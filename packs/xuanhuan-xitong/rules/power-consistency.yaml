@@ -1,0 +1,23 @@
+apiVersion: yushu.rules/v1
+id: power-consistency
+title: 战力防崩塌
+source: D03-战力防崩塌规则
+rules:
+  - id: power-no-regress
+    severity: error
+    scope: cross_chapter
+    when:
+      and:
+        - {">=": [{var: "b.realm.tier"}, {var: "a.realm.tier"}]}
+        - {"<": [{var: "b.combat_power"}, {var: "a.combat_power"}]}
+    message: "境界提升但战力下降（{a.chapter}→{b.chapter}），疑似战力崩塌"
+  - id: power-ceiling-exceeded
+    severity: warn
+    scope: chapter
+    when: {">": [{var: "scene.combat_power"}, {var: "realm.tier_next.ceiling"}]}
+    message: "战斗表现超出当前境界上限，需补突破事件或下调表现"
+  - id: power-no-cost
+    severity: info
+    scope: chapter
+    when: {"==": [{var: "scene.power_used"}, true], "cost_recorded": false}
+    message: "动用了超凡力量但未记录代价，建议补一句消耗/反噬描写"

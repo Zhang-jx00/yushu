@@ -1,0 +1,26 @@
+{
+  "name": "@yushu/llm",
+  "version": "0.1.0-alpha.0",
+  "description": "御书 LLM 接入：Provider 描述、OpenAI Chat Completions 兼容主干（chat/stream 两动词）",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@yushu/core": "workspace:*",
+    "yaml": "^2.6.0"
+  }
+}

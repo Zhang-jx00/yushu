@@ -1,0 +1,18 @@
+apiVersion: yushu.platform-mapping/v1
+id: xuanhuan-xitong-mapping
+title: 平台分类映射（外置、带版本）
+platforms:
+  起点:
+    category: 玄幻-东方玄幻
+    tags: [系统]
+  番茄:
+    category: 玄幻脑洞
+    tags: [系统, 无敌]
+  飞卢:
+    category: 玄幻魔法
+    tags: [系统]
+  七猫:
+    category: 玄幻奇幻
+    tags: [系统]
+checked_at: 2026-09-29
+notes: 平台分类与标签会变化，发布前请以平台规则包（I07）复核；本映射仅作投稿参考。

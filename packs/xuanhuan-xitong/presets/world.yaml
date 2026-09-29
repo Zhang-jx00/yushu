@@ -1,0 +1,26 @@
+apiVersion: yushu.world-preset/v1
+id: xuanhuan-xitong/world-preset
+title: 玄幻世界预置
+# 世界预设：起源工作台按此启用层级；层级可被用户自由开关（渐进披露）
+layers:
+  genesis: true
+  laws: true
+  geography: true
+  ecology: true
+  eras: true
+  civilizations: true
+  factions: true
+  characters: true
+  events: true
+  storylines: true
+  chapters: true
+# 建议建立的核心设定卡（均为建议，不强制）
+suggested_setting_cards:
+  - {layer: laws, type: 超凡法则, hint: 力量来源（灵气/斗气/血脉）及其代价}
+  - {layer: geography, type: 地域, hint: 大陆 → 主要地域 → 城市，逐卷扩大}
+  - {layer: characters, type: 主角, hint: 出身、金手指、初始动机}
+  - {layer: factions, type: 势力, hint: 宗门/家族/王朝，与主角阵营关系}
+# 力量体系必填卡（由派系包 schema 扩展）
+required_extension_cards:
+  - 境界体系卡
+  - 系统面板卡

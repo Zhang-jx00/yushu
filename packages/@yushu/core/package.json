@@ -1,0 +1,25 @@
+{
+  "name": "@yushu/core",
+  "version": "0.1.0-alpha.0",
+  "description": "御书最小通用内核：核心类型、稳定 ID、序列化基元、异常与事件总线",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.6.0"
+  }
+}

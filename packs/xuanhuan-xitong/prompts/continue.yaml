@@ -1,0 +1,24 @@
+apiVersion: yushu.prompts/v1
+id: continue-xuanhuan
+title: 玄幻正文续写模板
+description: 稳定前缀（世界约束+风格卡）置头，易变内容后置——为 prompt caching 与预算裁剪预留槽位（J02）。
+layer:
+  system: |
+    你是《{book_title}》的写作助手。严格遵守世界约束：
+    不得越级战斗、不得引入设定外实体、不得说破"已写未揭示"的设定（冰山原则）。
+    文风要求：{style_notes}
+  context_slots:
+    - world_constraints   # 常驻注入（境界体系+系统设定+核心设定卡）
+    - style_card          # 文风档案
+    - recent_summary      # 前情摘要（章摘要层）
+    - outline_chapter     # 本章细纲
+  task: |
+    基于本章细纲续写约 {target_words} 字：
+    {outline_chapter}
+    要求：以 {pov} 视角；结尾制造向上期待感的断章；不要提前揭晓未到节点的伏笔。
+output:
+  constraint: 只输出正文，不要解释、不要复述设定原文。
+cache:
+  breakpoint_after: world_constraints
+metadata:
+  source: G06 派系包 11 件套第 6 件 / J02 写作 Prompt 工程

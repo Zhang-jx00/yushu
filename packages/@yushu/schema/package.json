@@ -1,0 +1,26 @@
+{
+  "name": "@yushu/schema",
+  "version": "0.1.0-alpha.0",
+  "description": "御书 JSON Schema 仓库与校验器：核心 schema（world / 设定卡）+ 注册表",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@yushu/core": "workspace:*",
+    "ajv": "^8.17.0"
+  }
+}

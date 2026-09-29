@@ -1,0 +1,25 @@
+# 系统面板卡 —— 继承核心通用设定卡（core/setting-card）
+extends: core/setting-card
+id: system-panel
+title: 系统面板卡
+layer: laws
+unknown_field_policy: ignore_with_warning
+fields:
+  system_name: {type: string}
+  panel_style: {type: string, enum: [游戏面板, 任务清单, 积分商城]}
+  rules:
+    type: array
+    items: {type: string}
+  rewards:
+    type: array
+    items: {type: string}
+  penalties:
+    type: array
+    items: {type: string}
+# 防"系统沦为无代价发奖机器"（H15）：奖励必须与代价/任务绑定
+inject:
+  priority: medium
+  template: |
+    【系统设定】系统名：{system_name}；面板形态：{panel_style}。
+    发布奖励前必须核对：奖励是否与任务难度匹配、是否存在对应代价。
+    严禁无理由发放超出当前境界承受力的奖励。

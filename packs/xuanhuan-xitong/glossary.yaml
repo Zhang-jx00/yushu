@@ -1,0 +1,15 @@
+apiVersion: yushu.glossary/v1
+id: xuanhuan-glossary
+title: 玄幻·系统流术语表
+terms:
+  - {term: 境界, note: 修炼等级统称，具体名目以境界体系卡为准}
+  - {term: 灵气, note: 力量来源之一；与"斗气/血脉"需在超凡法则卡中二选一或分层}
+  - {term: 丹药, note: 修炼资源，注意与境界匹配（低阶境界慎用神药）}
+  - {term: 宗门, note: 主要势力形态；命名遵循"意象字+宗/阁/门/派"}
+  - {term: 系统, note: 主角金手指；任何奖励与任务必须核对系统面板卡规则}
+naming:
+  宗门: 意象字 + 宗/阁/门/派
+  功法: 意象字 + 诀/经/典
+  丹药: 属性字 + 丹/丸/散
+  境界: 单位字（气/玄/灵/天）+ 段位词
+taboo_alignment: 与 taboos.yaml 的雷点清单联动校验

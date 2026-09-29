@@ -1,0 +1,16 @@
+apiVersion: yushu.taboos/v1
+id: xuanhuan-taboos
+title: 玄幻·系统流雷点清单
+taboos:
+  - id: power-creep
+    desc: 前期出现后期天花板级战力，导致升级线失去意义
+  - id: map-shrink
+    desc: 地图越写越小、格局倒缩（H01 常见雷点）
+  - id: no-cost-system
+    desc: 系统沦为无代价发奖机器，任务-奖励失衡（H15）
+  - id: cheap-face-slap
+    desc: 打脸对象降智、理由牵强，爽点廉价化
+  - id: stall-humiliation
+    desc: 压抑段过长（超过 5 章仍无反击迹象），追读流失
+  - id: mc-flawless
+    desc: 主角道德失准或全知全能，代入感崩坏

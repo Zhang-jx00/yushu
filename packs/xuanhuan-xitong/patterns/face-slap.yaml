@@ -1,0 +1,16 @@
+apiVersion: yushu.patterns/v1
+id: face-slap
+title: 打脸爽点模式
+source: G05-爽点方法论与情绪曲线
+structure:
+  - step: 铺垫压迫
+    desc: 反派/环境给出具体羞辱（越具体越爽）
+  - step: 蓄势反转
+    desc: 主角亮出底牌但仅暗示结果
+  - step: 公开打脸
+    desc: 当众兑现，反派承受社会性代价
+  - step: 收益兑现
+    desc: 声望/资源/地位同步到账
+intensity: 4
+expectation_hook: 打脸将断未断处断章，给向上的期待感（I01 断章法）
+ledger_hint: 登记为爽点台账条目（I03），标注类型=打脸、受益方=主角

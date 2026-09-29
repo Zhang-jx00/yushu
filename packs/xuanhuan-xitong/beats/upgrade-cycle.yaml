@@ -1,0 +1,24 @@
+apiVersion: yushu.beats/v1
+id: upgrade-cycle
+title: 升级爆点节拍表
+source: H01-玄幻 / D07 / G05
+beats:
+  - phase: 压抑
+    desc: 主角受挫、资源被夺、被轻视
+    span: 3-5 章
+  - phase: 蓄力
+    desc: 获得线索/资源/功法，暗示转机
+    span: 2-3 章
+  - phase: 突破
+    desc: 境界提升 + 战力公开验证
+    span: 1 章
+  - phase: 打脸
+    desc: 反打此前压迫者，兑现期待
+    span: 1-2 章
+  - phase: 新循环
+    desc: 更大舞台、更强对手，抛出下一轮期待
+    span: 1 章
+cadence:
+  minor_climax: 每 10 万字
+  major_climax: 每 20-30 万字
+notes: 期待感 > 爽点密度；打脸将断未断处断章（I01/I03）

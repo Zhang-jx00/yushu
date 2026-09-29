@@ -1,0 +1,25 @@
+{
+  "name": "@yushu/search",
+  "version": "0.1.0-alpha.0",
+  "description": "御书检索索引：SQLite（node:sqlite）+ FTS5 external content 最小版（重建/查询/统计）",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@yushu/core": "workspace:*"
+  }
+}

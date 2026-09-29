@@ -1,0 +1,25 @@
+# 境界体系卡 —— 继承核心通用设定卡（core/setting-card）
+extends: core/setting-card
+id: realm-system
+title: 境界体系卡
+layer: laws
+unknown_field_policy: ignore_with_warning
+fields:
+  realms:
+    type: array
+    items:
+      required: [name, tier, lifespan, combat_power]
+      properties:
+        name: {type: string}
+        tier: {type: integer, order: asc}
+        lifespan: {type: integer, unit: 年}
+        combat_power: {type: number, scale: power_scale}
+        breakthrough_hint: {type: string}
+# 注入语义：该卡参与 AI 上下文注入的优先级与模板
+inject:
+  priority: high
+  sticky: true
+  template: |
+    【境界体系】{name}为唯一合法晋升路径，严禁越级：
+    {realms: 第{tier}境·{name}（寿元约{lifespan}年）}
+    主角当前境界以正文最近一次突破记录为准。

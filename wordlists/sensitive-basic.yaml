@@ -1,0 +1,37 @@
+# 御书内置敏感词词库（占位示例版）
+# 说明：本文件为「外置可更新」词库的默认占位条目，仅作流水线自证与示例；
+# 正式使用请按目标平台的规则包替换/扩充（docs/01 §4.6、docs/02 §4.8：外置、带来源与生效日期）。
+apiVersion: yushu.wordlist/v1
+id: sensitive-basic
+title: 内置基础词库（占位示例）
+version: 2026.09.1
+source: 御书内置占位词表（示例条目，可整文件替换）
+updated_at: "2026-09-29"
+entries:
+  - word: 加微信
+    severity: error
+    suggestion: 删除站外导流信息，改为平台内互动方式
+    note: 站外导流多为平台审核红线
+    platforms: [起点, 番茄]
+  - word: 扫码进群
+    severity: error
+    suggestion: 删除导流信息
+    note: 同上：站外导流
+  - word: 博彩
+    severity: error
+    suggestion: 改为与剧情无关的替代词或删除
+    note: 涉赌内容为审核红线
+  - word: 代写
+    severity: warn
+    suggestion: 若为剧情内「代写书信」可保留；交易向用法建议改写
+    note: 语境相关，需人工确认
+  - word: 刷单
+    severity: warn
+    suggestion: 改为中性描述
+  - word: 私聊
+    severity: warn
+    suggestion: 如需保留剧情动作，可改为「单独谈谈」
+  - word: 血腥
+    severity: info
+    suggestion: 投稿前按平台尺度复核该段描写强度
+    note: 提示类，不阻断导出

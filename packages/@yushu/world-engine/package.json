@@ -1,0 +1,28 @@
+{
+  "name": "@yushu/world-engine",
+  "version": "0.1.0-alpha.0",
+  "description": "御书世界引擎：世界真源（world.yaml / 设定卡）的创建、解析、校验与项目文件布局",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@yushu/core": "workspace:*",
+    "@yushu/schema": "workspace:*",
+    "smol-toml": "^1.9.0",
+    "yaml": "^2.6.0"
+  }
+}

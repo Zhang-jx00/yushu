@@ -1,0 +1,50 @@
+apiVersion: yushu.pack/v1
+kind: GenrePack
+metadata:
+  id: xuanhuan-xitong
+  name: 男频玄幻·系统流
+  version: 1.0.0
+  license: CC-BY-4.0
+  requires:
+    yushu: ">=0.1.0-alpha.0"
+genre_axes:
+  channel: [男频]
+  world: [玄幻]
+  technique: [系统流]
+  tone: [爽文]
+  romance_mode_default: 无女主
+content:
+  world_preset: presets/world.yaml
+  schema_extensions:
+    - schemas/境界体系卡.yaml
+    - schemas/系统面板卡.yaml
+  rules:
+    - rules/power-consistency.yaml
+    - rules/realm-progress.yaml
+  beat_sheets:
+    - beats/upgrade-cycle.yaml
+  satisfaction_patterns:
+    - patterns/face-slap.yaml
+  prompt_templates:
+    - prompts/continue.yaml
+  glossary: glossary.yaml
+  taboos: taboos.yaml
+  outline_templates:
+    - outlines/three-act-upgrade.yaml
+  evolution:
+    origin_work: 《斗破苍穹》
+    era: 2009
+    chain:
+      - "开山：《斗破苍穹》"
+      - "仿作：凡人流反向（资源精算、低配起步）"
+      - "反套路：稳健流/幕后流/系统流泛化"
+  platform_mapping: mappings.yaml
+fusions:
+  compatible_with:
+    - fanren-liu
+    - qianfu-liu
+  conflicts_with:
+    - pack: guiju-guaitan
+      reason: 规则解谜的慢曝光节奏与战力爽点节拍冲突
+    - pack: danmei-tianchong
+      reason: 频道与情感供给模型互斥（男频无女主 × 纯爱甜宠）

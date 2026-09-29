@@ -1,0 +1,23 @@
+apiVersion: yushu.outlines/v1
+id: three-act-upgrade
+title: 三幕升级骨架
+description: 一键生成的骨架（生成≠写死，用户可任意增删改；I02 三级大纲）
+template:
+  act1:
+    name: 起
+    desc: 废柴/微末开局 → 金手指觉醒 → 第一个小目标与第一个打脸
+    chapters_hint: 10-20
+  act2:
+    name: 承
+    desc: 逐卷扩大地图与对手；升级环循环（压抑→蓄力→突破→打脸→新循环）
+    chapters_hint: 60% 总篇幅
+  act3:
+    name: 合
+    desc: 回收主线承诺与全部核心伏笔，登顶对决，兑现开局埋下的所有悬念
+volume_template:
+  suggested_volumes: 3-6
+  per_volume:
+    climax: 卷末大高潮（打脸/突破/夺宝）
+    hook: 卷末抛出下一卷舞台的悬念
+    checklist: [本卷伏笔回收率, 爽点密度, 期待感钩子]
+notes: 与 G05 情绪曲线、F08 伏笔台账联动；章纲细纲化到"谁/在哪/目标/阻碍/转折/结果/钩子"七要素
