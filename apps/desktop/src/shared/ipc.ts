@@ -1,0 +1,696 @@
+/**
+ * IPC 契约（docs/03 §3）：一消息一方法；渲染层只能经 preload 白名单调用。
+ * 本文件是通道名与载荷类型的唯一事实源（preload.cjs 中的通道名需与之保持一致）。
+ * 说明：本文件保持零依赖（不 import 引擎包），仅用结构类型描述跨进程数据。
+ */
+
+export const CHANNELS = {
+  projectOpen: "project:open",
+  projectClose: "project:close",
+  projectTree: "project:tree",
+  /** 当前已挂载项目的快照（未打开项目时返回 null） */
+  projectCurrent: "project:current",
+  projectChooseDirectory: "project:chooseDirectory",
+  projectCreate: "project:create",
+  projectWorld: "project:world",
+  packCatalog: "pack:catalog",
+  packFuse: "pack:fuse",
+  cardList: "card:list",
+  cardRead: "card:read",
+  cardWrite: "card:write",
+  docRead: "doc:read",
+  docWrite: "doc:write",
+  docRename: "doc:rename",
+  outlineRead: "outline:read",
+  outlineGenerate: "outline:generate",
+  outlineWrite: "outline:write",
+  outlineCreateChapter: "outline:createChapter",
+  aiConfig: "ai:config",
+  aiSaveConfig: "ai:saveConfig",
+  aiSetKey: "ai:setKey",
+  aiDrafts: "ai:drafts",
+  aiContext: "ai:context",
+  aiStart: "ai:start",
+  aiAbort: "ai:abort",
+  aiAdopt: "ai:adopt",
+  aiUsage: "ai:usage",
+  /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
+  aiEvent: "ai:event",
+  exportPreview: "export:preview",
+  exportRun: "export:run",
+  exportClipboard: "export:clipboard",
+  indexStatus: "index:status",
+  indexRebuild: "index:rebuild",
+  indexSearch: "index:search",
+  namingGenerate: "naming:generate",
+  /** 通用剪贴板写入（主进程 Electron clipboard；渲染层 file:// 下 navigator.clipboard 不可靠） */
+  appWriteClipboard: "app:writeClipboard",
+  chapterRead: "chapter:read",
+  chapterWrite: "chapter:write",
+  chapterWriteSidecar: "chapter:writeSidecar",
+} as const;
+
+export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
+
+export interface TreeEntry {
+  path: string;
+  type: "file" | "dir";
+  size?: number;
+}
+
+export interface ProjectSnapshot {
+  root: string;
+  tree: TreeEntry[];
+}
+
+export interface DocSnapshot {
+  path: string;
+  content: string;
+  /** 内容 sha256；写操作必须携带读时的 hash 做并发检测 */
+  hash: string;
+}
+
+/** 四维派系取值 + 感情线开关（与 @yushu/core GenreAxes 结构兼容） */
+export interface AxisValues {
+  channel: string[];
+  world: string[];
+  technique: string[];
+  tone: string[];
+  romance_mode_default?: string;
+}
+
+export interface PackLintSummary {
+  ok: boolean;
+  errors: number;
+  warnings: number;
+  messages: string[];
+}
+
+export interface PackSummary {
+  id: string;
+  name: string;
+  version: string;
+  license: string;
+  genreAxes: AxisValues;
+  lint: PackLintSummary;
+}
+
+export interface PackCatalog {
+  wordlist: {
+    channel: string[];
+    world: string[];
+    technique: string[];
+    tone: string[];
+    romance: string[];
+  };
+  packs: PackSummary[];
+}
+
+export interface FusionAdded {
+  piece: string;
+  ref: string;
+  pack: string;
+}
+
+export interface FusionOverridden {
+  piece: string;
+  name: string;
+  refs: { pack: string; ref: string }[];
+  winner: string;
+}
+
+export interface FusionConflict {
+  kind: string;
+  severity: "error" | "warn";
+  message: string;
+  packs: string[];
+}
+
+export interface FusionPreview {
+  packs: string[];
+  genreAxes: AxisValues;
+  added: FusionAdded[];
+  overridden: FusionOverridden[];
+  conflicts: FusionConflict[];
+  ready: boolean;
+}
+
+export interface CreateProjectPayload {
+  dir: string;
+  title: string;
+  packIds: string[];
+  axes: AxisValues;
+}
+
+/* ---------- 设定卡（docs/03 §5.2 的结构化子集） ---------- */
+
+export interface CardRelationRef {
+  relation: string;
+  target: string;
+}
+
+export interface CardPayload {
+  /** 新建时可省略：由引擎按 type 前缀 + 名称生成稳定 ID */
+  id?: string;
+  type: string;
+  name: string;
+  layer?: string;
+  aliases?: string[];
+  refs?: CardRelationRef[];
+  source_chapters?: string[];
+  visibility?: string;
+  format_version?: number;
+  /** 派系包 schema 扩展字段（如境界体系卡的 realms） */
+  extensions?: Record<string, unknown>;
+}
+
+export interface CardSummary {
+  path: string;
+  id: string;
+  type: string;
+  name: string;
+  layer: string;
+  visibility: string;
+  aliases: string[];
+  /** 解析失败时携带的错误信息（卡片仍会出现在列表中以便修复） */
+  error?: string;
+}
+
+export interface CardReadResult {
+  path: string;
+  card: CardPayload;
+  body: string;
+  hash: string;
+}
+
+export interface CardWritePayload {
+  /** 省略时按 card.type + card.id 推导（world/cards/<type>/<id>.md） */
+  path?: string;
+  card: CardPayload;
+  body: string;
+  /** 编辑既有卡时必须携带（创建新卡时省略） */
+  baseHash?: string;
+}
+
+export interface CardWriteResult {
+  path: string;
+  hash: string;
+  /** 扩展字段校验的告警（如未知字段 ignore_with_warning） */
+  warnings: string[];
+}
+
+export interface WorldSummary {
+  id: string;
+  title: string;
+  layers: Record<string, boolean>;
+  genreAxes: AxisValues;
+}
+
+/* ---------- 三级大纲（docs/01 §4.4 / I02；结构与 @yushu/world-engine Outline 兼容） ---------- */
+
+export interface OutlineBrief {
+  who: string;
+  where: string;
+  goal: string;
+  obstacle: string;
+  turn: string;
+  result: string;
+  hook: string;
+}
+
+export interface OutlineChapterPayload {
+  /** 新建时可为空：由世界引擎补齐（co-*） */
+  id: string;
+  idx: number;
+  title: string;
+  brief: OutlineBrief;
+  /** 已一键创建草稿章节时回填（与 Chapter.outline_ref 双向映射） */
+  chapter_id?: string;
+  scene_ids: string[];
+}
+
+export interface OutlineVolumePayload {
+  /** 新建时可为空：由世界引擎补齐（vol-*） */
+  id: string;
+  title: string;
+  act: string;
+  desc: string;
+  climax?: string;
+  hook?: string;
+  checklist?: string[];
+  chapters: OutlineChapterPayload[];
+}
+
+export interface OutlineDocPayload {
+  apiVersion: string;
+  format_version: number;
+  id: string;
+  source_template?: string;
+  master: {
+    title: string;
+    logline: string;
+    theme: string;
+    notes: string;
+    acts: { name: string; desc: string; chapters_hint?: string }[];
+  };
+  volumes: OutlineVolumePayload[];
+}
+
+/** 派系包大纲模板摘要（一键生成入口） */
+export interface OutlineTemplateSummary {
+  /** 全局限定 ID：packId/templateId */
+  id: string;
+  packId: string;
+  title: string;
+  description?: string;
+  acts: { name: string; desc: string; chapters_hint?: string }[];
+  /** 模板默认规模（来自 suggested_volumes / chapters_hint 下限） */
+  defaultVolumeCount: number;
+  defaultChaptersPerVolume: number;
+  /** 模板解析失败时携带错误（该模板在 UI 中禁用） */
+  error?: string;
+}
+
+export interface OutlineState {
+  path: string;
+  exists: boolean;
+  /** 读时的内容 sha256（写操作与重新生成必须携带） */
+  hash?: string;
+  doc?: OutlineDocPayload;
+  templates: OutlineTemplateSummary[];
+}
+
+export interface OutlineGeneratePayload {
+  /** 模板限定 ID（来自 OutlineState.templates）；空字符串 = 空白创建（不使用模板） */
+  templateId: string;
+  title: string;
+  volumeCount?: number;
+  chaptersPerVolume?: number;
+  /** 大纲已存在时必须携带（覆盖前先经用户确认） */
+  baseHash?: string;
+}
+
+export interface OutlineWritePayload {
+  doc: OutlineDocPayload;
+  baseHash: string;
+}
+
+export interface OutlineMutateResult {
+  path: string;
+  hash: string;
+  doc: OutlineDocPayload;
+}
+
+export interface OutlineCreateChapterPayload {
+  volumeId: string;
+  chapterId: string;
+  /** 大纲当前 hash（回填 chapter_id 前做并发检测） */
+  baseHash: string;
+}
+
+export interface OutlineChapterDraftResult extends OutlineMutateResult {
+  chapterPath: string;
+  chapterId: string;
+  /** true = 章节草稿此前已存在，本次仅回填映射 */
+  reused: boolean;
+}
+
+/* ---------- AI 副驾（S4/S5；T1-13 ~ T1-17；结构与 @yushu/llm 兼容） ---------- */
+
+/** 上下文槽位（稳定前缀置头；上下文预览器的数据源） */
+export interface ContextSlotPayload {
+  /** system_prompt | world_core | world_constraints | outline_chapter | recent_prose */
+  slot: string;
+  /** true = 稳定前缀（prompt caching 断点前，内容不随章节变化） */
+  stable: boolean;
+  source: string;
+  chars: number;
+  truncated: boolean;
+  text: string;
+}
+
+/** 生成后轻提示（T1-14 最小版；重型规则校验留待 M4） */
+export interface DraftHintPayload {
+  /** 输出中命中的设定卡名 */
+  referenced: string[];
+  hints: string[];
+}
+
+export interface ContextPreviewPayload {
+  slots: ContextSlotPayload[];
+  /** 稳定前缀字符数（M1 粗预算；M3 换 token 预算） */
+  stableChars: number;
+  totalChars: number;
+  /** prompt caching 断点（最后一个 stable 槽位名） */
+  cacheBreakpointAfter: string;
+  worldTitle: string;
+  layers: Record<string, boolean>;
+  cardIndex: { id: string; name: string; aliases: string[]; visibility: string; layer: string }[];
+  constraints: string[];
+  target?: {
+    volumeId: string;
+    chapterId: string;
+    title: string;
+    chapterPath: string;
+    hasProse: boolean;
+  };
+}
+
+export interface AiProviderPayload {
+  id: string;
+  kind: string;
+  base_url: string;
+  model: string;
+  /** 只记录环境变量名；明文 key 禁止落盘（docs/03 §13） */
+  api_key_env?: string;
+  temperature?: number;
+  max_tokens?: number;
+  context_window?: number;
+}
+
+export interface AiProviderKeyState {
+  provider_id: string;
+  api_key_env?: string;
+  has_session_key: boolean;
+  has_env_key: boolean;
+  /** 无需 key 或 key 已就绪 */
+  ready: boolean;
+}
+
+export interface AiConfigState {
+  path: string;
+  exists: boolean;
+  hash?: string;
+  config: { apiVersion: string; format_version: number; providers: AiProviderPayload[] };
+  keyStates: AiProviderKeyState[];
+  /** 至少一个 provider 可用；false 时生成按钮禁用（离线时本地功能不受影响） */
+  canGenerate: boolean;
+}
+
+export interface AiSaveConfigPayload {
+  providers: AiProviderPayload[];
+  /** 配置已存在时必须携带（覆盖前经确认） */
+  baseHash?: string;
+}
+
+/** 可生成目标：已创建草稿章节的章纲 */
+export interface AiDraftTarget {
+  volumeId: string;
+  volumeTitle: string;
+  volumeAct: string;
+  /** 章纲 ID（co-*） */
+  chapterId: string;
+  title: string;
+  idx: number;
+  chapterPath: string;
+  hasBody: boolean;
+  wordCount: number;
+}
+
+export interface AiGeneratePayload {
+  /** 客户端生成的流 ID（先于 invoke 确定，避免首个增量与返回值的竞态）；缺省由主进程生成 */
+  streamId?: string;
+  volumeId: string;
+  /** 章纲 ID */
+  chapterId: string;
+  task: "draft-first" | "continue";
+  instruction?: string;
+  targetWords?: number;
+}
+
+export interface AiStartResult {
+  streamId: string;
+}
+
+/** 流式事件（主进程 → 渲染层，经 ai:event 单向推送） */
+export type AiStreamEvent =
+  | { streamId: string; type: "delta"; text: string; chars: number }
+  | { streamId: string; type: "fallback"; providerId: string; reason: string }
+  | {
+      streamId: string;
+      type: "done";
+      text: string;
+      chars: number;
+      aborted: boolean;
+      providerId: string;
+      model: string;
+      usageId: string;
+      hints: DraftHintPayload;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    }
+  | { streamId: string; type: "error"; code: string; message: string };
+
+export interface AiAdoptPayload {
+  /** 生成记录 ID（采纳留痕关联） */
+  usageId: string;
+  volumeId: string;
+  chapterId: string;
+  text: string;
+  mode: "replace" | "append";
+}
+
+export interface AiAdoptResult {
+  chapterPath: string;
+  hash: string;
+  wordCount: number;
+  chars: number;
+}
+
+export interface AiUsageEntryPayload {
+  id: string;
+  time: string;
+  type: "generate" | "adopt";
+  task?: string;
+  provider_id?: string;
+  model?: string;
+  status?: "ok" | "aborted" | "error";
+  chars?: number;
+  chapter_id?: string;
+  usage_id?: string;
+}
+
+export interface AiUsageState {
+  path: string;
+  entries: AiUsageEntryPayload[];
+}
+
+/* ---------- 导出与敏感词自查（S6；T1-18/19/20；结构与 @yushu/export 兼容） ---------- */
+
+export interface ReconcileRowPayload {
+  chapterId: string;
+  title: string;
+  volumeTitle: string;
+  /** frontmatter 记录字数 */
+  stated: number;
+  /** 正文实际字数 */
+  actual: number;
+  matched: boolean;
+}
+
+export interface SensitiveHitPayload {
+  word: string;
+  severity: "error" | "warn" | "info";
+  suggestion?: string;
+  note?: string;
+  platforms?: string[];
+  wordlistId: string;
+  wordlistVersion: string;
+  chapterId: string;
+  chapterTitle: string;
+  volumeTitle: string;
+  /** 命中位置（章内正文字符下标） */
+  index: number;
+  context: string;
+}
+
+export interface WordlistInfoPayload {
+  id: string;
+  version: string;
+  source?: string;
+  entries: number;
+}
+
+/** 写词库失败/被跳过的文件（项目内词库解析失败不阻断内置词库） */
+export interface SkippedWordlistPayload {
+  path: string;
+  error: string;
+}
+
+export interface ExportPreviewPayload {
+  bookTitle: string;
+  volumes: number;
+  chapters: number;
+  totalWords: number;
+  /** 尚未创建草稿章节的章纲数（不计入导出） */
+  missingDrafts: number;
+  reconcile: ReconcileRowPayload[];
+  hits: SensitiveHitPayload[];
+  hitTotal: number;
+  bySeverity: { error: number; warn: number; info: number };
+  wordlists: WordlistInfoPayload[];
+  /** 合并后参与扫描的词条数（同词条后者覆盖前者） */
+  wordEntryCount: number;
+  skippedWordlists: SkippedWordlistPayload[];
+  /** 词库扫描目录（外置可更新：仓库内置 + 项目内覆盖） */
+  wordlistDirs: string[];
+}
+
+export interface ExportRunPayload {
+  /** 防手滑（T1-20）：必须显式为 true，服务端同样校验 */
+  confirmed: boolean;
+  includeToc?: boolean;
+  stripMarkers?: boolean;
+}
+
+export interface ExportRunResult {
+  path: string;
+  hash: string;
+  chapters: number;
+  words: number;
+  /** 无错误级敏感词命中（提示级不阻断） */
+  clean: boolean;
+}
+
+export interface ClipboardPayload {
+  stripComments?: boolean;
+  stripAiMarks?: boolean;
+}
+
+export interface ClipboardResult {
+  chapters: number;
+  words: number;
+  /** 复制内容前 160 字预览（便于确认复制了什么） */
+  preview: string;
+  /** 复制路径：Electron 系统剪贴板 */
+  target: string;
+}
+
+/* ---------- 检索索引（S7；T1-21/22；结构与 @yushu/search 兼容） ---------- */
+
+export interface IndexStatsPayload {
+  schemaVersion: number;
+  builtAt: string;
+  files: number;
+  entities: number;
+  refs: number;
+  chunks: number;
+  /** FTS5 虚表行数（应与 chunks 一致） */
+  ftsRows: number;
+}
+
+export interface IndexStatusPayload {
+  /** 相对路径：.yushu/index.db */
+  path: string;
+  exists: boolean;
+  stats: IndexStatsPayload | null;
+  schemaVersion: number;
+}
+
+export interface IndexRebuildResultPayload extends IndexStatusPayload {
+  stats: IndexStatsPayload;
+  /** 解析失败被跳过的真源文件 */
+  skipped: { path: string; error: string }[];
+}
+
+export interface IndexChunkHitPayload {
+  chunkId: string;
+  path: string;
+  kind: string;
+  chapterId?: string;
+  volume?: string;
+  charStart: number;
+  charEnd: number;
+  textHash: string;
+  entities: string[];
+  /** 命中片段（【】标记高亮） */
+  snippet: string;
+}
+
+export interface IndexEntityHitPayload {
+  id: string;
+  type: string;
+  layer: string;
+  name: string;
+  aliases: string[];
+  filePath: string;
+}
+
+export interface IndexSearchResultPayload {
+  keyword: string;
+  chunks: IndexChunkHitPayload[];
+  entities: IndexEntityHitPayload[];
+}
+
+/* ---------- 命名生成器（S2；T1-8） ---------- */
+
+export type NamingKindPayload = "character" | "place" | "sect" | "technique";
+
+export interface NamingGeneratePayload {
+  kind: NamingKindPayload;
+  count?: number;
+  /** 显式种子（可复现）；缺省为主进程时间戳 */
+  seed?: number | string;
+  /** 指定文化规则 id（缺省按世界维度自动推导） */
+  culture?: string;
+}
+
+export interface NamingResultPayload {
+  rulesId: string;
+  rulesTitle: string;
+  /** 构词模式说明 */
+  pattern: string;
+  seed: string;
+  names: string[];
+}
+
+/* ---------- 章节编辑器（M2；T2-1 切片 A：源码形态） ---------- */
+
+export interface ChapterReadResult {
+  path: string;
+  title: string;
+  /** 正文（不含 frontmatter） */
+  body: string;
+  /** frontmatter 记录字数 */
+  wordCount: number;
+  hash: string;
+}
+
+export interface ChapterWritePayload {
+  path: string;
+  body: string;
+  /** 读时的内容 hash（并发检测，防覆盖） */
+  baseHash: string;
+}
+
+export interface ChapterWriteResult {
+  path: string;
+  hash: string;
+  /** 保存后同步回 frontmatter 的字数（与导出对账口径一致） */
+  wordCount: number;
+}
+
+/* ---------- 保存管线（M2 / T2-6 切片：冲突旁路） ---------- */
+
+export interface ChapterSidecarPayload {
+  path: string;
+  body: string;
+}
+
+export interface ChapterSidecarResult {
+  /** 旁路文件相对路径：<章节>.conflict-<时间戳>.md（主文件不动） */
+  sidecarPath: string;
+  hash: string;
+  wordCount: number;
+}
+
+export interface IpcOk<T> {
+  ok: true;
+  data: T;
+}
+
+export interface IpcError {
+  ok: false;
+  error: { code: string; message: string };
+}
+
+export type IpcResult<T> = IpcOk<T> | IpcError;

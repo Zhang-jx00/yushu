@@ -1,0 +1,21 @@
+{
+  "name": "@yushu/cli",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "description": "御书无头 CLI：索引重建（rebuild）/ 状态（status）/ 检索（search）",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "yushu": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "rebuild": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@yushu/core": "workspace:*",
+    "@yushu/search": "workspace:*",
+    "@yushu/world-engine": "workspace:*"
+  }
+}

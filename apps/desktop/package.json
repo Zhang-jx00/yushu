@@ -1,0 +1,48 @@
+{
+  "name": "@yushu/desktop",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "description": "御书桌面端：Electron 主进程 + preload + React renderer 装配",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build",
+    "build:main": "tsc -p tsconfig.json",
+    "build:renderer": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p renderer/tsconfig.json --noEmit",
+    "start": "electron .",
+    "dev": "pnpm run build:main && node scripts/dev.mjs",
+    "smoke": "pnpm run build:main && electron . --smoke",
+    "e2e": "pnpm run build:main && electron . --e2e-smoke"
+  },
+  "dependencies": {
+    "@yushu/core": "workspace:*",
+    "@yushu/export": "workspace:*",
+    "@yushu/genre-engine": "workspace:*",
+    "@yushu/llm": "workspace:*",
+    "@yushu/search": "workspace:*",
+    "@yushu/world-engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
+    "@types/markdown-it": "^14.2.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/turndown": "^5.0.6",
+    "@vitejs/plugin-react": "^6.1.1",
+    "codemirror": "^6.0.2",
+    "electron": "^44.4.5",
+    "markdown-it": "^15.0.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "turndown": "^7.2.4",
+    "vite": "^8.3.1"
+  }
+}

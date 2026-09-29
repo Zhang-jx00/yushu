@@ -1,0 +1,529 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { EditorView } from "@codemirror/view";
+import { Compartment, EditorState } from "@codemirror/state";
+import { basicSetup } from "codemirror";
+import { markdown } from "@codemirror/lang-markdown";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import type { AiDraftTarget } from "../../../src/shared/ipc";
+import { api } from "../api";
+import { findUnsupportedSyntax, htmlToMd, mdToHtml } from "../markdown-bridge";
+import { collectMentionedEntities, type EntityIndexEntry } from "../entity-mentions";
+import { entityMentionPlugin } from "../entity-mention-plugin";
+import { createAutosaveScheduler, type AutosaveScheduler, type AutosaveState } from "../autosave";
+
+/**
+ * 章节编辑器（T2-1：CodeMirror 6 源码形态 + TipTap 富文本形态；T2-2 实体 @ 提及）。
+ * - 磁盘真源始终是 chapters/<卷>/<章>.md（Markdown 文本）；两种形态是同一文本的两种视图；
+ * - 富文本形态由 StarterKit 承载（标题/粗斜/引用/列表/分隔线）；检测到暂不支持的语法（表格/代码块/图片/链接/HTML）
+ *   会先提示再由用户决定，避免往返丢数据；
+ * - 保存经 chapter:write：同步 word_count（与导出对账同口径）+ baseHash 并发检测；
+ * - 保存管线（T2-6 切片）：编辑即登记自动保存（防抖 800ms / 高频上限 5s），
+ *   失焦与切换章节前 flush；冲突冻结时提供「写入旁路文件」与「重新载入」两条人工处置路径；
+ * - 实体提及（T2-2）：正文 `@名称`/`@别名` 在源码形态高亮（悬停提示，Ctrl/⌘+点击打开设定卡），
+ *   底部「本章提及」面板可一键跳转档案（点击跳转由 ProjectScreen 协调）。
+ */
+
+/** UI 预演（--ui-walkthrough）经 window.__yushuDebug 暴露的调试句柄（生产不设置该标志则不可见） */
+type DebugWindow = Window & {
+  __yushuDebug?: boolean;
+  __yushuCmView?: EditorView | null;
+  /** reload 精确等待重载完成（预演同步点）；doc 读取当前编辑器文本 */
+  __yushuEditorDebug?: { reload: () => Promise<void>; doc: () => string };
+};
+
+/** 与 @yushu/core countWords 同口径（去空白字符数）——渲染层不 import 引擎包，保持零依赖约定 */
+function localCountWords(text: string): number {
+  return text.replace(/\s+/g, "").length;
+}
+
+type EditorMode = "source" | "rich";
+
+export function ChapterEditorView({ onOpenCard }: { onOpenCard?: (path: string) => void }) {
+  const [targets, setTargets] = useState<AiDraftTarget[]>([]);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [savedBody, setSavedBody] = useState<string>("");
+  const [liveWords, setLiveWords] = useState(0);
+  const [dirty, setDirty] = useState(false);
+  const [mode, setMode] = useState<EditorMode>("source");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("选择左侧草稿章节开始写作");
+  const [error, setError] = useState<string | null>(null);
+  const [entities, setEntities] = useState<EntityIndexEntry[]>([]);
+  const [mentioned, setMentioned] = useState<EntityIndexEntry[]>([]);
+  const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const savedBodyRef = useRef("");
+  const modeRef = useRef<EditorMode>("source");
+  const entitiesRef = useRef<EntityIndexEntry[]>([]);
+  const onOpenCardRef = useRef<((path: string) => void) | undefined>(onOpenCard);
+  const mentionCompartment = useRef(new Compartment());
+  const schedulerRef = useRef<AutosaveScheduler | null>(null);
+  /** 自动保存闭包读取的最新值（不依赖 React 渲染时序，避免保存到过期章节/hash） */
+  const selectedPathRef = useRef<string | null>(null);
+  const hashRef = useRef("");
+  const dirtyRef = useRef(false);
+  const performSaveRef = useRef<() => Promise<void>>(async () => undefined);
+  const loadChapterRef = useRef<(path: string, options?: { force?: boolean }) => Promise<void>>(async () => undefined);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+  useEffect(() => {
+    onOpenCardRef.current = onOpenCard;
+  }, [onOpenCard]);
+  useEffect(() => {
+    selectedPathRef.current = selectedPath;
+  }, [selectedPath]);
+
+  /**
+   * 自动保存调度器（T2-6 切片）：惰性创建一次；save 经 performSaveRef 读取最新渲染闭包。
+   * 保存失败（如 baseHash 冲突）进入冻结态不自动重试，由 UI 引导旁路/重载。
+   */
+  const getScheduler = useCallback((): AutosaveScheduler => {
+    if (!schedulerRef.current) {
+      schedulerRef.current = createAutosaveScheduler({
+        save: () => performSaveRef.current(),
+        onChange: (state, detail) => {
+          setAutosaveState(state);
+          if (state === "saved") {
+            setSavedAt(detail?.savedAt ?? Date.now());
+            setError(null);
+          }
+          if (state === "error" && detail?.error) {
+            setError(
+              detail.error.includes("E_DOC_CONFLICT")
+                ? `${detail.error} —— 自动保存已暂停：可「写入旁路文件」保留当前内容，或「重新载入」磁盘最新版本后再编辑`
+                : detail.error,
+            );
+          }
+        },
+      });
+    }
+    return schedulerRef.current;
+  }, []);
+
+  const refreshEntities = useCallback(async () => {
+    try {
+      const cards = await api().card.list();
+      const list: EntityIndexEntry[] = cards
+        .filter((card) => !card.error)
+        .map((card) => ({
+          id: card.id,
+          name: card.name,
+          aliases: card.aliases,
+          type: card.type,
+          layer: card.layer,
+          filePath: card.path,
+        }));
+      entitiesRef.current = list;
+      setEntities(list);
+      const view = viewRef.current;
+      if (view) {
+        // 实体列表变化：重配提及装饰插件（回调通过 ref 读取最新依赖）
+        view.dispatch({
+          effects: mentionCompartment.current.reconfigure(
+            entityMentionPlugin({
+              getEntities: () => entitiesRef.current,
+              onOpen: (entity) => onOpenCardRef.current?.(entity.filePath),
+            }).plugin,
+          ),
+        });
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
+  const updateDerived = useCallback(
+    (text: string) => {
+      setLiveWords(localCountWords(text));
+      const nextDirty = text !== savedBodyRef.current;
+      dirtyRef.current = nextDirty;
+      setDirty(nextDirty);
+      setMentioned(collectMentionedEntities(text, entitiesRef.current));
+      // T2-6：文本有变化即登记自动保存（防抖 800ms / 高频上限 5s）；还原为磁盘态则撤销待发保存
+      if (nextDirty) getScheduler().schedule();
+      else getScheduler().cancel();
+    },
+    [getScheduler],
+  );
+
+  const refreshTargets = useCallback(async () => {
+    try {
+      const list = await api().ai.drafts();
+      setTargets(list);
+      setSelectedPath((prev) =>
+        prev && list.some((item) => item.chapterPath === prev) ? prev : (list[0]?.chapterPath ?? null),
+      );
+      return list;
+    } catch (err) {
+      setError((err as Error).message);
+      return [];
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshTargets();
+    void refreshEntities();
+  }, [refreshTargets, refreshEntities]);
+
+  // 源码形态：CodeMirror 实例（一次创建；实体提及装饰走 Compartment，便于实体列表变化后重配）
+  useEffect(() => {
+    if (!hostRef.current) return;
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: "",
+        extensions: [
+          basicSetup,
+          markdown(),
+          EditorView.lineWrapping,
+          mentionCompartment.current.of([]),
+          // 失焦立即落盘（T2-6：把"杀进程丢稿"窗口压到最短）
+          EditorView.domEventHandlers({
+            blur: () => {
+              void getScheduler().flush();
+            },
+          }),
+          EditorView.updateListener.of((update) => {
+            if (!update.docChanged) return;
+            updateDerived(update.state.doc.toString());
+          }),
+        ],
+      }),
+      parent: hostRef.current,
+    });
+    viewRef.current = view;
+    // UI 预演调试句柄（--ui-walkthrough）：仅在 __yushuDebug 时暴露
+    const debugWindow = window as DebugWindow;
+    if (debugWindow.__yushuDebug) debugWindow.__yushuCmView = view;
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+      if (debugWindow.__yushuCmView === view) debugWindow.__yushuCmView = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 富文本形态：TipTap（StarterKit）；更新时序列化回 Markdown 参与 dirty/字数统计
+  const editor = useEditor({
+    extensions: [StarterKit],
+    content: "",
+    onUpdate: ({ editor: instance }) => {
+      if (modeRef.current !== "rich") return;
+      updateDerived(htmlToMd(instance.getHTML()));
+    },
+  });
+
+  // 富文本形态失焦同样立即落盘（与源码形态的 blur 行为一致）
+  useEffect(() => {
+    if (!editor) return;
+    const onBlur = () => {
+      void getScheduler().flush();
+    };
+    editor.on("blur", onBlur);
+    return () => {
+      editor.off("blur", onBlur);
+    };
+  }, [editor, getScheduler]);
+
+  const currentMarkdown = (): string => {
+    if (modeRef.current === "rich" && editor) return htmlToMd(editor.getHTML());
+    return viewRef.current?.state.doc.toString() ?? "";
+  };
+
+  const loadChapter = useCallback(
+    async (path: string, options?: { force?: boolean }) => {
+      try {
+        setError(null);
+        const chapter = await api().chapter.read(path);
+        const view = viewRef.current;
+        // 载入竞态保护（复核修复 2026-09-29）：读取磁盘期间用户已开始输入 —— 绝不用磁盘内容覆盖刚敲的字；
+        // force = 用户主动「重新载入 / 同值点击章节」，视为明确要求回到磁盘态
+        if (!options?.force && view && view.state.doc.toString() !== savedBodyRef.current) {
+          setStatus(
+            "已取到磁盘最新版本，但载入期间编辑器已有新输入：已保留输入未覆盖（如需查看磁盘版本请点「重新载入」）",
+          );
+          return;
+        }
+        if (view) {
+          view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: chapter.body } });
+        }
+        editor?.commands.setContent(mdToHtml(chapter.body));
+        savedBodyRef.current = chapter.body;
+        setSavedBody(chapter.body);
+        hashRef.current = chapter.hash;
+        updateDerived(chapter.body);
+        setStatus(`已载入 ${path}（记录 ${chapter.wordCount} 字）`);
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    },
+    [editor, updateDerived],
+  );
+  loadChapterRef.current = loadChapter;
+
+  /**
+   * 切换 / 重新载入章节（T2-6）：先 flush 把待自动保存的改动落盘再切换 —— 不再走"丢稿式"确认；
+   * 仅当自动保存已冻结（写入冲突、flush 无法完成）时才提示可能丢失，由用户决定是否强制继续。
+   */
+  const selectTarget = (path: string) => {
+    void (async () => {
+      const scheduler = getScheduler();
+      await scheduler.flush();
+      if (scheduler.state() === "error") {
+        const prefix = dirty ? "当前章自动保存失败（写入冲突）：继续将丢弃未保存的改动" : "当前章自动保存失败（写入冲突）";
+        if (!confirm(`${prefix}。仍要继续？`)) return;
+      }
+      if (path === selectedPath) {
+        // 同值点击 = 强制重新载入（外部改动 / 冲突后的恢复路径；force 绕过载入竞态保护）
+        void loadChapter(path, { force: true });
+        return;
+      }
+      setSelectedPath(path);
+    })();
+  };
+
+  const selected = targets.find((item) => item.chapterPath === selectedPath) ?? null;
+
+  useEffect(() => {
+    if (selectedPath) void loadChapter(selectedPath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPath]);
+
+  // UI 预演调试句柄（--ui-walkthrough；仅 __yushuDebug 时暴露）：reload 精确等待重载完成，避免预演竞态
+  useEffect(() => {
+    const debugWindow = window as DebugWindow;
+    if (!debugWindow.__yushuDebug) return;
+    debugWindow.__yushuEditorDebug = {
+      reload: async () => {
+        const path = selectedPathRef.current;
+        if (path) await loadChapterRef.current(path, { force: true });
+      },
+      doc: () => viewRef.current?.state.doc.toString() ?? "",
+    };
+    return () => {
+      delete debugWindow.__yushuEditorDebug;
+    };
+  }, []);
+
+  const switchToRich = () => {
+    if (!editor || mode === "rich") return;
+    const mdText = viewRef.current?.state.doc.toString() ?? "";
+    const unsupported = findUnsupportedSyntax(mdText);
+    if (unsupported.length > 0) {
+      const detail = unsupported.map((item) => `${item.label}（如：${item.sample}）`).join("；");
+      if (
+        !confirm(
+          `富文本形态暂不支持：${detail}。\n继续切换可能造成这些格式在切回源码时丢失，建议保持源码形态。仍要切换吗？`,
+        )
+      ) {
+        return;
+      }
+    }
+    editor.commands.setContent(mdToHtml(mdText));
+    setMode("rich");
+    setStatus("已切换到富文本形态（保存仍写回 Markdown 真源）");
+  };
+
+  const switchToSource = () => {
+    if (!editor || mode === "source") return;
+    const mdText = htmlToMd(editor.getHTML());
+    const view = viewRef.current;
+    if (view) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: mdText } });
+      // 复核修复（2026-09-29）：CM 在 display:none 期间尺寸测量失效，切回时强制重新测量
+      view.requestMeasure();
+    }
+    setMode("source");
+    setStatus("已切回源码形态（Markdown）");
+  };
+
+  /** 保存正文（自动保存与手动保存共用；失败会抛出，由调度器进入冻结态/UI 呈现） */
+  const performSave = async (): Promise<void> => {
+    const path = selectedPathRef.current;
+    if (!path || !dirtyRef.current) return;
+    const body = currentMarkdown();
+    const result = await api().chapter.write({ path, body, baseHash: hashRef.current });
+    savedBodyRef.current = body;
+    hashRef.current = result.hash;
+    dirtyRef.current = false;
+    setSavedBody(body);
+    setDirty(false);
+    setStatus(`已保存 ${result.path}（${result.wordCount} 字，frontmatter 已同步）`);
+    await refreshTargets();
+  };
+  performSaveRef.current = performSave;
+
+  const save = async () => {
+    if (!selectedPath) return;
+    setError(null);
+    // 手动保存 = flush：若已有自动保存在途则等待其完成，避免并发双写（baseHash 只有一个赢家）
+    await getScheduler().flush();
+  };
+
+  /** 冲突旁路（T2-6）：把当前编辑内容另存 <章节>.conflict-<时间戳>.md，主文件不动 */
+  const writeSidecar = async () => {
+    if (!selectedPath) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api().chapter.writeSidecar({ path: selectedPath, body: currentMarkdown() });
+      setStatus(
+        `冲突内容已写入旁路文件 ${result.sidecarPath}（${result.wordCount} 字）；建议「重新载入」磁盘版本后手动合并`,
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const autosaveLabel = (): string => {
+    switch (autosaveState) {
+      case "pending":
+        return "编辑中…";
+      case "saving":
+        return "保存中…";
+      case "saved":
+        return savedAt
+          ? `已自动保存 ${new Date(savedAt).toLocaleTimeString("zh-CN", { hour12: false })}`
+          : "已自动保存";
+      case "error":
+        return "自动保存已暂停（冲突）";
+      default:
+        return "自动保存待命";
+    }
+  };
+
+  return (
+    <div className="chapter-editor">
+      <aside>
+        <div className="panel-title">
+          <span className="muted">草稿章节（{targets.length}）</span>
+          <button type="button" className="link" onClick={() => void refreshTargets()}>
+            刷新
+          </button>
+        </div>
+        {targets.length === 0 && (
+          <p className="muted pad">
+            尚无草稿章节：请先在「三级大纲」为章纲点击「创建草稿章节」。
+          </p>
+        )}
+        <ul className="draft-list">
+          {targets.map((target) => (
+            <li
+              key={target.chapterPath}
+              className={target.chapterPath === selectedPath ? "on" : ""}
+              onClick={() => selectTarget(target.chapterPath)}
+            >
+              <div>
+                <strong>{target.title}</strong>
+                <span className="muted">{target.wordCount} 字</span>
+              </div>
+              <div className="muted">
+                {target.volumeTitle} · 第 {target.idx} 章{target.hasBody ? "" : "（空正文）"}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </aside>
+
+      <section className="editor">
+        <div className="panel-title">
+          <span className="muted">
+            {selected ? selected.chapterPath : "未选择章节"}
+            {dirty && (
+              <span className="dirty">
+                {" "}｜ {autosaveState === "error" ? "未保存（自动保存已暂停）" : "编辑中（待自动保存）"}
+              </span>
+            )}
+          </span>
+          <span className="mode-switch">
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                if (!selectedPath) return;
+                // 先 flush 落盘再重载；仅冲突冻结时确认后强制重载（T2-6）
+                selectTarget(selectedPath);
+              }}
+              disabled={!selectedPath}
+            >
+              重新载入
+            </button>
+            <button
+              type="button"
+              className={mode === "source" ? "on" : ""}
+              onClick={switchToSource}
+              disabled={mode === "source"}
+            >
+              源码形态
+            </button>
+            <button
+              type="button"
+              className={mode === "rich" ? "on" : ""}
+              onClick={switchToRich}
+              disabled={mode === "rich" || !editor}
+            >
+              富文本形态
+            </button>
+            <span className="muted">
+              实时 {liveWords} 字（记录 {localCountWords(savedBody)} 字）
+            </span>
+          </span>
+        </div>
+        <div className="cm-host" ref={hostRef} style={{ display: mode === "source" ? undefined : "none" }} />
+        {mode === "rich" && (
+          <div className="tiptap-host">
+            <EditorContent editor={editor} />
+          </div>
+        )}
+        <div className="mention-panel">
+          <span className="muted">本章提及（{mentioned.length}）：</span>
+          {mentioned.length === 0 && (
+            <span className="muted">
+              在正文中用 <code>@名称</code> 引用已建档实体
+              {entities[0] ? `（如 @${entities[0].name}）` : "（先在「世界观档案」建档）"}
+              ；源码形态下 Ctrl/⌘+点击可打开设定卡
+            </span>
+          )}
+          {mentioned.map((entity) => (
+            <button
+              key={entity.id}
+              type="button"
+              className="mention-chip"
+              title={`${entity.type}｜${entity.filePath}`}
+              onClick={() => onOpenCard?.(entity.filePath)}
+            >
+              {entity.name}
+            </button>
+          ))}
+        </div>
+        <div className="editor-foot">
+          <button
+            type="button"
+            className="primary"
+            onClick={save}
+            disabled={busy || autosaveState === "saving" || !dirty || autosaveState === "error"}
+          >
+            {busy || autosaveState === "saving" ? "保存中…" : "保存正文（baseHash + 字数同步）"}
+          </button>
+          <span className={`autosave-status ${autosaveState}`} title="编辑即自动保存；失焦与切换章节前会立即落盘">
+            {autosaveLabel()}
+          </span>
+          {autosaveState === "error" && (
+            <button type="button" onClick={() => void writeSidecar()} disabled={busy}>
+              写入旁路文件
+            </button>
+          )}
+          <span className="muted">T2-1：源码（Markdown）/ 富文本（TipTap）双形态，真源始终为 Markdown</span>
+          {error ? <span className="error-text">{error}</span> : <span className="muted">{status}</span>}
+        </div>
+      </section>
+    </div>
+  );
+}
