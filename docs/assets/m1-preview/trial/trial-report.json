@@ -1,0 +1,280 @@
+{
+  "mode": "--ui-trial",
+  "startedAt": "2026-09-29T09:44:44.035Z",
+  "finishedAt": "2026-09-29T09:45:05.279Z",
+  "totalMs": 21244,
+  "mockBaseUrl": "http://127.0.0.1:59742/v1",
+  "screenshotsDir": "docs/assets/m1-preview/trial",
+  "users": [
+    {
+      "id": "U1",
+      "profile": "新人",
+      "projectDir": "D:\\Temp\\yushu-trial\\U1",
+      "steps": [
+        {
+          "step": 1,
+          "title": "进入项目页（project:current 自动）",
+          "ok": true,
+          "detail": "项目页已就绪，标签 6 个；root=D:\\Temp\\yushu-trial\\U1",
+          "screenshot": "docs/assets/m1-preview/trial/U1-step1-project.png",
+          "ms": 214
+        },
+        {
+          "step": 2,
+          "title": "起源工作台逐步建档 5 张设定卡",
+          "ok": true,
+          "detail": "已完成步骤 5 / 5；计数文本：世界构建层级 | 已建卡 5 张",
+          "screenshot": "docs/assets/m1-preview/trial/U1-step2-genesis.png",
+          "ms": 1216
+        },
+        {
+          "step": 3,
+          "title": "三级大纲一键生成骨架",
+          "ok": true,
+          "detail": "卷纲 3 条（期望 3 卷 × 10 章）；当前卷章纲 10 条",
+          "screenshot": "docs/assets/m1-preview/trial/U1-step3-outline.png",
+          "ms": 735
+        },
+        {
+          "step": 4,
+          "title": "章纲一键创建草稿章节（回填 chapter_id）",
+          "ok": true,
+          "detail": "草稿章节已创建，章纲显示「草稿章节已建」（chapter_id 已回填）",
+          "screenshot": "docs/assets/m1-preview/trial/U1-step4-chapter.png",
+          "ms": 737
+        },
+        {
+          "step": 5,
+          "title": "AI 副驾开启开关并流式生成候选",
+          "ok": true,
+          "detail": "候选文本=\"天启界的夜色\"（长度 6，含「生成完成」=true）",
+          "screenshot": "docs/assets/m1-preview/trial/U1-step5-ai.png",
+          "ms": 1052
+        },
+        {
+          "step": 6,
+          "title": "采纳候选（替换正文）并留痕",
+          "ok": true,
+          "detail": "采纳回执含「已替换采纳」=true；使用记录：采纳 | 2026-09-29 09:44:48 · - · ok · 6 字 · 关联 ai-d8e0a239 | 生成 | 2026-09-29 09:44:48 · mock-model · ok · 6 字",
+          "screenshot": "docs/assets/m1-preview/trial/U1-step6-adopt.png",
+          "ms": 176
+        },
+        {
+          "step": 7,
+          "title": "导出与自查：确认导出 TXT + 字数对账",
+          "ok": true,
+          "detail": "导出回执=true；对账全一致=true；失配=false；目录页勾选=true；未执行复制",
+          "screenshot": "docs/assets/m1-preview/trial/U1-step7-export.png",
+          "ms": 635
+        },
+        {
+          "step": 8,
+          "title": "敏感词自查（追加含敏感词正文 → 重新核对 → 命中定位）",
+          "ok": true,
+          "detail": "命中表可见「加微信」=true；片段=\"误 1 / 警告 0 / 提示 0）\\n级别\\t词条\\t位置\\t上下文\\t替换建议\\n错误\\t加微信\\t第1章（待拟题） · 第 17 字符\\t夜色 临走时他低声说：加微信详谈。\"",
+          "screenshot": "docs/assets/m1-preview/trial/U1-step8-sensitive.png",
+          "ms": 452
+        },
+        {
+          "step": 9,
+          "title": "项目文件：重建索引 + 实体检索（加分项）",
+          "ok": true,
+          "detail": "索引状态含「已构建」=true；检索「林渊」实体命中 1；「林渊」：实体 1 · 正文块 1 | 林渊 species · ecology | …种 / 生态特色 **： 【林渊】 - ** 特征与习性… | worl",
+          "screenshot": "docs/assets/m1-preview/trial/U1-step9-index.png",
+          "ms": 783
+        }
+      ],
+      "okCount": 9,
+      "failCount": 0
+    },
+    {
+      "id": "U2",
+      "profile": "连载中",
+      "projectDir": "D:\\Temp\\yushu-trial\\U2",
+      "steps": [
+        {
+          "step": 1,
+          "title": "进入项目页（project:current 自动）",
+          "ok": true,
+          "detail": "项目页已就绪，标签 6 个；root=D:\\Temp\\yushu-trial\\U2",
+          "screenshot": "docs/assets/m1-preview/trial/U2-step1-project.png",
+          "ms": 200
+        },
+        {
+          "step": 2,
+          "title": "起源工作台逐步建档 5 张设定卡",
+          "ok": true,
+          "detail": "已完成步骤 5 / 5；计数文本：世界构建层级 | 已建卡 5 张",
+          "screenshot": "docs/assets/m1-preview/trial/U2-step2-genesis.png",
+          "ms": 1231
+        },
+        {
+          "step": 3,
+          "title": "三级大纲一键生成骨架",
+          "ok": true,
+          "detail": "卷纲 4 条（期望 4 卷 × 6 章）；当前卷章纲 6 条",
+          "screenshot": "docs/assets/m1-preview/trial/U2-step3-outline.png",
+          "ms": 738
+        },
+        {
+          "step": 4,
+          "title": "章纲一键创建草稿章节（回填 chapter_id）",
+          "ok": true,
+          "detail": "草稿章节已创建，章纲显示「草稿章节已建」（chapter_id 已回填）",
+          "screenshot": "docs/assets/m1-preview/trial/U2-step4-chapter.png",
+          "ms": 1949
+        },
+        {
+          "step": 5,
+          "title": "AI 副驾开启开关并流式生成候选",
+          "ok": true,
+          "detail": "候选文本=\"天启界的夜色\"（长度 6，含「生成完成」=true）",
+          "screenshot": "docs/assets/m1-preview/trial/U2-step5-ai.png",
+          "ms": 943
+        },
+        {
+          "step": 6,
+          "title": "采纳候选（追加到正文）并留痕",
+          "ok": true,
+          "detail": "采纳回执含「已追加采纳」=true；使用记录：采纳 | 2026-09-29 09:44:55 · - · ok · 6 字 · 关联 ai-08d20829 | 生成 | 2026-09-29 09:44:55 · mock-model · ok · 6 字",
+          "screenshot": "docs/assets/m1-preview/trial/U2-step6-adopt.png",
+          "ms": 162
+        },
+        {
+          "step": 7,
+          "title": "导出与自查：确认导出 TXT + 字数对账",
+          "ok": true,
+          "detail": "导出回执=true；对账全一致=true；失配=false；目录页勾选=true；剪贴板预览=true（ai）",
+          "screenshot": "docs/assets/m1-preview/trial/U2-step7-export.png",
+          "ms": 893
+        },
+        {
+          "step": 8,
+          "title": "敏感词自查（追加含敏感词正文 → 重新核对 → 命中定位）",
+          "ok": true,
+          "detail": "命中表可见「加微信」=true；片段=\"误 1 / 警告 0 / 提示 0）\\n级别\\t词条\\t位置\\t上下文\\t替换建议\\n错误\\t加微信\\t第1章（待拟题） · 第 17 字符\\t夜色 临走时他低声说：加微信详谈。\"",
+          "screenshot": "docs/assets/m1-preview/trial/U2-step8-sensitive.png",
+          "ms": 447
+        },
+        {
+          "step": 9,
+          "title": "项目文件：重建索引 + 实体检索（加分项）",
+          "ok": true,
+          "detail": "索引状态含「已构建」=true；检索「顾长歌」实体命中 1；「顾长歌」：实体 1 · 正文块 2 | 顾长歌 species · ecology | …生态特色 **： 【顾长歌】 - ** 特征与习性… | world",
+          "screenshot": "docs/assets/m1-preview/trial/U2-step9-index.png",
+          "ms": 779
+        }
+      ],
+      "okCount": 9,
+      "failCount": 0
+    },
+    {
+      "id": "U3",
+      "profile": "老作者",
+      "projectDir": "D:\\Temp\\yushu-trial\\U3",
+      "steps": [
+        {
+          "step": 1,
+          "title": "进入项目页（project:current 自动）",
+          "ok": true,
+          "detail": "项目页已就绪，标签 6 个；root=D:\\Temp\\yushu-trial\\U3",
+          "screenshot": "docs/assets/m1-preview/trial/U3-step1-project.png",
+          "ms": 182
+        },
+        {
+          "step": 2,
+          "title": "起源工作台逐步建档 5 张设定卡",
+          "ok": true,
+          "detail": "已完成步骤 5 / 5；计数文本：世界构建层级 | 已建卡 5 张",
+          "screenshot": "docs/assets/m1-preview/trial/U3-step2-genesis.png",
+          "ms": 1215
+        },
+        {
+          "step": 3,
+          "title": "三级大纲一键生成骨架",
+          "ok": true,
+          "detail": "卷纲 2 条（期望 2 卷 × 8 章）；当前卷章纲 8 条",
+          "screenshot": "docs/assets/m1-preview/trial/U3-step3-outline.png",
+          "ms": 725
+        },
+        {
+          "step": 4,
+          "title": "章纲一键创建草稿章节（回填 chapter_id）",
+          "ok": true,
+          "detail": "草稿章节已创建，章纲显示「草稿章节已建」（chapter_id 已回填）",
+          "screenshot": "docs/assets/m1-preview/trial/U3-step4-chapter.png",
+          "ms": 1903
+        },
+        {
+          "step": 5,
+          "title": "AI 副驾开启开关并流式生成候选",
+          "ok": true,
+          "detail": "首个增量后停止（点击=true，中途停止=true）；候选=\"天启\"（长度 2）",
+          "screenshot": "docs/assets/m1-preview/trial/U3-step5-ai.png",
+          "ms": 638
+        },
+        {
+          "step": 6,
+          "title": "采纳候选（替换正文）并留痕",
+          "ok": true,
+          "detail": "采纳回执含「已替换采纳」=true；使用记录：采纳 | 2026-09-29 09:45:02 · - · ok · 2 字 · 关联 ai-e71eb05f | 生成 | 2026-09-29 09:45:02 · - · aborted · 2 字",
+          "screenshot": "docs/assets/m1-preview/trial/U3-step6-adopt.png",
+          "ms": 176
+        },
+        {
+          "step": 7,
+          "title": "导出与自查：确认导出 TXT + 字数对账",
+          "ok": true,
+          "detail": "导出回执=true；对账全一致=true；失配=false；目录页勾选=false；剪贴板预览=true（both）",
+          "screenshot": "docs/assets/m1-preview/trial/U3-step7-export.png",
+          "ms": 1133
+        },
+        {
+          "step": 8,
+          "title": "敏感词自查（追加含敏感词正文 → 重新核对 → 命中定位）",
+          "ok": true,
+          "detail": "命中表可见「加微信」=true；片段=\"误 1 / 警告 0 / 提示 0）\\n级别\\t词条\\t位置\\t上下文\\t替换建议\\n错误\\t加微信\\t第一章 烬余 · 第 13 字符\\t天启 临走时他低声说：加微信详谈。\\t删\"",
+          "screenshot": "docs/assets/m1-preview/trial/U3-step8-sensitive.png",
+          "ms": 448
+        },
+        {
+          "step": 9,
+          "title": "项目文件：重建索引 + 实体检索（加分项）",
+          "ok": true,
+          "detail": "索引状态含「已构建」=true；检索「谢无咎」实体命中 1；「谢无咎」：实体 1 · 正文块 1 | 谢无咎 species · ecology | …生态特色 **： 【谢无咎】 - ** 特征与习性… | world",
+          "screenshot": "docs/assets/m1-preview/trial/U3-step9-index.png",
+          "ms": 803
+        }
+      ],
+      "okCount": 9,
+      "failCount": 0
+    }
+  ],
+  "summary": {
+    "users": 3,
+    "allComplete": true,
+    "failedSteps": []
+  },
+  "networkAudit": {
+    "rendererTotal": 9,
+    "rendererLocal": 9,
+    "rendererExternal": 0,
+    "externalUrls": []
+  },
+  "bypasses": [
+    "步骤 1（各组）：UI 的存放目录为 readOnly 输入 + 系统对话框，无法自动化；改由主进程等价执行 createProject（与 project:create 同一函数）",
+    "步骤 8（各组）：M1 尚无正文编辑器；经 window.yushu.ai.adopt 追加一次含敏感词正文后再走 UI 的「重新核对」"
+  ],
+  "notes": [
+    "三组共用同一本地 mock（仅覆盖 Chat Completions/SSE，base_url 见 mockBaseUrl）；分块间隔 120ms 便于 U3 截到中途停止",
+    "第 2 步卡名按验收表顺序写入起源工作台前 5 步的「名称」字段（第 4 步落在生态层）；第 9 步实体检索依据卡名（与字段语义无关）",
+    "U3 第 5 步在首个增量出现后立即点「停止生成」；若流已结束则在 detail 中如实记录「停止未截到中途」",
+    "renderer 全部经 IPC，零外网；唯一联网为 AI 生成——由主进程 fetch 指向本次 mock 的 127.0.0.1 地址，不经过 renderer session"
+  ],
+  "env": {
+    "platform": "win32",
+    "electron": "44.4.5",
+    "chrome": "152.0.7977.130",
+    "node": "24.21.0"
+  }
+}

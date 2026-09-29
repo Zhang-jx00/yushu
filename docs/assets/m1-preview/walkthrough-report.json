@@ -1,0 +1,125 @@
+{
+  "mode": "--ui-walkthrough",
+  "scene": "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器扩展（步骤 10-12）",
+  "startedAt": "2026-09-29T11:13:26.990Z",
+  "finishedAt": "2026-09-29T11:14:36.329Z",
+  "totalMs": 69339,
+  "projectDir": "D:\\Temp\\yushu-wt-v12",
+  "mockBaseUrl": "http://127.0.0.1:62886/v1",
+  "screenshotsDir": "docs/assets/m1-preview",
+  "okCount": 12,
+  "failCount": 0,
+  "bypasses": [
+    "步骤 1：UI 的存放目录为 readOnly 输入 + 系统对话框，无法自动化；改由主进程等价执行 createProject（与 project:create 同一函数）",
+    "步骤 8：该步骤排在编辑器页步骤之前；经 window.yushu.ai.adopt 追加一次含敏感词正文后再走 UI 的「重新核对」",
+    "步骤 12：经 __yushuDebug 暴露的编辑器调试句柄 await reload()（等价于点击已选中章节的强制重载）作为同步点；其后全部经真实 CodeMirror 事务输入与产品 IPC 断言落盘"
+  ],
+  "notes": [
+    "步骤 9 的「林渊」在本预演项目中不存在（第 2 步卡名为占位「测试设定N」），故追加「测试设定」关键词证明检索链路有命中"
+  ],
+  "env": {
+    "platform": "win32",
+    "electron": "44.4.5",
+    "chrome": "152.0.7977.130",
+    "node": "24.21.0"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "title": "进入项目页（App 自动加载已挂载项目）",
+      "ok": true,
+      "detail": "项目页已就绪，标签 7 个；root=D:\\Temp\\yushu-wt-v12 ｜截图：第 1 轮失败（UnknownVizError）；第 2 轮取得新画面",
+      "screenshot": "docs/assets/m1-preview/step1-project.png",
+      "ms": 3316
+    },
+    {
+      "step": 2,
+      "title": "起源工作台逐步建档 5 张设定卡",
+      "ok": true,
+      "detail": "已完成步骤 5 / 5；计数文本：世界构建层级 | 已建卡 5 张",
+      "screenshot": "docs/assets/m1-preview/step2-genesis.png",
+      "ms": 10974
+    },
+    {
+      "step": 3,
+      "title": "三级大纲一键生成骨架",
+      "ok": true,
+      "detail": "卷纲 3 条；当前卷章纲 10 条 ｜截图：第 1 轮与上一张相同；第 2 轮与上一张相同；第 3 轮取得新画面",
+      "screenshot": "docs/assets/m1-preview/step3-outline.png",
+      "ms": 7017
+    },
+    {
+      "step": 4,
+      "title": "章纲一键创建草稿章节（回填 chapter_id）",
+      "ok": true,
+      "detail": "草稿章节已创建，章纲显示「草稿章节已建」（chapter_id 已回填） ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "screenshot": "docs/assets/m1-preview/step4-chapter-draft.png",
+      "ms": 6001
+    },
+    {
+      "step": 5,
+      "title": "AI 副驾开启开关并流式生成候选",
+      "ok": true,
+      "detail": "候选文本=\"天启界的夜色\"（长度 6，含「生成完成」=true）",
+      "screenshot": "docs/assets/m1-preview/step5-ai-stream.png",
+      "ms": 4010
+    },
+    {
+      "step": 6,
+      "title": "整段采纳（替换正文）并留痕",
+      "ok": true,
+      "detail": "采纳回执含「替换采纳」=true；使用记录：采纳 | 2026-09-29 11:13:58 · - · ok · 6 字 · 关联 ai-7ddeab76 | 生成 | 2026-09-29 11:13:56 · mock-model · ok · 6 字 ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "screenshot": "docs/assets/m1-preview/step6-adopt.png",
+      "ms": 3983
+    },
+    {
+      "step": 7,
+      "title": "导出与自查：确认导出 TXT + 字数对账",
+      "ok": true,
+      "detail": "导出回执=true；对账全部一致=true；存在失配=false",
+      "screenshot": "docs/assets/m1-preview/step7-export.png",
+      "ms": 3997
+    },
+    {
+      "step": 8,
+      "title": "敏感词自查（追加含敏感词正文 → 重新核对 → 命中定位）",
+      "ok": true,
+      "detail": "命中表可见「加微信」=true；片段=\"误 1 / 警告 0 / 提示 0）\\n级别\\t词条\\t位置\\t上下文\\t替换建议\\n错误\\t加微信\\t第1章（待拟题） · 第 17 字符\\t夜色 临走时他低声说：加微信详谈。\" ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "screenshot": "docs/assets/m1-preview/step8-sensitive.png",
+      "ms": 4996
+    },
+    {
+      "step": 9,
+      "title": "项目文件：重建索引 + 中文检索",
+      "ok": true,
+      "detail": "索引状态含「已构建」=true；「林渊」结果：「林渊」：实体 0 · 正文块 0；「测试设定」命中行数=10",
+      "screenshot": "docs/assets/m1-preview/step9-index.png",
+      "ms": 7017
+    },
+    {
+      "step": 10,
+      "title": "编辑器页：源码形态挂载 + 富文本形态切换（T2-1 切片 A/B）",
+      "ok": true,
+      "detail": "CodeMirror 已挂载；正文前 40 字=天启界的夜色临走时他低声说：加微信详谈。；富文本已挂载=true（富文本正文前 30 字=天启界的夜色临走时他低声说：加微信详谈。）；已切回源码=true；含实时字数=true ｜截图：第 1 轮与上一张相同；第 2 轮与上一张相同；第 3 轮取得新画面",
+      "screenshot": "docs/assets/m1-preview/step10-editor.png",
+      "ms": 7995
+    },
+    {
+      "step": 11,
+      "title": "编辑器：实体 @ 提及装饰 + 提及面板 + 跳转档案（T2-2）",
+      "ok": true,
+      "detail": "实体提及装饰=true；提及面板=本章提及（1）：测试设定1；点击跳转档案并选中=true ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "screenshot": "docs/assets/m1-preview/step11-mentions.png",
+      "ms": 5985
+    },
+    {
+      "step": 12,
+      "title": "编辑器：自动保存落盘 + frontmatter 字数同步（T2-6 切片）",
+      "ok": true,
+      "detail": "自动保存状态=已自动保存 19:14:34；重新读盘（chapters/vol-f2lgbh/ch-q5wbog.md）含「自动保存测试段落。」=true；frontmatter 字数=42（正文实际=42，一致=true）",
+      "screenshot": "docs/assets/m1-preview/step12-autosave.png",
+      "ms": 4018
+    }
+  ],
+  "failures": []
+}
