@@ -102,6 +102,10 @@ export function ChapterEditorView({
   const dirtyRef = useRef(false);
   const performSaveRef = useRef<() => Promise<void>>(async () => undefined);
   const loadChapterRef = useRef<(path: string, options?: { force?: boolean }) => Promise<void>>(async () => undefined);
+  /** 最后成功载入的章节（编辑器内容所属章节）；载入竞态回滚选择时使用 */
+  const loadedPathRef = useRef<string | null>(null);
+  /** 竞态回滚选择后跳过该次自动加载（避免用旧选择再次触发重载） */
+  const skipAutoLoadRef = useRef<string | null>(null);
   /** 专注模式标记（供 CM 打字机滚动插件读取，避免插件随 prop 重建） */
   const focusModeRef = useRef(focusMode);
 
@@ -290,11 +294,21 @@ export function ChapterEditorView({
         // 载入竞态保护（复核修复 2026-09-29）：读取磁盘期间用户已开始输入 —— 绝不用磁盘内容覆盖刚敲的字；
         // force = 用户主动「重新载入 / 同值点击章节」，视为明确要求回到磁盘态
         if (!options?.force && view && view.state.doc.toString() !== savedBodyRef.current) {
-          setStatus(
-            "已取到磁盘最新版本，但载入期间编辑器已有新输入：已保留输入未覆盖（如需查看磁盘版本请点「重新载入」）",
-          );
+          const loaded = loadedPathRef.current;
+          if (loaded && loaded !== path) {
+            // 选择已前移但内容仍属于旧章节：把选择回滚到内容所属章节，保持「内容 ↔ 选择」一致，
+            // 用户刚敲的字继续归属旧章节、自动保存可正常落盘（避免错位后误写新章节）
+            skipAutoLoadRef.current = loaded;
+            setSelectedPath(loaded);
+            setStatus(`已取到 ${path} 的磁盘版本，但载入期间编辑器已有新输入：已保留输入并保持在原章节（未切换）`);
+          } else {
+            setStatus(
+              "已取到磁盘最新版本，但载入期间编辑器已有新输入：已保留输入未覆盖（如需查看磁盘版本请点「重新载入」）",
+            );
+          }
           return;
         }
+        loadedPathRef.current = path;
         if (view) {
           view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: chapter.body } });
         }
@@ -336,6 +350,11 @@ export function ChapterEditorView({
   const selected = targets.find((item) => item.chapterPath === selectedPath) ?? null;
 
   useEffect(() => {
+    // 竞态回滚选择：本次 selectedPath 变化由回滚产生，跳过自动加载（编辑器内容本就属于该章节）
+    if (skipAutoLoadRef.current !== null && skipAutoLoadRef.current === selectedPath) {
+      skipAutoLoadRef.current = null;
+      return;
+    }
     if (selectedPath) void loadChapter(selectedPath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPath]);

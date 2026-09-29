@@ -1,11 +1,11 @@
 {
   "mode": "--ui-walkthrough",
   "scene": "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器扩展（步骤 10-13）",
-  "startedAt": "2026-09-29T11:55:14.046Z",
-  "finishedAt": "2026-09-29T11:55:24.477Z",
-  "totalMs": 10431,
-  "projectDir": "D:\\Temp\\yushu-wt-v15",
-  "mockBaseUrl": "http://127.0.0.1:57271/v1",
+  "startedAt": "2026-09-29T11:58:53.462Z",
+  "finishedAt": "2026-09-29T11:59:03.858Z",
+  "totalMs": 10396,
+  "projectDir": "D:\\Temp\\yushu-wt-v16",
+  "mockBaseUrl": "http://127.0.0.1:53046/v1",
   "screenshotsDir": "docs/assets/m1-preview",
   "okCount": 13,
   "failCount": 0,
@@ -28,9 +28,9 @@
       "step": 1,
       "title": "进入项目页（App 自动加载已挂载项目）",
       "ok": true,
-      "detail": "项目页已就绪，标签 7 个；root=D:\\Temp\\yushu-wt-v15",
+      "detail": "项目页已就绪，标签 7 个；root=D:\\Temp\\yushu-wt-v16",
       "screenshot": "docs/assets/m1-preview/step1-project.png",
-      "ms": 181
+      "ms": 154
     },
     {
       "step": 2,
@@ -38,7 +38,7 @@
       "ok": true,
       "detail": "已完成步骤 5 / 5；计数文本：世界构建层级 | 已建卡 5 张",
       "screenshot": "docs/assets/m1-preview/step2-genesis.png",
-      "ms": 1223
+      "ms": 1225
     },
     {
       "step": 3,
@@ -46,7 +46,7 @@
       "ok": true,
       "detail": "卷纲 3 条；当前卷章纲 10 条",
       "screenshot": "docs/assets/m1-preview/step3-outline.png",
-      "ms": 425
+      "ms": 429
     },
     {
       "step": 4,
@@ -54,7 +54,7 @@
       "ok": true,
       "detail": "草稿章节已创建，章纲显示「草稿章节已建」（chapter_id 已回填）",
       "screenshot": "docs/assets/m1-preview/step4-chapter-draft.png",
-      "ms": 773
+      "ms": 745
     },
     {
       "step": 5,
@@ -62,15 +62,15 @@
       "ok": true,
       "detail": "候选文本=\"天启界的夜色\"（长度 6，含「生成完成」=true）",
       "screenshot": "docs/assets/m1-preview/step5-ai-stream.png",
-      "ms": 642
+      "ms": 626
     },
     {
       "step": 6,
       "title": "整段采纳（替换正文）并留痕",
       "ok": true,
-      "detail": "采纳回执含「替换采纳」=true；使用记录：采纳 | 2026-09-29 11:55:17 · - · ok · 6 字 · 关联 ai-59ea74d5 | 生成 | 2026-09-29 11:55:17 · mock-model · ok · 6 字",
+      "detail": "采纳回执含「替换采纳」=true；使用记录：采纳 | 2026-09-29 11:58:56 · - · ok · 6 字 · 关联 ai-88a9d35a | 生成 | 2026-09-29 11:58:56 · mock-model · ok · 6 字",
       "screenshot": "docs/assets/m1-preview/step6-adopt.png",
-      "ms": 201
+      "ms": 184
     },
     {
       "step": 7,
@@ -78,7 +78,7 @@
       "ok": true,
       "detail": "导出回执=true；对账全部一致=true；存在失配=false",
       "screenshot": "docs/assets/m1-preview/step7-export.png",
-      "ms": 620
+      "ms": 657
     },
     {
       "step": 8,
@@ -86,7 +86,7 @@
       "ok": true,
       "detail": "命中表可见「加微信」=true；片段=\"误 1 / 警告 0 / 提示 0）\\n级别\\t词条\\t位置\\t上下文\\t替换建议\\n错误\\t加微信\\t第1章（待拟题） · 第 17 字符\\t夜色 临走时他低声说：加微信详谈。\"",
       "screenshot": "docs/assets/m1-preview/step8-sensitive.png",
-      "ms": 455
+      "ms": 480
     },
     {
       "step": 9,
@@ -94,7 +94,7 @@
       "ok": true,
       "detail": "索引状态含「已构建」=true；「林渊」结果：「林渊」：实体 0 · 正文块 0；「测试设定」命中行数=10",
       "screenshot": "docs/assets/m1-preview/step9-index.png",
-      "ms": 1144
+      "ms": 1162
     },
     {
       "step": 10,
@@ -102,7 +102,7 @@
       "ok": true,
       "detail": "CodeMirror 已挂载；正文前 40 字=天启界的夜色临走时他低声说：加微信详谈。；富文本已挂载=true（富文本正文前 30 字=天启界的夜色临走时他低声说：加微信详谈。）；已切回源码=true；含实时字数=true",
       "screenshot": "docs/assets/m1-preview/step10-editor.png",
-      "ms": 747
+      "ms": 749
     },
     {
       "step": 11,
@@ -110,15 +110,15 @@
       "ok": true,
       "detail": "实体提及装饰=true；提及面板=本章提及（1）：测试设定1；点击跳转档案并选中=true",
       "screenshot": "docs/assets/m1-preview/step11-mentions.png",
-      "ms": 985
+      "ms": 961
     },
     {
       "step": 12,
       "title": "编辑器：自动保存落盘 + frontmatter 字数同步（T2-6 切片）",
       "ok": true,
-      "detail": "自动保存状态=已自动保存 19:55:22；重新读盘（chapters/vol-f2lgbh/ch-q5wbog.md）含「自动保存测试段落。」=true；frontmatter 字数=42（正文实际=42，一致=true）",
+      "detail": "自动保存状态=已自动保存 19:59:01；重新读盘（chapters/vol-f2lgbh/ch-q5wbog.md）含「自动保存测试段落。」=true；frontmatter 字数=42（正文实际=42，一致=true）",
       "screenshot": "docs/assets/m1-preview/step12-autosave.png",
-      "ms": 1233
+      "ms": 1211
     },
     {
       "step": 13,
@@ -126,7 +126,7 @@
       "ok": true,
       "detail": "标签栏隐藏=true；侧栏隐藏=true；提示可见=true；scrollTop=440；光标行居中偏差=0px（<120 判定=true）；Esc 退出后标签栏恢复=true、提示消失=true",
       "screenshot": "docs/assets/m1-preview/step13-focus.png",
-      "ms": 1773
+      "ms": 1781
     }
   ],
   "failures": []
