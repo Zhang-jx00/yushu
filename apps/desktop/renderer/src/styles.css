@@ -497,6 +497,39 @@ textarea:focus {
   color: var(--bad);
 }
 
+/* ---------- 写作视图：无干扰（专注）模式与打字机滚动（T2-3 切片 A） ---------- */
+
+.project-screen.focus-mode .tabs,
+.project-screen.focus-mode .chapter-editor aside,
+.project-screen.focus-mode .mention-panel {
+  display: none;
+}
+
+/* 顶栏是 .project-screen 的兄弟节点（App 层），用 :has 联动隐藏 */
+.app:has(.project-screen.focus-mode) .topbar {
+  display: none;
+}
+
+.project-screen.focus-mode .chapter-editor {
+  grid-template-columns: 1fr;
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.focus-hint {
+  position: fixed;
+  right: 18px;
+  bottom: 16px;
+  z-index: 30;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
 /* ---------- 项目主容器与标签页 ---------- */
 
 .project-screen {

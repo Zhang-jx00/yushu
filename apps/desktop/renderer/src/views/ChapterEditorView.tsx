@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EditorView } from "@codemirror/view";
+import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { Compartment, EditorState } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
@@ -37,9 +37,43 @@ function localCountWords(text: string): number {
   return text.replace(/\s+/g, "").length;
 }
 
+/** 把光标所在行滚动到视口垂直居中（打字机滚动；T2-3 切片 A） */
+function centerLine(view: EditorView): void {
+  const pos = view.state.selection.main.head;
+  const block = view.lineBlockAt(pos);
+  const viewport = view.scrollDOM.clientHeight;
+  const target = Math.max(0, block.top + block.height / 2 - viewport / 2);
+  // 阈值防抖动：滚动本身不产生 ViewUpdate，不会自激循环
+  if (Math.abs(view.scrollDOM.scrollTop - target) > 24) {
+    view.scrollDOM.scrollTop = target;
+  }
+}
+
+/** 打字机滚动插件：仅在启用时（专注模式）随输入 / 光标移动保持光标行居中 */
+function typewriterScrollExtension(enabled: () => boolean) {
+  return ViewPlugin.fromClass(
+    class {
+      update(update: ViewUpdate) {
+        if (!enabled()) return;
+        if (!update.docChanged && !update.selectionSet) return;
+        centerLine(update.view);
+      }
+    },
+  );
+}
+
 type EditorMode = "source" | "rich";
 
-export function ChapterEditorView({ onOpenCard }: { onOpenCard?: (path: string) => void }) {
+export function ChapterEditorView({
+  onOpenCard,
+  focusMode = false,
+  onToggleFocus,
+}: {
+  onOpenCard?: (path: string) => void;
+  /** 无干扰（专注）模式：由 ProjectScreen 统一隐藏顶栏 / 标签栏 / 侧栏（T2-3 切片 A） */
+  focusMode?: boolean;
+  onToggleFocus?: (next: boolean) => void;
+}) {
   const [targets, setTargets] = useState<AiDraftTarget[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [savedBody, setSavedBody] = useState<string>("");
@@ -68,10 +102,20 @@ export function ChapterEditorView({ onOpenCard }: { onOpenCard?: (path: string) 
   const dirtyRef = useRef(false);
   const performSaveRef = useRef<() => Promise<void>>(async () => undefined);
   const loadChapterRef = useRef<(path: string, options?: { force?: boolean }) => Promise<void>>(async () => undefined);
+  /** 专注模式标记（供 CM 打字机滚动插件读取，避免插件随 prop 重建） */
+  const focusModeRef = useRef(focusMode);
 
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+  useEffect(() => {
+    focusModeRef.current = focusMode;
+    // 进入专注模式时立即居中一次（此后由打字机滚动插件维持）
+    if (focusMode) {
+      const view = viewRef.current;
+      if (view) centerLine(view);
+    }
+  }, [focusMode]);
   useEffect(() => {
     onOpenCardRef.current = onOpenCard;
   }, [onOpenCard]);
@@ -182,6 +226,8 @@ export function ChapterEditorView({ onOpenCard }: { onOpenCard?: (path: string) 
           markdown(),
           EditorView.lineWrapping,
           mentionCompartment.current.of([]),
+          // 打字机滚动（T2-3 切片 A）：仅在专注模式下把光标行保持居中
+          typewriterScrollExtension(() => focusModeRef.current),
           // 失焦立即落盘（T2-6：把"杀进程丢稿"窗口压到最短）
           EditorView.domEventHandlers({
             blur: () => {
@@ -471,6 +517,15 @@ export function ChapterEditorView({ onOpenCard }: { onOpenCard?: (path: string) 
             >
               富文本形态
             </button>
+            <button
+              type="button"
+              className={focusMode ? "on" : ""}
+              onClick={() => onToggleFocus?.(!focusMode)}
+              disabled={!selectedPath}
+              title="隐藏顶栏 / 标签栏 / 侧栏，只留正文；Esc 退出"
+            >
+              专注模式
+            </button>
             <span className="muted">
               实时 {liveWords} 字（记录 {localCountWords(savedBody)} 字）
             </span>
@@ -524,6 +579,7 @@ export function ChapterEditorView({ onOpenCard }: { onOpenCard?: (path: string) 
           {error ? <span className="error-text">{error}</span> : <span className="muted">{status}</span>}
         </div>
       </section>
+      {focusMode && <div className="focus-hint">专注模式 · 打字机滚动已开启 · 按 Esc 退出</div>}
     </div>
   );
 }

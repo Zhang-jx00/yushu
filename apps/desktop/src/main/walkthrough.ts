@@ -530,6 +530,54 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 13,
+    title: "写作视图：无干扰（专注）模式 + 打字机滚动（T2-3 切片 A）",
+    file: "step13-focus.png",
+    body: String.raw`
+      await tab('编辑器');
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      const view = await waitFor(() => window.__yushuCmView, 8000);
+      if (!ie || !view) return { ok: false, note: '编辑器调试句柄未暴露：' + pageText() };
+      await ie.reload();
+      // 铺 40 行文本使编辑器可滚动（打字机滚动才有意义）
+      const filler = [];
+      for (let i = 1; i <= 40; i += 1) filler.push('第 ' + i + ' 行：专注模式下的打字机滚动验证文本。');
+      view.dispatch({ changes: { from: view.state.doc.length, insert: '\n\n' + filler.join('\n') } });
+      const focusBtn = [...document.querySelectorAll('.mode-switch button')].find((b) => b.textContent.includes('专注'));
+      if (!focusBtn) return { ok: false, note: '找不到「专注模式」按钮：' + pageText() };
+      focusBtn.click();
+      await sleep(350);
+      const tabsHidden = document.querySelector('.tabs').offsetParent === null;
+      const asideHidden = document.querySelector('.chapter-editor aside').offsetParent === null;
+      const hintShown = document.querySelector('.focus-hint') !== null;
+      // 光标移到文档中部 → 打字机滚动应把该行带到视口中央附近
+      // （注意：光标在文末时滚动会被 clamp 到最底部，末尾行无法居中，属正确行为，故取中部）
+      const mid = Math.floor(view.state.doc.length / 2);
+      view.dispatch({ selection: { anchor: mid } });
+      await sleep(350);
+      const pos = view.state.selection.main.head;
+      const block = view.lineBlockAt(pos);
+      const vp = view.scrollDOM.clientHeight;
+      const scrolled = view.scrollDOM.scrollTop;
+      const delta = Math.abs(block.top + block.height / 2 - scrolled - vp / 2);
+      const centered = delta < 120;
+      // Esc 退出专注模式
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(350);
+      const tabsBack = document.querySelector('.tabs').offsetParent !== null;
+      const hintGone = document.querySelector('.focus-hint') === null;
+      // 停留在专注模式供截图取证（Esc 退出路径已在上面验证）
+      focusBtn.click();
+      await sleep(350);
+      return {
+        ok: tabsHidden && asideHidden && hintShown && scrolled > 0 && centered && tabsBack && hintGone,
+        note: '标签栏隐藏=' + tabsHidden + '；侧栏隐藏=' + asideHidden + '；提示可见=' + hintShown +
+          '；scrollTop=' + Math.round(scrolled) + '；光标行居中偏差=' + Math.round(delta) + 'px（<120 判定=' + centered + '）' +
+          '；Esc 退出后标签栏恢复=' + tabsBack + '、提示消失=' + hintGone,
+      };
+    `,
+  },
 ];
 
 /**
@@ -611,7 +659,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器扩展（步骤 10-12）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器扩展（步骤 10-13）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,
