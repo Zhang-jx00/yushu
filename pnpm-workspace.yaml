@@ -1,0 +1,8 @@
+packages:
+  - "packages/@yushu/*"
+  - "apps/*"
+
+# 允许执行安装脚本的依赖（pnpm 12 默认拦截构建脚本）
+allowBuilds:
+  esbuild: true
+  electron: true

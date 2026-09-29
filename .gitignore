@@ -13,8 +13,13 @@ node_modules/
 dist/
 build/
 *.log
+*.tsbuildinfo
 
-# 本地索引缓存（SQLite 索引可随时从文件重建，不入库）
+# 本地索引与运行期产物（SQLite 索引可随时从文件重建，不入库）
+.yushu/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# 测试覆盖率
+coverage/
