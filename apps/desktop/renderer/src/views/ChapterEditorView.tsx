@@ -64,6 +64,17 @@ function typewriterScrollExtension(enabled: () => boolean) {
 
 type EditorMode = "source" | "rich";
 
+/** 双栏对照（T2-3 切片 B）：本章提及的设定卡 + 正文摘要（只读） */
+interface MentionCardData {
+  id: string;
+  name: string;
+  type: string;
+  layer: string;
+  filePath: string;
+  aliases: string[];
+  excerpt: string;
+}
+
 export function ChapterEditorView({
   onOpenCard,
   focusMode = false,
@@ -87,6 +98,9 @@ export function ChapterEditorView({
   const [mentioned, setMentioned] = useState<EntityIndexEntry[]>([]);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  /** 双栏对照开关（T2-3 切片 B）与本章设定卡数据 */
+  const [splitView, setSplitView] = useState(false);
+  const [mentionCards, setMentionCards] = useState<MentionCardData[]>([]);
 
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -359,6 +373,33 @@ export function ChapterEditorView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPath]);
 
+  // 双栏对照（T2-3 切片 B）：加载本章提及的设定卡与正文摘要（按提及集合去重，避免每次输入重复读卡）
+  const mentionedKey = mentioned.map((item) => item.id).join(",");
+  useEffect(() => {
+    if (!splitView) {
+      setMentionCards([]);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      const loaded = await Promise.all(
+        mentioned.map(async (entity) => {
+          try {
+            const card = await api().card.read(entity.filePath);
+            return { ...entity, excerpt: card.body.replace(/\s+/g, " ").trim().slice(0, 140) };
+          } catch {
+            return { ...entity, excerpt: "（读取失败，可在档案页查看）" };
+          }
+        }),
+      );
+      if (alive) setMentionCards(loaded);
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitView, mentionedKey]);
+
   // UI 预演调试句柄（--ui-walkthrough；仅 __yushuDebug 时暴露）：reload 精确等待重载完成，避免预演竞态
   useEffect(() => {
     const debugWindow = window as DebugWindow;
@@ -497,7 +538,7 @@ export function ChapterEditorView({
         </ul>
       </aside>
 
-      <section className="editor">
+      <section className={splitView ? "editor split-on" : "editor"}>
         <div className="panel-title">
           <span className="muted">
             {selected ? selected.chapterPath : "未选择章节"}
@@ -545,17 +586,57 @@ export function ChapterEditorView({
             >
               专注模式
             </button>
+            <button
+              type="button"
+              className={splitView ? "on" : ""}
+              onClick={() => setSplitView((value) => !value)}
+              disabled={!selectedPath}
+              title="左设定右正文：显示本章提及的设定卡与正文摘要"
+            >
+              双栏对照
+            </button>
             <span className="muted">
               实时 {liveWords} 字（记录 {localCountWords(savedBody)} 字）
             </span>
           </span>
         </div>
-        <div className="cm-host" ref={hostRef} style={{ display: mode === "source" ? undefined : "none" }} />
-        {mode === "rich" && (
-          <div className="tiptap-host">
-            <EditorContent editor={editor} />
+        <div className="editor-main">
+          {splitView && (
+            <aside className="setting-column">
+              <div className="panel-title">
+                <span className="muted">本章设定（{mentionCards.length}）</span>
+              </div>
+              {mentionCards.length === 0 && (
+                <p className="muted pad">
+                  本章尚未提及已建档实体：在正文中用 <code>@名称</code> 引用后自动出现在这里。
+                </p>
+              )}
+              {mentionCards.map((card) => (
+                <div key={card.id} className="setting-card">
+                  <div className="setting-card-head">
+                    <strong>{card.name}</strong>
+                    <span className="muted">
+                      {card.type}｜{card.layer}
+                    </span>
+                  </div>
+                  {card.aliases.length > 0 && <div className="muted">别名：{card.aliases.join("、")}</div>}
+                  <p className="setting-excerpt">{card.excerpt || "（卡片暂无正文）"}</p>
+                  <button type="button" className="link" onClick={() => onOpenCard?.(card.filePath)}>
+                    打开设定卡
+                  </button>
+                </div>
+              ))}
+            </aside>
+          )}
+          <div className="editor-body">
+            <div className="cm-host" ref={hostRef} style={{ display: mode === "source" ? undefined : "none" }} />
+            {mode === "rich" && (
+              <div className="tiptap-host">
+                <EditorContent editor={editor} />
+              </div>
+            )}
           </div>
-        )}
+        </div>
         <div className="mention-panel">
           <span className="muted">本章提及（{mentioned.length}）：</span>
           {mentioned.length === 0 && (

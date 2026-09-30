@@ -578,6 +578,57 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 14,
+    title: "写作视图：双栏对照（左设定右正文）（T2-3 切片 B）",
+    file: "step14-split.png",
+    body: String.raw`
+      await tab('编辑器');
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      if (!ie) return { ok: false, note: '编辑器调试句柄未暴露：' + pageText() };
+      await ie.reload();
+      const splitBtn = [...document.querySelectorAll('.mode-switch button')].find((b) => b.textContent.includes('双栏'));
+      if (!splitBtn) return { ok: false, note: '找不到「双栏对照」按钮：' + pageText() };
+      splitBtn.click();
+      const col = await waitFor(() => document.querySelector('.setting-column'), 8000);
+      const card = await waitFor(() => {
+        const el = document.querySelector('.setting-column .setting-card');
+        return el && el.textContent.includes('测试设定1') ? el : null;
+      }, 8000);
+      if (!col || !card) {
+        return { ok: false, note: '设定栏未出现或未加载到「测试设定1」：' + (col ? String(card && card.textContent) : '(无设定栏)') };
+      }
+      const excerpt = card.querySelector('.setting-excerpt');
+      const excerptText = excerpt ? String(excerpt.textContent) : '';
+      const panelEl = document.querySelector('.mention-panel');
+      const panelHidden = panelEl === null || panelEl.offsetParent === null;
+      // 打开设定卡 → 跳转档案页并选中
+      const openBtn = [...card.querySelectorAll('button')].find((b) => b.textContent.includes('打开设定卡'));
+      if (!openBtn) return { ok: false, note: '找不到「打开设定卡」按钮' };
+      openBtn.click();
+      await sleep(500);
+      const jumped = document.body.innerText.includes('世界观档案') && document.querySelector('.archive') !== null;
+      // 回编辑器并重开双栏（切页会卸载编辑器视图，开关状态不保留）——同时用于截图取证
+      await tab('编辑器');
+      const splitBtn2 = await waitFor(() => {
+        const b = [...document.querySelectorAll('.mode-switch button')].find((x) => x.textContent.includes('双栏'));
+        return b && !b.disabled ? b : null;
+      }, 8000);
+      if (splitBtn2) {
+        splitBtn2.click();
+        await sleep(400);
+      }
+      const cardBack = await waitFor(() => (document.querySelector('.setting-column .setting-card') ? true : null), 10000);
+      const colBack = document.querySelector('.setting-column') !== null;
+      return {
+        ok: col !== null && card !== null && excerptText.includes('测试设定1') && panelHidden && jumped && cardBack === true,
+        note: '设定栏出现=' + (col !== null) + '；卡片含「测试设定1」=' + (card !== null) +
+          '；摘要=' + JSON.stringify(excerptText.slice(0, 40)) +
+          '；底部提及面板隐藏=' + panelHidden + '；打开设定卡跳转档案=' + jumped +
+          '；切页返回后重开双栏=' + colBack + '、加载卡片=' + (cardBack === true),
+      };
+    `,
+  },
 ];
 
 /**
@@ -659,7 +710,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器扩展（步骤 10-13）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器扩展（步骤 10-14）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

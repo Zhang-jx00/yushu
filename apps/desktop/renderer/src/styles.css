@@ -530,6 +530,62 @@ textarea:focus {
   font-size: 12.5px;
 }
 
+/* ---------- 双栏对照：左设定右正文（T2-3 切片 B） ---------- */
+
+.editor-main {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
+.editor-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.setting-column {
+  flex: none;
+  width: 280px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.setting-card {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.setting-card:first-of-type {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.setting-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.setting-excerpt {
+  margin: 4px 0;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+/* 双栏开启时设定已在左栏，隐藏底部提及面板 */
+.editor.split-on .mention-panel {
+  display: none;
+}
+
 /* ---------- 项目主容器与标签页 ---------- */
 
 .project-screen {
