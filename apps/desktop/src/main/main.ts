@@ -209,6 +209,25 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     const indexEntitySearch = await api.index.search("林渊");
     const indexStatus = await api.index.status();
 
+    // 索引增量（T2-5 切片 A）：改一章 → 增量重建（复用未变文件、只更新 1 个）→ 新词可检索
+    const incBefore = await api.chapter.read(draft.chapterPath);
+    await api.chapter.write({
+      path: draft.chapterPath,
+      body: incBefore.body + "\\n\\n增量索引验证：玄铁令。",
+      baseHash: incBefore.hash,
+    });
+    const indexIncremental = await api.index.rebuild({ incremental: true });
+    const indexIncSearch = await api.index.search("玄铁令");
+    const incremental = {
+      mode: indexIncremental.mode,
+      reused: indexIncremental.reusedFiles,
+      updated: indexIncremental.updatedFiles,
+      removed: indexIncremental.removedFiles,
+      issues: indexIncremental.integrityIssues.length,
+      hit: indexIncSearch.chunks.length,
+      filesKeep: indexIncremental.stats.files === indexRebuild.stats.files,
+    };
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -316,6 +335,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         grew: chapterInfo.grew,
         error: chapterInfo.error,
       },
+      incremental,
       pipeline,
     };
   })()`;
@@ -391,6 +411,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         grew: boolean;
         error: string;
       };
+      incremental: {
+        mode: string;
+        reused: number;
+        updated: number;
+        removed: number;
+        issues: number;
+        hit: number;
+        filesKeep: boolean;
+      };
       pipeline: {
         conflict: string;
         sidecarOk: boolean;
@@ -459,10 +488,17 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.chapter.writeWords > result.chapter.readWords &&
       result.pipeline.conflict === "E_DOC_CONFLICT" &&
       result.pipeline.sidecarOk &&
-      result.pipeline.mainKeptExternal;
+      result.pipeline.mainKeptExternal &&
+      result.incremental.mode === "incremental" &&
+      result.incremental.updated === 1 &&
+      result.incremental.reused === result.indexed.files - 1 &&
+      result.incremental.removed === 0 &&
+      result.incremental.issues === 0 &&
+      result.incremental.hit >= 1 &&
+      result.incremental.filesKeep;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 命名生成 → 冲突拒绝与旁路文件 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 命名生成 → 冲突拒绝与旁路文件 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

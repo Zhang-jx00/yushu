@@ -1,28 +1,40 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { YushuError } from "@yushu/core";
 import {
   INDEX_SCHEMA_VERSION,
+  applyIndexDelta,
+  checkIntegrity,
   closeIndex,
   lookupEntities,
   openIndex,
   queryChunks,
+  readFileIndex,
   readStats,
   rebuildIndex,
   type ChunkHit,
   type EntityHit,
   type IndexStats,
 } from "@yushu/search";
-import { INDEX_DIR, collectIndexInput, type IndexSourceReader } from "@yushu/world-engine";
+import {
+  INDEX_DIR,
+  collectIndexInput,
+  isIndexablePath,
+  type IndexSourceFile,
+  type IndexSourceReader,
+} from "@yushu/world-engine";
 import type { IndexRebuildResultPayload, IndexSearchResultPayload, IndexStatusPayload } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
 
 /**
- * 桌面端索引操作（T1-21）：
+ * 桌面端索引操作（T1-21；T2-5 切片 A：增量与自愈）：
  * - 数据源适配器：一切读取走 FileGateway（路径防护与遍历口径统一）；
- * - 重建：世界引擎收集 → @yushu/search 全量重建（可反复执行、删库可重建）；
+ * - 重建：全量（默认）或增量（mtime+size 快速跳过 → hash 确认 → 只解析变更文件）；
+ * - 自愈：增量前做完整性校验，失败自动回退全量重建并回报问题项；
  * - 检索：全文块（FTS5）+ 实体（名称/别名）。
- * 索引库位于 `.yushu/index.db`（真源永不进 SQLite；增量索引留待 M2）。
+ * 索引库位于 `.yushu/index.db`（真源永不进 SQLite）。
  */
 
 export const INDEX_DB_RELATIVE = `${INDEX_DIR}/index.db`;
@@ -37,7 +49,11 @@ export function gatewayReader(gateway: ProjectGateway): IndexSourceReader {
     listFiles: async () =>
       (await gateway.listTree())
         .filter((entry) => entry.type === "file")
-        .map((entry) => ({ path: entry.path, size: entry.size ?? 0 })),
+        .map((entry) => ({
+          path: entry.path,
+          size: entry.size ?? 0,
+          ...(entry.mtime ? { mtime: entry.mtime } : {}),
+        })),
     readText: async (path) => (await gateway.readDoc(path)).content,
   };
 }
@@ -64,14 +80,131 @@ export async function readIndexStatus(gateway: ProjectGateway): Promise<IndexSta
   }
 }
 
-/** 全量重建（幂等；删除 .yushu/index.db 后可重跑——零丢失） */
-export async function rebuildProjectIndex(gateway: ProjectGateway): Promise<IndexRebuildResultPayload> {
-  const input = await collectIndexInput(gatewayReader(gateway));
+/** 内容 sha256（hex；与 world-engine / search 的 hash 口径一致） */
+function sha256Hex(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+interface IncrementalOutcome {
+  stats: IndexStats;
+  skipped: { path: string; error: string }[];
+  reusedFiles: number;
+  updatedFiles: number;
+  removedFiles: number;
+}
+
+/**
+ * 增量重建（T2-5 切片 A）：
+ * 1. 与 file_index 逐文件比对：mtime 与大小都未变 → 直接复用（不读内容）；
+ * 2. 疑似变化 → 读内容算 hash：相同则只刷新 mtime 记录（touch），不同才重新解析；
+ * 3. 真源已删除的路径 → 从索引移除；变更文件定向走 collectIndexInput（wrapper reader）。
+ */
+async function applyIncremental(
+  reader: IndexSourceReader,
+  files: IndexSourceFile[],
+  db: DatabaseSync,
+): Promise<IncrementalOutcome> {
+  const prev = new Map(readFileIndex(db).map((row) => [row.path, row]));
+  const currentPaths = new Set(files.map((file) => file.path));
+  const removedPaths = [...prev.keys()].filter((path) => !currentPaths.has(path));
+  const changed: IndexSourceFile[] = [];
+  const touchedFiles: { path: string; mtime?: string; hash: string; bytes: number }[] = [];
+
+  for (const file of files) {
+    const old = prev.get(file.path);
+    if (!old) {
+      changed.push(file);
+      continue;
+    }
+    if (old.mtime && file.mtime && old.mtime === file.mtime && old.bytes === file.size) continue;
+    let text: string;
+    try {
+      text = await reader.readText(file.path);
+    } catch {
+      continue; // 读取失败：保留旧记录（下次增量再试），不阻断整体
+    }
+    const hash = sha256Hex(text);
+    if (hash === old.hash) {
+      touchedFiles.push({ path: file.path, ...(file.mtime ? { mtime: file.mtime } : {}), hash, bytes: file.size });
+      continue;
+    }
+    changed.push(file);
+  }
+
+  const scopedReader: IndexSourceReader = {
+    listFiles: async () => changed,
+    readText: (path) => reader.readText(path),
+  };
+  const deltaInput = changed.length > 0 ? await collectIndexInput(scopedReader) : null;
+  const stats = applyIndexDelta(db, {
+    removedPaths,
+    files: deltaInput?.files ?? [],
+    touchedFiles,
+    entities: deltaInput?.entities ?? [],
+    refs: deltaInput?.refs ?? [],
+    chunks: deltaInput?.chunks ?? [],
+  });
+  return {
+    stats,
+    skipped: deltaInput?.skipped ?? [],
+    reusedFiles: files.length - changed.length,
+    updatedFiles: changed.length,
+    removedFiles: removedPaths.length,
+  };
+}
+
+export interface RebuildIndexOptions {
+  /** true = 增量（复用未变文件）；索引缺失或完整性校验失败时自动回退全量 */
+  incremental?: boolean;
+}
+
+export async function rebuildProjectIndex(
+  gateway: ProjectGateway,
+  options: RebuildIndexOptions = {},
+): Promise<IndexRebuildResultPayload> {
+  // 全量重建（默认；幂等——删除 .yushu/index.db 后可重跑，零丢失）
+  const reader = gatewayReader(gateway);
   const dbPath = resolveDbPath(gateway);
   const db = openIndex(dbPath);
   try {
+    const existing = readStats(db) !== null;
+    let integrityIssues: string[] = [];
+    if (options.incremental && existing) {
+      const integrity = checkIntegrity(db);
+      if (integrity.ok) {
+        // 增量 diff 与收集侧同口径过滤（导出产物 / 引擎目录 / 旁路文件不参与，避免"伪变更"）
+        const files = (await reader.listFiles()).filter((file) => isIndexablePath(file.path));
+        const outcome = await applyIncremental(reader, files, db);
+        return {
+          path: INDEX_DB_RELATIVE,
+          exists: true,
+          stats: outcome.stats,
+          schemaVersion: INDEX_SCHEMA_VERSION,
+          skipped: outcome.skipped,
+          mode: "incremental",
+          reusedFiles: outcome.reusedFiles,
+          updatedFiles: outcome.updatedFiles,
+          removedFiles: outcome.removedFiles,
+          integrityIssues: [],
+        };
+      }
+      // 自愈（T2-5）：索引损坏 → 放弃增量，回退全量重建（问题项回报给 UI）
+      integrityIssues = integrity.issues;
+    }
+    const input = await collectIndexInput(reader);
     const stats = rebuildIndex(db, input);
-    return { path: INDEX_DB_RELATIVE, exists: true, stats, schemaVersion: INDEX_SCHEMA_VERSION, skipped: input.skipped };
+    return {
+      path: INDEX_DB_RELATIVE,
+      exists: true,
+      stats,
+      schemaVersion: INDEX_SCHEMA_VERSION,
+      skipped: input.skipped,
+      mode: "full",
+      reusedFiles: 0,
+      updatedFiles: input.files.length,
+      removedFiles: 0,
+      integrityIssues,
+    };
   } finally {
     closeIndex(db);
   }

@@ -2,7 +2,16 @@ import { existsSync, mkdirSync, promises as fs } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { YushuError } from "@yushu/core";
-import type { ChunkHit, EntityHit, IndexInput, IndexStats } from "./types.js";
+import type {
+  ChunkHit,
+  EntityHit,
+  IndexChunkRow,
+  IndexEntityRow,
+  IndexFileRow,
+  IndexInput,
+  IndexRefRow,
+  IndexStats,
+} from "./types.js";
 
 /**
  * 索引库（docs/03 §6）：真源永不进 SQLite——所有表都是文件派生的可重建数据。
@@ -122,59 +131,67 @@ export function estimateTokens(text: string): number {
   return cjk + asciiWords;
 }
 
+/** 写入派生数据（全量重建与增量更新共用；调用方负责事务与旧数据清理） */
+function insertRows(
+  db: DatabaseSync,
+  input: Pick<IndexInput, "files" | "entities" | "refs" | "chunks">,
+  builtAt: string,
+): void {
+  const insertFile = db.prepare(
+    "INSERT INTO file_index(path, mtime, hash, bytes, indexed_at) VALUES (?, ?, ?, ?, ?)",
+  );
+  for (const file of input.files) {
+    insertFile.run(file.path, file.mtime ?? null, file.hash, file.bytes, builtAt);
+  }
+
+  const insertEntity = db.prepare(
+    "INSERT INTO entities(id, type, layer, name, aliases, visibility, file_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  );
+  for (const entity of input.entities) {
+    insertEntity.run(
+      entity.id,
+      entity.type,
+      entity.layer,
+      entity.name,
+      entity.aliases.join("、"),
+      entity.visibility,
+      entity.filePath,
+    );
+  }
+
+  const insertRef = db.prepare("INSERT INTO refs(referrer, relation, target) VALUES (?, ?, ?)");
+  for (const ref of input.refs) {
+    insertRef.run(ref.referrer, ref.relation, ref.target);
+  }
+
+  const insertChunk = db.prepare(
+    `INSERT INTO chunks(id, path, chapter_id, volume, kind, text, text_fts, char_start, char_end, text_hash, entities, tokens)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (const chunk of input.chunks) {
+    insertChunk.run(
+      chunk.id,
+      chunk.path,
+      chunk.chapterId ?? null,
+      chunk.volume ?? null,
+      chunk.kind,
+      chunk.text,
+      toFtsText(chunk.text),
+      chunk.charStart,
+      chunk.charEnd,
+      chunk.textHash,
+      chunk.entities.join("、"),
+      estimateTokens(chunk.text),
+    );
+  }
+}
+
 /** 全量重建：清空派生表 → 写入输入 → FTS5 external content 重建（幂等，可反复执行） */
 export function rebuildIndex(db: DatabaseSync, input: IndexInput, builtAt = new Date().toISOString()): IndexStats {
   db.exec("BEGIN");
   try {
     db.exec("DELETE FROM chunks; DELETE FROM entities; DELETE FROM refs; DELETE FROM file_index;");
-
-    const insertFile = db.prepare(
-      "INSERT INTO file_index(path, mtime, hash, bytes, indexed_at) VALUES (?, ?, ?, ?, ?)",
-    );
-    for (const file of input.files) {
-      insertFile.run(file.path, file.mtime ?? null, file.hash, file.bytes, builtAt);
-    }
-
-    const insertEntity = db.prepare(
-      "INSERT INTO entities(id, type, layer, name, aliases, visibility, file_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    );
-    for (const entity of input.entities) {
-      insertEntity.run(
-        entity.id,
-        entity.type,
-        entity.layer,
-        entity.name,
-        entity.aliases.join("、"),
-        entity.visibility,
-        entity.filePath,
-      );
-    }
-
-    const insertRef = db.prepare("INSERT INTO refs(referrer, relation, target) VALUES (?, ?, ?)");
-    for (const ref of input.refs) {
-      insertRef.run(ref.referrer, ref.relation, ref.target);
-    }
-
-    const insertChunk = db.prepare(
-      `INSERT INTO chunks(id, path, chapter_id, volume, kind, text, text_fts, char_start, char_end, text_hash, entities, tokens)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const chunk of input.chunks) {
-      insertChunk.run(
-        chunk.id,
-        chunk.path,
-        chunk.chapterId ?? null,
-        chunk.volume ?? null,
-        chunk.kind,
-        chunk.text,
-        toFtsText(chunk.text),
-        chunk.charStart,
-        chunk.charEnd,
-        chunk.textHash,
-        chunk.entities.join("、"),
-        estimateTokens(chunk.text),
-      );
-    }
+    insertRows(db, input, builtAt);
 
     // 官方全量重建命令（docs/03 §6：external content 可随时 rebuild）
     db.exec("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');");
@@ -261,6 +278,110 @@ export function lookupEntities(db: DatabaseSync, keyword: string, limit = 20): E
       .filter(Boolean),
     filePath: String(row["file_path"] ?? ""),
   }));
+}
+
+/* ---------- 增量更新与完整性自愈（M2 / T2-5 切片 A） ---------- */
+
+/** 增量输入：与 IndexInput 同形，语义为"差异"（只含变更 / 移除文件） */
+export interface IndexDelta {
+  /** 已从真源删除的文件路径（清空其全部派生数据） */
+  removedPaths: string[];
+  /** 内容变更或新增的文件（先清旧数据再写入） */
+  files: IndexFileRow[];
+  /** 内容未变、仅刷新 mtime/indexed_at 的文件（不触碰派生数据） */
+  touchedFiles: IndexFileRow[];
+  entities: IndexEntityRow[];
+  refs: IndexRefRow[];
+  chunks: IndexChunkRow[];
+}
+
+/** 读取 file_index（增量 diff 基线） */
+export function readFileIndex(db: DatabaseSync): IndexFileRow[] {
+  const rows = db.prepare("SELECT path, mtime, hash, bytes FROM file_index").all() as Record<string, unknown>[];
+  return rows.map((row) => ({
+    path: String(row["path"] ?? ""),
+    ...(typeof row["mtime"] === "string" && row["mtime"] ? { mtime: row["mtime"] } : {}),
+    hash: String(row["hash"] ?? ""),
+    bytes: Number(row["bytes"] ?? 0),
+  }));
+}
+
+/**
+ * 完整性校验（T2-5 自愈前置）：PRAGMA integrity_check + FTS5 完整检查（rank=1）。
+ * 注：external content 表的 `count(*)` 走 content 表，无法用于「索引缺行」判定；
+ * FTS5 的 `('integrity-check', 1)` 才会连同 external content 一起校验（缺行即抛错）。
+ * 失败时调用方应放弃增量、回退全量重建（K09：索引损坏不得阻断日更）。
+ */
+export function checkIntegrity(db: DatabaseSync): { ok: boolean; issues: string[] } {
+  const issues: string[] = [];
+  try {
+    const rows = db.prepare("PRAGMA integrity_check").all() as Record<string, unknown>[];
+    for (const row of rows) {
+      const value = String(Object.values(row)[0] ?? "");
+      if (value !== "" && value !== "ok") issues.push(`integrity_check：${value}`);
+    }
+  } catch (err) {
+    issues.push(`integrity_check 执行失败：${err instanceof Error ? err.message : String(err)}`);
+  }
+  try {
+    db.exec("INSERT INTO chunks_fts(chunks_fts, rank) VALUES('integrity-check', 1);");
+  } catch (err) {
+    issues.push(`FTS integrity-check 失败：${err instanceof Error ? err.message : String(err)}`);
+  }
+  return { ok: issues.length === 0, issues };
+}
+
+/**
+ * 增量应用（T2-5）：按文件清理旧派生数据 → 写入变更数据 → FTS5 **行级** delete/insert 同步。
+ * 不用全库 `rebuild`（大库为 O(全量)）；external content 表的行级命令要求提供与索引一致的旧值，
+ * 这里从 chunks 表（持久化的 text_fts/entities）取值，保证与 FTS 索引一致。
+ */
+export function applyIndexDelta(
+  db: DatabaseSync,
+  delta: IndexDelta,
+  builtAt = new Date().toISOString(),
+): IndexStats {
+  const changedPaths = [...delta.removedPaths, ...delta.files.map((file) => file.path)];
+  const ftsDelete = db.prepare(
+    "INSERT INTO chunks_fts(chunks_fts, rowid, text_fts, entities) SELECT 'delete', rowid, text_fts, entities FROM chunks WHERE path = ?",
+  );
+  const ftsInsert = db.prepare(
+    "INSERT INTO chunks_fts(rowid, text_fts, entities) SELECT rowid, text_fts, entities FROM chunks WHERE path = ?",
+  );
+  const entityIdsOf = db.prepare("SELECT id FROM entities WHERE file_path = ?");
+  const deleteRefs = db.prepare("DELETE FROM refs WHERE referrer = ?");
+  const deleteEntities = db.prepare("DELETE FROM entities WHERE file_path = ?");
+  const deleteChunks = db.prepare("DELETE FROM chunks WHERE path = ?");
+  const deleteFileRow = db.prepare("DELETE FROM file_index WHERE path = ?");
+  const touchFileRow = db.prepare("UPDATE file_index SET mtime = ?, indexed_at = ? WHERE path = ?");
+
+  db.exec("BEGIN");
+  try {
+    for (const path of changedPaths) {
+      ftsDelete.run(path);
+      deleteChunks.run(path);
+      const ids = (entityIdsOf.all(path) as Record<string, unknown>[]).map((row) => String(row["id"] ?? ""));
+      for (const id of ids) deleteRefs.run(id);
+      deleteEntities.run(path);
+      deleteFileRow.run(path);
+    }
+    for (const file of delta.touchedFiles) {
+      touchFileRow.run(file.mtime ?? null, builtAt, file.path);
+    }
+    insertRows(db, delta, builtAt);
+    for (const file of delta.files) {
+      ftsInsert.run(file.path);
+    }
+    metaSet(db, "schema_version", String(INDEX_SCHEMA_VERSION));
+    metaSet(db, "built_at", builtAt);
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw new IndexError("索引增量更新失败（已回滚，原索引保持不变）", { cause: err });
+  }
+  const stats = readStats(db);
+  if (!stats) throw new IndexError("索引增量更新后读取统计失败");
+  return stats;
 }
 
 export function closeIndex(db: DatabaseSync): void {

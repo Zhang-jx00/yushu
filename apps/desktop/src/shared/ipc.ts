@@ -56,6 +56,8 @@ export interface TreeEntry {
   path: string;
   type: "file" | "dir";
   size?: number;
+  /** 文件修改时间（ISO；仅文件条目）——索引增量的 mtime+hash 快速判定用 */
+  mtime?: string;
 }
 
 export interface ProjectSnapshot {
@@ -590,6 +592,21 @@ export interface IndexRebuildResultPayload extends IndexStatusPayload {
   stats: IndexStatsPayload;
   /** 解析失败被跳过的真源文件 */
   skipped: { path: string; error: string }[];
+  /** full = 全量重建；incremental = 增量（复用未变文件） */
+  mode: "full" | "incremental";
+  /** 增量：未变而直接复用的文件数（含仅 mtime 刷新的文件） */
+  reusedFiles: number;
+  /** 增量：重新解析的文件数（新增 + 内容变更） */
+  updatedFiles: number;
+  /** 增量：真源已删除、从索引移除的文件数 */
+  removedFiles: number;
+  /** 完整性校验失败项（非空表示本次因自愈回退为全量重建） */
+  integrityIssues: string[];
+}
+
+/** 重建请求（T2-5：默认全量；incremental=true 时增量，索引缺失/损坏自动回退全量） */
+export interface IndexRebuildPayload {
+  incremental?: boolean;
 }
 
 export interface IndexChunkHitPayload {

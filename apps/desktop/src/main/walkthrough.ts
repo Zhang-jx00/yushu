@@ -629,6 +629,30 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 15,
+    title: "项目文件：索引增量重建（复用未变文件）（T2-5 切片 A）",
+    file: "step15-incremental.png",
+    body: String.raw`
+      await tab('项目文件');
+      const btn = await waitFor(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === '增量重建');
+        return b && !b.disabled ? b : null;
+      }, 12000);
+      if (!btn) return { ok: false, note: '「增量重建」按钮不可用（索引尚未构建？）：' + pageText() };
+      btn.click();
+      const done = await waitFor(() => (document.body.innerText.includes('索引已重建（增量') ? true : null), 20000);
+      if (done === null) return { ok: false, note: '未出现增量重建回执：' + pageText() };
+      const text = document.body.innerText;
+      const m = text.match(/增量：复用 (\d+) · 更新 (\d+) · 移除 (\d+) 个文件/);
+      const reused = m ? Number(m[1]) : -1;
+      const updated = m ? Number(m[2]) : -1;
+      return {
+        ok: reused > 0 && updated >= 0,
+        note: '增量回执=' + (m ? m[0] : '(未匹配)') + '；复用>0=' + (reused > 0) + '；更新=' + updated,
+      };
+    `,
+  },
 ];
 
 /**
@@ -710,7 +734,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器扩展（步骤 10-14）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-15）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

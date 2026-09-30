@@ -68,16 +68,21 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
     }
   };
 
-  /** 重建索引（T1-21）：全量可重建，删库后重跑零丢失 */
-  const rebuildIndex = async () => {
+  /** 重建索引（T1-21 全量 / T2-5 增量）：增量复用未变文件；完整性失败自动自愈为全量 */
+  const rebuildIndex = async (incremental = false) => {
     setIndexBusy(true);
     setError(null);
     try {
-      const result = await api().index.rebuild();
+      const result = await api().index.rebuild(incremental ? { incremental: true } : {});
       setIndexStatus(result);
+      const modeText =
+        result.mode === "incremental"
+          ? `增量：复用 ${result.reusedFiles} · 更新 ${result.updatedFiles} · 移除 ${result.removedFiles} 个文件`
+          : "全量";
       setStatus(
-        `索引已重建：${result.stats.files} 文件 / ${result.stats.entities} 实体 / ${result.stats.refs} 引用 / ${result.stats.chunks} 块` +
-          (result.skipped.length > 0 ? `（跳过 ${result.skipped.length} 个解析失败文件）` : ""),
+        `索引已重建（${modeText}）：${result.stats.files} 文件 / ${result.stats.entities} 实体 / ${result.stats.refs} 引用 / ${result.stats.chunks} 块` +
+          (result.skipped.length > 0 ? `（跳过 ${result.skipped.length} 个解析失败文件）` : "") +
+          (result.integrityIssues.length > 0 ? `（完整性自愈：${result.integrityIssues[0]}）` : ""),
       );
     } catch (err) {
       setError((err as Error).message);
@@ -112,8 +117,16 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
               : "尚未构建（索引可随删随建，真源不受影响）"}
           </div>
           <div className="outline-actions">
-            <button type="button" disabled={indexBusy} onClick={rebuildIndex}>
+            <button type="button" disabled={indexBusy} onClick={() => void rebuildIndex()}>
               {indexBusy ? "重建中…" : "重建索引"}
+            </button>
+            <button
+              type="button"
+              disabled={indexBusy || !indexStatus?.exists}
+              onClick={() => void rebuildIndex(true)}
+              title="复用未变文件，只重新解析变更内容；索引损坏时自动全量自愈"
+            >
+              增量重建
             </button>
           </div>
           <div className="dir-row">

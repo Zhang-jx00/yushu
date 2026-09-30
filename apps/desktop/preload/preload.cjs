@@ -74,7 +74,7 @@ contextBridge.exposeInMainWorld("yushu", {
   },
   index: {
     status: () => invoke("index:status"),
-    rebuild: () => invoke("index:rebuild"),
+    rebuild: (payload) => invoke("index:rebuild", payload),
     search: (keyword, limit) => invoke("index:search", { keyword, limit }),
   },
   naming: {

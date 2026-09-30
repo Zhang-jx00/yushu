@@ -30,6 +30,7 @@ import {
   type ExportRunPayload,
   type ExportRunResult,
   type FusionPreview,
+  type IndexRebuildPayload,
   type IndexRebuildResultPayload,
   type IndexSearchResultPayload,
   type IndexStatusPayload,
@@ -313,8 +314,8 @@ export function registerIpcHandlers(): void {
     wrap<IndexStatusPayload>(() => readIndexStatus(requireGateway())),
   );
 
-  ipcMain.handle(CHANNELS.indexRebuild, () =>
-    wrap<IndexRebuildResultPayload>(() => rebuildProjectIndex(requireGateway())),
+  ipcMain.handle(CHANNELS.indexRebuild, (_event, payload?: IndexRebuildPayload) =>
+    wrap<IndexRebuildResultPayload>(() => rebuildProjectIndex(requireGateway(), payload ?? {})),
   );
 
   ipcMain.handle(CHANNELS.indexSearch, (_event, payload: { keyword: string; limit?: number }) =>

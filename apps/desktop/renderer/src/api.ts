@@ -26,6 +26,7 @@ import type {
   ExportRunPayload,
   ExportRunResult,
   FusionPreview,
+  IndexRebuildPayload,
   IndexRebuildResultPayload,
   IndexSearchResultPayload,
   IndexStatusPayload,
@@ -95,7 +96,8 @@ export interface YushuApi {
   };
   index: {
     status: () => Promise<IndexStatusPayload>;
-    rebuild: () => Promise<IndexRebuildResultPayload>;
+    /** 重建索引：默认全量；`{ incremental: true }` 增量（复用未变文件，损坏时自动自愈为全量） */
+    rebuild: (payload?: IndexRebuildPayload) => Promise<IndexRebuildResultPayload>;
     search: (keyword: string, limit?: number) => Promise<IndexSearchResultPayload>;
   };
   naming: {

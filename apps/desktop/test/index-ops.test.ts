@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { removeIndexFiles } from "@yushu/search";
+import { removeIndexFiles, openIndex, closeIndex } from "@yushu/search";
 import { adoptDraft } from "../src/main/ai-ops.js";
 import { INDEX_DB_RELATIVE, readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "../src/main/index-ops.js";
 import { createOutlineChapter, createProject, generateOutline, writeCardDoc } from "../src/main/project-ops.js";
@@ -120,5 +120,66 @@ describe("桌面端索引（T1-21 / T1-22）", () => {
     await expect(searchProjectIndex(gateway, "夜色")).rejects.toMatchObject({
       code: "E_INDEX_MISSING",
     });
+  });
+
+  it("增量重建（T2-5）：复用未变文件、只重解析变更、移除已删文件；新内容可检索", async () => {
+    const { gateway, cardPath } = await setupProject();
+    const full = await rebuildProjectIndex(gateway);
+    expect(full.mode).toBe("full");
+    expect(full.integrityIssues).toEqual([]);
+
+    // 1) 内容未变 → 全部复用（mtime+size 快速跳过）
+    const reused = await rebuildProjectIndex(gateway, { incremental: true });
+    expect(reused.mode).toBe("incremental");
+    expect(reused.updatedFiles).toBe(0);
+    expect(reused.reusedFiles).toBe(full.stats.files);
+    expect(reused.removedFiles).toBe(0);
+    expect(reused.stats.chunks).toBe(full.stats.chunks);
+    expect(reused.stats.ftsRows).toBe(reused.stats.chunks);
+
+    // 2) 改一张卡 → 只有它被重解析；新词可检索；FTS 行数与 chunks 对齐
+    const snapshot = await gateway.readDoc(cardPath);
+    await gateway.writeDoc(
+      cardPath,
+      snapshot.content.replace("剑指苍穹", "剑指苍穹，持有玄铁令"),
+      snapshot.hash,
+    );
+    const afterCard = await rebuildProjectIndex(gateway, { incremental: true });
+    expect(afterCard.updatedFiles).toBe(1);
+    expect(afterCard.reusedFiles).toBe(full.stats.files - 1);
+    expect(afterCard.stats.ftsRows).toBe(afterCard.stats.chunks);
+    const hit = await searchProjectIndex(gateway, "玄铁令");
+    expect(hit.chunks.length).toBeGreaterThanOrEqual(1);
+    expect(hit.chunks[0]?.path).toBe(cardPath);
+    expect((await searchProjectIndex(gateway, "林渊")).entities).toHaveLength(1);
+
+    // 3) 删除一张卡 → 从索引移除（实体与引用一并清理）
+    await rm(join(dir, cardPath), { force: true });
+    const afterRemove = await rebuildProjectIndex(gateway, { incremental: true });
+    expect(afterRemove.removedFiles).toBe(1);
+    expect(afterRemove.stats.entities).toBe(1);
+    expect((await searchProjectIndex(gateway, "林渊")).entities).toHaveLength(0);
+    expect(afterRemove.stats.ftsRows).toBe(afterRemove.stats.chunks);
+  });
+
+  it("完整性自愈（T2-5）：FTS 不一致时增量自动回退全量重建并回报问题项", async () => {
+    const { gateway } = await setupProject();
+    const full = await rebuildProjectIndex(gateway);
+
+    // 人为破坏：删掉卡片 chunks（FTS 索引行随之与 chunks 表不一致）
+    const dbPath = join(dir, ".yushu", "index.db");
+    const db = openIndex(dbPath);
+    try {
+      db.exec("DELETE FROM chunks WHERE kind = 'card'");
+    } finally {
+      closeIndex(db);
+    }
+
+    const healed = await rebuildProjectIndex(gateway, { incremental: true });
+    expect(healed.mode).toBe("full");
+    expect(healed.integrityIssues.length).toBeGreaterThan(0);
+    expect(healed.integrityIssues.join("；")).toContain("FTS");
+    expect(healed.stats.chunks).toBe(full.stats.chunks);
+    expect(healed.stats.ftsRows).toBe(healed.stats.chunks);
   });
 });

@@ -75,7 +75,7 @@ export class ProjectGateway {
           await walk(abs, rel);
         } else if (dirent.isFile()) {
           const stat = await fs.stat(abs);
-          entries.push({ path: rel, type: "file", size: stat.size });
+          entries.push({ path: rel, type: "file", size: stat.size, mtime: stat.mtime.toISOString() });
         }
       }
     };

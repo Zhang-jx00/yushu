@@ -76,7 +76,7 @@ export interface CollectIndexOptions {
   excludePrefixes?: string[];
 }
 
-const DEFAULT_EXCLUDES = [".yushu/", ".git/", "node_modules/", "exports/"];
+export const DEFAULT_INDEX_EXCLUDES = [".yushu/", ".git/", "node_modules/", "exports/"];
 
 /**
  * 冲突旁路文件（T2-6：`<章节>.conflict-<时间戳>.md`，见 docs/04 T2-6）。
@@ -84,6 +84,18 @@ const DEFAULT_EXCLUDES = [".yushu/", ".git/", "node_modules/", "exports/"];
  * （同一 chapterId 的重复块）。此处统一排除，与导出（走大纲映射）保持同一口径。
  */
 const CONFLICT_SIDECAR_RE = /\.conflict-\d{8}-\d{9}\.md$/;
+
+/**
+ * 该路径是否进入索引（扩展名 + 排除前缀 + 旁路文件；增量 diff 与收集两侧同口径）。
+ * 增量重建的 diff 必须复用本判定——否则导出产物等被收集侧排除的文件会被误计为"变更"。
+ */
+export function isIndexablePath(path: string, excludes: string[] = DEFAULT_INDEX_EXCLUDES): boolean {
+  return (
+    INDEXABLE_EXT_RE.test(path) &&
+    !excludes.some((prefix) => path.startsWith(prefix)) &&
+    !CONFLICT_SIDECAR_RE.test(path)
+  );
+}
 
 function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
@@ -181,7 +193,7 @@ export async function collectIndexInput(
   options: CollectIndexOptions = {},
 ): Promise<IndexInput & { skipped: { path: string; error: string }[] }> {
   const chunkSize = options.chunkSize ?? 400;
-  const excludes = options.excludePrefixes ?? DEFAULT_EXCLUDES;
+  const excludes = options.excludePrefixes ?? DEFAULT_INDEX_EXCLUDES;
   const files: IndexFileRow[] = [];
   const entities: IndexEntityRow[] = [];
   const refs: IndexRefRow[] = [];
@@ -189,9 +201,7 @@ export async function collectIndexInput(
   const skipped: { path: string; error: string }[] = [];
 
   const list = (await reader.listFiles())
-    .filter((file) => INDEXABLE_EXT_RE.test(file.path))
-    .filter((file) => !excludes.some((prefix) => file.path.startsWith(prefix)))
-    .filter((file) => !CONFLICT_SIDECAR_RE.test(file.path))
+    .filter((file) => isIndexablePath(file.path, excludes))
     .sort((a, b) => a.path.localeCompare(b.path));
 
   const texts = new Map<string, string>();
