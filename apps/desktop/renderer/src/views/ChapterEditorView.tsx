@@ -11,6 +11,7 @@ import { findUnsupportedSyntax, htmlToMd, mdToHtml } from "../markdown-bridge";
 import { collectMentionedEntities, type EntityIndexEntry } from "../entity-mentions";
 import { entityMentionPlugin } from "../entity-mention-plugin";
 import { createAutosaveScheduler, type AutosaveScheduler, type AutosaveState } from "../autosave";
+import { cardTypeLabel, layerLabel } from "../card-labels";
 
 /**
  * 章节编辑器（T2-1：CodeMirror 6 源码形态 + TipTap 富文本形态；T2-2 实体 @ 提及）。
@@ -35,6 +36,17 @@ type DebugWindow = Window & {
 /** 与 @yushu/core countWords 同口径（去空白字符数）——渲染层不 import 引擎包，保持零依赖约定 */
 function localCountWords(text: string): number {
   return text.replace(/\s+/g, "").length;
+}
+
+/** 双栏对照的卡片摘要（复核修复 2026-09-30）：清洗 Markdown 标记 → 单段纯文本 → 截断加省略号 */
+function excerptOf(body: string): string {
+  const plain = body
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*/g, "")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
 }
 
 /** 把光标所在行滚动到视口垂直居中（打字机滚动；T2-3 切片 A） */
@@ -401,7 +413,7 @@ export function ChapterEditorView({
         mentioned.map(async (entity) => {
           try {
             const card = await api().card.read(entity.filePath);
-            return { ...entity, excerpt: card.body.replace(/\s+/g, " ").trim().slice(0, 140) };
+            return { ...entity, excerpt: excerptOf(card.body) };
           } catch {
             return { ...entity, excerpt: "（读取失败，可在档案页查看）" };
           }
@@ -631,7 +643,7 @@ export function ChapterEditorView({
                   <div className="setting-card-head">
                     <strong>{card.name}</strong>
                     <span className="muted">
-                      {card.type}｜{card.layer}
+                      {cardTypeLabel(card.type)}｜{layerLabel(card.layer)}
                     </span>
                   </div>
                   {card.aliases.length > 0 && <div className="muted">别名：{card.aliases.join("、")}</div>}
@@ -666,7 +678,7 @@ export function ChapterEditorView({
               key={entity.id}
               type="button"
               className="mention-chip"
-              title={`${entity.type}｜${entity.filePath}`}
+              title={`${cardTypeLabel(entity.type)}｜${entity.filePath}`}
               onClick={() => onOpenCard?.(entity.filePath)}
             >
               {entity.name}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CardReadResult, CardSummary, NamingKindPayload, NamingResultPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { cardTypeLabel, layerLabel } from "../card-labels";
 
 const NAMING_KINDS: { kind: NamingKindPayload; label: string }[] = [
   { kind: "character", label: "角色名" },
@@ -194,7 +195,7 @@ export function ArchiveView({
               <div>
                 <strong>{card.name}</strong>
                 <span className="muted">
-                  {card.type} · {card.layer}
+                  {cardTypeLabel(card.type)} · {layerLabel(card.layer)}
                 </span>
               </div>
               <div className="muted">

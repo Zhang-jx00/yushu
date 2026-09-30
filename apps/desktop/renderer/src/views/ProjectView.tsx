@@ -7,6 +7,7 @@ import type {
   TreeEntry,
 } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { cardTypeLabel, layerLabel } from "../card-labels";
 
 /** 项目视图：目录树 + 文档编辑（带 baseHash 并发检测）+ 检索索引卡（T1-21 无头能力的桌面入口） */
 export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
@@ -151,7 +152,7 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
                 {searchResult.entities.map((entity) => (
                   <li key={entity.id} onClick={() => void openDoc(entity.filePath)}>
                     <strong>{entity.name}</strong>
-                    <span className="muted"> {entity.type} · {entity.layer}</span>
+                    <span className="muted"> {cardTypeLabel(entity.type)} · {layerLabel(entity.layer)}</span>
                   </li>
                 ))}
                 {searchResult.chunks.map((chunk) => (

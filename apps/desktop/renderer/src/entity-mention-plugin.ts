@@ -6,6 +6,7 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import { findMentions, type EntityIndexEntry, type MentionMatch } from "./entity-mentions";
+import { cardTypeLabel } from "./card-labels";
 
 /**
  * 源码形态的实体提及装饰（M2 / T2-2）：
@@ -49,7 +50,7 @@ class MentionPluginValue {
       Decoration.mark({
         class: "entity-mention",
         attributes: {
-          title: `${match.entity.type}｜${match.entity.name}（Ctrl/⌘+点击查看设定卡）`,
+          title: `${cardTypeLabel(match.entity.type)}｜${match.entity.name}（Ctrl/⌘+点击查看设定卡）`,
         },
       }).range(match.start, match.end),
     );
