@@ -583,12 +583,26 @@ export interface IndexStatsPayload {
   ftsRows: number;
 }
 
+/** 保存即增量（T2-5 切片 B）：写通道成功后的后台索引刷新状态（随 index:status 一并返回） */
+export interface IndexRefreshState {
+  /** 已调度待执行（防抖窗口内） */
+  pending: boolean;
+  /** 正在执行增量刷新 */
+  running: boolean;
+  /** 最近一次自动刷新完成时间（ISO；从未执行过为 null） */
+  lastRunAt: string | null;
+  /** 最近一次自动刷新错误（不阻断写通道，下次保存后自动重试） */
+  lastError: string | null;
+}
+
 export interface IndexStatusPayload {
   /** 相对路径：.yushu/index.db */
   path: string;
   exists: boolean;
   stats: IndexStatsPayload | null;
   schemaVersion: number;
+  /** 自动增量刷新状态（readIndexStatus 本身不产生该字段，由 IPC 层合并） */
+  refresh?: IndexRefreshState;
 }
 
 export interface IndexRebuildResultPayload extends IndexStatusPayload {

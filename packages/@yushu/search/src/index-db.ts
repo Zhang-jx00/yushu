@@ -102,6 +102,9 @@ export function openIndex(dbPath: string): DatabaseSync {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL;");
+  // 并发写健壮性（T2-5 切片 B）：后台自动增量与用户手动重建可能并发，
+  // node:sqlite 默认 busy 超时为 0（锁冲突立即失败）——给 3s 重试窗口，避免无谓报错。
+  db.exec("PRAGMA busy_timeout = 3000;");
   try {
     db.exec(SCHEMA_SQL);
   } catch (err) {

@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-12 为 M2 编辑器扩展（双形态 / 实体提及 / 自动保存）。
+ * 步骤 10-16 为 M2 编辑器与索引扩展（双形态 / 实体提及 / 自动保存 / 写作视图 / 索引增量与保存即增量）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -653,6 +653,46 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 16,
+    title: "保存即增量：编辑器输入后索引自动刷新（T2-5 切片 B）",
+    file: "step16-auto-index.png",
+    body: String.raw`
+      await tab('编辑器');
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      const view = await waitFor(() => window.__yushuCmView, 8000);
+      if (!ie || !view) return { ok: false, note: '编辑器调试句柄未暴露：' + pageText() };
+      await ie.reload();
+      // 经真实 CodeMirror 事务输入唯一短语 → 自动保存成功后触发后台增量刷新
+      view.dispatch({ changes: { from: view.state.doc.length, insert: '\n\n落霞峰上剑气纵横。' } });
+      const saved = await waitFor(() => {
+        const el = document.querySelector('.autosave-status');
+        return el && el.textContent.includes('已自动保存') ? true : null;
+      }, 12000);
+      if (saved === null) return { ok: false, note: '自动保存未完成：' + pageText() };
+      // 切到项目文件页：不点任何重建按钮，等「自动增量：已同步」出现后检索新内容
+      await tab('项目文件');
+      const input = await waitFor(() => document.querySelector('.dir-row input'), 10000);
+      const searchBtn = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === '检索');
+      if (!input || !searchBtn) return { ok: false, note: '找不到检索输入框/按钮：' + pageText() };
+      let synced = false;
+      let hits = 0;
+      for (let i = 0; i < 60; i += 1) {
+        if (document.body.innerText.includes('自动增量：已同步')) synced = true;
+        setV(input, '落霞峰');
+        await sleep(120);
+        searchBtn.click();
+        await sleep(220);
+        hits = document.querySelectorAll('.search-results li').length;
+        if (synced && hits > 0) break;
+        await sleep(200);
+      }
+      return {
+        ok: synced && hits > 0,
+        note: '未点击重建按钮；「自动增量：已同步」可见=' + synced + '；检索「落霞峰」命中行数=' + hits,
+      };
+    `,
+  },
 ];
 
 /**
@@ -734,7 +774,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-15）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-16）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,
@@ -746,7 +786,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
     bypasses: [
       "步骤 1：UI 的存放目录为 readOnly 输入 + 系统对话框，无法自动化；改由主进程等价执行 createProject（与 project:create 同一函数）",
       "步骤 8：该步骤排在编辑器页步骤之前；经 window.yushu.ai.adopt 追加一次含敏感词正文后再走 UI 的「重新核对」",
-      "步骤 12：经 __yushuDebug 暴露的编辑器调试句柄 await reload()（等价于点击已选中章节的强制重载）作为同步点；其后全部经真实 CodeMirror 事务输入与产品 IPC 断言落盘",
+      "步骤 12 / 16：经 __yushuDebug 暴露的编辑器调试句柄 await reload()（等价于点击已选中章节的强制重载）作为同步点；其后全部经真实 CodeMirror 事务输入与产品 IPC 断言落盘（step16 进一步断言保存后索引自动刷新，全程未点重建按钮）",
     ],
     notes: [
       "步骤 9 的「林渊」在本预演项目中不存在（第 2 步卡名为占位「测试设定N」），故追加「测试设定」关键词证明检索链路有命中",

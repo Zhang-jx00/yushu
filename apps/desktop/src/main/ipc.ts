@@ -61,6 +61,7 @@ import {
 } from "./ai-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
+import { IndexRefreshScheduler } from "./index-scheduler.js";
 import { generateNames } from "./naming-ops.js";
 import { readChapter, writeChapterBody, writeChapterSidecar } from "./chapter-ops.js";
 import {
@@ -87,6 +88,18 @@ let gateway: ProjectGateway | null = null;
 /** 进行中的 AI 流式会话（streamId → AbortController），供 ai:abort 停止 */
 const aiStreams = new Map<string, AbortController>();
 
+/**
+ * 保存即增量（T2-5 切片 B）：写通道成功后的后台增量刷新（防抖 2.5s、单飞、失败不阻断写）。
+ * 仅在索引已存在时刷新——首次构建仍由用户显式触发（「索引可控」原则）。
+ */
+const indexRefresh = new IndexRefreshScheduler(async () => {
+  const current = gateway;
+  if (!current) return;
+  const status = await readIndexStatus(current);
+  if (!status.exists) return;
+  await rebuildProjectIndex(current, { incremental: true });
+});
+
 function requireGateway(): ProjectGateway {
   if (!gateway) {
     throw new YushuError("E_NO_PROJECT", "尚未打开项目");
@@ -96,6 +109,7 @@ function requireGateway(): ProjectGateway {
 
 /** 挂载项目根目录为当前 gateway（project:create 的副作用；UI walkthrough 预演复用） */
 export function attachProject(root: string): void {
+  indexRefresh.reset();
   gateway = new ProjectGateway(root);
 }
 
@@ -109,6 +123,15 @@ async function wrap<T>(fn: () => Promise<T> | T): Promise<IpcResult<T>> {
       error: { code: e.code ?? "E_UNKNOWN", message: e.message ?? String(err) },
     };
   }
+}
+
+/** 写通道包装（T2-5 保存即增量）：写成功后调度后台索引刷新（刷新失败不改变写结果） */
+function wrapWrite<T>(fn: () => Promise<T> | T): Promise<IpcResult<T>> {
+  return wrap(async () => {
+    const result = await fn();
+    indexRefresh.schedule();
+    return result;
+  });
 }
 
 export function registerIpcHandlers(): void {
@@ -129,12 +152,14 @@ export function registerIpcHandlers(): void {
         throw new PathSafetyError(`目录不存在或不是文件夹：${root}`);
       }
       gateway = new ProjectGateway(root);
+      indexRefresh.reset();
       return { root: gateway.root, tree: await gateway.listTree() };
     }),
   );
 
   ipcMain.handle(CHANNELS.projectClose, () =>
     wrap<boolean>(() => {
+      indexRefresh.reset();
       gateway = null;
       return true;
     }),
@@ -187,7 +212,7 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(CHANNELS.cardWrite, (_event, payload: CardWritePayload) =>
-    wrap<CardWriteResult>(() => writeCardDoc(requireGateway(), payload)),
+    wrapWrite<CardWriteResult>(() => writeCardDoc(requireGateway(), payload)),
   );
 
   ipcMain.handle(CHANNELS.docRead, (_event, payload: { path: string }) =>
@@ -197,11 +222,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     CHANNELS.docWrite,
     (_event, payload: { path: string; content: string; baseHash?: string }) =>
-      wrap<DocSnapshot>(() => requireGateway().writeDoc(payload.path, payload.content, payload.baseHash)),
+      wrapWrite<DocSnapshot>(() => requireGateway().writeDoc(payload.path, payload.content, payload.baseHash)),
   );
 
   ipcMain.handle(CHANNELS.docRename, (_event, payload: { from: string; to: string }) =>
-    wrap<boolean>(async () => {
+    wrapWrite<boolean>(async () => {
       await requireGateway().renameDoc(payload.from, payload.to);
       return true;
     }),
@@ -212,15 +237,15 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(CHANNELS.outlineGenerate, (_event, payload: OutlineGeneratePayload) =>
-    wrap<OutlineMutateResult>(() => generateOutline(requireGateway(), payload)),
+    wrapWrite<OutlineMutateResult>(() => generateOutline(requireGateway(), payload)),
   );
 
   ipcMain.handle(CHANNELS.outlineWrite, (_event, payload: OutlineWritePayload) =>
-    wrap<OutlineMutateResult>(() => writeOutline(requireGateway(), payload)),
+    wrapWrite<OutlineMutateResult>(() => writeOutline(requireGateway(), payload)),
   );
 
   ipcMain.handle(CHANNELS.outlineCreateChapter, (_event, payload: OutlineCreateChapterPayload) =>
-    wrap<OutlineChapterDraftResult>(() => createOutlineChapter(requireGateway(), payload)),
+    wrapWrite<OutlineChapterDraftResult>(() => createOutlineChapter(requireGateway(), payload)),
   );
 
   /* ---------- AI 副驾（S4/S5） ---------- */
@@ -284,7 +309,7 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(CHANNELS.aiAdopt, (_event, payload: AiAdoptPayload) =>
-    wrap<AiAdoptResult>(() => adoptDraft(requireGateway(), payload)),
+    wrapWrite<AiAdoptResult>(() => adoptDraft(requireGateway(), payload)),
   );
 
   ipcMain.handle(CHANNELS.aiUsage, () => wrap<AiUsageState>(() => readAiUsageState(requireGateway())));
@@ -311,7 +336,10 @@ export function registerIpcHandlers(): void {
   /* ---------- 检索索引（S7） ---------- */
 
   ipcMain.handle(CHANNELS.indexStatus, () =>
-    wrap<IndexStatusPayload>(() => readIndexStatus(requireGateway())),
+    wrap<IndexStatusPayload>(async () => ({
+      ...(await readIndexStatus(requireGateway())),
+      refresh: indexRefresh.state(),
+    })),
   );
 
   ipcMain.handle(CHANNELS.indexRebuild, (_event, payload?: IndexRebuildPayload) =>
@@ -346,7 +374,7 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(CHANNELS.chapterWrite, (_event, payload: ChapterWritePayload) =>
-    wrap<ChapterWriteResult>(() => writeChapterBody(requireGateway(), payload)),
+    wrapWrite<ChapterWriteResult>(() => writeChapterBody(requireGateway(), payload)),
   );
 
   // 冲突旁路（T2-6 切片）：把当前编辑内容写入 <章节>.conflict-<时间戳>.md，主文件不动

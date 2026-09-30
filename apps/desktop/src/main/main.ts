@@ -228,6 +228,33 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       filesKeep: indexIncremental.stats.files === indexRebuild.stats.files,
     };
 
+    // 保存即增量（T2-5 切片 B）：保存后自动刷新索引——不点任何重建按钮，新内容即可检索
+    const autoBefore = await api.chapter.read(draft.chapterPath);
+    await api.chapter.write({
+      path: draft.chapterPath,
+      body: autoBefore.body + "\\n\\n自动索引验证：落霞峰。",
+      baseHash: autoBefore.hash,
+    });
+    const autoIndex = await (async () => {
+      const started = Date.now();
+      let autoHit = 0;
+      let autoStatus = null;
+      for (let i = 0; i < 120; i += 1) {
+        const found = await api.index.search("落霞峰");
+        autoHit = found.chunks.length;
+        if (autoHit > 0) {
+          autoStatus = await api.index.status();
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      return {
+        hit: autoHit,
+        elapsedMs: Date.now() - started,
+        lastRunAt: autoStatus && autoStatus.refresh ? autoStatus.refresh.lastRunAt : null,
+      };
+    })();
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -336,6 +363,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         error: chapterInfo.error,
       },
       incremental,
+      autoIndex,
       pipeline,
     };
   })()`;
@@ -420,6 +448,11 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         hit: number;
         filesKeep: boolean;
       };
+      autoIndex: {
+        hit: number;
+        elapsedMs: number;
+        lastRunAt: string | null;
+      };
       pipeline: {
         conflict: string;
         sidecarOk: boolean;
@@ -495,10 +528,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.incremental.removed === 0 &&
       result.incremental.issues === 0 &&
       result.incremental.hit >= 1 &&
-      result.incremental.filesKeep;
+      result.incremental.filesKeep &&
+      result.autoIndex.hit >= 1 &&
+      result.autoIndex.lastRunAt !== null;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 命名生成 → 冲突拒绝与旁路文件 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

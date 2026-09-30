@@ -9,6 +9,17 @@ import type {
 import { api } from "../api";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 
+/** 自动增量状态文案（T2-5 切片 B）：索引未构建时不宣称"已同步"（首次构建仍由用户显式触发） */
+function indexRefreshLabel(status: IndexStatusPayload): string {
+  const refresh = status.refresh;
+  if (!refresh) return "";
+  if (!status.exists) return "自动增量：待索引首次构建后生效（保存后自动刷新）";
+  if (refresh.lastError) return `自动增量：上次失败（${refresh.lastError.slice(0, 60)}），下次保存后重试`;
+  if (refresh.pending || refresh.running) return "自动增量：保存后正在刷新…";
+  if (refresh.lastRunAt) return `自动增量：已同步（${refresh.lastRunAt.replace("T", " ").slice(0, 19)}）`;
+  return "自动增量：保存后自动刷新";
+}
+
 /** 项目视图：目录树 + 文档编辑（带 baseHash 并发检测）+ 检索索引卡（T1-21 无头能力的桌面入口） */
 export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [tree, setTree] = useState<TreeEntry[]>(snapshot.tree);
@@ -44,6 +55,14 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
     void refresh();
     void refreshIndex();
   }, [refresh, refreshIndex]);
+
+  // 自动增量（T2-5 切片 B）：刷新待命 / 执行中时轮询状态（结束后自动停，不常驻轮询）
+  useEffect(() => {
+    const st = indexStatus?.refresh;
+    if (!st || (!st.pending && !st.running)) return;
+    const timer = window.setInterval(() => void refreshIndex(), 1200);
+    return () => window.clearInterval(timer);
+  }, [indexStatus, refreshIndex]);
 
   const openDoc = async (path: string) => {
     try {
@@ -117,6 +136,7 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
               ? `已构建：${indexStatus.stats.files} 文件 · ${indexStatus.stats.entities} 实体 · ${indexStatus.stats.refs} 引用 · ${indexStatus.stats.chunks} 块（${indexStatus.stats.builtAt.replace("T", " ").slice(0, 19)}）`
               : "尚未构建（索引可随删随建，真源不受影响）"}
           </div>
+          {indexStatus?.refresh && <div className="muted">{indexRefreshLabel(indexStatus)}</div>}
           <div className="outline-actions">
             <button type="button" disabled={indexBusy} onClick={() => void rebuildIndex()}>
               {indexBusy ? "重建中…" : "重建索引"}
