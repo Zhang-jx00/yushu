@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -162,6 +162,26 @@ describe("桌面端索引（T1-21 / T1-22）", () => {
     expect(afterRemove.stats.ftsRows).toBe(afterRemove.stats.chunks);
   });
 
+  it("增量 racy 防护（T2-5 复核）：mtime 不早于上次索引写入时不做快速跳过（同大小改写仍被 hash 确认）", async () => {
+    const { gateway, cardPath } = await setupProject();
+    const abs = join(dir, cardPath);
+    // 构造 racy 场景：文件 mtime 晚于索引写入时刻（与索引写入同刻的外部改写 / 时钟偏移）
+    const future = new Date("2030-01-01T00:00:00.000Z");
+    await utimes(abs, future, future);
+    const full = await rebuildProjectIndex(gateway);
+    expect(full.stats.builtAt < future.toISOString()).toBe(true); // racy 前提：mtime >= builtAt
+
+    // 同大小内容改写 + 保持 mtime 不变：旧口径（仅比 mtime+size）会直接跳过 → 新内容进不了索引
+    const snapshot = await gateway.readDoc(cardPath);
+    await gateway.writeDoc(cardPath, snapshot.content.replace("剑指苍穹", "剑指沧溟"), snapshot.hash);
+    await utimes(abs, future, future);
+
+    const inc = await rebuildProjectIndex(gateway, { incremental: true });
+    expect(inc.mode).toBe("incremental");
+    expect(inc.updatedFiles).toBe(1);
+    expect((await searchProjectIndex(gateway, "沧溟")).chunks.length).toBeGreaterThanOrEqual(1);
+  });
+
   it("完整性自愈（T2-5）：FTS 不一致时增量自动回退全量重建并回报问题项", async () => {
     const { gateway } = await setupProject();
     const full = await rebuildProjectIndex(gateway);
@@ -174,6 +194,12 @@ describe("桌面端索引（T1-21 / T1-22）", () => {
     } finally {
       closeIndex(db);
     }
+
+    // 真实 FTS 对齐指标（复核修复）：缺行在统计上可见（旧口径 `count(*) FROM chunks_fts`
+    // 走 content 表、恒等于 chunks，无法暴露——ftsRows 现取影子表 chunks_fts_docsize）
+    const brokenStats = (await readIndexStatus(gateway)).stats;
+    expect(brokenStats).not.toBeNull();
+    expect(brokenStats!.ftsRows).not.toBe(brokenStats!.chunks);
 
     const healed = await rebuildProjectIndex(gateway, { incremental: true });
     expect(healed.mode).toBe("full");

@@ -207,6 +207,20 @@ export function rebuildIndex(db: DatabaseSync, input: IndexInput, builtAt = new 
   return stats;
 }
 
+/**
+ * FTS 真实索引行数（T2-5 复核修正）：`count(*) FROM chunks_fts` 走 external content 的
+ * content 表，恒等于 chunks，无法暴露"索引缺行"；FTS5 影子表 `chunks_fts_docsize`
+ * 每个已索引文档一行，可作为真实对齐指标（与 chunks 不等即缺行 / 滞后）。
+ * 影子表不可用（未来 SQLite 变更）时回退 content 表口径，仅降级不报错。
+ */
+function countFtsIndexRows(db: DatabaseSync): number {
+  try {
+    return count(db.prepare("SELECT count(*) AS c FROM chunks_fts_docsize").get() as Record<string, unknown>);
+  } catch {
+    return count(db.prepare("SELECT count(*) AS c FROM chunks_fts").get() as Record<string, unknown>);
+  }
+}
+
 /** 读取统计（未初始化时返回 null） */
 export function readStats(db: DatabaseSync): IndexStats | null {
   const builtAt = metaGet(db, "built_at");
@@ -219,7 +233,7 @@ export function readStats(db: DatabaseSync): IndexStats | null {
     entities: count(db.prepare("SELECT count(*) AS c FROM entities").get() as Record<string, unknown>),
     refs: count(db.prepare("SELECT count(*) AS c FROM refs").get() as Record<string, unknown>),
     chunks: count(db.prepare("SELECT count(*) AS c FROM chunks").get() as Record<string, unknown>),
-    ftsRows: count(db.prepare("SELECT count(*) AS c FROM chunks_fts").get() as Record<string, unknown>),
+    ftsRows: countFtsIndexRows(db),
   };
 }
 

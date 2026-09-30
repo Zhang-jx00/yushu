@@ -98,11 +98,16 @@ interface IncrementalOutcome {
  * 1. 与 file_index 逐文件比对：mtime 与大小都未变 → 直接复用（不读内容）；
  * 2. 疑似变化 → 读内容算 hash：相同则只刷新 mtime 记录（touch），不同才重新解析；
  * 3. 真源已删除的路径 → 从索引移除；变更文件定向走 collectIndexInput（wrapper reader）。
+ *
+ * racy 防护（复核修复）：快速跳过仅在 mtime **早于**上次索引写入（builtAt）时可信——
+ * mtime 与索引写入同刻或更晚时，无法排除"与索引写入并发发生的同刻改写（mtime 未变）"，
+ * 此时退回 hash 确认（借鉴 Git index 的 racy timestamp 处理）。
  */
 async function applyIncremental(
   reader: IndexSourceReader,
   files: IndexSourceFile[],
   db: DatabaseSync,
+  builtAt: string,
 ): Promise<IncrementalOutcome> {
   const prev = new Map(readFileIndex(db).map((row) => [row.path, row]));
   const currentPaths = new Set(files.map((file) => file.path));
@@ -116,7 +121,15 @@ async function applyIncremental(
       changed.push(file);
       continue;
     }
-    if (old.mtime && file.mtime && old.mtime === file.mtime && old.bytes === file.size) continue;
+    if (
+      old.mtime &&
+      file.mtime &&
+      old.mtime === file.mtime &&
+      old.bytes === file.size &&
+      old.mtime < builtAt
+    ) {
+      continue;
+    }
     let text: string;
     try {
       text = await reader.readText(file.path);
@@ -167,14 +180,14 @@ export async function rebuildProjectIndex(
   const dbPath = resolveDbPath(gateway);
   const db = openIndex(dbPath);
   try {
-    const existing = readStats(db) !== null;
+    const existingStats = readStats(db);
     let integrityIssues: string[] = [];
-    if (options.incremental && existing) {
+    if (options.incremental && existingStats) {
       const integrity = checkIntegrity(db);
       if (integrity.ok) {
         // 增量 diff 与收集侧同口径过滤（导出产物 / 引擎目录 / 旁路文件不参与，避免"伪变更"）
         const files = (await reader.listFiles()).filter((file) => isIndexablePath(file.path));
-        const outcome = await applyIncremental(reader, files, db);
+        const outcome = await applyIncremental(reader, files, db, existingStats.builtAt);
         return {
           path: INDEX_DB_RELATIVE,
           exists: true,

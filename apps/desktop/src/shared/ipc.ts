@@ -576,7 +576,10 @@ export interface IndexStatsPayload {
   entities: number;
   refs: number;
   chunks: number;
-  /** FTS5 虚表行数（应与 chunks 一致） */
+  /**
+   * FTS5 真实索引行数（影子表 `chunks_fts_docsize`；应与 chunks 一致——不一致即索引滞后/损坏）。
+   * 注意：不可用 `count(*) FROM chunks_fts`（external content 会回落到 content 表、恒等于 chunks）。
+   */
   ftsRows: number;
 }
 

@@ -19,6 +19,7 @@
 - **写作视图切片（T2-3 切片 B）**：双栏对照（左设定右正文）——「本章设定」栏显示本章提及的设定卡（名称 / 类型｜层级 / 别名 / 正文摘要前 140 字 / 一键「打开设定卡」跳档案页并选中），开启时底部提及面板收起；仅在提及集合变化时重新读卡。UI 预演 step14（walkthrough 14/14）；**T2-3 三项（无干扰 / 打字机滚动 / 双栏对照）齐备**。
 - **索引增量与自愈切片（T2-5 切片 A）**：`index:rebuild` 支持增量——与 `file_index` 逐文件比对（mtime+size 快速跳过 → hash 确认 → 仅重解析变更文件；真源删除的文件从索引移除），FTS5 external content 用**行级 delete/insert** 同步；增量前完整性校验（`PRAGMA integrity_check` + FTS5 `('integrity-check',1)`），失败**自动回退全量**并回报问题项（自愈）。「项目文件」页新增「增量重建」按钮与「复用 / 更新 / 移除」回执。单测 181 例、e2e 增量探针、UI 预演 step15（walkthrough 15/15）。
 - **可读性与摘要修复（复核修复）**：设定卡「类型 / 层级」由英文枚举改为中文标签（新增 `card-labels.ts`，层级派生自起源工作台步骤配置；覆盖档案页 / 双栏设定栏 / 提及悬停 / 索引实体列表）；双栏卡片摘要清洗 Markdown 标记并超长加省略号。
+- **索引口径与 racy 防护修复（第 10 轮复核）**：① 增量快速跳过仅在文件 mtime **早于**上次索引写入（builtAt）时可信，同刻 / 更晚一律退回 hash 确认（借鉴 Git index 的 racy timestamp 处理）——修复"同大小 + mtime 未变的同刻改写被静默漏索引"（单测先红灯复现再转绿）；② `ftsRows` 改为 FTS5 影子表 `chunks_fts_docsize` 真实行数口径（原 `count(*) FROM chunks_fts` 在 external content 表上回落 content 表、恒等于 chunks——自愈单测的"对齐"断言实为空断言，现能暴露"索引缺行"）；③ `docs/06` §一 / §五 复跑数字按 M1 时点标注并修正 typecheck 表述（9 个包/应用）。
 
 ### Added
 

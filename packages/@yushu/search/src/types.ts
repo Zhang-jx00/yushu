@@ -62,7 +62,11 @@ export interface IndexStats {
   entities: number;
   refs: number;
   chunks: number;
-  /** FTS5 虚表行数（应与 chunks 一致） */
+  /**
+   * FTS5 真实索引行数（影子表 `chunks_fts_docsize` 每已索引文档一行；应与 chunks 一致）。
+   * 注意：不能取 `count(*) FROM chunks_fts`——external content 表会回落到 content 表（恒等于 chunks，
+   * 掩盖"索引缺行"）；不一致即视为索引滞后/损坏（`checkIntegrity` 为完整校验）。
+   */
   ftsRows: number;
 }
 
