@@ -116,10 +116,14 @@ export function ChapterEditorView({
   const dirtyRef = useRef(false);
   const performSaveRef = useRef<() => Promise<void>>(async () => undefined);
   const loadChapterRef = useRef<(path: string, options?: { force?: boolean }) => Promise<void>>(async () => undefined);
+  /** updateDerived 的最新引用（实体列表晚于内容加载时补算提及；复核修复 2026-09-30） */
+  const updateDerivedRef = useRef<(text: string) => void>(() => undefined);
   /** 最后成功载入的章节（编辑器内容所属章节）；载入竞态回滚选择时使用 */
   const loadedPathRef = useRef<string | null>(null);
   /** 竞态回滚选择后跳过该次自动加载（避免用旧选择再次触发重载） */
   const skipAutoLoadRef = useRef<string | null>(null);
+  /** 用户已确认「丢弃未保存改动」时，下一次加载该章节走 force（跳过竞态保护；复核修复 2026-09-30） */
+  const forceLoadRef = useRef<string | null>(null);
   /** 专注模式标记（供 CM 打字机滚动插件读取，避免插件随 prop 重建） */
   const focusModeRef = useRef(focusMode);
 
@@ -194,6 +198,10 @@ export function ChapterEditorView({
             }).plugin,
           ),
         });
+        // 复核修复 2026-09-30：实体列表可能晚于章节内容加载（重挂载竞态），
+        // 就绪后按当前内容补算一次提及（否则面板/设定栏会空到用户再次输入为止）
+        const text = view.state.doc.toString();
+        if (text) updateDerivedRef.current(text);
       }
     } catch (err) {
       setError((err as Error).message);
@@ -213,6 +221,7 @@ export function ChapterEditorView({
     },
     [getScheduler],
   );
+  updateDerivedRef.current = updateDerived;
 
   const refreshTargets = useCallback(async () => {
     try {
@@ -351,9 +360,12 @@ export function ChapterEditorView({
       if (scheduler.state() === "error") {
         const prefix = dirty ? "当前章自动保存失败（写入冲突）：继续将丢弃未保存的改动" : "当前章自动保存失败（写入冲突）";
         if (!confirm(`${prefix}。仍要继续？`)) return;
+        // 用户已确认丢弃未保存改动：本次加载走 force，避免载入竞态保护再次拦截（复核修复 2026-09-30）
+        forceLoadRef.current = path;
       }
       if (path === selectedPath) {
         // 同值点击 = 强制重新载入（外部改动 / 冲突后的恢复路径；force 绕过载入竞态保护）
+        forceLoadRef.current = null; // 此分支已显式 force，无需标记
         void loadChapter(path, { force: true });
         return;
       }
@@ -369,7 +381,10 @@ export function ChapterEditorView({
       skipAutoLoadRef.current = null;
       return;
     }
-    if (selectedPath) void loadChapter(selectedPath);
+    // 用户确认「丢弃未保存改动」后的强制加载（复核修复 2026-09-30）
+    const force = forceLoadRef.current === selectedPath;
+    if (force) forceLoadRef.current = null;
+    if (selectedPath) void loadChapter(selectedPath, { force });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPath]);
 
@@ -679,7 +694,11 @@ export function ChapterEditorView({
           {error ? <span className="error-text">{error}</span> : <span className="muted">{status}</span>}
         </div>
       </section>
-      {focusMode && <div className="focus-hint">专注模式 · 打字机滚动已开启 · 按 Esc 退出</div>}
+      {focusMode && (
+        <div className="focus-hint">
+          专注模式 · {mode === "source" ? "打字机滚动已开启" : "打字机滚动仅源码形态"} · 按 Esc 退出
+        </div>
+      )}
     </div>
   );
 }
