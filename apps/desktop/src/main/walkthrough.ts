@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-18 为 M2 扩展（双形态 / 实体提及 / 自动保存 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计）。
+ * 步骤 10-21 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计 / 会话与快照恢复）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -842,6 +842,112 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 21,
+    title: "编辑器：富文本形态 @ 候选菜单（触发 / 过滤 / Esc / 键盘与点击插入）（T2-2）",
+    file: "step21-rich-mention.png",
+    body: String.raw`
+      await tab('编辑器');
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      if (!ie) return { ok: false, note: '编辑器调试句柄未暴露：' + pageText() };
+      await ie.reload(); // 对齐磁盘，确保后续输入从干净状态开始
+      const richBtn = [...document.querySelectorAll('.mode-switch button')].find((x) => x.textContent.includes('富文本'));
+      if (!richBtn) return { ok: false, note: '找不到富文本切换按钮：' + pageText() };
+      richBtn.click();
+      const tiptap = await waitFor(() => document.querySelector('.tiptap-host .tiptap'), 8000);
+      if (!tiptap) return { ok: false, note: '富文本编辑器未挂载：' + pageText() };
+      await sleep(300); // 等 modeRef 更新（切换后的输入才会计入富文本管线）
+      // 真实输入模拟：聚焦 + 光标置文末段落末尾 + execCommand insertText（走 ProseMirror 输入管线）
+      // （typeText 每次重新取元素：切形态会卸载/重挂载 .tiptap 宿主）
+      const typeText = (text) => {
+        const el = document.querySelector('.tiptap-host .tiptap');
+        if (!el) return;
+        el.focus();
+        const last = el.lastElementChild || el;
+        const range = document.createRange();
+        range.selectNodeContents(last);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('insertText', false, text);
+      };
+      const press = (key) => tiptap.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      // 计数口径：完整提及 @测试设定N 出现次数；atCount = 全文 @ 总数——
+      // 「插入成功」与「查询词无残留」合并为 atCount === fullCount（所有 @ 都属于完整提及）
+      const fullCount = () => (String(tiptap.textContent).match(/@测试设定\d/g) || []).length;
+      const atCount = () => (String(tiptap.textContent).match(/@/g) || []).length;
+      const fullBefore = fullCount();
+      // 1) 输入 @ → 候选菜单出现（空查询显示全部设定卡）
+      typeText('@');
+      const menu = await waitFor(() => document.querySelector('.mention-menu'), 4000);
+      if (!menu) return { ok: false, note: '输入 @ 后未出现候选菜单：' + pageText() };
+      const allCount = document.querySelectorAll('.mention-menu li').length;
+      // 2) Esc 关闭菜单，并清理本次留下的 @（避免污染后续计数）
+      press('Escape');
+      const escClosed = await waitFor(() => (document.querySelector('.mention-menu') === null ? true : null), 4000);
+      document.execCommand('delete');
+      await sleep(200);
+      const cleaned = atCount() === fullCount();
+      // 3) 键盘路径：输入 @测试 → ↓ 移动高亮 → 回车插入
+      typeText('@测试');
+      const fiveItems = await waitFor(() => {
+        const n = document.querySelectorAll('.mention-menu li').length;
+        return n >= 5 ? n : null;
+      }, 4000);
+      if (fiveItems === null) {
+        const el = document.querySelector('.mention-menu');
+        return { ok: false, note: '输入「@测试」后候选数异常（菜单' + (el ? lines(el) : '已消失') + '）：' + pageText() };
+      }
+      press('ArrowDown');
+      await sleep(150);
+      const activeIdx = [...document.querySelectorAll('.mention-menu li')].findIndex((li) => li.className.includes('on'));
+      press('Enter');
+      const keyboardInserted = await waitFor(
+        () => (fullCount() === fullBefore + 1 && atCount() === fullCount() && document.querySelector('.mention-menu') === null ? true : null),
+        4000,
+      );
+      // 4) 点击路径：输入「 @测试」（空格分隔——@ 前一字符若为 ASCII 数字/字母属邮箱防误触场景，不触发候选）→ 点「测试设定5」
+      typeText(' @测试');
+      await waitFor(() => (document.querySelectorAll('.mention-menu li').length >= 5 ? true : null), 4000);
+      const target = await waitFor(() => {
+        const li = [...document.querySelectorAll('.mention-menu li')].find((x) => x.textContent.includes('测试设定5'));
+        return li || null;
+      }, 4000);
+      if (!target) return { ok: false, note: '候选列表未找到「测试设定5」：' + lines(document.querySelector('.mention-menu')) };
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      const clickInserted = await waitFor(
+        () => (fullCount() === fullBefore + 2 && atCount() === fullCount() && document.querySelector('.mention-menu') === null ? true : null),
+        4000,
+      );
+      // 5) 跨形态一致性：切源码 → CodeMirror 文档含新提及 + 提及面板同步 + 源码装饰高亮
+      const srcBtn = [...document.querySelectorAll('.mode-switch button')].find((x) => x.textContent.includes('源码'));
+      if (srcBtn) srcBtn.click();
+      await sleep(500);
+      const cmDoc = window.__yushuCmView ? String(window.__yushuCmView.state.doc.toString()) : '';
+      const cmHasNew = cmDoc.includes('@测试设定5') && /@测试设定\d/.test(cmDoc);
+      const panelText = String((document.querySelector('.mention-panel') || {}).textContent || '');
+      const panelSynced = panelText.includes('测试设定1') && panelText.includes('测试设定5');
+      const decorated = document.querySelectorAll('.cm-content .entity-mention').length;
+      // 6) 切回富文本并保持候选菜单开启：供截图取证「菜单 UI 与候选列表」（空格分隔规避邮箱防误触）
+      const richBtn2 = [...document.querySelectorAll('.mode-switch button')].find((x) => x.textContent.includes('富文本'));
+      if (richBtn2) richBtn2.click();
+      await waitFor(() => (document.querySelector('.tiptap-host .tiptap') ? true : null), 8000);
+      await sleep(300);
+      typeText(' @测试');
+      const menuShot = (await waitFor(() => (document.querySelector('.mention-menu') ? true : null), 4000)) === true;
+      return {
+        ok:
+          allCount >= 5 && escClosed === true && cleaned && fiveItems !== null && activeIdx === 1 &&
+          keyboardInserted === true && clickInserted === true && cmHasNew && panelSynced && decorated >= 2 && menuShot,
+        note:
+          '空查询候选=' + allCount + '；Esc 关闭=' + escClosed + '；键盘路径（↓ 高亮第 ' + activeIdx + ' 项后回车）插入=' + (keyboardInserted === true) +
+          '；点击「测试设定5」插入=' + (clickInserted === true) + '；切源码后文档含新提及=' + cmHasNew +
+          '；提及面板同步=' + panelSynced + '；源码形态装饰数=' + decorated +
+          '；截图时菜单开启=' + menuShot,
+      };
+    `,
+  },
 ];
 
 /**
@@ -923,7 +1029,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-18）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-21）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

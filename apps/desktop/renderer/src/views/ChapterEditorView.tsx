@@ -3,12 +3,13 @@ import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { Compartment, EditorState } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import type { AiDraftTarget } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { findUnsupportedSyntax, htmlToMd, mdToHtml } from "../markdown-bridge";
 import { collectMentionedEntities, type EntityIndexEntry } from "../entity-mentions";
+import { detectMentionQuery, filterMentionCandidates } from "../mention-suggest";
 import { entityMentionPlugin } from "../entity-mention-plugin";
 import { createAutosaveScheduler, type AutosaveScheduler, type AutosaveState } from "../autosave";
 import { registerEditorFlusher } from "../editor-flush";
@@ -90,6 +91,23 @@ interface MentionCardData {
   excerpt: string;
 }
 
+/** 富文本 @ 候选菜单（T2-2 富文本形态）：跟随光标定位；键盘 ↑↓ / 回车 / Esc 与点击均可操作 */
+interface MentionMenuState {
+  /** `@` 字符在文档中的位置（插入时替换 [from, 当前光标] 区间） */
+  from: number;
+  /** 已输入的查询词（`@` 之后、光标之前） */
+  query: string;
+  /** 过滤后的候选（空数组 = 无匹配 / 尚未建档，仅提示不响应回车） */
+  items: EntityIndexEntry[];
+  /** 当前高亮项下标 */
+  active: number;
+  /** 相对 .tiptap-host 内容坐标的定位（px） */
+  top: number;
+  left: number;
+  /** 光标贴近可视区底部时向上弹出（translateY(-100%)） */
+  above: boolean;
+}
+
 export function ChapterEditorView({
   onOpenCard,
   focusMode = false,
@@ -119,9 +137,17 @@ export function ChapterEditorView({
   /** 双栏对照开关（T2-3 切片 B）与本章设定卡数据 */
   const [splitView, setSplitView] = useState(false);
   const [mentionCards, setMentionCards] = useState<MentionCardData[]>([]);
+  /** 富文本 @ 候选菜单（T2-2 富文本形态） */
+  const [mentionMenu, setMentionMenu] = useState<MentionMenuState | null>(null);
 
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  /** .tiptap-host 容器（候选菜单的定位参照，position:relative） */
+  const tiptapHostRef = useRef<HTMLDivElement | null>(null);
+  /** 菜单最新状态（键盘处理器读 ref，保证与最近一次计算一致，不等 React 渲染时序） */
+  const mentionMenuRef = useRef<MentionMenuState | null>(null);
+  const updateMentionMenuRef = useRef<(instance: Editor) => void>(() => undefined);
+  const mentionKeyHandlerRef = useRef<(event: KeyboardEvent) => boolean>(() => false);
   const savedBodyRef = useRef("");
   const modeRef = useRef<EditorMode>("source");
   const entitiesRef = useRef<EntityIndexEntry[]>([]);
@@ -375,27 +401,99 @@ export function ChapterEditorView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 菜单状态写入（ref 同步 + React 状态）：键盘处理器读 ref，保证与最新一次计算一致 */
+  const applyMenu = useCallback((next: MentionMenuState | null) => {
+    mentionMenuRef.current = next;
+    setMentionMenu(next);
+  }, []);
+
+  /**
+   * 富文本 @ 候选探测（T2-2 富文本形态）：光标前 `@查询词` → 过滤设定卡并定位浮层。
+   * - 触发范围限定在光标所在段落（跨段 / 空白后不触发，防邮箱等误触见 mention-suggest）；
+   * - 定位换算：视口坐标 → .tiptap-host 内容坐标（含容器滚动量），贴近可视区底部时向上弹出；
+   * - 插入起点 = 段落起始位置 + `@` 的段落内下标（$from.start() 即段落内容的第一个位置）。
+   */
+  const updateMentionMenu = useCallback(
+    (instance: Editor) => {
+      if (modeRef.current !== "rich") {
+        applyMenu(null);
+        return;
+      }
+      const selection = instance.state.selection;
+      if (!selection.empty) {
+        applyMenu(null);
+        return;
+      }
+      const { $from } = selection;
+      const beforeText = $from.parent.textBetween(0, $from.parentOffset, "\n", "\n");
+      const trigger = detectMentionQuery(beforeText);
+      const host = tiptapHostRef.current;
+      if (!trigger || !host) {
+        applyMenu(null);
+        return;
+      }
+      const atDoc = $from.start() + trigger.at;
+      let coords: { top: number; bottom: number; left: number };
+      try {
+        coords = instance.view.coordsAtPos(atDoc);
+      } catch {
+        applyMenu(null);
+        return;
+      }
+      const items = filterMentionCandidates(entitiesRef.current, trigger.query);
+      const hostRect = host.getBoundingClientRect();
+      const viewportBottom = coords.bottom - hostRect.top;
+      const above = viewportBottom > host.clientHeight - 240;
+      const top = (above ? coords.top - hostRect.top - 6 : coords.bottom - hostRect.top + 6) + host.scrollTop;
+      const left = Math.max(
+        4,
+        Math.min(coords.left - hostRect.left + host.scrollLeft, Math.max(4, host.clientWidth - 268)),
+      );
+      const prev = mentionMenuRef.current;
+      applyMenu({
+        from: atDoc,
+        query: trigger.query,
+        items,
+        active: items.length === 0 ? 0 : Math.min(prev?.active ?? 0, items.length - 1),
+        top,
+        left,
+        above,
+      });
+    },
+    [applyMenu],
+  );
+  updateMentionMenuRef.current = updateMentionMenu;
+
   // 富文本形态：TipTap（StarterKit）；更新时序列化回 Markdown 参与 dirty/字数统计
   const editor = useEditor({
     extensions: [StarterKit],
     content: "",
+    // @ 候选菜单（T2-2）：菜单开启时接管 ↑↓ / 回车 / Esc（经 ref 读最新状态，不随编辑器重建）
+    editorProps: {
+      handleKeyDown: (_view, event) => mentionKeyHandlerRef.current(event),
+    },
     onUpdate: ({ editor: instance }) => {
       if (modeRef.current !== "rich") return;
       updateDerived(htmlToMd(instance.getHTML()));
+      updateMentionMenuRef.current(instance);
+    },
+    onSelectionUpdate: ({ editor: instance }) => {
+      updateMentionMenuRef.current(instance);
     },
   });
 
-  // 富文本形态失焦同样立即落盘（与源码形态的 blur 行为一致）
+  // 富文本形态失焦同样立即落盘（与源码形态的 blur 行为一致）；同时关闭 @ 候选菜单
   useEffect(() => {
     if (!editor) return;
     const onBlur = () => {
       void getScheduler().flush();
+      applyMenu(null);
     };
     editor.on("blur", onBlur);
     return () => {
       editor.off("blur", onBlur);
     };
-  }, [editor, getScheduler]);
+  }, [editor, getScheduler, applyMenu]);
 
   /** 当前正文（第 12 轮复核修复：兜底「最近一次编辑快照」——卸载清理阶段编辑器可能已被先销毁，仍能落盘最后输入） */
   const currentMarkdown = (): string => {
@@ -406,6 +504,57 @@ export function ChapterEditorView({
     }
     return latestMarkdownRef.current;
   };
+
+  /**
+   * 候选落地（T2-2 富文本形态）：用 `@名称` 纯文本替换 [@位置, 当前光标] 区间——
+   * 与源码形态解析（entity-mentions.findMentions）同口径；插入后 onUpdate 重算提及面板，菜单关闭。
+   */
+  const applyMention = useCallback(
+    (entity: EntityIndexEntry) => {
+      const menu = mentionMenuRef.current;
+      if (!menu || !editor || editor.isDestroyed) return;
+      const to = editor.state.selection.from;
+      if (to < menu.from) {
+        applyMenu(null);
+        return;
+      }
+      editor
+        .chain()
+        .focus()
+        .insertContentAt({ from: menu.from, to }, [{ type: "text", text: `@${entity.name}` }])
+        .run();
+      applyMenu(null);
+    },
+    [editor, applyMenu],
+  );
+
+  /** 菜单开启时的键盘接管：↑↓ 循环移动高亮、回车插入、Esc 关闭（并阻止专注模式 Esc 同时退出） */
+  const mentionKeyHandler = useCallback(
+    (event: KeyboardEvent): boolean => {
+      const menu = mentionMenuRef.current;
+      if (!menu || modeRef.current !== "rich") return false;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        if (menu.items.length === 0) return true;
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        applyMenu({ ...menu, active: (menu.active + delta + menu.items.length) % menu.items.length });
+        return true;
+      }
+      if (event.key === "Enter") {
+        if (menu.items.length === 0) return false; // 无候选：放行回车（正常换行 / 分新段）
+        const picked = menu.items[menu.active] ?? menu.items[0];
+        if (picked) applyMention(picked);
+        return true;
+      }
+      if (event.key === "Escape") {
+        event.stopPropagation(); // 只关菜单：不让专注模式的 window Esc 监听同时退出
+        applyMenu(null);
+        return true;
+      }
+      return false;
+    },
+    [applyMenu, applyMention],
+  );
+  mentionKeyHandlerRef.current = mentionKeyHandler;
 
   const loadChapter = useCallback(
     async (path: string, options?: { force?: boolean }) => {
@@ -439,6 +588,7 @@ export function ChapterEditorView({
           view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: initialBody } });
         }
         editor?.commands.setContent(mdToHtml(initialBody));
+        applyMenu(null); // 切换 / 重载章节：关闭残留的 @ 候选菜单
         savedBodyRef.current = chapter.body;
         setSavedBody(chapter.body);
         hashRef.current = chapter.hash;
@@ -452,7 +602,7 @@ export function ChapterEditorView({
         setError((err as Error).message);
       }
     },
-    [editor, updateDerived],
+    [editor, updateDerived, applyMenu],
   );
   loadChapterRef.current = loadChapter;
 
@@ -577,6 +727,7 @@ export function ChapterEditorView({
     }
     setMode("source");
     setStatus("已切回源码形态（Markdown）");
+    applyMenu(null); // 切回源码形态：关闭 @ 候选菜单
   };
 
   /** 保存正文（自动保存与手动保存共用；失败会抛出，由调度器进入冻结态/UI 呈现） */
@@ -767,8 +918,49 @@ export function ChapterEditorView({
           <div className="editor-body">
             <div className="cm-host" ref={hostRef} style={{ display: mode === "source" ? undefined : "none" }} />
             {mode === "rich" && (
-              <div className="tiptap-host">
+              <div className="tiptap-host" ref={tiptapHostRef}>
                 <EditorContent editor={editor} />
+                {/* 富文本 @ 候选菜单（T2-2 富文本形态）：跟随光标定位；↑↓ / 回车 / Esc 与点击均可操作 */}
+                {mentionMenu && (
+                  <div
+                    className={mentionMenu.above ? "mention-menu above" : "mention-menu"}
+                    style={{ top: mentionMenu.top, left: mentionMenu.left }}
+                  >
+                    <div className="mention-menu-head">
+                      {mentionMenu.items.length > 0
+                        ? `插入设定卡提及（${mentionMenu.items.length}）`
+                        : mentionMenu.query === ""
+                          ? "尚未建档设定卡：先在「世界观档案」建档"
+                          : `无匹配设定卡（已输入 @${mentionMenu.query}）`}
+                    </div>
+                    {mentionMenu.items.length > 0 && (
+                      <ul>
+                        {mentionMenu.items.map((item, index) => (
+                          <li
+                            key={item.id}
+                            className={index === mentionMenu.active ? "on" : ""}
+                            title={`${cardTypeLabel(item.type)}｜${layerLabel(item.layer)}｜${item.filePath}`}
+                            onMouseEnter={() => {
+                              const menu = mentionMenuRef.current;
+                              if (menu) applyMenu({ ...menu, active: index });
+                            }}
+                            onMouseDown={(event) => {
+                              event.preventDefault(); // 保持编辑器焦点：避免 mousedown 先触发 blur 关菜单
+                              applyMention(item);
+                            }}
+                          >
+                            <strong>{item.name}</strong>
+                            <span className="muted">
+                              {cardTypeLabel(item.type)}｜{layerLabel(item.layer)}
+                              {item.aliases.length > 0 ? `（${item.aliases.join("、")}）` : ""}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="mention-menu-foot muted">↑↓ 选择 · 回车插入 · Esc 关闭 · 插入为 @名称</div>
+                  </div>
+                )}
               </div>
             )}
           </div>
