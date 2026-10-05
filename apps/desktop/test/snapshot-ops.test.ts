@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectGateway } from "../src/main/file-gateway.js";
 import { createProject } from "../src/main/project-ops.js";
@@ -209,6 +209,68 @@ describe("本地快照（T2-7 切片 A）", () => {
     expect(isSnapshotSource("exports/out.txt")).toBe(false);
     expect(isSnapshotSource("world/cover.png")).toBe(false);
     expect(isSnapshotSource("world/noext")).toBe(false);
+  });
+
+  it("并发 take 串行化（第 14 轮复核）：第二个看到第一个的结果 → unchanged、仅 1 份 manifest，引用 blob 无缺失", async () => {
+    const [first, second] = await Promise.all([
+      takeSnapshot(gateway, "manual", { force: true }),
+      takeSnapshot(gateway, "manual", { force: true }),
+    ]);
+    expect(first.outcome).toBe("taken");
+    expect(second.outcome).toBe("unchanged");
+    expect(await manifestFiles()).toHaveLength(1);
+
+    const state = await snapshotState(gateway);
+    expect(state.snapshots).toHaveLength(1);
+    const manifest = JSON.parse(
+      await readFile(join(dir, SNAPSHOT_MANIFESTS_DIR, `${first.snapshot!.id}.json`), "utf8"),
+    ) as { entries: { blob: string }[] };
+    for (const entry of manifest.entries) {
+      expect(await exists(blobAbs(entry.blob))).toBe(true);
+    }
+  });
+
+  it("blob 损坏：恢复时内容校验失败 → E_SNAPSHOT_INVALID（绝不静默写回坏内容）", async () => {
+    const s1 = await takeSnapshot(gateway, "manual", { force: true });
+    const manifest = JSON.parse(
+      await readFile(join(dir, SNAPSHOT_MANIFESTS_DIR, `${s1.snapshot!.id}.json`), "utf8"),
+    ) as { entries: { path: string; blob: string }[] };
+    const victim = manifest.entries[0]!;
+    await writeFile(blobAbs(victim.blob), "已被篡改的坏内容。", "utf8");
+
+    await expect(restoreSnapshot(gateway, s1.snapshot!.id)).rejects.toMatchObject({ code: "E_SNAPSHOT_INVALID" });
+    // 真源未被写入坏内容（校验在写回之前拦截）
+    expect(await readFile(join(dir, victim.path), "utf8")).not.toContain("已被篡改的坏内容");
+  });
+
+  it("非法 manifest（id / blob / path 含路径穿越字段）：列表跳过、恢复拒绝（防御纵深）", async () => {
+    await takeSnapshot(gateway, "manual", { force: true });
+    const evil = {
+      schema_version: 1,
+      id: "snap-../../evil",
+      createdAt: new Date().toISOString(),
+      reason: "manual",
+      entries: [{ path: "../../outside.md", blob: "../../x", size: 1, mtime: "" }],
+    };
+    await mkdir(join(dir, SNAPSHOT_MANIFESTS_DIR), { recursive: true });
+    await writeFile(join(dir, SNAPSHOT_MANIFESTS_DIR, "snap-evil.json"), JSON.stringify(evil), "utf8");
+
+    const state = await snapshotState(gateway);
+    expect(state.snapshots).toHaveLength(1); // 非法条目被跳过（原文件保留不删）
+    await expect(restoreSnapshot(gateway, "snap-../../evil")).rejects.toMatchObject({ code: "E_SNAPSHOT_INVALID" });
+    expect(await exists(join(dir, SNAPSHOT_MANIFESTS_DIR, "snap-evil.json"))).toBe(true);
+  });
+
+  it("prune 顺带清理 blob 目录中原子写崩溃残留的 .tmp", async () => {
+    await takeSnapshot(gateway, "manual", { force: true });
+    const orphanTmp = join(dir, SNAPSHOT_BLOBS_DIR, "ab", "deadbeef.tmp");
+    await mkdir(dirname(orphanTmp), { recursive: true });
+    await writeFile(orphanTmp, "残留", "utf8");
+
+    await writeFile(join(dir, "chapters/vol-a/ch-1.md"), "触发新快照以执行 prune。", "utf8");
+    const again = await takeSnapshot(gateway, "manual", { force: true });
+    expect(again.outcome).toBe("taken");
+    expect(await exists(orphanTmp)).toBe(false);
   });
 });
 

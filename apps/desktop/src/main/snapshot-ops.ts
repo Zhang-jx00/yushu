@@ -40,6 +40,24 @@ export const SNAPSHOT_RING_KEEP = 20;
 const SNAPSHOT_EXTS = new Set([".md", ".yaml", ".yml", ".toml", ".txt", ".json"]);
 const SNAPSHOT_EXCLUDE_PREFIXES = ["exports/"];
 
+/**
+ * manifest 解析校验（第 14 轮复核修复·防御纵深）：id 用于拼接 manifest 文件名（环形保留删除）、
+ * blob 用于拼接 blob 路径（恢复读取）——不合法一律视为损坏 manifest 跳过（保守保留原文件，不静默删）。
+ */
+const SNAPSHOT_ID_RE = /^snap-\d{8}-\d{6}-[0-9a-f]{4,32}$/;
+const SNAPSHOT_BLOB_RE = /^[0-9a-f]{64}$/;
+const SNAPSHOT_REASONS = new Set<SnapshotReasonPayload>(["auto", "manual", "pre_restore"]);
+
+function isSafeRelPath(path: string): boolean {
+  return (
+    path !== "" &&
+    !path.startsWith("/") &&
+    !path.includes("\\") &&
+    !/^[a-zA-Z]:/.test(path) &&
+    !path.split("/").includes("..")
+  );
+}
+
 export interface SnapshotManifestEntry {
   path: string;
   blob: string;
@@ -107,11 +125,32 @@ async function writeBlobIfAbsent(gateway: ProjectGateway, blob: string, content:
 }
 
 async function readBlob(gateway: ProjectGateway, blob: string): Promise<string> {
+  let content: string;
   try {
-    return await fs.readFile(blobAbs(gateway, blob), "utf8");
+    content = await fs.readFile(blobAbs(gateway, blob), "utf8");
   } catch {
     throw new YushuError("E_SNAPSHOT_INVALID", `快照内容缺失（blob ${blob.slice(0, 12)}…）：无法恢复该版本`);
   }
+  // 内容寻址读取校验（第 14 轮复核修复）：磁盘损坏 / 被改写 → 明确报错，绝不把坏内容静默写回项目
+  if (sha256(content) !== blob) {
+    throw new YushuError("E_SNAPSHOT_INVALID", `快照内容校验失败（blob ${blob.slice(0, 12)}…）：文件已损坏或被改写`);
+  }
+  return content;
+}
+
+/** 快照操作队列（第 14 轮复核修复）：take / restore 串行执行，避免两类交错——
+ * ① 两个 take 并发时，后完成者的 prune 会把先完成者「已写 blob、尚未写 manifest」的内容当孤儿删除，
+ *    造成 manifest 引用缺失 blob（快照损坏）；
+ * ② 恢复写文件与自动快照读取交错（把半恢复状态拍成快照）。
+ * 说明：pruneSnapshots 只在持锁的 take 内部调用（导出仅为单测直用，不另行加锁）。 */
+let snapshotQueue: Promise<unknown> = Promise.resolve();
+function withSnapshotLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = snapshotQueue.then(fn, fn);
+  snapshotQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 /** 读取全部有效 manifest（损坏的跳过；按 id 倒序 = 最新在前） */
@@ -126,13 +165,17 @@ async function readManifests(gateway: ProjectGateway): Promise<SnapshotManifest[
       if (
         data &&
         typeof data.id === "string" &&
+        SNAPSHOT_ID_RE.test(data.id) &&
         typeof data.createdAt === "string" &&
+        SNAPSHOT_REASONS.has(data.reason) &&
         Array.isArray(data.entries) &&
         data.entries.every(
           (entry) =>
             entry &&
             typeof entry.path === "string" &&
+            isSafeRelPath(entry.path) &&
             typeof entry.blob === "string" &&
+            SNAPSHOT_BLOB_RE.test(entry.blob) &&
             typeof entry.size === "number",
         )
       ) {
@@ -181,7 +224,15 @@ function sameEntries(a: SnapshotManifestEntry[], b: SnapshotManifestEntry[]): bo
  * - 内容与最新快照完全一致 → unchanged（不产生新 manifest）；
  * - 变更文件重新读取并落 blob；未变文件复用 blob（mtime+size 且有 blob 才可信）。
  */
-export async function takeSnapshot(
+export function takeSnapshot(
+  gateway: ProjectGateway,
+  reason: SnapshotReasonPayload,
+  options?: { force?: boolean; now?: Date; minIntervalMs?: number; keep?: number },
+): Promise<SnapshotTakeResultPayload> {
+  return withSnapshotLock(() => takeSnapshotLocked(gateway, reason, options));
+}
+
+async function takeSnapshotLocked(
   gateway: ProjectGateway,
   reason: SnapshotReasonPayload,
   options?: { force?: boolean; now?: Date; minIntervalMs?: number; keep?: number },
@@ -248,7 +299,8 @@ export async function pruneSnapshots(gateway: ProjectGateway, keep = SNAPSHOT_RI
       const abs = join(dirAbs2, dirent.name);
       if (dirent.isDirectory()) {
         await walk(abs);
-      } else if (dirent.isFile() && !dirent.name.endsWith(".tmp") && !referenced.has(dirent.name)) {
+      } else if (dirent.isFile() && (dirent.name.endsWith(".tmp") || !referenced.has(dirent.name))) {
+        // .tmp = 原子写崩溃残留（持锁下 prune 不会遇到在途写入）；其余为不再被引用的孤儿 blob
         await fs.rm(abs, { force: true }).catch(() => undefined);
       }
     }
@@ -264,7 +316,14 @@ export async function pruneSnapshots(gateway: ProjectGateway, keep = SNAPSHOT_RI
  *    由 UI 二次确认 + ① 共同兜底）；
  * ③ 快照之后新增的文件保守保留，仅在结果中列出。
  */
-export async function restoreSnapshot(
+export function restoreSnapshot(
+  gateway: ProjectGateway,
+  id: string,
+): Promise<SnapshotRestoreResultPayload> {
+  return withSnapshotLock(() => restoreSnapshotLocked(gateway, id));
+}
+
+async function restoreSnapshotLocked(
   gateway: ProjectGateway,
   id: string,
 ): Promise<SnapshotRestoreResultPayload> {
@@ -273,7 +332,8 @@ export async function restoreSnapshot(
   if (!target) {
     throw new YushuError("E_SNAPSHOT_INVALID", `快照不存在或已损坏：${id}`);
   }
-  const pre = await takeSnapshot(gateway, "pre_restore", { force: true });
+  // 恢复前强制快照（撤销窗口）：即使 60s 内也强制生成；已持锁，调用无锁内部实现避免自锁
+  const pre = await takeSnapshotLocked(gateway, "pre_restore", { force: true });
   const preRestoreId = pre.snapshot?.id ?? pre.latest?.id ?? "";
   const preRestoreTaken = pre.outcome === "taken";
 
