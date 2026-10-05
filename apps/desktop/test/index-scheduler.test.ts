@@ -79,6 +79,32 @@ describe("IndexRefreshScheduler（保存即增量）", () => {
     }
   });
 
+  it("reset 代际保护：运行中 reset 不回写状态、不触发脏补跑（项目关闭/切换）", async () => {
+    vi.useFakeTimers();
+    try {
+      let release: (() => void) | null = null;
+      let calls = 0;
+      const scheduler = new IndexRefreshScheduler(async () => {
+        calls += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }, 500);
+      scheduler.schedule();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(calls).toBe(1);
+      expect(scheduler.state().running).toBe(true);
+      scheduler.schedule(); // 运行中触发 → dirty（旧代际的补跑标记）
+      scheduler.reset(); // 项目关闭：取消补跑 + 代际失效
+      release!();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(calls).toBe(1); // 旧一轮结束后不补跑
+      expect(scheduler.state()).toEqual({ pending: false, running: false, lastRunAt: null, lastError: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reset（项目关闭/切换）：取消待命刷新并清空状态", async () => {
     vi.useFakeTimers();
     try {

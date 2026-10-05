@@ -26,7 +26,7 @@ export class IndexRefreshScheduler {
     private readonly debounceMs = 2500,
   ) {}
 
-  /** 写通道成功后调用：合并到防抖窗口；窗口内重复调用不重置计时（避免高频保存starving） */
+  /** 写通道成功后调用：合并到防抖窗口；窗口内重复调用不重置计时（避免持续保存把刷新无限推迟） */
   schedule(): void {
     if (this.running) {
       this.dirty = true;
