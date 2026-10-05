@@ -34,6 +34,7 @@
 - **码字统计存储修复（第 16 轮复核）**：① `recordChapterDelta` / `setStatsGoal` 对 `stats.json` 的读-改-写改为**串行队列**（`withStatsLock`）——自动保存 flush 与 AI 采纳重叠、面板保存目标与记账重叠时不再互相覆盖丢更新；② 读取改为逐条清洗 `sanitizeDaily`——`daily` 内单条损坏（null / 字符串 / 非数字 delta）不再让汇总抛错或产生 NaN（保守丢弃坏条目）。单测 +2 例。
 - **会话异常退出检测（T2-8 切片 B）**：`.yushu/session.json` 会话标记（打开项目写 active + 主进程 pid；快照循环 60s 心跳 lastSeenAt；正常退出经 `before-quit` 同步原子写置 closed；切换 / 关闭项目亦置 closed）；启动检出「上次会话异常退出」（`state=active 且 pid ≠ 当前进程`，**pid 守卫**使渲染层 reload / 同进程重开不误报）；「脏快照」提示（最近快照早于会话最后可见时间或无快照 → 可能不含崩溃前最后修改）；新增 `session:status` 通道与项目页顶部横幅（含本地快照回退指引）。单测 7 例；e2e 探针四项（异常检出 / 心跳 / 正常关闭不重报）；kill-test 二阶段新增 `sessionAbnormal=true` 实证（重启真实检出被强杀会话）；UI 预演 step19（walkthrough 19/19）。
 - **破坏性操作强制快照（T2-8 切片 B；K10 `destructive-without-backup`）**：新增 `takePreDestructiveSnapshot`（强制、不受 60s 间隔限制；失败**阻断操作** `E_SNAPSHOT_REQUIRED`），接入四条破坏性路径——覆盖既有大纲（重新生成 / 空白创建）、保存大纲时的删卷 / 删章（新旧文档 ID 对比检出）、AI 采纳「整段替换正文」；快照来源文案新增「破坏前」，相关二次确认文案标明「可整体回退」。单测 4 例；e2e 探针 `preDestructive.taken=3`（删卷 / 删章 / 采纳替换各一次）。
+- **布局修复（横幅与标签页视图并排成窄列）**：`tab-body` 由 row 改 column——会话异常退出 / 崩溃恢复横幅改为**全宽顶部堆叠**（瑕疵自 T2-8 切片 A 恢复面板起存在，由 step20 截图证据暴露并修复）；`.stats` 补 `flex:1` 与其它标签页视图对齐。
 
 ### Added
 

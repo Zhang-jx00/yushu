@@ -621,7 +621,9 @@ textarea:focus {
 .tab-body {
   flex: 1;
   min-height: 0;
+  /* 纵向堆叠：顶部横幅（崩溃恢复 / 会话异常退出）与标签页视图上下排列（此前 row 布局下横幅会与视图并排成窄列） */
   display: flex;
+  flex-direction: column;
 }
 
 /* ---------- 起源工作台 ---------- */
@@ -1243,6 +1245,8 @@ select {
 /* ---------- 码字统计（T2-9 切片 A） ---------- */
 
 .stats {
+  flex: 1;
+  min-height: 0;
   padding: 14px 18px;
   overflow: auto;
 }
