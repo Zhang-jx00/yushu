@@ -5,9 +5,10 @@ import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import type { AiDraftTarget } from "../../../src/shared/ipc";
+import type { AiDraftTarget, ChapterWriteResult } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { findUnsupportedSyntax, htmlToMd, mdToHtml } from "../markdown-bridge";
+import { merge3 } from "../chapter-merge";
 import { collectMentionedEntities, type EntityIndexEntry } from "../entity-mentions";
 import { detectMentionQuery, filterMentionCandidates } from "../mention-suggest";
 import { entityMentionPlugin } from "../entity-mention-plugin";
@@ -34,7 +35,12 @@ type DebugWindow = Window & {
   __yushuDebug?: boolean;
   __yushuCmView?: EditorView | null;
   /** reload 精确等待重载完成（预演同步点）；doc 读取当前编辑器文本 */
-  __yushuEditorDebug?: { reload: () => Promise<void>; doc: () => string };
+  __yushuEditorDebug?: {
+    reload: () => Promise<void>;
+    doc: () => string;
+    /** 保存管线诊断（预演排查用）：上次已知磁盘内容 / hash / 脏标记 */
+    saved: () => { body: string; hash: string; dirty: boolean };
+  };
 };
 
 /** 与 @yushu/core countWords 同口径（去空白字符数）——渲染层不 import 引擎包，保持零依赖约定 */
@@ -584,14 +590,16 @@ export function ChapterEditorView({
         // 仍记磁盘正文 → 内容呈「脏」态，随后的自动保存把恢复内容落盘）
         const recovered = takePendingRecovery(path);
         const initialBody = recovered ?? chapter.body;
+        // 基线先更新再写入内容：CM dispatch 会经 updateListener 触发 updateDerived 做 dirty 比较，
+        // 若基线仍是上一章/上次保存的旧值，会把「载入」误判为「新输入」（幻影脏标记 + 无谓自动保存）
+        savedBodyRef.current = chapter.body;
+        hashRef.current = chapter.hash;
         if (view) {
           view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: initialBody } });
         }
         editor?.commands.setContent(mdToHtml(initialBody));
         applyMenu(null); // 切换 / 重载章节：关闭残留的 @ 候选菜单
-        savedBodyRef.current = chapter.body;
         setSavedBody(chapter.body);
-        hashRef.current = chapter.hash;
         updateDerived(initialBody);
         setStatus(
           recovered !== null
@@ -691,6 +699,7 @@ export function ChapterEditorView({
         if (path) await loadChapterRef.current(path, { force: true });
       },
       doc: () => viewRef.current?.state.doc.toString() ?? "",
+      saved: () => ({ body: savedBodyRef.current, hash: hashRef.current, dirty: dirtyRef.current }),
     };
     return () => {
       delete debugWindow.__yushuEditorDebug;
@@ -730,23 +739,93 @@ export function ChapterEditorView({
     applyMenu(null); // 切回源码形态：关闭 @ 候选菜单
   };
 
+  /**
+   * 三方合并尝试（T2-6 完整版）：base = 上次已知磁盘内容（savedBodyRef）、local = 当前编辑、remote = 最新磁盘。
+   * - 干净合并 → 以磁盘最新 hash 写回（一次成功即视为保存完成，不再冻结）；
+   * - 冲突 / 读取失败 / 合并写回失败 → 返回失败原因，由调用方维持「冻结 + 旁路文件 / 重新载入」路径
+   *   （失败原因写入错误信息，UI 可直接给出可操作指引，也便于自动化诊断）。
+   */
+  const tryThreeWayMerge = async (
+    path: string,
+    localBody: string,
+  ): Promise<
+    | { ok: true; result: ChapterWriteResult; text: string }
+    | { ok: false; reason: "conflict"; conflicts: number }
+    | { ok: false; reason: "read" | "merge" | "write"; detail: string }
+  > => {
+    let diskBody: string;
+    let diskHash: string;
+    try {
+      const disk = await api().chapter.read(path);
+      diskBody = disk.body;
+      diskHash = disk.hash;
+    } catch (err) {
+      return { ok: false, reason: "read", detail: String((err as Error).message ?? err) };
+    }
+    let merged: ReturnType<typeof merge3>;
+    try {
+      merged = merge3(savedBodyRef.current, localBody, diskBody);
+    } catch (err) {
+      return { ok: false, reason: "merge", detail: String((err as Error).message ?? err) };
+    }
+    if (!merged.clean) return { ok: false, reason: "conflict", conflicts: merged.conflicts };
+    try {
+      const result = await api().chapter.write({ path, body: merged.text, baseHash: diskHash });
+      return { ok: true, result, text: merged.text };
+    } catch (err) {
+      return { ok: false, reason: "write", detail: String((err as Error).message ?? err) };
+    }
+  };
+
   /** 保存正文（自动保存与手动保存共用；失败会抛出，由调度器进入冻结态/UI 呈现） */
   const performSave = async (): Promise<void> => {
     const path = selectedPathRef.current;
     if (!path || !dirtyRef.current) return;
-    const body = currentMarkdown();
-    const result = await api().chapter.write({ path, body, baseHash: hashRef.current });
+    const localBody = currentMarkdown();
+    /** 落盘后的磁盘内容：正常保存 = 本地内容；自动合并 = 合并结果（编辑器随后同步为该内容） */
+    let persisted = localBody;
+    let mergedNote = "";
+    let result: ChapterWriteResult;
+    try {
+      result = await api().chapter.write({ path, body: localBody, baseHash: hashRef.current });
+    } catch (err) {
+      const message = String((err as Error).message ?? "");
+      if (!message.includes("E_DOC_CONFLICT")) throw err;
+      const merged = await tryThreeWayMerge(path, localBody);
+      if (!merged.ok) {
+        // 合并不可用：保持冻结，绝不强行覆盖；错误信息带明原因（UI 给「旁路文件 / 重新载入」指引）
+        const reason =
+          merged.reason === "conflict"
+            ? `自动三方合并检测到 ${merged.conflicts} 处冲突`
+            : `自动三方合并未完成（${
+                merged.reason === "read" ? "读取磁盘失败" : merged.reason === "merge" ? "合并计算失败" : "合并写回失败"
+              }：${merged.detail}）`;
+        throw new Error(
+          `[E_DOC_CONFLICT] ${reason}——已保留当前编辑内容（主文件未被覆盖）；可「写入旁路文件」保留本地版本，或「重新载入」磁盘版本后再编辑`,
+        );
+      }
+      result = merged.result;
+      persisted = merged.text;
+      mergedNote = "已自动合并外部改动；";
+    }
     // T2-8：保存成功 = 编辑日志使命完成（取消待发写入 + 清除 journal 文件）
     getJournal().cancel();
     void api()
       .recovery.clearJournal(path)
       .catch(() => undefined);
-    savedBodyRef.current = body;
+    // 自动合并：编辑器内容同步为合并结果（本地 = 磁盘），避免下一次输入把磁盘上的合并结果覆盖掉。
+    // savedBodyRef 必须先更新：CM dispatch 会经 updateListener 触发 updateDerived 做 dirty 比较。
+    savedBodyRef.current = persisted;
+    if (mergedNote !== "") {
+      const view = viewRef.current;
+      if (view) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: persisted } });
+      if (editor && !editor.isDestroyed) editor.commands.setContent(mdToHtml(persisted));
+    }
     hashRef.current = result.hash;
     dirtyRef.current = false;
-    setSavedBody(body);
+    setSavedBody(persisted);
     setDirty(false);
-    setStatus(`已保存 ${result.path}（${result.wordCount} 字，frontmatter 已同步）`);
+    setStatus(`${mergedNote}已保存 ${result.path}（${result.wordCount} 字，frontmatter 已同步）`);
     await refreshTargets();
   };
   performSaveRef.current = performSave;

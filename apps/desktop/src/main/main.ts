@@ -1195,6 +1195,67 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     }
     console.log("[e2e] 本地快照:", JSON.stringify(snapshotProbe));
 
+    // 三方自动合并（T2-6 完整版）：外部改动（开头）+ 本地续写（结尾，不同区域）→ 自动保存遇
+    // baseHash 冲突 → 自动三方合并写回（无需人工）。断言：状态含「已自动合并」、磁盘双方改动
+    // 均在、编辑器已同步为合并结果、自动保存未冻结（回到「已自动保存」）、未新增旁路文件。
+    let mergeProbe = { ok: false, note: "未执行" };
+    try {
+      const probe = (await win.webContents.executeJavaScript(`(async () => {
+        const api = window.yushu;
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const waitFor = async (fn, timeout = 12000) => {
+          const t0 = Date.now();
+          for (;;) {
+            let r = null;
+            try { r = fn(); } catch { r = null; }
+            if (r) return r;
+            if (Date.now() - t0 > timeout) return null;
+            await sleep(100);
+          }
+        };
+        const tab = [...document.querySelectorAll('.tab')].find((x) => x.textContent.includes('编辑器'));
+        if (!tab) return { ok: false, note: '找不到编辑器标签页' };
+        tab.click();
+        const view = await waitFor(() => (window.__yushuCmView && window.__yushuCmView.state.doc.length > 0 ? window.__yushuCmView : null));
+        const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+        if (!view || !ie) return { ok: false, note: '编辑器未就绪（调试句柄未暴露或章节未加载）' };
+        await ie.reload();
+        const srcBtn = [...document.querySelectorAll('.mode-switch button')].find((x) => x.textContent.includes('源码'));
+        if (srcBtn && !srcBtn.disabled) { srcBtn.click(); await sleep(300); }
+        const drafts = await api.ai.drafts();
+        const path = drafts[0] && drafts[0].chapterPath;
+        if (!path) return { ok: false, note: '无草稿章节' };
+        const localMarker = '本地续写（自动合并探针）。';
+        const remoteMarker = '【外部开头改动】';
+        const before = await api.chapter.read(path);
+        const sidecarsBefore = (await api.project.tree()).filter((e) => e.path.includes('.conflict-')).length;
+        // 外部改动先行（不同区域：开头插入一行），再本地追加 → 自动保存必然撞 baseHash
+        await api.chapter.write({ path, body: remoteMarker + '\\n\\n' + before.body, baseHash: before.hash });
+        view.dispatch({ changes: { from: view.state.doc.length, insert: '\\n\\n' + localMarker } });
+        const merged = await waitFor(() => {
+          const el = document.querySelector('.autosave-status');
+          return el && el.textContent.includes('已自动保存') && document.body.innerText.includes('已自动合并外部改动') ? true : null;
+        }, 15000);
+        const after = await api.chapter.read(path);
+        const bothKept = after.body.includes(remoteMarker) && after.body.includes(localMarker);
+        const editorText = String(view.state.doc.toString());
+        const editorSynced = editorText.includes(remoteMarker) && editorText.includes(localMarker);
+        const statusEl = document.querySelector('.autosave-status');
+        const notFrozen = statusEl ? !statusEl.textContent.includes('暂停') : false;
+        const sidecarsAfter = (await api.project.tree()).filter((e) => e.path.includes('.conflict-')).length;
+        return {
+          ok: merged === true && bothKept && editorSynced && notFrozen && sidecarsAfter === sidecarsBefore,
+          note: '自动合并完成=' + (merged === true) + '；磁盘含双方改动=' + bothKept +
+            '；编辑器已同步合并结果=' + editorSynced + '；自动保存未冻结=' + notFrozen +
+            '；未新增旁路文件=' + (sidecarsAfter === sidecarsBefore),
+        };
+      })()`)) as { ok?: boolean; note?: string };
+      mergeProbe = { ok: probe?.ok === true, note: String(probe?.note ?? "(无返回)") };
+    } catch (err) {
+      mergeProbe = { ok: false, note: `执行失败：${err instanceof Error ? err.message : String(err)}` };
+    }
+    console.log("[e2e] 三方自动合并:", JSON.stringify(mergeProbe));
+
     const closeProbeScript = `(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const waitFor = async (fn, timeout = 12000) => {
@@ -1349,11 +1410,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       snapshotProbe.cardRecreated &&
       snapshotProbe.extraKept &&
       snapshotProbe.preRestore &&
+      mergeProbe.ok &&
       closeFlush.ok &&
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

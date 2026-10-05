@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-21 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计 / 会话与快照恢复）。
+ * 步骤 10-22 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计 / 会话与快照恢复）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -954,6 +954,60 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 22,
+    title: "编辑器：外部改动自动三方合并（T2-6 完整版）",
+    file: "step22-auto-merge.png",
+    body: String.raw`
+      await tab('编辑器');
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      const view = await waitFor(() => window.__yushuCmView, 8000);
+      if (!ie || !view) return { ok: false, note: '编辑器调试句柄未暴露：' + pageText() };
+      // 经产品「重新载入」先 flush 再强载：把上一步（截图用）的待保存输入确定落盘并复位编辑器——
+      // 否则「本地待保存 + 外部改动」在补丁窗口内竞态，合并的 base 与磁盘不一致会保守判冲突
+      const reloadBtn = [...document.querySelectorAll('.mode-switch button')].find((x) => x.textContent.includes('重新载入'));
+      if (reloadBtn && !reloadBtn.disabled) reloadBtn.click();
+      await sleep(700);
+      await ie.reload(); // 双重保险：确保调试句柄下内容为磁盘态
+      // 切到源码形态（本地编辑经真实 CM 事务；外部改动以 Markdown 文本为准）
+      const srcBtn = [...document.querySelectorAll('.mode-switch button')].find((x) => x.textContent.includes('源码'));
+      if (srcBtn && !srcBtn.disabled) { srcBtn.click(); await sleep(300); }
+      const drafts = await window.yushu.ai.drafts();
+      const path = drafts[0] && drafts[0].chapterPath;
+      if (!path) return { ok: false, note: '无草稿章节：' + pageText() };
+      const localMarker = '本地续写（三方合并预演）。';
+      const remoteMarker = '【外部开头改动】';
+      const before = await window.yushu.chapter.read(path);
+      // 基线诊断（排查用）：编辑器「上次已知磁盘内容」应恰为当前磁盘（否则三方合并会保守判冲突）
+      const savedSnap = ie.saved ? ie.saved() : null;
+      const baseDiag = savedSnap
+        ? '基线/磁盘一致=' + (savedSnap.body === before.body) +
+          '（基线 ' + savedSnap.body.length + ' 字 / 磁盘 ' + before.body.length + ' 字 / hash 一致=' + (savedSnap.hash === before.hash) + '）'
+        : '基线句柄缺失';
+      // 外部改动先行（不同区域：开头插入一行）→ 本地追加 → 自动保存必然撞 baseHash
+      await window.yushu.chapter.write({ path, body: remoteMarker + '\n\n' + before.body, baseHash: before.hash });
+      view.dispatch({ changes: { from: view.state.doc.length, insert: '\n\n' + localMarker } });
+      const merged = await waitFor(() => {
+        const el = document.querySelector('.autosave-status');
+        return el && el.textContent.includes('已自动保存') && document.body.innerText.includes('已自动合并外部改动') ? true : null;
+      }, 15000);
+      const after = await window.yushu.chapter.read(path);
+      const bothKept = after.body.includes(remoteMarker) && after.body.includes(localMarker);
+      const editorSynced = String(view.state.doc.toString()).includes(remoteMarker) && String(view.state.doc.toString()).includes(localMarker);
+      const statusEl = document.querySelector('.autosave-status');
+      const notFrozen = statusEl ? !statusEl.textContent.includes('暂停') : false;
+      const statusText = statusEl ? String(statusEl.textContent) : '(无状态元素)';
+      const errorEl = document.querySelector('.error-text');
+      const errorText = errorEl ? String(errorEl.textContent).slice(0, 180) : '';
+      return {
+        ok: merged === true && bothKept && editorSynced && notFrozen,
+        note: '自动合并完成=' + (merged === true) + '；磁盘含双方改动=' + bothKept +
+          '；编辑器已同步合并结果=' + editorSynced + '；自动保存未冻结=' + notFrozen +
+          '；' + baseDiag +
+          '；自动保存状态=' + statusText + (errorText ? '；错误=' + errorText : ''),
+      };
+    `,
+  },
 ];
 
 /**
@@ -1035,7 +1089,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-21）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-22）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,
@@ -1048,6 +1102,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
       "步骤 1：UI 的存放目录为 readOnly 输入 + 系统对话框，无法自动化；改由主进程等价执行 createProject（与 project:create 同一函数）",
       "步骤 8：该步骤排在编辑器页步骤之前；经 window.yushu.ai.adopt 追加一次含敏感词正文后再走 UI 的「重新核对」",
       "步骤 12 / 16：经 __yushuDebug 暴露的编辑器调试句柄 await reload()（等价于点击已选中章节的强制重载）作为同步点；其后全部经真实 CodeMirror 事务输入与产品 IPC 断言落盘（step16 进一步断言保存后索引自动刷新，全程未点重建按钮）",
+      "步骤 22：外部改动经 window.yushu.chapter.write 模拟（等价于外部工具改文件）；三方合并本身走编辑器自动保存的真实冲突管线（无人工干预）",
     ],
     notes: [
       "步骤 9 的「林渊」在本预演项目中不存在（第 2 步卡名为占位「测试设定N」），故追加「测试设定」关键词证明检索链路有命中",
