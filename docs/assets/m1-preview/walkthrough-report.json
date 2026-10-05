@@ -1,11 +1,11 @@
 {
   "mode": "--ui-walkthrough",
   "scene": "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-16）",
-  "startedAt": "2026-10-05T08:22:19.214Z",
-  "finishedAt": "2026-10-05T08:24:00.331Z",
-  "totalMs": 101117,
-  "projectDir": "D:\\Temp\\yushu-wt-v29",
-  "mockBaseUrl": "http://127.0.0.1:62138/v1",
+  "startedAt": "2026-10-05T09:01:20.455Z",
+  "finishedAt": "2026-10-05T09:01:38.713Z",
+  "totalMs": 18258,
+  "projectDir": "D:\\Temp\\yushu-wt-v32",
+  "mockBaseUrl": "http://127.0.0.1:51784/v1",
   "screenshotsDir": "docs/assets/m1-preview",
   "okCount": 16,
   "failCount": 0,
@@ -28,9 +28,9 @@
       "step": 1,
       "title": "进入项目页（App 自动加载已挂载项目）",
       "ok": true,
-      "detail": "项目页已就绪，标签 7 个；root=D:\\Temp\\yushu-wt-v29 ｜截图：第 1 轮失败（UnknownVizError）；第 2 轮取得新画面",
+      "detail": "项目页已就绪，标签 7 个；root=D:\\Temp\\yushu-wt-v32",
       "screenshot": "docs/assets/m1-preview/step1-project.png",
-      "ms": 4091
+      "ms": 158
     },
     {
       "step": 2,
@@ -38,15 +38,15 @@
       "ok": true,
       "detail": "已完成步骤 5 / 5；计数文本：世界构建层级 | 已建卡 5 张",
       "screenshot": "docs/assets/m1-preview/step2-genesis.png",
-      "ms": 10988
+      "ms": 1244
     },
     {
       "step": 3,
       "title": "三级大纲一键生成骨架",
       "ok": true,
-      "detail": "卷纲 3 条；当前卷章纲 10 条 ｜截图：第 1 轮与上一张相同；第 2 轮与上一张相同；第 3 轮取得新画面",
+      "detail": "卷纲 3 条；当前卷章纲 10 条",
       "screenshot": "docs/assets/m1-preview/step3-outline.png",
-      "ms": 7016
+      "ms": 443
     },
     {
       "step": 4,
@@ -54,39 +54,39 @@
       "ok": true,
       "detail": "草稿章节已创建，章纲显示「草稿章节已建」（chapter_id 已回填）",
       "screenshot": "docs/assets/m1-preview/step4-chapter-draft.png",
-      "ms": 3992
+      "ms": 741
     },
     {
       "step": 5,
       "title": "AI 副驾开启开关并流式生成候选",
       "ok": true,
-      "detail": "候选文本=\"天启界的夜色\"（长度 6，含「生成完成」=true） ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "detail": "候选文本=\"天启界的夜色\"（长度 6，含「生成完成」=true）",
       "screenshot": "docs/assets/m1-preview/step5-ai-stream.png",
-      "ms": 5989
+      "ms": 643
     },
     {
       "step": 6,
       "title": "整段采纳（替换正文）并留痕",
       "ok": true,
-      "detail": "采纳回执含「替换采纳」=true；使用记录：采纳 | 2026-10-05 08:22:51 · - · ok · 6 字 · 关联 ai-c4eb0ef1 | 生成 | 2026-10-05 08:22:47 · mock-model · ok · 6 字 ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "detail": "采纳回执含「替换采纳」=true；使用记录：采纳 | 2026-10-05 09:01:23 · - · ok · 6 字 · 关联 ai-d5c21285 | 生成 | 2026-10-05 09:01:23 · mock-model · ok · 6 字",
       "screenshot": "docs/assets/m1-preview/step6-adopt.png",
-      "ms": 4016
+      "ms": 184
     },
     {
       "step": 7,
       "title": "导出与自查：确认导出 TXT + 字数对账",
       "ok": true,
-      "detail": "导出回执=true；对账全部一致=true；存在失配=false ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "detail": "导出回执=true；对账全部一致=true；存在失配=false",
       "screenshot": "docs/assets/m1-preview/step7-export.png",
-      "ms": 5975
+      "ms": 626
     },
     {
       "step": 8,
       "title": "敏感词自查（追加含敏感词正文 → 重新核对 → 命中定位）",
       "ok": true,
-      "detail": "命中表可见「加微信」=true；片段=\"误 1 / 警告 0 / 提示 0）\\n级别\\t词条\\t位置\\t上下文\\t替换建议\\n错误\\t加微信\\t第1章（待拟题） · 第 17 字符\\t夜色 临走时他低声说：加微信详谈。\" ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "detail": "命中表可见「加微信」=true；片段=\"误 1 / 警告 0 / 提示 0）\\n级别\\t词条\\t位置\\t上下文\\t替换建议\\n错误\\t加微信\\t第1章（待拟题） · 第 17 字符\\t夜色 临走时他低声说：加微信详谈。\"",
       "screenshot": "docs/assets/m1-preview/step8-sensitive.png",
-      "ms": 5005
+      "ms": 470
     },
     {
       "step": 9,
@@ -94,47 +94,47 @@
       "ok": true,
       "detail": "索引状态含「已构建」=true；「林渊」结果：「林渊」：实体 0 · 正文块 0；「测试设定」命中行数=10",
       "screenshot": "docs/assets/m1-preview/step9-index.png",
-      "ms": 7012
+      "ms": 1201
     },
     {
       "step": 10,
       "title": "编辑器页：源码形态挂载 + 富文本形态切换（T2-1 切片 A/B）",
       "ok": true,
-      "detail": "CodeMirror 已挂载；正文前 40 字=天启界的夜色临走时他低声说：加微信详谈。；富文本已挂载=true（富文本正文前 30 字=天启界的夜色临走时他低声说：加微信详谈。）；已切回源码=true；含实时字数=true ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "detail": "CodeMirror 已挂载；正文前 40 字=天启界的夜色临走时他低声说：加微信详谈。；富文本已挂载=true（富文本正文前 30 字=天启界的夜色临走时他低声说：加微信详谈。）；已切回源码=true；含实时字数=true",
       "screenshot": "docs/assets/m1-preview/step10-editor.png",
-      "ms": 5981
+      "ms": 724
     },
     {
       "step": 11,
       "title": "编辑器：实体 @ 提及装饰 + 提及面板 + 跳转档案（T2-2）",
       "ok": true,
-      "detail": "实体提及装饰=true；提及面板=本章提及（1）：测试设定1；点击跳转档案并选中=true ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "detail": "实体提及装饰=true；提及面板=本章提及（1）：测试设定1；点击跳转档案并选中=true",
       "screenshot": "docs/assets/m1-preview/step11-mentions.png",
-      "ms": 6013
+      "ms": 981
     },
     {
       "step": 12,
       "title": "编辑器：自动保存落盘 + frontmatter 字数同步（T2-6 切片）",
       "ok": true,
-      "detail": "自动保存状态=已自动保存 16:23:27；重新读盘（chapters/vol-f2lgbh/ch-q5wbog.md）含「自动保存测试段落。」=true；frontmatter 字数=42（正文实际=42，一致=true）",
+      "detail": "自动保存状态=已自动保存 17:01:28；重新读盘（chapters/vol-f2lgbh/ch-q5wbog.md）含「自动保存测试段落。」=true；frontmatter 字数=42（正文实际=42，一致=true）",
       "screenshot": "docs/assets/m1-preview/step12-autosave.png",
-      "ms": 3996
+      "ms": 1213
     },
     {
       "step": 13,
       "title": "写作视图：无干扰（专注）模式 + 打字机滚动（T2-3 切片 A）",
       "ok": true,
-      "detail": "标签栏隐藏=true；侧栏隐藏=true；提示可见=true；scrollTop=450；光标行居中偏差=2px（<120 判定=true）；Esc 退出后标签栏恢复=true、提示消失=true ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "detail": "标签栏隐藏=true；侧栏隐藏=true；提示可见=true；scrollTop=450；光标行居中偏差=0px（<120 判定=true）；Esc 退出后标签栏恢复=true、提示消失=true",
       "screenshot": "docs/assets/m1-preview/step13-focus.png",
-      "ms": 8005
+      "ms": 1782
     },
     {
       "step": 14,
       "title": "写作视图：双栏对照（左设定右正文）（T2-3 切片 B）",
       "ok": true,
-      "detail": "设定栏出现=true；卡片含「测试设定1」=true；摘要=\"问卷回答 创世事件：测试设定1 代价与遗留物：（待补充） 神话母题：（待补充）\"；底部提及面板隐藏=true；打开设定卡跳转档案=true；切页返回后重开双栏=true、加载卡片=true ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "detail": "设定栏出现=true；卡片含「测试设定1」=true；摘要=\"问卷回答 创世事件：测试设定1 代价与遗留物：（待补充） 神话母题：（待补充）\"；底部提及面板隐藏=true；打开设定卡跳转档案=true；切页返回后重开双栏=true、加载卡片=true",
       "screenshot": "docs/assets/m1-preview/step14-split.png",
-      "ms": 8018
+      "ms": 1619
     },
     {
       "step": 15,
@@ -142,15 +142,15 @@
       "ok": true,
       "detail": "增量回执=增量：复用 10 · 更新 0 · 移除 0 个文件；复用>0=true；更新=0",
       "screenshot": "docs/assets/m1-preview/step15-incremental.png",
-      "ms": 2983
+      "ms": 456
     },
     {
       "step": 16,
       "title": "保存即增量：编辑器输入后索引自动刷新（T2-5 切片 B）",
       "ok": true,
-      "detail": "未点击重建按钮；「自动增量：已同步」可见=true；检索「落霞峰」命中行数=1 ｜截图：第 1 轮与上一张相同；第 2 轮取得新画面",
+      "detail": "未点击重建按钮；「自动增量：已同步」可见=true；检索「落霞峰」命中行数=1",
       "screenshot": "docs/assets/m1-preview/step16-auto-index.png",
-      "ms": 12009
+      "ms": 5745
     }
   ],
   "failures": []

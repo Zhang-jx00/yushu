@@ -41,6 +41,8 @@ import type {
   OutlineWritePayload,
   PackCatalog,
   ProjectSnapshot,
+  RecoveryEntry,
+  RecoveryWritePayload,
   TreeEntry,
   WorldSummary,
 } from "../../src/shared/ipc";
@@ -125,6 +127,16 @@ export interface YushuApi {
      * 自动保存因 baseHash 冲突冻结时，由用户显式触发，绝不静默覆盖。
      */
     writeSidecar: (payload: ChapterSidecarPayload) => Promise<ChapterSidecarResult>;
+  };
+  recovery: {
+    /** 编辑日志（T2-8）：写入当前正文快照（输入期间短防抖调用；保存成功后须 clearJournal） */
+    writeJournal: (payload: RecoveryWritePayload) => Promise<boolean>;
+    /** 清除某章节的编辑日志 */
+    clearJournal: (path: string) => Promise<boolean>;
+    /** 进入项目时检测可恢复条目（journal 与磁盘不一致才返回） */
+    list: () => Promise<RecoveryEntry[]>;
+    /** 丢弃某章节的编辑日志 */
+    discard: (path: string) => Promise<boolean>;
   };
 }
 

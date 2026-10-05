@@ -46,6 +46,8 @@ import {
   type OutlineWritePayload,
   type PackCatalog,
   type ProjectSnapshot,
+  type RecoveryEntry,
+  type RecoveryWritePayload,
   type TreeEntry,
   type WorldSummary,
 } from "../shared/ipc.js";
@@ -66,6 +68,12 @@ import { IndexRefreshScheduler } from "./index-scheduler.js";
 import { closeCoordinatorFor } from "./close-coordinator.js";
 import { generateNames } from "./naming-ops.js";
 import { readChapter, writeChapterBody, writeChapterSidecar } from "./chapter-ops.js";
+import {
+  clearRecoveryJournal,
+  discardRecoveryJournal,
+  listRecoverable,
+  writeRecoveryJournal,
+} from "./recovery-ops.js";
 import {
   buildFusionPreview,
   buildPackCatalog,
@@ -388,5 +396,23 @@ export function registerIpcHandlers(): void {
   // 冲突旁路（T2-6 切片）：把当前编辑内容写入 <章节>.conflict-<时间戳>.md，主文件不动
   ipcMain.handle(CHANNELS.chapterWriteSidecar, (_event, payload: ChapterSidecarPayload) =>
     wrap<ChapterSidecarResult>(() => writeChapterSidecar(requireGateway(), payload)),
+  );
+
+  /* ---------- 编辑日志与崩溃恢复（M2 / T2-8 切片 A） ---------- */
+
+  ipcMain.handle(CHANNELS.recoveryWriteJournal, (_event, payload: RecoveryWritePayload) =>
+    wrap<boolean>(() => writeRecoveryJournal(requireGateway(), payload)),
+  );
+
+  ipcMain.handle(CHANNELS.recoveryClearJournal, (_event, payload: { path: string }) =>
+    wrap<boolean>(() => clearRecoveryJournal(requireGateway(), payload.path)),
+  );
+
+  ipcMain.handle(CHANNELS.recoveryList, () =>
+    wrap<RecoveryEntry[]>(() => listRecoverable(requireGateway())),
+  );
+
+  ipcMain.handle(CHANNELS.recoveryDiscard, (_event, payload: { path: string }) =>
+    wrap<boolean>(() => discardRecoveryJournal(requireGateway(), payload.path)),
   );
 }

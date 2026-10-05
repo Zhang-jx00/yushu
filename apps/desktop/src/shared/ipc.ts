@@ -52,6 +52,11 @@ export const CHANNELS = {
   chapterRead: "chapter:read",
   chapterWrite: "chapter:write",
   chapterWriteSidecar: "chapter:writeSidecar",
+  /** 编辑日志（T2-8 切片 A·崩溃恢复）：写入 / 清除 / 检测列表 / 丢弃 */
+  recoveryWriteJournal: "recovery:writeJournal",
+  recoveryClearJournal: "recovery:clearJournal",
+  recoveryList: "recovery:list",
+  recoveryDiscard: "recovery:discard",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -67,6 +72,23 @@ export interface AppFlushDonePayload {
   detail?: string;
   /** 落盘失败原因（冻结 / IPC 异常等；不阻塞关闭） */
   error?: string;
+}
+
+/** 编辑日志写入载荷（T2-8 切片 A）：编辑器当前正文快照 */
+export interface RecoveryWritePayload {
+  /** 章节文件相对路径（仅 chapters/ 前缀；journal 只服务章节编辑器） */
+  path: string;
+  /** 编辑器当前正文（未含 frontmatter） */
+  body: string;
+}
+
+/** 可恢复条目（journal 与磁盘不一致时才出现在列表中） */
+export interface RecoveryEntry {
+  path: string;
+  body: string;
+  /** journal 写入时间（ISO；损坏时为旧值或空） */
+  updatedAt: string;
+  wordCount: number;
 }
 
 export interface TreeEntry {

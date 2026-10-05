@@ -99,4 +99,14 @@ contextBridge.exposeInMainWorld("yushu", {
     write: (payload) => invoke("chapter:write", payload),
     writeSidecar: (payload) => invoke("chapter:writeSidecar", payload),
   },
+  recovery: {
+    /** 编辑日志（T2-8）：写入当前正文快照（输入期间短防抖调用） */
+    writeJournal: (payload) => invoke("recovery:writeJournal", payload),
+    /** 保存成功后清除本编辑器对应章节的日志 */
+    clearJournal: (path) => invoke("recovery:clearJournal", { path }),
+    /** 进入项目时检测可恢复条目（journal 与磁盘不一致才返回） */
+    list: () => invoke("recovery:list"),
+    /** 丢弃某章节的编辑日志 */
+    discard: (path) => invoke("recovery:discard", { path }),
+  },
 });

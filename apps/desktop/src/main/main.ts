@@ -25,6 +25,10 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // 保存管线依赖渲染层计时器（自动保存 800ms 防抖、编辑日志 500ms 快照）：
+      // 窗口被遮挡时若被 Chromium 后台节流，保存会显著延后（e2e 探针实测暴露）——
+      // 写作工具以"防丢稿"为硬约束，禁用后台节流换取计时器可靠性。
+      backgroundThrottling: false,
     },
   });
 
@@ -142,7 +146,7 @@ void app.whenReady().then(() => {
 });
 
 async function runE2E(win: BrowserWindow): Promise<void> {
-  const { mkdtemp, rm, readFile } = await import("node:fs/promises");
+  const { mkdtemp, rm, readFile, readdir } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const dir = await mkdtemp(join(tmpdir(), "yushu-e2e-"));
@@ -494,6 +498,214 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     await reloaded;
     // 探针需要编辑器调试句柄（与 UI 预演同一机制；标志需在编辑器视图挂载前设置）
     await win.webContents.executeJavaScript("window.__yushuDebug = true;");
+
+    // 切页落盘（第 12 轮复核修复）：编辑器输入（不等自动保存）→ 立即切页（组件卸载触发 flush）→
+    // 磁盘应在 < 800ms（自动保存防抖窗口）内包含新内容——证明落盘由「切页 flush」完成。
+    const switchFlushScript = `(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const waitFor = async (fn, timeout = 12000) => {
+        const t0 = Date.now();
+        for (;;) {
+          let r = null;
+          try { r = fn(); } catch { r = null; }
+          if (r) return r;
+          if (Date.now() - t0 > timeout) return null;
+          await sleep(100);
+        }
+      };
+      const clickTab = (label) => {
+        const b = [...document.querySelectorAll('.tab')].find((x) => x.textContent.includes(label));
+        if (!b) return null;
+        b.click();
+        return b;
+      };
+      const tabs = await waitFor(() => (document.querySelectorAll('.tab').length > 0 ? true : null), 15000);
+      if (!tabs) return { ok: false, note: '项目页标签未出现：' + document.body.innerText.slice(0, 160).split('\\n').join(' | ') };
+      if (!clickTab('编辑器')) return { ok: false, note: '找不到编辑器标签页' };
+      const view = await waitFor(() => (window.__yushuCmView && window.__yushuCmView.state.doc.length > 0 ? window.__yushuCmView : null));
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      if (!view || !ie) return { ok: false, note: '编辑器未就绪（调试句柄未暴露或章节未加载）' };
+      await ie.reload();
+      const marker = '切页落盘验证：疏影横斜。';
+      const dispatchAt = Date.now();
+      view.dispatch({ changes: { from: view.state.doc.length, insert: '\\n\\n' + marker } });
+      if (!clickTab('项目文件')) return { ok: false, note: '找不到项目文件标签页' };
+      return { ok: true, marker, dispatchAt };
+    })()`;
+    let switchFlush = { ok: false, withinDebounce: false, sinceDispatchMs: -1, note: "未执行" };
+    try {
+      const probe = (await win.webContents.executeJavaScript(switchFlushScript)) as {
+        ok: boolean;
+        marker?: string;
+        dispatchAt?: number;
+        note?: string;
+      };
+      if (!probe.ok || typeof probe.dispatchAt !== "number" || !probe.marker) {
+        switchFlush = { ...switchFlush, note: probe.note ?? "预置脚本失败" };
+      } else {
+        let hasMarker = false;
+        for (let i = 0; i < 40 && !hasMarker; i += 1) {
+          const content = await readFile(join(dir, result.chapterPath), "utf8");
+          hasMarker = content.includes(probe.marker);
+          if (!hasMarker) await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        const sinceDispatchMs = Date.now() - probe.dispatchAt;
+        switchFlush = {
+          ok: hasMarker,
+          withinDebounce: sinceDispatchMs < 800,
+          sinceDispatchMs,
+          note: `输入→切页落盘 ${sinceDispatchMs}ms（<800ms 自动保存防抖窗口）；磁盘含标记=${hasMarker}`,
+        };
+      }
+    } catch (err) {
+      switchFlush = { ...switchFlush, note: `异常：${err instanceof Error ? err.message : String(err)}` };
+    }
+    console.log("[e2e] 切页落盘:", JSON.stringify(switchFlush));
+
+    // 崩溃恢复（T2-8 切片 A）：编辑器输入 → 编辑日志（.yushu/recovery）落盘（自动保存防抖未到）→
+    // reload 销毁渲染层 JS 上下文（模拟崩溃：自动保存定时器死亡，journal 是唯一幸存者）→
+    // 重新进入项目 → 恢复面板出现 → 点「恢复」→ 编辑器载入恢复内容 → 自动保存落盘 → journal 清除。
+    const crashRecoveryInputScript = `(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const waitFor = async (fn, timeout = 12000) => {
+        const t0 = Date.now();
+        for (;;) {
+          let r = null;
+          try { r = fn(); } catch { r = null; }
+          if (r) return r;
+          if (Date.now() - t0 > timeout) return null;
+          await sleep(100);
+        }
+      };
+      const tabs = await waitFor(() => (document.querySelectorAll('.tab').length > 0 ? true : null), 15000);
+      if (!tabs) return { ok: false, note: '项目页标签未出现' };
+      const tab = [...document.querySelectorAll('.tab')].find((x) => x.textContent.includes('编辑器'));
+      if (!tab) return { ok: false, note: '找不到编辑器标签页' };
+      tab.click();
+      const view = await waitFor(() => (window.__yushuCmView && window.__yushuCmView.state.doc.length > 0 ? window.__yushuCmView : null));
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      if (!view || !ie) return { ok: false, note: '编辑器未就绪（调试句柄未暴露或章节未加载）' };
+      await ie.reload();
+      const marker = '崩溃恢复验证：孤舟蓑笠。';
+      const dispatchAt = Date.now();
+      view.dispatch({ changes: { from: view.state.doc.length, insert: '\\n\\n' + marker } });
+      // 等编辑日志（500ms 快照；自动保存防抖 800ms 未到）——经产品自身恢复检测接口确认，确认即返回（不等自动保存）
+      let journalConfirmed = false;
+      let confirmedMs = -1;
+      let lastCount = -1;
+      let lastErr = '';
+      for (let i = 0; i < 30 && !journalConfirmed; i += 1) {
+        try {
+          const entries = await window.yushu.recovery.list();
+          lastCount = entries.length;
+          if (entries.some((e) => String(e.body).includes(marker))) {
+            journalConfirmed = true;
+            confirmedMs = Date.now() - dispatchAt;
+            break;
+          }
+        } catch (err) {
+          lastErr = String((err && err.message) || err).slice(0, 140);
+        }
+        await sleep(50);
+      }
+      return { ok: journalConfirmed, marker, dispatchAt, confirmedMs, lastCount, lastErr };
+    })()`;
+    const crashRecoveryRestoreScript = `(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const waitFor = async (fn, timeout = 12000) => {
+        const t0 = Date.now();
+        for (;;) {
+          let r = null;
+          try { r = fn(); } catch { r = null; }
+          if (r) return r;
+          if (Date.now() - t0 > timeout) return null;
+          await sleep(100);
+        }
+      };
+      const banner = await waitFor(() => document.querySelector('.recovery-banner'), 20000);
+      if (!banner) return { ok: false, note: '恢复面板未出现：' + document.body.innerText.slice(0, 200) };
+      const bannerShown = String(banner.textContent).includes('崩溃前的未保存编辑');
+      const restoreBtn = [...banner.querySelectorAll('button')].find((b) => b.textContent.trim() === '恢复');
+      if (!restoreBtn) return { ok: false, note: '找不到「恢复」按钮', bannerShown };
+      restoreBtn.click();
+      const inEditor = await waitFor(() => {
+        const el = document.querySelector('.cm-content');
+        return el && el.textContent.includes('崩溃恢复验证：孤舟蓑笠。') ? true : null;
+      }, 15000);
+      const saved = await waitFor(() => {
+        const el = document.querySelector('.autosave-status');
+        return el && el.textContent.includes('已自动保存') ? true : null;
+      }, 15000);
+      return { ok: true, bannerShown, restoredInEditor: inEditor === true, savedShown: saved === true };
+    })()`;
+    let crashRecovery = {
+      journalDetected: false,
+      diskNotSavedYet: false,
+      bannerShown: false,
+      restoredInEditor: false,
+      persisted: false,
+      journalCleared: false,
+      note: "未执行",
+    };
+    try {
+      const marker = "崩溃恢复验证：孤舟蓑笠。";
+      const recoveryDir = join(dir, ".yushu", "recovery");
+      const probeA = (await win.webContents.executeJavaScript(crashRecoveryInputScript)) as {
+        ok: boolean;
+        marker?: string;
+        confirmedMs?: number;
+        lastCount?: number;
+        lastErr?: string;
+        note?: string;
+      };
+      if (!probeA.ok || probeA.marker !== marker) {
+        crashRecovery = {
+          ...crashRecovery,
+          note:
+            probeA.note ??
+            `编辑日志未在 1.5s 内出现（输入脚本失败；list 末次条数=${probeA.lastCount ?? -1}${probeA.lastErr ? `；异常=${probeA.lastErr}` : ""}）`,
+        };
+      } else {
+        // 渲染层已用 recovery:list 确认编辑日志出现（与恢复面板同一检测逻辑）：确认即返回，不等自动保存
+        const journalFound = true;
+        // 前置确认：章节磁盘尚未包含标记（自动保存防抖 800ms 未到；随后落盘的是"崩溃→恢复"链路）
+        const chapterAtCrash = await readFile(join(dir, result.chapterPath), "utf8");
+        const diskNotSavedYet = !chapterAtCrash.includes(marker);
+        // 3) 模拟崩溃：reload 销毁渲染层（自动保存定时器随之死亡）
+        const reloaded2 = new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
+        win.webContents.reload();
+        await reloaded2;
+        await win.webContents.executeJavaScript("window.__yushuDebug = true;");
+        // 4) 恢复面板 → 恢复 → 编辑器载入 → 自动保存
+        const probeB = (await win.webContents.executeJavaScript(crashRecoveryRestoreScript)) as {
+          ok: boolean;
+          bannerShown?: boolean;
+          restoredInEditor?: boolean;
+          savedShown?: boolean;
+          note?: string;
+        };
+        const chapterAfter = await readFile(join(dir, result.chapterPath), "utf8");
+        const persisted = chapterAfter.includes(marker);
+        const remaining = (await readdir(recoveryDir).catch(() => [] as string[])).filter((name) => name.endsWith(".json"));
+        crashRecovery = {
+          journalDetected: journalFound,
+          diskNotSavedYet,
+          bannerShown: probeB.bannerShown === true,
+          restoredInEditor: probeB.restoredInEditor === true,
+          persisted,
+          journalCleared: remaining.length === 0,
+          note:
+            `编辑日志检出=${journalFound}；崩溃时磁盘未保存=${diskNotSavedYet}；` +
+            `恢复面板=${probeB.bannerShown === true}；编辑器载入恢复内容=${probeB.restoredInEditor === true}；` +
+            `落盘=${persisted}；journal 已清=${remaining.length === 0}` +
+            (probeB.note ? `；脚本：${probeB.note}` : ""),
+        };
+      }
+    } catch (err) {
+      crashRecovery = { ...crashRecovery, note: `异常：${err instanceof Error ? err.message : String(err)}` };
+    }
+    console.log("[e2e] 崩溃恢复:", JSON.stringify(crashRecovery));
+
     const closeProbeScript = `(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const waitFor = async (fn, timeout = 12000) => {
@@ -621,11 +833,19 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.incremental.filesKeep &&
       result.autoIndex.hit >= 1 &&
       result.autoIndex.lastRunAt !== null &&
+      switchFlush.ok &&
+      switchFlush.withinDebounce &&
+      crashRecovery.journalDetected &&
+      crashRecovery.diskNotSavedYet &&
+      crashRecovery.bannerShown &&
+      crashRecovery.restoredInEditor &&
+      crashRecovery.persisted &&
+      crashRecovery.journalCleared &&
       closeFlush.ok &&
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 关闭前 flush（关窗落盘） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

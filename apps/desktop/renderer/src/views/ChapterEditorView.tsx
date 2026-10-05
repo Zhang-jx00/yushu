@@ -12,6 +12,8 @@ import { collectMentionedEntities, type EntityIndexEntry } from "../entity-menti
 import { entityMentionPlugin } from "../entity-mention-plugin";
 import { createAutosaveScheduler, type AutosaveScheduler, type AutosaveState } from "../autosave";
 import { registerEditorFlusher } from "../editor-flush";
+import { createRecoveryJournalScheduler, type RecoveryJournalScheduler } from "../recovery-journal";
+import { takePendingRecovery } from "../recovery-inbox";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 
 /**
@@ -92,11 +94,14 @@ export function ChapterEditorView({
   onOpenCard,
   focusMode = false,
   onToggleFocus,
+  recoveryFocus,
 }: {
   onOpenCard?: (path: string) => void;
   /** 无干扰（专注）模式：由 ProjectScreen 统一隐藏顶栏 / 标签栏 / 侧栏（T2-3 切片 A） */
   focusMode?: boolean;
   onToggleFocus?: (next: boolean) => void;
+  /** 崩溃恢复入口（T2-8 切片 A）：ProjectScreen 恢复面板跳转目标（tick 触发；经 selectTarget 先 flush 再切换） */
+  recoveryFocus?: { path: string; tick: number } | null;
 }) {
   const [targets, setTargets] = useState<AiDraftTarget[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -190,6 +195,28 @@ export function ChapterEditorView({
     return schedulerRef.current;
   }, []);
 
+  const journalRef = useRef<RecoveryJournalScheduler | null>(null);
+
+  /**
+   * 编辑日志（T2-8 切片 A）：输入期间以固定间隔（500ms）把当前正文快照写入 .yushu/recovery/——
+   * 进程被杀 / 崩溃时最多丢失该间隔内的输入；保存成功后取消并清除 journal 文件。
+   */
+  const getJournal = useCallback((): RecoveryJournalScheduler => {
+    if (!journalRef.current) {
+      journalRef.current = createRecoveryJournalScheduler({
+        // 失败时让 Promise 拒绝（由调度器保留待写文本、下一轮重试）；无选中章节则为空操作
+        write: (text) => {
+          const path = selectedPathRef.current;
+          if (!path) return Promise.resolve();
+          return api()
+            .recovery.writeJournal({ path, body: text })
+            .then(() => undefined);
+        },
+      });
+    }
+    return journalRef.current;
+  }, []);
+
   // 关闭窗口前 flush（T2-6 完整版）：把「落盘待发改动」注册到全局注册表，供 App 的关闭处理器调用；
   // 返回调度器状态快照（主进程日志诊断：是否确有待发改动、是否落盘成功）
   useEffect(
@@ -210,8 +237,9 @@ export function ChapterEditorView({
   useEffect(
     () => () => {
       void getScheduler().flush();
+      getJournal().dispose(); // T2-8：停掉日志定时器（journal 文件保留；flush 落盘成功后会清除它）
     },
-    [getScheduler],
+    [getScheduler, getJournal],
   );
 
   const refreshEntities = useCallback(async () => {
@@ -259,10 +287,15 @@ export function ChapterEditorView({
       setDirty(nextDirty);
       setMentioned(collectMentionedEntities(text, entitiesRef.current));
       // T2-6：文本有变化即登记自动保存（防抖 800ms / 高频上限 5s）；还原为磁盘态则撤销待发保存
-      if (nextDirty) getScheduler().schedule();
-      else getScheduler().cancel();
+      if (nextDirty) {
+        getScheduler().schedule();
+        getJournal().note(text); // T2-8：编辑日志（500ms 快照，崩溃恢复用）
+      } else {
+        getScheduler().cancel();
+        getJournal().cancel(); // 回到磁盘态：取消待发日志（已存在的 journal 文件不动，供异常终止场景恢复）
+      }
     },
-    [getScheduler],
+    [getScheduler, getJournal],
   );
   updateDerivedRef.current = updateDerived;
 
@@ -380,15 +413,23 @@ export function ChapterEditorView({
           return;
         }
         loadedPathRef.current = path;
+        // 崩溃恢复（T2-8 切片 A）：守卫之后取收件箱（有恢复内容时以其为初始正文——savedBody / hash
+        // 仍记磁盘正文 → 内容呈「脏」态，随后的自动保存把恢复内容落盘）
+        const recovered = takePendingRecovery(path);
+        const initialBody = recovered ?? chapter.body;
         if (view) {
-          view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: chapter.body } });
+          view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: initialBody } });
         }
-        editor?.commands.setContent(mdToHtml(chapter.body));
+        editor?.commands.setContent(mdToHtml(initialBody));
         savedBodyRef.current = chapter.body;
         setSavedBody(chapter.body);
         hashRef.current = chapter.hash;
-        updateDerived(chapter.body);
-        setStatus(`已载入 ${path}（记录 ${chapter.wordCount} 字）`);
+        updateDerived(initialBody);
+        setStatus(
+          recovered !== null
+            ? `已载入崩溃前未保存内容（${localCountWords(initialBody)} 字；磁盘为 ${chapter.wordCount} 字）——即将自动保存`
+            : `已载入 ${path}（记录 ${chapter.wordCount} 字）`,
+        );
       } catch (err) {
         setError((err as Error).message);
       }
@@ -422,6 +463,15 @@ export function ChapterEditorView({
   };
 
   const selected = targets.find((item) => item.chapterPath === selectedPath) ?? null;
+
+  const selectTargetRef = useRef<(path: string) => void>(() => undefined);
+  selectTargetRef.current = selectTarget;
+
+  // 崩溃恢复入口（T2-8 切片 A）：恢复面板跳转 → 经 selectTarget 选中该章节
+  // （先 flush 当前章再切换，避免载入竞态保护拦截；loadChapter 随后从收件箱取恢复内容）
+  useEffect(() => {
+    if (recoveryFocus) selectTargetRef.current(recoveryFocus.path);
+  }, [recoveryFocus]);
 
   useEffect(() => {
     // 竞态回滚选择：本次 selectedPath 变化由回滚产生，跳过自动加载（编辑器内容本就属于该章节）
@@ -517,6 +567,11 @@ export function ChapterEditorView({
     if (!path || !dirtyRef.current) return;
     const body = currentMarkdown();
     const result = await api().chapter.write({ path, body, baseHash: hashRef.current });
+    // T2-8：保存成功 = 编辑日志使命完成（取消待发写入 + 清除 journal 文件）
+    getJournal().cancel();
+    void api()
+      .recovery.clearJournal(path)
+      .catch(() => undefined);
     savedBodyRef.current = body;
     hashRef.current = result.hash;
     dirtyRef.current = false;
