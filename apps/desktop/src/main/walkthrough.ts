@@ -432,6 +432,11 @@ const STEPS: StepDef[] = [
       if (!rebuild) return { ok: false, note: '找不到「重建索引」按钮：' + pageText() };
       rebuild.click();
       const built = await waitFor(() => (document.body.innerText.includes('已构建') ? true : null), 25000);
+      // 分片写入回执（T2-5 切片 B：全量重建以分片写入 + 进度流执行）
+      const sharded = await waitFor(
+        () => (document.body.innerText.includes('索引已重建（全量 · 分片') ? true : null),
+        8000,
+      );
       const input = await waitFor(() => document.querySelector('.dir-row input'), 10000);
       if (!input) return { ok: false, note: '找不到检索输入框' };
       const searchBtn = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === '检索');
@@ -450,8 +455,9 @@ const STEPS: StepDef[] = [
         12000,
       );
       return {
-        ok: built === true && panel !== null && hits !== null,
-        note: '索引状态含「已构建」=' + (built === true) + '；「林渊」结果：' + first + '；「测试设定」命中行数=' + (hits === null ? 0 : hits),
+        ok: built === true && sharded === true && panel !== null && hits !== null,
+        note: '索引状态含「已构建」=' + (built === true) + '；分片写入回执=' + (sharded === true) +
+          '；「林渊」结果：' + first + '；「测试设定」命中行数=' + (hits === null ? 0 : hits),
       };
     `,
   },

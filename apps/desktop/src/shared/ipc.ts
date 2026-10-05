@@ -42,6 +42,7 @@ export const CHANNELS = {
   indexStatus: "index:status",
   indexRebuild: "index:rebuild",
   indexSearch: "index:search",
+  indexProgress: "index:progress",
   namingGenerate: "naming:generate",
   /** 通用剪贴板写入（主进程 Electron clipboard；渲染层 file:// 下 navigator.clipboard 不可靠） */
   appWriteClipboard: "app:writeClipboard",
@@ -653,6 +654,16 @@ export interface IndexStatusPayload {
   refresh?: IndexRefreshState;
 }
 
+/** 索引重建进度（T2-5 切片 B：分片写入与 FTS 段合并的可观测性；经 index:progress 单向推送） */
+export interface IndexProgressPayload {
+  /** parse = 读取/解析真源文件；files = 写入文件/实体/引用表；chunks = 正文块 + FTS 分片写入；merge = FTS 段合并 */
+  phase: "parse" | "files" | "chunks" | "merge";
+  done: number;
+  total: number;
+  /** 当前文件 / 批次末条所属文件（展示用） */
+  currentPath?: string;
+}
+
 export interface IndexRebuildResultPayload extends IndexStatusPayload {
   stats: IndexStatsPayload;
   /** 解析失败被跳过的真源文件 */
@@ -667,6 +678,8 @@ export interface IndexRebuildResultPayload extends IndexStatusPayload {
   removedFiles: number;
   /** 完整性校验失败项（非空表示本次因自愈回退为全量重建） */
   integrityIssues: string[];
+  /** 全量重建的正文块分片批次数（T2-5 切片 B；增量路径为 0） */
+  shards: number;
 }
 
 /** 重建请求（T2-5：默认全量；incremental=true 时增量，索引缺失/损坏自动回退全量） */

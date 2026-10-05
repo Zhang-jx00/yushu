@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   DocSnapshot,
+  IndexProgressPayload,
   IndexSearchResultPayload,
   IndexStatusPayload,
   ProjectSnapshot,
@@ -19,6 +20,27 @@ function indexRefreshLabel(status: IndexStatusPayload): string {
   if (refresh.pending || refresh.running) return "自动增量：保存后正在刷新…";
   if (refresh.lastRunAt) return `自动增量：已同步（${refresh.lastRunAt.replace("T", " ").slice(0, 19)}）`;
   return "自动增量：保存后自动刷新";
+}
+
+/** 重建进度文案（T2-5 切片 B：解析 → 分片写入 → 段合并） */
+function indexProgressLabel(progress: IndexProgressPayload): string {
+  switch (progress.phase) {
+    case "parse":
+      return `解析文件 ${progress.done}/${progress.total}`;
+    case "files":
+      return `写入文件表 ${progress.done}/${progress.total}`;
+    case "chunks":
+      return `分片写入 ${progress.done}/${progress.total} 块`;
+    case "merge":
+      return "合并 FTS 索引段";
+  }
+}
+
+/** 进度百分比（解析阶段总数可能未定：为 0 时按不确定态处理） */
+function indexProgressPercent(progress: IndexProgressPayload): number {
+  if (progress.phase === "merge") return 100;
+  if (progress.total <= 0) return 0;
+  return Math.min(100, Math.round((progress.done / progress.total) * 100));
 }
 
 /** 快照来源文案（T2-7 切片 A；T2-8 切片 B 增补破坏前） */
@@ -51,6 +73,8 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
 
   const [indexStatus, setIndexStatus] = useState<IndexStatusPayload | null>(null);
   const [indexBusy, setIndexBusy] = useState(false);
+  /** 重建进度（T2-5 切片 B）：仅重建进行中显示 */
+  const [indexProgress, setIndexProgress] = useState<IndexProgressPayload | null>(null);
   const [keyword, setKeyword] = useState("");
   const [searchResult, setSearchResult] = useState<IndexSearchResultPayload | null>(null);
 
@@ -92,6 +116,9 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
     void refreshIndex();
     void refreshSnapshots();
   }, [refresh, refreshIndex, refreshSnapshots]);
+
+  // 重建进度订阅（T2-5 切片 B）：主进程经 index:progress 推送（仅手动重建期间有事件）
+  useEffect(() => api().index.onProgress(setIndexProgress), []);
 
   /** 立即快照（手动强制；不受 60s 最小间隔限制） */
   const takeSnapshot = async () => {
@@ -167,17 +194,18 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
     }
   };
 
-  /** 重建索引（T1-21 全量 / T2-5 增量）：增量复用未变文件；完整性失败自动自愈为全量 */
+  /** 重建索引（T1-21 全量 / T2-5 增量）：增量复用未变文件；完整性失败自动自愈为全量；全程推送进度（切片 B） */
   const rebuildIndex = async (incremental = false) => {
     setIndexBusy(true);
     setError(null);
+    setIndexProgress(null);
     try {
       const result = await api().index.rebuild(incremental ? { incremental: true } : {});
       setIndexStatus(result);
       const modeText =
         result.mode === "incremental"
           ? `增量：复用 ${result.reusedFiles} · 更新 ${result.updatedFiles} · 移除 ${result.removedFiles} 个文件`
-          : "全量";
+          : `全量 · 分片 ${result.shards} 批`;
       setStatus(
         `索引已重建（${modeText}）：${result.stats.files} 文件 / ${result.stats.entities} 实体 / ${result.stats.refs} 引用 / ${result.stats.chunks} 块` +
           (result.skipped.length > 0 ? `（跳过 ${result.skipped.length} 个解析失败文件）` : "") +
@@ -187,6 +215,7 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
       setError((err as Error).message);
     } finally {
       setIndexBusy(false);
+      setIndexProgress(null);
     }
   };
 
@@ -229,6 +258,21 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
               增量重建
             </button>
           </div>
+          {/* 重建进度（T2-5 切片 B）：分片写入 / 段合并实时推进；重建结束自动收起 */}
+          {indexBusy && (
+            <div className="index-progress">
+              <div className="index-progress-track">
+                <div
+                  className="index-progress-bar"
+                  style={{ width: `${indexProgress ? indexProgressPercent(indexProgress) : 0}%` }}
+                />
+              </div>
+              <span className="muted">
+                {indexProgress ? indexProgressLabel(indexProgress) : "准备中…"}
+                {indexProgress?.currentPath ? ` · ${indexProgress.currentPath}` : ""}
+              </span>
+            </div>
+          )}
           <div className="dir-row">
             <input
               value={keyword}

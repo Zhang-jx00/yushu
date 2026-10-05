@@ -40,3 +40,19 @@ measurements:
       idle_rss_mb: 429                 # ≤600（Electron 全进程 working set）
       million_chars_rss_mb: 646        # ≤1200（打开大章后）
     report: docs/assets/perf/perf-report-local-dev-20261005.json
+  - date: 2026-10-05
+    runner: local-dev          # 第 20 轮复跑：全量重建改分片写入 + FTS merge（T2-5 切片 B）
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,107,549 字 + 100k 大章靶子
+    result: pass_9_of_9
+    metrics:
+      cold_to_editable_ms: 1432        # ≤2000
+      hot_to_editable_ms: 602          # ≤800
+      project_open_ms: 197             # ≤3000
+      keystroke_p95_ms: 1.4            # ≤16
+      keystroke_mega_p95_ms: 3.7       # ~100k 字大章处理延迟（T2-4 参考，非门禁）
+      save_to_indexed_ms: 390          # ≤500（单章变更 → 增量重建完成）
+      query_p95_ms: 13.8               # ≤80
+      rebuild_cpm: 60051455            # ≥20000（全量重建 1.107s / 1.108M 字；分片写入 128 块/批 + merge 500 页）
+      idle_rss_mb: 428                 # ≤600
+      million_chars_rss_mb: 649        # ≤1200
+    report: docs/assets/perf/perf-report-local-dev-20261005-r20-index-shards.json

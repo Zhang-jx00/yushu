@@ -407,8 +407,16 @@ export function registerIpcHandlers(): void {
     })),
   );
 
-  ipcMain.handle(CHANNELS.indexRebuild, (_event, payload?: IndexRebuildPayload) =>
-    wrap<IndexRebuildResultPayload>(() => rebuildProjectIndex(requireGateway(), payload ?? {})),
+  ipcMain.handle(CHANNELS.indexRebuild, (event, payload?: IndexRebuildPayload) =>
+    wrap<IndexRebuildResultPayload>(() =>
+      rebuildProjectIndex(requireGateway(), {
+        ...(payload ?? {}),
+        // 进度流（T2-5 切片 B）：分片写入 / 段合并阶段实时推送给发起窗口（窗口销毁则静默停止）
+        onProgress: (progress) => {
+          if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.indexProgress, progress);
+        },
+      }),
+    ),
   );
 
   ipcMain.handle(CHANNELS.indexSearch, (_event, payload: { keyword: string; limit?: number }) =>

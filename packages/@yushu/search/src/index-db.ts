@@ -134,17 +134,52 @@ export function estimateTokens(text: string): number {
   return cjk + asciiWords;
 }
 
-/** 写入派生数据（全量重建与增量更新共用；调用方负责事务与旧数据清理） */
+/* ---------- 分片写入与进度（M2 / T2-5 切片 B） ---------- */
+
+/** 重建进度事件（分片写入 / FTS 段合并的可观测口径；phase 含义见 rebuildIndex 注释） */
+export interface RebuildProgress {
+  /** files = 文件 / 实体 / 引用表；chunks = 正文块 + FTS 行级写入（每批一次）；merge = FTS 段合并 */
+  phase: "files" | "chunks" | "merge";
+  done: number;
+  total: number;
+  /** 当前批次末条记录所属文件（展示用，可空） */
+  currentPath?: string;
+}
+
+export interface RebuildOptions {
+  onProgress?: (progress: RebuildProgress) => void;
+  /** 每批写入的正文块数（分片粒度；默认 128） */
+  batchSize?: number;
+}
+
+/** 全文重建的默认分片粒度（正文块/批）：控制单次 FTS 写入事务内的段规模 */
+export const DEFAULT_REBUILD_BATCH = 128;
+
+/** 写入派生数据（全量重建与增量更新共用；调用方负责事务与旧数据清理）。
+ * - 默认（增量路径）：仅写内容表，FTS 同步由调用方行级 delete/insert 完成；
+ * - withFts = true（全量重建路径）：正文块与 FTS 行成批写入（分片），并回调进度；
+ * - 返回本轮写入的正文块批次数（分片数，供回执展示）。 */
 function insertRows(
   db: DatabaseSync,
   input: Pick<IndexInput, "files" | "entities" | "refs" | "chunks">,
   builtAt: string,
-): void {
+  hooks: { onProgress?: (progress: RebuildProgress) => void; batchSize?: number; withFts?: boolean } = {},
+): number {
+  const { onProgress, withFts = false } = hooks;
+  const batchSize = Math.max(1, Math.floor(hooks.batchSize ?? DEFAULT_REBUILD_BATCH));
   const insertFile = db.prepare(
     "INSERT INTO file_index(path, mtime, hash, bytes, indexed_at) VALUES (?, ?, ?, ?, ?)",
   );
+  let fileDone = 0;
   for (const file of input.files) {
     insertFile.run(file.path, file.mtime ?? null, file.hash, file.bytes, builtAt);
+    fileDone += 1;
+    if (onProgress && withFts && (fileDone % batchSize === 0 || fileDone === input.files.length)) {
+      onProgress({ phase: "files", done: fileDone, total: input.files.length });
+    }
+  }
+  if (onProgress && withFts && input.files.length === 0) {
+    onProgress({ phase: "files", done: 0, total: 0 });
   }
 
   const insertEntity = db.prepare(
@@ -171,33 +206,70 @@ function insertRows(
     `INSERT INTO chunks(id, path, chapter_id, volume, kind, text, text_fts, char_start, char_end, text_hash, entities, tokens)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  for (const chunk of input.chunks) {
-    insertChunk.run(
-      chunk.id,
-      chunk.path,
-      chunk.chapterId ?? null,
-      chunk.volume ?? null,
-      chunk.kind,
-      chunk.text,
-      toFtsText(chunk.text),
-      chunk.charStart,
-      chunk.charEnd,
-      chunk.textHash,
-      chunk.entities.join("、"),
-      estimateTokens(chunk.text),
-    );
+  const insertChunkFts = withFts
+    ? db.prepare("INSERT INTO chunks_fts(rowid, text_fts, entities) VALUES (?, ?, ?)")
+    : null;
+
+  let shards = 0;
+  const total = input.chunks.length;
+  for (let offset = 0; offset < total; offset += batchSize) {
+    const batch = input.chunks.slice(offset, offset + batchSize);
+    for (const chunk of batch) {
+      const result = insertChunk.run(
+        chunk.id,
+        chunk.path,
+        chunk.chapterId ?? null,
+        chunk.volume ?? null,
+        chunk.kind,
+        chunk.text,
+        toFtsText(chunk.text),
+        chunk.charStart,
+        chunk.charEnd,
+        chunk.textHash,
+        chunk.entities.join("、"),
+        estimateTokens(chunk.text),
+      );
+      // 分片路径：正文行与 FTS 行同批写入（external content 保持一致；旧索引已由 delete-all 清空）
+      if (insertChunkFts) {
+        insertChunkFts.run(result.lastInsertRowid, toFtsText(chunk.text), chunk.entities.join("、"));
+      }
+    }
+    shards += 1;
+    if (onProgress && withFts) {
+      const last = batch[batch.length - 1]!;
+      onProgress({
+        phase: "chunks",
+        done: Math.min(offset + batchSize, total),
+        total,
+        currentPath: last.path,
+      });
+    }
   }
+  return shards;
 }
 
-/** 全量重建：清空派生表 → 写入输入 → FTS5 external content 重建（幂等，可反复执行） */
-export function rebuildIndex(db: DatabaseSync, input: IndexInput, builtAt = new Date().toISOString()): IndexStats {
+/**
+ * 全量重建：清空派生表 → 清空 FTS 索引段 → 分片写入（正文块 + FTS 行同批）→ 段合并（幂等，可反复执行）。
+ * T2-5 切片 B：以行级分片写入替代一次性 `('rebuild')` 全库扫描——每批 batchSize 块（默认 128），
+ * 批间回调进度（files → chunks → merge，`chunks` 事件数即分片数）；结束用官方 `('merge', 500)`
+ * 把写入段合并到 500 页粒度（K09：控制段数量，兼顾查询性能与合并耗时）。`('delete-all')` 清空
+ * 外部内容表的索引段，保证旧内容不残留（删除 content 行不会自动清 FTS 索引，不先清会导致索引与内容不一致）。
+ */
+export function rebuildIndex(
+  db: DatabaseSync,
+  input: IndexInput,
+  builtAt = new Date().toISOString(),
+  options: RebuildOptions = {},
+): IndexStats {
+  const { onProgress, batchSize } = options;
   db.exec("BEGIN");
   try {
     db.exec("DELETE FROM chunks; DELETE FROM entities; DELETE FROM refs; DELETE FROM file_index;");
-    insertRows(db, input, builtAt);
-
-    // 官方全量重建命令（docs/03 §6：external content 可随时 rebuild）
-    db.exec("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');");
+    db.exec("INSERT INTO chunks_fts(chunks_fts) VALUES('delete-all');");
+    insertRows(db, input, builtAt, { onProgress, batchSize, withFts: true });
+    // FTS5 特殊命令带参数时经 rank 列传入（与 checkIntegrity 的 integrity-check 同款语法）
+    db.exec("INSERT INTO chunks_fts(chunks_fts, rank) VALUES('merge', 500);");
+    onProgress?.({ phase: "merge", done: 1, total: 1 });
     metaSet(db, "schema_version", String(INDEX_SCHEMA_VERSION));
     metaSet(db, "built_at", builtAt);
     db.exec("COMMIT");

@@ -452,8 +452,11 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     const exportedDoc = await api.doc.read(exported.path);
     const clipboardResult = await api.export.clipboard({ stripComments: true, stripAiMarks: true });
 
-    // 检索索引全链路：重建（.yushu/index.db）→ 中文全文检索 + 实体检索 → 状态回读
+    // 检索索引全链路：重建（分片写入 + 进度流，T2-5 切片 B）→ 中文全文检索 + 实体检索 → 状态回读
+    const indexProgressEvents = [];
+    const offIndexProgress = api.index.onProgress((progress) => indexProgressEvents.push(progress));
     const indexRebuild = await api.index.rebuild();
+    offIndexProgress();
     const indexSearch = await api.index.search("夜色");
     const indexEntitySearch = await api.index.search("林渊");
     const indexStatus = await api.index.status();
@@ -617,6 +620,13 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         searchChunks: indexSearch.chunks.length,
         snippetHasHit: indexSearch.chunks.some((chunk) => chunk.snippet.includes("夜色")),
         statusChunks: indexStatus.stats ? indexStatus.stats.chunks : -1,
+        shards: indexRebuild.shards,
+        progressOk:
+          indexProgressEvents.some((event) => event.phase === "parse") &&
+          indexProgressEvents.some((event) => event.phase === "chunks") &&
+          indexProgressEvents[indexProgressEvents.length - 1]?.phase === "merge",
+        progressShardsMatch:
+          indexProgressEvents.filter((event) => event.phase === "chunks").length === indexRebuild.shards,
       },
       naming: {
         rulesId: naming.rulesId,
@@ -704,6 +714,9 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         searchChunks: number;
         snippetHasHit: boolean;
         statusChunks: number;
+        shards: number;
+        progressOk: boolean;
+        progressShardsMatch: boolean;
       };
       naming: {
         rulesId: string;
@@ -1284,6 +1297,9 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.indexed.chunks >= 3 &&
       result.indexed.ftsRows === result.indexed.chunks &&
       result.indexed.skipped === 0 &&
+      result.indexed.shards >= 1 &&
+      result.indexed.progressOk &&
+      result.indexed.progressShardsMatch &&
       result.indexed.searchEntities >= 1 &&
       result.indexed.searchChunks >= 1 &&
       result.indexed.snippetHasHit &&

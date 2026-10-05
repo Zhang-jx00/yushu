@@ -25,7 +25,12 @@ import {
   type IndexSourceFile,
   type IndexSourceReader,
 } from "@yushu/world-engine";
-import type { IndexRebuildResultPayload, IndexSearchResultPayload, IndexStatusPayload } from "../shared/ipc.js";
+import type {
+  IndexProgressPayload,
+  IndexRebuildResultPayload,
+  IndexSearchResultPayload,
+  IndexStatusPayload,
+} from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
 
 /**
@@ -64,6 +69,34 @@ function toStatusPayload(stats: IndexStats | null): IndexStatusPayload {
     exists: stats !== null,
     stats,
     schemaVersion: INDEX_SCHEMA_VERSION,
+  };
+}
+
+/**
+ * 进度包装读取器（T2-5 切片 B）：统计"读取/解析真源文件"进度。
+ * listFiles 时按与收集侧同口径（isIndexablePath）确定总数；readText 成功一次回调一次。
+ * 注：incremental 场景中未变文件走快速跳过不读取，进度总数是"可索引文件数"的上限。
+ */
+function progressReader(
+  reader: IndexSourceReader,
+  onProgress?: (progress: IndexProgressPayload) => void,
+): IndexSourceReader {
+  let total = 0;
+  let done = 0;
+  return {
+    listFiles: async () => {
+      const files = await reader.listFiles();
+      total = files.filter((file) => isIndexablePath(file.path)).length;
+      return files;
+    },
+    readText: async (path) => {
+      const text = await reader.readText(path);
+      if (onProgress && isIndexablePath(path)) {
+        done += 1;
+        onProgress({ phase: "parse", done, total, currentPath: path });
+      }
+      return text;
+    },
   };
 }
 
@@ -169,6 +202,8 @@ async function applyIncremental(
 export interface RebuildIndexOptions {
   /** true = 增量（复用未变文件）；索引缺失或完整性校验失败时自动回退全量 */
   incremental?: boolean;
+  /** 进度回调（T2-5 切片 B）：parse = 读取真源；files / chunks / merge = 分片写入与段合并 */
+  onProgress?: (progress: IndexProgressPayload) => void;
 }
 
 export async function rebuildProjectIndex(
@@ -187,7 +222,12 @@ export async function rebuildProjectIndex(
       if (integrity.ok) {
         // 增量 diff 与收集侧同口径过滤（导出产物 / 引擎目录 / 旁路文件不参与，避免"伪变更"）
         const files = (await reader.listFiles()).filter((file) => isIndexablePath(file.path));
-        const outcome = await applyIncremental(reader, files, db, existingStats.builtAt);
+        const outcome = await applyIncremental(
+          progressReader(reader, options.onProgress),
+          files,
+          db,
+          existingStats.builtAt,
+        );
         return {
           path: INDEX_DB_RELATIVE,
           exists: true,
@@ -199,13 +239,21 @@ export async function rebuildProjectIndex(
           updatedFiles: outcome.updatedFiles,
           removedFiles: outcome.removedFiles,
           integrityIssues: [],
+          shards: 0,
         };
       }
       // 自愈（T2-5）：索引损坏 → 放弃增量，回退全量重建（问题项回报给 UI）
       integrityIssues = integrity.issues;
     }
-    const input = await collectIndexInput(reader);
-    const stats = rebuildIndex(db, input);
+    // 全量：解析与写入两段均回报进度；chunks 事件数即分片批次数（与写入循环同源）
+    let shards = 0;
+    const onProgress = options.onProgress;
+    const forward = (progress: IndexProgressPayload) => {
+      if (progress.phase === "chunks") shards += 1;
+      onProgress?.(progress);
+    };
+    const input = await collectIndexInput(progressReader(reader, forward));
+    const stats = rebuildIndex(db, input, undefined, { onProgress: forward });
     return {
       path: INDEX_DB_RELATIVE,
       exists: true,
@@ -217,6 +265,7 @@ export async function rebuildProjectIndex(
       updatedFiles: input.files.length,
       removedFiles: 0,
       integrityIssues,
+      shards,
     };
   } finally {
     closeIndex(db);

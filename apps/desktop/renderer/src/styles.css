@@ -1172,6 +1172,29 @@ select {
 
 /* ---------- 检索索引（项目文件页） ---------- */
 
+/* 重建进度（T2-5 切片 B）：分片写入 / 段合并 */
+.index-progress {
+  margin: 6px 0 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.index-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.index-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.15s linear;
+}
+
 .search-results {
   margin-top: 8px;
   border-top: 1px dashed var(--border);

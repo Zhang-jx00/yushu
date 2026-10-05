@@ -27,6 +27,7 @@ import type {
   ExportRunPayload,
   ExportRunResult,
   FusionPreview,
+  IndexProgressPayload,
   IndexRebuildPayload,
   IndexRebuildResultPayload,
   IndexSearchResultPayload,
@@ -108,6 +109,11 @@ export interface YushuApi {
     /** 重建索引：默认全量；`{ incremental: true }` 增量（复用未变文件，损坏时自动自愈为全量） */
     rebuild: (payload?: IndexRebuildPayload) => Promise<IndexRebuildResultPayload>;
     search: (keyword: string, limit?: number) => Promise<IndexSearchResultPayload>;
+    /**
+     * 订阅重建进度（T2-5 切片 B：解析 / 分片写入 / 段合并；主进程单向推送）；
+     * 返回取消订阅函数。
+     */
+    onProgress: (handler: (progress: IndexProgressPayload) => void) => () => void;
   };
   naming: {
     generate: (payload: NamingGeneratePayload) => Promise<NamingResultPayload>;

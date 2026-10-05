@@ -76,6 +76,15 @@ contextBridge.exposeInMainWorld("yushu", {
     status: () => invoke("index:status"),
     rebuild: (payload) => invoke("index:rebuild", payload),
     search: (keyword, limit) => invoke("index:search", { keyword, limit }),
+    /**
+     * 订阅索引重建进度（T2-5 切片 B：分片写入 / 段合并；主进程 → 渲染层单向推送）；
+     * 返回取消订阅函数，只透传事件数据。
+     */
+    onProgress: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("index:progress", listener);
+      return () => ipcRenderer.removeListener("index:progress", listener);
+    },
   },
   naming: {
     generate: (payload) => invoke("naming:generate", payload),

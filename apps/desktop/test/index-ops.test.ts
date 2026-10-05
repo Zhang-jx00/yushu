@@ -7,6 +7,7 @@ import { adoptDraft } from "../src/main/ai-ops.js";
 import { INDEX_DB_RELATIVE, readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "../src/main/index-ops.js";
 import { createOutlineChapter, createProject, generateOutline, writeCardDoc } from "../src/main/project-ops.js";
 import { ProjectGateway } from "../src/main/file-gateway.js";
+import type { IndexProgressPayload } from "../src/shared/ipc.js";
 
 let dir: string;
 
@@ -207,5 +208,49 @@ describe("桌面端索引（T1-21 / T1-22）", () => {
     expect(healed.integrityIssues.join("；")).toContain("FTS");
     expect(healed.stats.chunks).toBe(full.stats.chunks);
     expect(healed.stats.ftsRows).toBe(healed.stats.chunks);
+  });
+
+  it("全量重建进度（T2-5 切片 B）：解析与分片写入事件可达；分片数 = chunks 事件数", async () => {
+    const { gateway } = await setupProject();
+    const events: IndexProgressPayload[] = [];
+    const result = await rebuildProjectIndex(gateway, { onProgress: (progress) => events.push(progress) });
+
+    expect(result.mode).toBe("full");
+    expect(result.shards).toBeGreaterThanOrEqual(1);
+    expect(events.some((event) => event.phase === "parse")).toBe(true);
+
+    const chunkEvents = events.filter((event) => event.phase === "chunks");
+    expect(chunkEvents).toHaveLength(result.shards);
+    expect(chunkEvents[chunkEvents.length - 1]!.done).toBe(result.stats.chunks);
+    expect(events[events.length - 1]!.phase).toBe("merge");
+
+    // 解析进度最终 done == total（所有可索引文件均被读取）
+    const parseEvents = events.filter((event) => event.phase === "parse");
+    const lastParse = parseEvents[parseEvents.length - 1]!;
+    expect(lastParse.done).toBe(lastParse.total);
+    expect(lastParse.total).toBe(result.stats.files);
+
+    // 分片写入完成后 FTS 与内容对齐（影子表口径）
+    expect(result.stats.ftsRows).toBe(result.stats.chunks);
+  });
+
+  it("增量重建进度（T2-5 切片 B）：读取流转为 parse 事件；回执分片数为 0", async () => {
+    const { gateway, cardPath } = await setupProject();
+    await rebuildProjectIndex(gateway);
+    const snapshot = await gateway.readDoc(cardPath);
+    await gateway.writeDoc(
+      cardPath,
+      snapshot.content.replace("剑指苍穹", "剑指苍穹，持有玄铁令"),
+      snapshot.hash,
+    );
+
+    const events: IndexProgressPayload[] = [];
+    const result = await rebuildProjectIndex(gateway, {
+      incremental: true,
+      onProgress: (progress) => events.push(progress),
+    });
+    expect(result.mode).toBe("incremental");
+    expect(result.shards).toBe(0);
+    expect(events.some((event) => event.phase === "parse" && event.currentPath === cardPath)).toBe(true);
   });
 });
