@@ -1,5 +1,7 @@
 import { BrowserWindow, app } from "electron";
 import { join } from "node:path";
+import { CHANNELS } from "../shared/ipc.js";
+import { CloseCoordinator, registerCloseCoordinator, unregisterCloseCoordinator } from "./close-coordinator.js";
 import { registerIpcHandlers } from "./ipc.js";
 import { appRoot } from "./paths.js";
 import { parseTrialDir, runTrial } from "./trial.js";
@@ -25,6 +27,24 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   });
+
+  // 关闭窗口前 flush（T2-6 完整版）：首次 close 拦截 → 渲染层落盘 → 回执后真正关闭；超时（5s）兜底强关。
+  // 页面尚未加载完成时无未落盘内容可言：requestFlush 返回 false 直接放行，不拖延用户退出。
+  const coordinator = new CloseCoordinator({
+    requestFlush: () => {
+      if (win.isDestroyed() || win.webContents.isDestroyed() || win.webContents.isLoading()) return false;
+      win.webContents.send(CHANNELS.appBeforeClose);
+      return true;
+    },
+    forceClose: () => {
+      if (!win.isDestroyed()) win.destroy();
+    },
+    onEvent: (event) => console.log(`[close-flush] ${event}`),
+  });
+  const webContentsId = win.webContents.id;
+  registerCloseCoordinator(webContentsId, coordinator);
+  win.on("close", (event) => coordinator.handleClose(event));
+  win.on("closed", () => unregisterCloseCoordinator(webContentsId));
 
   // 开发模式：加载 Vite dev server（scripts/dev.mjs 注入）；生产：加载构建产物
   const devServerUrl = process.env["VITE_DEV_SERVER_URL"];
@@ -72,8 +92,11 @@ void app.whenReady().then(() => {
   }
   // --e2e-smoke：端到端验收——在真实窗口内经 IPC 走完 建项目→建设定卡→生成大纲→创建草稿章节 全链路
   if (process.argv.includes("--e2e-smoke")) {
+    // 关闭前 flush 探针会自行 destroy 窗口：抑制「窗口全关即退出」，末尾由断言结果统一 app.exit
+    autoQuitDisabled = true;
     const win = createWindow();
-    win.webContents.on("did-finish-load", () => {
+    // once：关闭前 flush 探针会 reload 渲染层，did-finish-load 会再次触发——绝不能让 e2e 跑第二遍
+    win.webContents.once("did-finish-load", () => {
       void runE2E(win);
     });
     win.webContents.on("did-fail-load", (_event, code, desc) => {
@@ -119,7 +142,7 @@ void app.whenReady().then(() => {
 });
 
 async function runE2E(win: BrowserWindow): Promise<void> {
-  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { mkdtemp, rm, readFile } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const dir = await mkdtemp(join(tmpdir(), "yushu-e2e-"));
@@ -460,6 +483,73 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
+
+    // 关闭前 flush（T2-6 完整版）：编辑器内输入（不等自动保存）→ 立即关闭窗口 →
+    // 协调器拦截 close 并请求渲染层落盘 → 回执后真正关闭。从「输入」到「窗口 closed」
+    // 全程 < 800ms（自动保存防抖窗口）即证明内容由关闭前 flush 落盘，而非自动保存抢先写入。
+    // 前置：大脚本创建项目时渲染层仍停在欢迎页（App 挂载早于 createProject）——
+    // 先重载渲染层（App 重新挂载时 project:current 返回已挂载项目 → 进入项目页）。
+    const reloaded = new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
+    win.webContents.reload();
+    await reloaded;
+    // 探针需要编辑器调试句柄（与 UI 预演同一机制；标志需在编辑器视图挂载前设置）
+    await win.webContents.executeJavaScript("window.__yushuDebug = true;");
+    const closeProbeScript = `(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const waitFor = async (fn, timeout = 12000) => {
+        const t0 = Date.now();
+        for (;;) {
+          let r = null;
+          try { r = fn(); } catch { r = null; }
+          if (r) return r;
+          if (Date.now() - t0 > timeout) return null;
+          await sleep(100);
+        }
+      };
+      const tabs = await waitFor(() => (document.querySelectorAll('.tab').length > 0 ? [...document.querySelectorAll('.tab')] : null), 15000);
+      if (!tabs) return { ok: false, note: '项目页标签未出现：' + document.body.innerText.slice(0, 160).split('\\n').join(' | ') };
+      const tab = tabs.find((x) => x.textContent.includes('编辑器'));
+      if (!tab) return { ok: false, note: '找不到编辑器标签页' };
+      tab.click();
+      const view = await waitFor(() => (window.__yushuCmView && window.__yushuCmView.state.doc.length > 0 ? window.__yushuCmView : null));
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      if (!view || !ie) return { ok: false, note: '编辑器未就绪（调试句柄未暴露或章节未加载）' };
+      await ie.reload();
+      const marker = '关闭前 flush 验证：断桥残雪。';
+      const dispatchAt = Date.now();
+      view.dispatch({ changes: { from: view.state.doc.length, insert: '\\n\\n' + marker } });
+      return { ok: true, marker, dispatchAt };
+    })()`;
+    let closeFlush = { ok: false, withinDebounce: false, sinceDispatchMs: -1, note: "未执行" };
+    try {
+      const probe = (await win.webContents.executeJavaScript(closeProbeScript)) as {
+        ok: boolean;
+        marker?: string;
+        dispatchAt?: number;
+        note?: string;
+      };
+      if (!probe.ok || typeof probe.dispatchAt !== "number" || !probe.marker) {
+        closeFlush = { ...closeFlush, note: probe.note ?? "预置脚本失败" };
+      } else {
+        const marker = probe.marker;
+        const closed = new Promise<void>((resolve) => win.once("closed", () => resolve()));
+        win.close();
+        await closed;
+        const sinceDispatchMs = Date.now() - probe.dispatchAt;
+        const chapterContent = await readFile(join(dir, result.chapterPath), "utf8");
+        const hasMarker = chapterContent.includes(marker);
+        closeFlush = {
+          ok: hasMarker,
+          withinDebounce: sinceDispatchMs < 800,
+          sinceDispatchMs,
+          note: `输入→closed ${sinceDispatchMs}ms（<800ms 自动保存防抖窗口）；重新读盘含标记=${hasMarker}`,
+        };
+      }
+    } catch (err) {
+      closeFlush = { ...closeFlush, note: `异常：${err instanceof Error ? err.message : String(err)}` };
+    }
+    console.log("[e2e] 关闭前 flush:", JSON.stringify(closeFlush));
+
     const ok =
       result.ready &&
       result.cards === 2 &&
@@ -530,10 +620,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.incremental.hit >= 1 &&
       result.incremental.filesKeep &&
       result.autoIndex.hit >= 1 &&
-      result.autoIndex.lastRunAt !== null;
+      result.autoIndex.lastRunAt !== null &&
+      closeFlush.ok &&
+      closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 关闭前 flush（关窗落盘） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

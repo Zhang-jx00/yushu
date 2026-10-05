@@ -12,6 +12,7 @@ import {
   type AiSaveConfigPayload,
   type AiStartResult,
   type AiUsageState,
+  type AppFlushDonePayload,
   type CardReadResult,
   type CardSummary,
   type CardWritePayload,
@@ -62,6 +63,7 @@ import {
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
 import { IndexRefreshScheduler } from "./index-scheduler.js";
+import { closeCoordinatorFor } from "./close-coordinator.js";
 import { generateNames } from "./naming-ops.js";
 import { readChapter, writeChapterBody, writeChapterSidecar } from "./chapter-ops.js";
 import {
@@ -366,6 +368,12 @@ export function registerIpcHandlers(): void {
       return true;
     }),
   );
+
+  // 关闭前 flush（T2-6 完整版）：渲染层落盘完成回执（单向消息）→ 记录结果并放行对应窗口的关闭
+  ipcMain.on(CHANNELS.appFlushDone, (event, payload?: AppFlushDonePayload) => {
+    console.log(`[close-flush] 渲染层回执：${JSON.stringify(payload ?? {})}`);
+    closeCoordinatorFor(event.sender.id)?.handleFlushDone();
+  });
 
   /* ---------- 章节编辑器（M2 / T2-1 切片 A） ---------- */
 

@@ -45,12 +45,29 @@ export const CHANNELS = {
   namingGenerate: "naming:generate",
   /** 通用剪贴板写入（主进程 Electron clipboard；渲染层 file:// 下 navigator.clipboard 不可靠） */
   appWriteClipboard: "app:writeClipboard",
+  /** 主进程 → 渲染层：请求关闭窗口前落盘（T2-6 完整版；单向推送，非 invoke） */
+  appBeforeClose: "app:beforeClose",
+  /** 渲染层 → 主进程：落盘完成回执（单向 send；主进程据此真正关闭窗口，或超时兜底） */
+  appFlushDone: "app:flushDone",
   chapterRead: "chapter:read",
   chapterWrite: "chapter:write",
   chapterWriteSidecar: "chapter:writeSidecar",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
+
+/**
+ * 关闭前 flush 的渲染层回执（app:flushDone 单向载荷）。
+ * 主进程仅记录日志（判定以窗口关闭流程为准：回执到达即放行，否则超时兜底）。
+ */
+export interface AppFlushDonePayload {
+  /** 渲染层存在编辑器视图且已调用落盘（未在编辑时为 false，无内容可落） */
+  editorFlushed?: boolean;
+  /** 编辑器回传细节（调度器状态等，诊断用） */
+  detail?: string;
+  /** 落盘失败原因（冻结 / IPC 异常等；不阻塞关闭） */
+  error?: string;
+}
 
 export interface TreeEntry {
   path: string;

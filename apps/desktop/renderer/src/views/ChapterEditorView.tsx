@@ -11,6 +11,7 @@ import { findUnsupportedSyntax, htmlToMd, mdToHtml } from "../markdown-bridge";
 import { collectMentionedEntities, type EntityIndexEntry } from "../entity-mentions";
 import { entityMentionPlugin } from "../entity-mention-plugin";
 import { createAutosaveScheduler, type AutosaveScheduler, type AutosaveState } from "../autosave";
+import { registerEditorFlusher } from "../editor-flush";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 
 /**
@@ -183,6 +184,20 @@ export function ChapterEditorView({
     }
     return schedulerRef.current;
   }, []);
+
+  // 关闭窗口前 flush（T2-6 完整版）：把「落盘待发改动」注册到全局注册表，供 App 的关闭处理器调用；
+  // 返回调度器状态快照（主进程日志诊断：是否确有待发改动、是否落盘成功）
+  useEffect(
+    () =>
+      registerEditorFlusher(async () => {
+        const scheduler = getScheduler();
+        const before = scheduler.state();
+        const snapshot = `path=${selectedPathRef.current ?? "(none)"} dirty=${dirtyRef.current} docLen=${viewRef.current?.state.doc.length ?? -1}`;
+        await scheduler.flush();
+        return `scheduler ${before}→${scheduler.state()}；${snapshot}`;
+      }),
+    [getScheduler],
+  );
 
   const refreshEntities = useCallback(async () => {
     try {

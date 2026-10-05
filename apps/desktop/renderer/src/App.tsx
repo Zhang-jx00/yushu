@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { ProjectSnapshot } from "../../src/shared/ipc";
+import type { AppFlushDonePayload, ProjectSnapshot } from "../../src/shared/ipc";
 import { api } from "./api";
+import { flushEditorIfAny } from "./editor-flush";
 import { ProjectScreen } from "./views/ProjectScreen";
 import { WizardView } from "./views/WizardView";
 
@@ -25,6 +26,33 @@ export function App() {
     return () => {
       alive = false;
     };
+  }, []);
+
+  // 关闭窗口前 flush（T2-6 完整版）：主进程拦截窗口 close 后请求落盘；
+  // 无论成败都必须回执（失败 = 冻结等场景由超时兜底，不阻塞用户关闭）。
+  useEffect(() => {
+    const off = api().app.onBeforeClose(() => {
+      void (async () => {
+        let payload: AppFlushDonePayload = { editorFlushed: false };
+        try {
+          const outcome = await flushEditorIfAny();
+          payload = {
+            editorFlushed: outcome.hadEditor,
+            ...(outcome.detail ? { detail: outcome.detail } : {}),
+          };
+        } catch (err) {
+          payload = { editorFlushed: false, error: err instanceof Error ? err.message : String(err) };
+          console.error("关闭前 flush 失败（不阻塞关闭，内容保持现状）:", err);
+        } finally {
+          try {
+            api().app.flushDone(payload);
+          } catch {
+            /* 窗口可能已在销毁：回执失败等价于由超时兜底 */
+          }
+        }
+      })();
+    });
+    return off;
   }, []);
 
   const openExisting = async () => {

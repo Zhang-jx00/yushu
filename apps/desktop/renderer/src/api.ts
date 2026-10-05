@@ -8,6 +8,7 @@ import type {
   AiStartResult,
   AiStreamEvent,
   AiUsageState,
+  AppFlushDonePayload,
   CardReadResult,
   CardSummary,
   CardWritePayload,
@@ -106,6 +107,13 @@ export interface YushuApi {
   app: {
     /** 通用剪贴板写入（走主进程 Electron clipboard，生产 file:// 下更可靠） */
     writeClipboard: (text: string) => Promise<boolean>;
+    /**
+     * 订阅「关闭窗口前落盘」请求（T2-6 完整版；主进程拦截窗口 close 后推送）；
+     * 渲染层 flush 完毕须调用 flushDone() 回执。返回取消订阅函数。
+     */
+    onBeforeClose: (handler: () => void) => () => void;
+    /** 落盘完成回执（单向发送；载荷供主进程记录日志） */
+    flushDone: (payload?: AppFlushDonePayload) => void;
   };
   chapter: {
     /** 读取章节正文（不含 frontmatter）与记录字数 */

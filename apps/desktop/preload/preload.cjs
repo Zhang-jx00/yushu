@@ -82,6 +82,17 @@ contextBridge.exposeInMainWorld("yushu", {
   },
   app: {
     writeClipboard: (text) => invoke("app:writeClipboard", { text }),
+    /**
+     * 订阅「关闭窗口前落盘」请求（主进程 → 渲染层单向推送）；返回取消订阅函数。
+     * 渲染层完成 flush 后必须调用 flushDone() 回执，主进程才会真正关闭窗口（超时兜底 5s）。
+     */
+    onBeforeClose: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on("app:beforeClose", listener);
+      return () => ipcRenderer.removeListener("app:beforeClose", listener);
+    },
+    /** 落盘完成回执（单向发送；payload 供主进程记录日志：{ editorFlushed, detail, error }） */
+    flushDone: (payload) => ipcRenderer.send("app:flushDone", payload),
   },
   chapter: {
     read: (path) => invoke("chapter:read", { path }),
