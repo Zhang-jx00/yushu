@@ -813,6 +813,35 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 20,
+    title: "码字统计：有效字数与档位 / 节奏曲线 / 写作日历热力图（T2-9 切片 B）",
+    file: "step20-stats-b.png",
+    body: String.raw`
+      await tab('码字统计');
+      const effective = await waitFor(() => document.querySelector('.stats-effective'), 12000);
+      if (!effective) return { ok: false, note: '有效字数行未出现：' + pageText() };
+      const effText = String(effective.textContent);
+      const effectiveShown = effText.includes('有效字数') && effText.includes('4,000 普通 / 6,000 进阶');
+      const tierText = String(effective.querySelector('.stats-tier')?.textContent ?? '');
+      const tierShown = /(未达标|普通档|进阶档)/.test(tierText);
+      const line = document.querySelector('.stats-speed svg polyline.speed-line');
+      const speedPoints = line ? (line.getAttribute('points') || '').split(' ').filter(Boolean).length : 0;
+      const cells = document.querySelectorAll('.stats-heat-grid .heat-cell').length;
+      // 滚动到切片 B 区域（节奏曲线 + 热力图）：让截图证据拍到新 UI，再点击热力格查看单日详情
+      const heatmap = document.querySelector('.stats-heatmap');
+      if (heatmap) heatmap.scrollIntoView({ block: 'center' });
+      await sleep(150);
+      const firstCell = document.querySelector('.stats-heat-grid .heat-cell');
+      if (firstCell) firstCell.click();
+      const picked = await waitFor(() => (document.querySelector('.heat-foot .muted') ? true : null), 8000);
+      return {
+        ok: effectiveShown && tierShown && speedPoints >= 30 && cells >= 84 && picked === true,
+        note: '有效字数行=' + effectiveShown + '（档位标签「' + tierText + '」）；速度曲线点数=' + speedPoints +
+          '；热力格=' + cells + '；点击详情=' + (picked === true),
+      };
+    `,
+  },
 ];
 
 /**

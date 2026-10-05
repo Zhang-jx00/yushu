@@ -1343,6 +1343,136 @@ select {
   background: var(--bad);
 }
 
+/* ---------- 码字统计·切片 B（有效字数 / 节奏曲线 / 日历热力） ---------- */
+
+.stats-effective {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.stats-tier {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+}
+
+.stats-tier.is-basic {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.stats-tier.is-advanced {
+  color: #fff;
+  border-color: var(--good);
+  background: var(--good);
+}
+
+.stats-tier.is-none {
+  color: var(--muted);
+}
+
+.stats-speed {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.stats-speed svg {
+  width: 100%;
+  height: 96px;
+  display: block;
+  margin-top: 6px;
+}
+
+.speed-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.speed-goal {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.stats-heatmap {
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.stats-heat-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 12px);
+  gap: 3px;
+  margin-top: 8px;
+  justify-content: start;
+}
+
+.heat-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: none;
+  padding: 0;
+  background: var(--panel-2);
+  cursor: pointer;
+}
+
+.heat-cell.l0 {
+  background: var(--panel-2);
+}
+
+.heat-cell.l1 {
+  background: #d9e8d4;
+}
+
+.heat-cell.l2 {
+  background: #a9cfa4;
+}
+
+.heat-cell.l3 {
+  background: #6faa74;
+}
+
+.heat-cell.l4 {
+  background: var(--good);
+}
+
+.heat-cell.lneg {
+  background: var(--bad);
+}
+
+.heat-cell.on {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.heat-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.heat-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.heat-legend .heat-cell {
+  cursor: default;
+}
+
 /* ---------- 取名助手（世界观档案） ---------- */
 
 .naming-pattern {

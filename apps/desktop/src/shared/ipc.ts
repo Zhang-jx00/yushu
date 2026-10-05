@@ -829,7 +829,7 @@ export interface SessionStatusPayload {
   snapshotStale: boolean;
 }
 
-/* ---------- 码字统计（M2 / T2-9 切片 A） ---------- */
+/* ---------- 码字统计（M2 / T2-9 切片 A/B） ---------- */
 
 /** 单日聚合（本地时区日期键） */
 export interface StatsDailyEntryPayload {
@@ -839,15 +839,28 @@ export interface StatsDailyEntryPayload {
   delta: number;
   /** 当日计入的保存次数（delta=0 的保存不计） */
   saves: number;
+  /** 当日平台口径有效字数净增（去空白换算，T2-9 切片 B；旧数据 / 缺失为 0） */
+  effective: number;
+}
+
+/** 速度曲线单点（T2-9 切片 B）：当日净增 + 7 日滑动平均（字/天；缺失日按 0 计入窗口） */
+export interface StatsSpeedPointPayload {
+  date: string;
+  delta: number;
+  avg: number;
 }
 
 export interface StatsStatePayload {
   /** 每日目标（0 = 未设目标） */
   goal: { daily: number };
-  /** 今日（无记录时 delta=0 / saves=0） */
+  /** 今日（无记录时 delta=0 / saves=0 / effective=0） */
   today: StatsDailyEntryPayload;
-  /** 按日期升序（最多 90 天，供柱状图） */
+  /** 按日期升序（最多 90 天，供柱状图 / 热力图） */
   daily: StatsDailyEntryPayload[];
+  /** 最近 30 天连续速度序列（含今日，补零；供速度曲线） */
+  speed: StatsSpeedPointPayload[];
+  /** 平台档位参考（番茄全勤口径：basic=4,000 / advanced=6,000；I08 §3） */
+  tiers: { basic: number; advanced: number };
   summary: {
     /** 最近 7 天（含今日） */
     week: number;
@@ -855,6 +868,8 @@ export interface StatsStatePayload {
     month: number;
     /** 全部历史 */
     total: number;
+    /** 最近 30 天有效字数合计（切片 B） */
+    monthEffective: number;
     /** 有记录的活跃天数 */
     activeDays: number;
     /** total / activeDays（四舍五入；无记录为 0） */

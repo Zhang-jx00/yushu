@@ -1,5 +1,5 @@
 import { countWords } from "@yushu/core";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,10 +7,20 @@ import { adoptDraft } from "../src/main/ai-ops.js";
 import { writeChapterBody } from "../src/main/chapter-ops.js";
 import { ProjectGateway } from "../src/main/file-gateway.js";
 import { createOutlineChapter, createProject, generateOutline } from "../src/main/project-ops.js";
-import { STATS_PATH, diffDays, localDateKey, readStatsState, recordChapterDelta, setStatsGoal } from "../src/main/stats-ops.js";
+import {
+  STATS_PATH,
+  countEffectiveChars,
+  diffDays,
+  localDateKey,
+  readStatsState,
+  recordChapterDelta,
+  setStatsGoal,
+  shiftDateKey,
+} from "../src/main/stats-ops.js";
 
 /**
- * 码字统计（T2-9 切片 A）：记账（净增 / 负值 / 空保存不计） / 多日汇总与断更 / 目标 / 损坏容错。
+ * 码字统计（T2-9 切片 A/B）：记账（净增 / 负值 / 空保存不计） / 多日汇总与断更 / 目标 / 损坏容错；
+ * 切片 B：有效字数口径与记账 / 旧数据兼容 / 速度序列（30 天补零 + 7 日滑动平均）/ 档位常量。
  * 口径：章节净增字数（编辑器保存与 AI 采纳均计；本地时区日键）。
  */
 
@@ -89,6 +99,7 @@ describe("码字统计（T2-9 切片 A）", () => {
     const state = await readStatsState(gateway);
     expect(state.today.delta).toBeGreaterThan(0);
     expect(state.today.saves).toBe(1);
+    expect(state.today.effective).toBe(countEffectiveChars("采纳的正文甲乙丙。"));
   });
 
   it("多日汇总 / 断更 / 连续天数（注入时间口径）", async () => {
@@ -111,13 +122,13 @@ describe("码字统计（T2-9 切片 A）", () => {
 
     // 当日（10-05）视角：连续 2 天（05、04 连续；03 缺）
     const today = await readStatsState(gateway, new Date("2026-10-05T12:00:00"));
-    expect(today.today).toEqual({ date: "2026-10-05", delta: 300, saves: 1 });
+    expect(today.today).toEqual({ date: "2026-10-05", delta: 300, saves: 1, effective: 0 });
     expect(today.summary.total).toBe(2800);
     expect(today.summary.week).toBe(2800);
     expect(today.summary.month).toBe(2800);
     expect(today.summary.activeDays).toBe(4);
     expect(today.summary.avgActiveDay).toBe(700);
-    expect(today.summary.bestDay).toEqual({ date: "2026-10-02", delta: 2000, saves: 3 });
+    expect(today.summary.bestDay).toEqual({ date: "2026-10-02", delta: 2000, saves: 3, effective: 0 });
     expect(today.daysSinceLastWriting).toBe(0);
     expect(today.streakDays).toBe(2);
 
@@ -208,5 +219,92 @@ describe("码字统计（T2-9 切片 A）", () => {
     expect(diffDays("2026-10-04", "2026-10-05")).toBe(1);
     expect(diffDays("2026-09-30", "2026-10-01")).toBe(1);
     expect(diffDays("2026-10-05", "2026-10-05")).toBe(0);
+  });
+
+  it("切片 B：countEffectiveChars 去空白口径（保留标点 / 全角空格 / 换行）与 shiftDateKey 跨月年", () => {
+    expect(countEffectiveChars("甲 乙\n丙\t丁。！")).toBe(6);
+    expect(countEffectiveChars("a b 中 文")).toBe(4);
+    expect(countEffectiveChars("　全角　空格")).toBe(4);
+    expect(countEffectiveChars("")).toBe(0);
+    expect(shiftDateKey("2026-10-01", -1)).toBe("2026-09-30");
+    expect(shiftDateKey("2026-12-31", 1)).toBe("2027-01-01");
+    expect(shiftDateKey("2026-03-01", -28)).toBe("2026-02-01");
+  });
+
+  it("切片 B：编辑器保存记账有效字数净增（可负；空保存不计）", async () => {
+    const { chapterPath } = await setupDraft();
+    const initial = await gateway.readDoc(chapterPath);
+
+    const first = await writeChapterBody(gateway, { path: chapterPath, body: BODY_A, baseHash: initial.hash });
+    let state = await readStatsState(gateway);
+    expect(state.today.effective).toBe(countEffectiveChars(BODY_A));
+
+    const second = await writeChapterBody(gateway, { path: chapterPath, body: BODY_B, baseHash: first.hash });
+    state = await readStatsState(gateway);
+    expect(state.today.effective).toBe(countEffectiveChars(BODY_B));
+
+    // 删字：有效字数净减；同内容空保存不改变累计
+    const third = await writeChapterBody(gateway, { path: chapterPath, body: BODY_A, baseHash: second.hash });
+    await writeChapterBody(gateway, { path: chapterPath, body: BODY_A, baseHash: third.hash });
+    state = await readStatsState(gateway);
+    expect(state.today.effective).toBe(countEffectiveChars(BODY_A));
+    expect(state.summary.monthEffective).toBe(countEffectiveChars(BODY_A));
+  });
+
+  it("切片 B：旧条目无 effective → 缺失按 0 处理，写回不补造历史", async () => {
+    await mkdir(join(dir, ".yushu"), { recursive: true });
+    await writeFile(
+      join(dir, STATS_PATH),
+      JSON.stringify({
+        schema_version: 1,
+        goal: { daily: 3000 },
+        updated_at: "",
+        daily: {
+          "2026-10-05": { delta: 100, saves: 1 },
+          "2026-10-04": { delta: 500, saves: 2, effective: 480 },
+        },
+      }),
+      "utf8",
+    );
+    const state = await readStatsState(gateway, new Date("2026-10-05T12:00:00"));
+    expect(state.today.effective).toBe(0);
+    expect(state.summary.monthEffective).toBe(480);
+
+    await recordChapterDelta(gateway, { path: "chapters/x.md", oldWords: 0, newWords: 5, oldEffective: 0, newEffective: 6 });
+    const after = await readStatsState(gateway, new Date("2026-10-05T12:00:00"));
+    expect(after.today.effective).toBe(6);
+    expect(after.summary.monthEffective).toBe(486);
+
+    // 写回后旧条目保持「无 effective」原样（不补造 0 值历史）
+    const raw = JSON.parse(await readFile(join(dir, STATS_PATH), "utf8")) as {
+      daily: Record<string, Record<string, unknown>>;
+    };
+    expect(raw.daily["2026-10-04"]).toEqual({ delta: 500, saves: 2, effective: 480 });
+    expect(raw.daily["2026-10-05"]).toEqual({ delta: 105, saves: 2, effective: 6 });
+  });
+
+  it("切片 B：速度序列 30 天补零 + 7 日滑动平均（末尾满窗取均值、窗口首端按可得天数）；档位常量", async () => {
+    const daily: Record<string, { delta: number; saves: number }> = {};
+    for (const date of ["10-01", "10-02", "10-03", "10-04", "10-05", "10-06", "10-07"]) {
+      daily[`2026-${date}`] = { delta: 100, saves: 1 };
+    }
+    await mkdir(join(dir, ".yushu"), { recursive: true });
+    await writeFile(
+      join(dir, STATS_PATH),
+      JSON.stringify({ schema_version: 1, goal: { daily: 3000 }, updated_at: "", daily }),
+      "utf8",
+    );
+
+    const state = await readStatsState(gateway, new Date("2026-10-07T12:00:00"));
+    expect(state.speed).toHaveLength(30);
+    expect(state.tiers).toEqual({ basic: 4000, advanced: 6000 });
+    // 末点（10-07）：窗口 10-01..10-07 全有数据 → 100
+    expect(state.speed[29]).toEqual({ date: "2026-10-07", delta: 100, avg: 100 });
+    // 前一点（10-06）：窗口 09-30..10-06（09-30 无数据按 0）→ 600 / 7 ≈ 86
+    expect(state.speed[28]!.avg).toBe(86);
+    // 窗口首端（09-08）：仅当日、无数据 → 0；日期连续递增
+    expect(state.speed[0]).toEqual({ date: "2026-09-08", delta: 0, avg: 0 });
+    // 10-01：窗口 09-25..10-01 内仅 10-01 有数据 → 100 / 7 ≈ 14
+    expect(state.speed[23]).toEqual({ date: "2026-10-01", delta: 100, avg: 14 });
   });
 });

@@ -8,7 +8,7 @@ import type {
   ChapterWriteResult,
 } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
-import { recordChapterDelta } from "./stats-ops.js";
+import { countEffectiveChars, recordChapterDelta } from "./stats-ops.js";
 
 /**
  * 章节正文读写（M2 / T2-1 切片 A：源码形态编辑器）：
@@ -38,9 +38,16 @@ export async function writeChapterBody(
   const wordCount = countWords(payload.body);
   const text = serializeChapterFile({ ...chapter, word_count: wordCount }, payload.body);
   const written = await gateway.writeDoc(payload.path, text, payload.baseHash);
-  // T2-9 码字统计：按章节净增字数记账（frontmatter 记录值为旧值，缺失时回算正文；失败不阻断保存）
+  // T2-9 码字统计：按章节净增字数记账（frontmatter 记录值为旧值，缺失时回算正文）；
+  // 切片 B：同时记平台口径有效字数净增（去空白换算；失败不阻断保存）
   const oldWords = chapter.word_count > 0 ? chapter.word_count : countWords(oldBody);
-  await recordChapterDelta(gateway, { path: payload.path, oldWords, newWords: wordCount }).catch(() => undefined);
+  await recordChapterDelta(gateway, {
+    path: payload.path,
+    oldWords,
+    newWords: wordCount,
+    oldEffective: countEffectiveChars(oldBody),
+    newEffective: countEffectiveChars(payload.body),
+  }).catch(() => undefined);
   return { path: payload.path, hash: written.hash, wordCount };
 }
 

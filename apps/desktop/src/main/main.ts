@@ -424,7 +424,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     } catch (err) {
       chapterInfo.error = String(err && err.message).slice(0, 200);
     }
-    // 码字统计（T2-9 切片 A）：章节保存后记账可见（净增口径）
+    // 码字统计（T2-9 切片 A/B）：章节保存后记账可见（净增口径 + 有效字数口径 + 速度序列）
     const statsProbe = await api.stats.read();
     const exportPreview = await api.export.preview();
     let confirmError = "";
@@ -624,6 +624,9 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         todaySaves: statsProbe.today.saves,
         goal: statsProbe.goal.daily,
         dailyDays: statsProbe.daily.length,
+        todayEffective: statsProbe.today.effective,
+        speedPoints: statsProbe.speed.length,
+        tiers: statsProbe.tiers,
       },
       incremental,
       autoIndex,
@@ -708,6 +711,9 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         todaySaves: number;
         goal: number;
         dailyDays: number;
+        todayEffective: number;
+        speedPoints: number;
+        tiers: { basic: number; advanced: number };
       };
       incremental: {
         mode: string;
@@ -1282,6 +1288,10 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.stats.todayDelta > 0 &&
       result.stats.todaySaves >= 1 &&
       result.stats.dailyDays >= 1 &&
+      result.stats.todayEffective > 0 &&
+      result.stats.speedPoints === 30 &&
+      result.stats.tiers.basic === 4000 &&
+      result.stats.tiers.advanced === 6000 &&
       result.pipeline.conflict === "E_DOC_CONFLICT" &&
       result.pipeline.sidecarOk &&
       result.pipeline.mainKeptExternal &&
@@ -1315,7 +1325,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 码字统计（净增记账）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
