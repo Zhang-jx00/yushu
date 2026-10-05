@@ -26,8 +26,12 @@ const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** 与 apps/desktop/src/main/main.ts 的 KILL_TEST_MARKER 保持一致 */
 const MARKER = "杀进程实测：孤灯残卷。";
 
+/** 已启动的子进程登记（第 15 轮复核：清理阶段统一强杀，脚本异常 / 超时也不残留进程） */
+const spawned = [];
+
 function startElectron(arg) {
   const child = spawn(electronPath, [appDir, arg], { cwd: appDir, stdio: ["ignore", "pipe", "pipe"] });
+  spawned.push(child);
   let output = "";
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
@@ -50,6 +54,16 @@ function startElectron(arg) {
     }
   };
   return { child, exited, waitForText };
+}
+
+/** 等待子进程退出（带超时：强杀失败必须显式失败，绝不挂起脚本） */
+function waitExit(handle, timeoutMs, subject) {
+  return Promise.race([
+    handle.exited,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${subject} 未在 ${timeoutMs}ms 内退出（强杀可能失败）`)), timeoutMs),
+    ),
+  ]);
 }
 
 function hardKill(pid) {
@@ -82,7 +96,7 @@ try {
   await childA.waitForText("KILL_READY", 90_000);
   // ② 真实强杀（此刻：自动保存防抖因持续输入永不触发；journal 已落盘）
   hardKill(childA.child.pid);
-  const killed = await childA.exited;
+  const killed = await waitExit(childA, 15_000, "子进程 A");
 
   // ③ 磁盘取证（harness 侧直接读文件，不经应用）
   const recoveryDir = join(dir, ".yushu", "recovery");
@@ -104,7 +118,7 @@ try {
   const resultOutput = await childB.waitForText("KILL_RESULT ", 90_000);
   const firstLine = resultOutput.split("\n")[0];
   const result = JSON.parse(firstLine.slice(firstLine.indexOf("KILL_RESULT ") + "KILL_RESULT ".length));
-  await childB.exited;
+  await waitExit(childB, 10_000, "子进程 B");
 
   evidence = {
     ok: journalHasMarker && diskNotSaved && result.ok === true,
@@ -117,8 +131,10 @@ try {
   failure = err;
 }
 
-// 清理：残留子进程 + 临时目录（先清理再输出，保证退出码执行）
-if (childA && childA.child.exitCode === null && !childA.child.killed) hardKill(childA.child.pid);
+// 清理：残留子进程（全部登记进程）+ 临时目录（先清理再输出，保证退出码执行）
+for (const proc of spawned) {
+  if (proc.exitCode === null) hardKill(proc.pid);
+}
 await fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 }).catch(() => undefined);
 
 if (failure) {
