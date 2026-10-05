@@ -43,6 +43,9 @@ import type {
   ProjectSnapshot,
   RecoveryEntry,
   RecoveryWritePayload,
+  SnapshotRestoreResultPayload,
+  SnapshotStatePayload,
+  SnapshotTakeResultPayload,
   TreeEntry,
   WorldSummary,
 } from "../../src/shared/ipc";
@@ -137,6 +140,14 @@ export interface YushuApi {
     list: () => Promise<RecoveryEntry[]>;
     /** 丢弃某章节的编辑日志 */
     discard: (path: string) => Promise<boolean>;
+  };
+  snapshot: {
+    /** 快照列表与 blob 占用统计（T2-7 切片 A：内容寻址快照，60s / 环形 20） */
+    state: () => Promise<SnapshotStatePayload>;
+    /** 立即快照（手动 = 强制生成，不受 60s 最小间隔限制） */
+    take: () => Promise<SnapshotTakeResultPayload>;
+    /** 整体回滚到指定快照（恢复前自动生成 pre_restore 快照；快照后新增文件保守保留） */
+    restore: (id: string) => Promise<SnapshotRestoreResultPayload>;
   };
 }
 

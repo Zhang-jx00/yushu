@@ -48,6 +48,9 @@ import {
   type ProjectSnapshot,
   type RecoveryEntry,
   type RecoveryWritePayload,
+  type SnapshotRestoreResultPayload,
+  type SnapshotStatePayload,
+  type SnapshotTakeResultPayload,
   type TreeEntry,
   type WorldSummary,
 } from "../shared/ipc.js";
@@ -74,6 +77,12 @@ import {
   listRecoverable,
   writeRecoveryJournal,
 } from "./recovery-ops.js";
+import {
+  restoreSnapshot,
+  SnapshotLoop,
+  snapshotState,
+  takeSnapshot,
+} from "./snapshot-ops.js";
 import {
   buildFusionPreview,
   buildPackCatalog,
@@ -110,6 +119,16 @@ const indexRefresh = new IndexRefreshScheduler(async () => {
   await rebuildProjectIndex(current, { incremental: true });
 });
 
+/**
+ * 本地快照（T2-7 切片 A）：打开项目即检查一次（基线），此后每 60s 检查——
+ * 距上一份不足最小间隔 / 内容无变化则跳过（快照管理器内部判定）。
+ */
+const snapshotLoop = new SnapshotLoop(async () => {
+  const current = gateway;
+  if (!current) return;
+  await takeSnapshot(current, "auto");
+});
+
 function requireGateway(): ProjectGateway {
   if (!gateway) {
     throw new YushuError("E_NO_PROJECT", "尚未打开项目");
@@ -121,6 +140,8 @@ function requireGateway(): ProjectGateway {
 export function attachProject(root: string): void {
   indexRefresh.reset();
   gateway = new ProjectGateway(root);
+  snapshotLoop.stop();
+  snapshotLoop.start();
 }
 
 async function wrap<T>(fn: () => Promise<T> | T): Promise<IpcResult<T>> {
@@ -163,6 +184,8 @@ export function registerIpcHandlers(): void {
       }
       gateway = new ProjectGateway(root);
       indexRefresh.reset();
+      snapshotLoop.stop();
+      snapshotLoop.start();
       return { root: gateway.root, tree: await gateway.listTree() };
     }),
   );
@@ -170,6 +193,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNELS.projectClose, () =>
     wrap<boolean>(() => {
       indexRefresh.reset();
+      snapshotLoop.stop();
       gateway = null;
       return true;
     }),
@@ -414,5 +438,21 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNELS.recoveryDiscard, (_event, payload: { path: string }) =>
     wrap<boolean>(() => discardRecoveryJournal(requireGateway(), payload.path)),
+  );
+
+  /* ---------- 本地快照（M2 / T2-7 切片 A：内容寻址快照） ---------- */
+
+  ipcMain.handle(CHANNELS.snapshotState, () =>
+    wrap<SnapshotStatePayload>(() => snapshotState(requireGateway())),
+  );
+
+  // 手动快照 = 强制（不受 60s 最小间隔限制）
+  ipcMain.handle(CHANNELS.snapshotTake, () =>
+    wrap<SnapshotTakeResultPayload>(() => takeSnapshot(requireGateway(), "manual", { force: true })),
+  );
+
+  // 整体回滚：恢复前由 restoreSnapshot 强制生成 pre_restore 快照；恢复改写真源 → 触发后台增量索引
+  ipcMain.handle(CHANNELS.snapshotRestore, (_event, payload: { id: string }) =>
+    wrapWrite<SnapshotRestoreResultPayload>(() => restoreSnapshot(requireGateway(), payload.id)),
   );
 }

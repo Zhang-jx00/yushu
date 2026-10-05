@@ -4,6 +4,7 @@ import type {
   IndexSearchResultPayload,
   IndexStatusPayload,
   ProjectSnapshot,
+  SnapshotStatePayload,
   TreeEntry,
 } from "../../../src/shared/ipc";
 import { api } from "../api";
@@ -20,6 +21,24 @@ function indexRefreshLabel(status: IndexStatusPayload): string {
   return "自动增量：保存后自动刷新";
 }
 
+/** 快照来源文案（T2-7 切片 A） */
+function snapshotReasonLabel(reason: string): string {
+  switch (reason) {
+    case "manual":
+      return "手动";
+    case "pre_restore":
+      return "恢复前";
+    default:
+      return "自动";
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
 /** 项目视图：目录树 + 文档编辑（带 baseHash 并发检测）+ 检索索引卡（T1-21 无头能力的桌面入口） */
 export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [tree, setTree] = useState<TreeEntry[]>(snapshot.tree);
@@ -32,6 +51,13 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [indexBusy, setIndexBusy] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [searchResult, setSearchResult] = useState<IndexSearchResultPayload | null>(null);
+
+  /** 本地快照（T2-7 切片 A）：内容寻址快照的状态 / 操作 */
+  const [snapState, setSnapState] = useState<SnapshotStatePayload | null>(null);
+  const [snapBusy, setSnapBusy] = useState(false);
+  const [snapStatus, setSnapStatus] = useState("");
+  /** 恢复需二次确认（页内确认行，不用系统对话框——防手滑且可自动化取证） */
+  const [restoreConfirmId, setRestoreConfirmId] = useState<string | null>(null);
 
   const dirty = doc !== null && draft !== doc.content;
 
@@ -51,10 +77,61 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
     }
   }, []);
 
+  const refreshSnapshots = useCallback(async () => {
+    try {
+      setSnapState(await api().snapshot.state());
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
     void refreshIndex();
-  }, [refresh, refreshIndex]);
+    void refreshSnapshots();
+  }, [refresh, refreshIndex, refreshSnapshots]);
+
+  /** 立即快照（手动强制；不受 60s 最小间隔限制） */
+  const takeSnapshot = async () => {
+    setSnapBusy(true);
+    setError(null);
+    try {
+      const result = await api().snapshot.take();
+      setSnapStatus(
+        result.outcome === "taken"
+          ? `已生成快照（${snapshotReasonLabel(result.snapshot?.reason ?? "manual")} · ${result.snapshot?.files ?? 0} 文件 · ${formatBytes(result.snapshot?.bytes ?? 0)}）`
+          : result.outcome === "unchanged"
+            ? "内容与最新快照一致，未新增"
+            : "距上一份快照不足 60s，已跳过（自动策略）",
+      );
+      await refreshSnapshots();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSnapBusy(false);
+    }
+  };
+
+  /** 整体回滚（二次确认后；服务端恢复前强制生成 pre_restore 快照） */
+  const restoreSnapshot = async (id: string) => {
+    setSnapBusy(true);
+    setError(null);
+    setRestoreConfirmId(null);
+    try {
+      const result = await api().snapshot.restore(id);
+      setSnapStatus(
+        `已恢复到快照 ${result.id}：写回 ${result.restoredFiles} 个文件、重建 ${result.recreatedFiles} 个被删文件；` +
+          `快照后新增的 ${result.extraFiles.length} 个文件保守保留；恢复前快照 ${result.preRestoreId} 已生成（可再回滚）`,
+      );
+      await refreshSnapshots();
+      await refresh();
+      void refreshIndex();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSnapBusy(false);
+    }
+  };
 
   // 自动增量（T2-5 切片 B）：刷新待命 / 执行中时轮询状态（结束后自动停，不常驻轮询）
   useEffect(() => {
@@ -187,6 +264,58 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
               </ul>
             </div>
           )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">
+            <span className="muted">本地快照（.yushu/snapshots）</span>
+            <button type="button" className="link" onClick={() => void refreshSnapshots()}>
+              刷新
+            </button>
+          </div>
+          <div className="muted">
+            {snapState
+              ? `快照 ${snapState.snapshots.length} 份 · 内容寻址 blob ${snapState.blobCount} 个（${formatBytes(snapState.blobBytes)}）· 自动快照 60s 一份、环形保留 20`
+              : "快照保护误删与误改：打开项目即建立基线，此后每 60s 自动一份"}
+          </div>
+          <div className="outline-actions">
+            <button type="button" disabled={snapBusy} onClick={() => void takeSnapshot()}>
+              {snapBusy ? "处理中…" : "立即快照"}
+            </button>
+          </div>
+          <ul className="snapshots">
+            {snapState?.snapshots.map((item) => (
+              <li key={item.id}>
+                <span className="muted">
+                  {item.createdAt.replace("T", " ").slice(0, 19)} · {snapshotReasonLabel(item.reason)} · {item.files} 文件 ·{" "}
+                  {formatBytes(item.bytes)}
+                </span>
+                <span className="spacer" />
+                {restoreConfirmId === item.id ? (
+                  <span className="snapshot-confirm">
+                    <span className="muted">整体回滚到该快照？恢复前会自动快照当前状态</span>
+                    <button type="button" disabled={snapBusy} onClick={() => void restoreSnapshot(item.id)}>
+                      确认恢复
+                    </button>
+                    <button type="button" onClick={() => setRestoreConfirmId(null)}>
+                      取消
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" disabled={snapBusy} onClick={() => setRestoreConfirmId(item.id)}>
+                    恢复
+                  </button>
+                )}
+              </li>
+            ))}
+            {snapState && snapState.snapshots.length === 0 && (
+              <li className="muted">暂无快照（打开项目建立基线；每 60s 自动检查，内容变化才生成）</li>
+            )}
+          </ul>
+          {snapStatus && <div className="muted">{snapStatus}</div>}
+          <div className="muted">
+            恢复 = 整体回滚到该快照：被删文件重建、被改文件写回；快照之后新增的文件保守保留（列出不删除），绝不静默丢内容
+          </div>
         </div>
 
         <div className="panel-title">

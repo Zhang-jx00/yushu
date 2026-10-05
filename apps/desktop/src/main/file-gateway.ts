@@ -143,4 +143,31 @@ export class ProjectGateway {
     await fs.mkdir(dirname(toAbs), { recursive: true });
     await fs.rename(fromAbs, toAbs);
   }
+
+  /** 文件是否存在（路径防护同 readDoc；快照恢复统计"重建 / 覆盖"用） */
+  async exists(relPath: string): Promise<boolean> {
+    const abs = this.resolveInside(relPath);
+    return fs
+      .access(abs)
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  /**
+   * 快照恢复专用写入（T2-7 切片 A）：显式整体回滚语义——UI 已二次确认且调用方已强制生成
+   * pre_restore 快照，因此不做 baseHash 并发检测；路径防护与原子写（tmp → fsync → rename）不变。
+   */
+  async restoreDoc(relPath: string, content: string): Promise<void> {
+    const abs = this.resolveInside(relPath, true);
+    await fs.mkdir(dirname(abs), { recursive: true });
+    const tmp = `${abs}.${randomUUID().slice(0, 8)}.tmp`;
+    const handle = await fs.open(tmp, "w");
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(tmp, abs);
+  }
 }

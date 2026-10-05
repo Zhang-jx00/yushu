@@ -1200,6 +1200,46 @@ select {
   font-size: 12px;
 }
 
+/* ---------- 本地快照（T2-7 切片 A） ---------- */
+
+.snapshots {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+}
+
+.snapshots li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.snapshots li:hover {
+  background: var(--panel-2);
+}
+
+.snapshots li .muted {
+  font-size: 12px;
+}
+
+.snapshot-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.snapshot-confirm .muted {
+  font-size: 12px;
+}
+
 /* ---------- 取名助手（世界观档案） ---------- */
 
 .naming-pattern {

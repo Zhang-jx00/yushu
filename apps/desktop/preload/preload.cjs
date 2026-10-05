@@ -109,4 +109,12 @@ contextBridge.exposeInMainWorld("yushu", {
     /** 丢弃某章节的编辑日志 */
     discard: (path) => invoke("recovery:discard", { path }),
   },
+  snapshot: {
+    /** 快照列表与 blob 占用统计（T2-7 切片 A：内容寻址快照） */
+    state: () => invoke("snapshot:state"),
+    /** 立即快照（手动 = 强制，不受 60s 最小间隔限制） */
+    take: () => invoke("snapshot:take"),
+    /** 整体回滚到指定快照（恢复前自动生成 pre_restore 快照） */
+    restore: (id) => invoke("snapshot:restore", { id }),
+  },
 });

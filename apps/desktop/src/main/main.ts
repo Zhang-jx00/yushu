@@ -146,7 +146,7 @@ void app.whenReady().then(() => {
 });
 
 async function runE2E(win: BrowserWindow): Promise<void> {
-  const { mkdtemp, rm, readFile, readdir } = await import("node:fs/promises");
+  const { mkdtemp, rm, readFile, readdir, writeFile } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const dir = await mkdtemp(join(tmpdir(), "yushu-e2e-"));
@@ -818,6 +818,67 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     }
     console.log("[e2e] 恢复边界:", JSON.stringify(recoveryEdge));
 
+    // 本地快照（T2-7 切片 A）：手动快照 → 误改 / 误删 / 快照后新增 → 整体回滚 → 文件级取证。
+    // 说明：源文件改动经主进程直接写盘（模拟外部工具误操作）；快照与回滚经渲染层 IPC（覆盖 preload/api 链路）。
+    let snapshotProbe = {
+      takeOk: false,
+      restored: false,
+      cardRecreated: false,
+      extraKept: false,
+      preRestore: false,
+      note: "未执行",
+    };
+    try {
+      const take = (await win.webContents.executeJavaScript("window.yushu.snapshot.take()")) as {
+        outcome: string;
+        snapshot?: { id: string; files: number; reason: string };
+      };
+      const snapId = take.snapshot?.id ?? "";
+      const chapterBefore = await readFile(join(dir, result.chapterPath), "utf8");
+      // 误改：正文被外部工具追加了不该有的段落
+      await writeFile(join(dir, result.chapterPath), `${chapterBefore}\n\n误改段落。`, "utf8");
+      // 误删：角色设定卡文件被删除
+      await rm(join(dir, result.cardPath), { force: true });
+      // 快照后新增：整体回滚时应保守保留
+      await writeFile(join(dir, "world", "extra-note.md"), "快照之后新增。", "utf8");
+      const restore = (await win.webContents.executeJavaScript(
+        `window.yushu.snapshot.restore(${JSON.stringify(snapId)})`,
+      )) as {
+        id: string;
+        preRestoreId: string;
+        preRestoreTaken: boolean;
+        restoredFiles: number;
+        recreatedFiles: number;
+        extraFiles: string[];
+      };
+      const chapterAfter = await readFile(join(dir, result.chapterPath), "utf8");
+      const cardBack = await readFile(join(dir, result.cardPath), "utf8")
+        .then(() => true)
+        .catch(() => false);
+      const extraKept = await readFile(join(dir, "world", "extra-note.md"), "utf8")
+        .then(() => true)
+        .catch(() => false);
+      const state = (await win.webContents.executeJavaScript("window.yushu.snapshot.state()")) as {
+        snapshots: { id: string; reason: string }[];
+      };
+      snapshotProbe = {
+        takeOk: take.outcome === "taken" && snapId !== "",
+        restored: restore.id === snapId && chapterAfter === chapterBefore && !chapterAfter.includes("误改段落。"),
+        cardRecreated: cardBack && restore.recreatedFiles >= 1,
+        extraKept: extraKept && restore.extraFiles.includes("world/extra-note.md"),
+        preRestore:
+          restore.preRestoreId !== "" &&
+          state.snapshots.some((item) => item.id === restore.preRestoreId && item.reason === "pre_restore"),
+        note:
+          `快照生成=${take.outcome === "taken"}（${take.snapshot?.files ?? 0} 文件）；回滚命中=${restore.id === snapId}；` +
+          `正文写回=${chapterAfter === chapterBefore}；被删卡重建=${cardBack}（重建数 ${restore.recreatedFiles}）；` +
+          `快照后新增保守保留=${extraKept}（列出 ${restore.extraFiles.length}）；恢复前快照=${restore.preRestoreId || "(无)"}`,
+      };
+    } catch (err) {
+      snapshotProbe = { ...snapshotProbe, note: `异常：${err instanceof Error ? err.message : String(err)}` };
+    }
+    console.log("[e2e] 本地快照:", JSON.stringify(snapshotProbe));
+
     const closeProbeScript = `(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const waitFor = async (fn, timeout = 12000) => {
@@ -955,11 +1016,16 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       crashRecovery.journalCleared &&
       recoveryEdge.revertCleared &&
       recoveryEdge.staleBlocked &&
+      snapshotProbe.takeOk &&
+      snapshotProbe.restored &&
+      snapshotProbe.cardRecreated &&
+      snapshotProbe.extraKept &&
+      snapshotProbe.preRestore &&
       closeFlush.ok &&
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

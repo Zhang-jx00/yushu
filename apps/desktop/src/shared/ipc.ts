@@ -57,6 +57,10 @@ export const CHANNELS = {
   recoveryClearJournal: "recovery:clearJournal",
   recoveryList: "recovery:list",
   recoveryDiscard: "recovery:discard",
+  /** 本地快照（T2-7 切片 A·内容寻址）：状态 / 立即快照 / 整体回滚 */
+  snapshotState: "snapshot:state",
+  snapshotTake: "snapshot:take",
+  snapshotRestore: "snapshot:restore",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -754,6 +758,49 @@ export interface ChapterSidecarResult {
   sidecarPath: string;
   hash: string;
   wordCount: number;
+}
+
+/* ---------- 本地快照（M2 / T2-7 切片 A：内容寻址快照） ---------- */
+
+/** auto = 自动（60s 最小间隔，非强制）；manual = 手动（强制）；pre_restore = 恢复前自动（强制） */
+export type SnapshotReasonPayload = "auto" | "manual" | "pre_restore";
+
+export interface SnapshotSummaryPayload {
+  /** snap-YYYYMMDD-HHMMSS-<rand4>（字典序 = 时间序） */
+  id: string;
+  createdAt: string;
+  reason: SnapshotReasonPayload;
+  /** 快照覆盖的源文件数 */
+  files: number;
+  /** 源文件内容总字节（blob 去重后实际占用通常更小） */
+  bytes: number;
+}
+
+export interface SnapshotStatePayload {
+  /** 最新在前 */
+  snapshots: SnapshotSummaryPayload[];
+  blobCount: number;
+  blobBytes: number;
+}
+
+export interface SnapshotTakeResultPayload {
+  /** taken = 已生成；unchanged = 与最新快照内容一致；too_soon = 距上一份不足最小间隔（自动策略） */
+  outcome: "taken" | "unchanged" | "too_soon";
+  snapshot?: SnapshotSummaryPayload;
+  /** 当前最新一份（未生成新快照时的参照） */
+  latest?: SnapshotSummaryPayload;
+}
+
+export interface SnapshotRestoreResultPayload {
+  id: string;
+  /** 恢复前自动生成的 pre_restore 快照 ID（内容未变时为现有最新一份；可再回滚） */
+  preRestoreId: string;
+  preRestoreTaken: boolean;
+  restoredFiles: number;
+  /** 快照中记录、磁盘上已被删除而本次重建的文件 */
+  recreatedFiles: number;
+  /** 磁盘上存在、但不在该快照中的文件（保守保留，不删除） */
+  extraFiles: string[];
 }
 
 export interface IpcOk<T> {

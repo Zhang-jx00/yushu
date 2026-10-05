@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-16 为 M2 编辑器与索引扩展（双形态 / 实体提及 / 自动保存 / 写作视图 / 索引增量与保存即增量）。
+ * 步骤 10-17 为 M2 扩展（双形态 / 实体提及 / 自动保存 / 写作视图 / 索引增量与保存即增量 / 本地快照）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -693,6 +693,46 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 17,
+    title: "项目文件：本地快照（立即快照 → 列表 → 恢复二次确认）（T2-7 切片 A）",
+    file: "step17-snapshot.png",
+    body: String.raw`
+      await tab('项目文件');
+      const takeBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === '立即快照');
+        return b && !b.disabled ? b : null;
+      }, 12000);
+      if (!takeBtn) return { ok: false, note: '找不到「立即快照」按钮：' + pageText() };
+      const before = document.querySelectorAll('.snapshots li').length;
+      takeBtn.click();
+      const taken = await waitFor(() => {
+        const items = [...document.querySelectorAll('.snapshots li')];
+        return items.length > before && items.some((li) => li.textContent.includes('手动')) ? true : null;
+      }, 20000);
+      if (taken === null) {
+        return { ok: false, note: '手动快照未出现在列表（当前 ' + document.querySelectorAll('.snapshots li').length + ' 条）：' + pageText() };
+      }
+      // 恢复入口：点「恢复」出现页内二次确认（防手滑）；预演点「取消」，不真正回滚本预演内容
+      // （恢复的"写回 / 重建 / 新增保留 / 恢复前快照"文件级验证由 e2e 探针完成）
+      const restoreBtn = [...document.querySelectorAll('.snapshots li button')].find((b) => b.textContent.trim() === '恢复');
+      if (!restoreBtn) return { ok: false, note: '快照条目缺少「恢复」按钮：' + pageText() };
+      restoreBtn.click();
+      await sleep(300);
+      const confirmBtn = [...document.querySelectorAll('.snapshot-confirm button')].find((b) => b.textContent.trim() === '确认恢复');
+      const cancelBtn = [...document.querySelectorAll('.snapshot-confirm button')].find((b) => b.textContent.trim() === '取消');
+      if (!confirmBtn || !cancelBtn) return { ok: false, note: '二次确认行未出现：' + pageText() };
+      cancelBtn.click();
+      await sleep(200);
+      const confirmGone = document.querySelectorAll('.snapshot-confirm button').length === 0;
+      const firstItem = document.querySelector('.snapshots li');
+      return {
+        ok: taken === true && confirmGone,
+        note: '快照列表 ' + document.querySelectorAll('.snapshots li').length + ' 条（最新：' + lines(firstItem) + '）' +
+          '；二次确认行出现并可取消=' + confirmGone,
+      };
+    `,
+  },
 ];
 
 /**
@@ -774,7 +814,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-16）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-17）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,
