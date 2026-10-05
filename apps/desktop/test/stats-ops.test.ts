@@ -161,6 +161,47 @@ describe("码字统计（T2-9 切片 A）", () => {
     expect(repaired.today.saves).toBe(1);
   });
 
+  it("部分损坏 daily：坏条目保守丢弃，汇总不抛错、不产生 NaN（第 16 轮复核）", async () => {
+    await mkdir(join(dir, ".yushu"), { recursive: true });
+    await writeFile(
+      join(dir, STATS_PATH),
+      JSON.stringify({
+        schema_version: 1,
+        goal: { daily: 3000 },
+        updated_at: "",
+        daily: {
+          "2026-10-05": { delta: 100, saves: 1 },
+          "2026-10-04": null,
+          "2026-10-03": "oops",
+          "2026-10-02": { delta: "10", saves: 2 },
+        },
+      }),
+      "utf8",
+    );
+    const state = await readStatsState(gateway, new Date("2026-10-05T12:00:00"));
+    expect(state.summary.total).toBe(100);
+    expect(state.summary.activeDays).toBe(1);
+    expect(state.today.delta).toBe(100);
+
+    // 记账写回仅含清洗后的数据：坏条目不会复活、累计正确
+    await recordChapterDelta(gateway, { path: "chapters/vol-a/ch-1.md", oldWords: 0, newWords: 5 });
+    const after = await readStatsState(gateway, new Date("2026-10-05T12:00:00"));
+    expect(after.today.delta).toBe(105);
+  });
+
+  it("并发记账与目标设置串行化（第 16 轮复核）：互不覆盖、不丢记账", async () => {
+    const [goal] = await Promise.all([
+      setStatsGoal(gateway, 2000),
+      recordChapterDelta(gateway, { path: "chapters/vol-a/ch-1.md", oldWords: 0, newWords: 5 }),
+      recordChapterDelta(gateway, { path: "chapters/vol-a/ch-2.md", oldWords: 0, newWords: 7 }),
+    ]);
+    expect(goal.daily).toBe(2000);
+    const state = await readStatsState(gateway);
+    expect(state.goal.daily).toBe(2000);
+    expect(state.today.delta).toBe(12);
+    expect(state.today.saves).toBe(2);
+  });
+
   it("localDateKey 本地时区 / diffDays 跨月边界", () => {
     expect(localDateKey(new Date(2026, 9, 5, 23, 30))).toBe("2026-10-05");
     expect(localDateKey(new Date(2026, 0, 1, 0, 5))).toBe("2026-01-01");

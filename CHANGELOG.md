@@ -31,6 +31,7 @@
 - **杀进程不丢稿实测（T2-8 切片 B·第一项；M2 门禁 §5.5 A1）**：新增**真实强杀**集成测试 `pnpm --filter @yushu/desktop kill-test`——`scripts/kill-recovery.mjs` 编排两个应用阶段：子进程 A（`--kill-edit`：建夹具（项目 / 大纲 / 草稿章节）+ 编辑器**持续输入**使自动保存防抖永不触发、编辑日志照常落盘，经产品自身检测接口确认后打印 KILL_READY）→ `taskkill /F` 真强杀 → harness 磁盘取证（章节不含标记、journal 含标记）→ 子进程 B（`--kill-recover`）重启进入项目 → 恢复面板 → 「恢复」→ 编辑器载入恢复内容 → 自动保存落盘 + journal 清除；证据 JSON（killedExit=1 / journalHasMarker / diskNotSaved / persisted / journalCleared），连跑 3 次稳定。
 - **kill-test 编排健壮性修复（第 15 轮复核）**：① 强杀后等待子进程退出增加超时（`waitExit`，A 15s / B 10s）——taskkill 静默失败不再让脚本**永久挂起**；② 清理阶段改为统一强杀**全部登记子进程**（含子进程 B 异常挂起场景），不残留 Electron 进程。修复后 kill-test 复跑通过。
 - **码字统计切片（T2-9 切片 A）**：`.yushu/stats.json` 以「章节净增字数」记账（编辑器保存与 AI 采纳两挂点；frontmatter 记录值为旧值、缺失回算；删改为负；空保存不计；失败不阻断保存；本地时区日键；原子写、损坏回退默认值）；新增「码字统计」标签页——今日字数 + 目标进度条、断更预警（≥2 天）与连续写作天数、周 / 月 / 累计 / 活跃天数 / 日均（活跃日）/ 最佳单日、**最近 30 天柱状图**（缺失日补 0、负值红标）、每日目标设置（默认 3000，0 = 清除）；新增 `stats:read` / `stats:setGoal` 两通道。单测 6 例（净增 / 负值 / 空保存、AI 采纳计入、多日汇总与断更连续天数、目标校验、损坏回退、日键边界）；e2e 探针三项断言；UI 预演 step18（walkthrough 18/18）。
+- **码字统计存储修复（第 16 轮复核）**：① `recordChapterDelta` / `setStatsGoal` 对 `stats.json` 的读-改-写改为**串行队列**（`withStatsLock`）——自动保存 flush 与 AI 采纳重叠、面板保存目标与记账重叠时不再互相覆盖丢更新；② 读取改为逐条清洗 `sanitizeDaily`——`daily` 内单条损坏（null / 字符串 / 非数字 delta）不再让汇总抛错或产生 NaN（保守丢弃坏条目）。单测 +2 例。
 
 ### Added
 

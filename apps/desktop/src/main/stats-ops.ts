@@ -46,6 +46,27 @@ export function diffDays(from: string, to: string): number {
   return Math.round((parse(to) - parse(from)) / 86_400_000);
 }
 
+/**
+ * daily 逐条清洗（第 16 轮复核修复）：只保留 { delta, saves } 均为有限数字的条目。
+ * 部分损坏（如 `"2026-10-05": null` 或字符串）此前会让汇总抛错 / NaN——按「保守丢弃坏条目」处理，
+ * 与顶层损坏回退默认值同一策略（不静默删文件）。
+ */
+function sanitizeDaily(raw: unknown): Record<string, { delta: number; saves: number }> {
+  const out: Record<string, { delta: number; saves: number }> = {};
+  if (raw && typeof raw === "object") {
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (!value || typeof value !== "object") continue;
+      const entry = value as { delta?: unknown; saves?: unknown };
+      const delta = typeof entry.delta === "number" && Number.isFinite(entry.delta) ? Math.trunc(entry.delta) : null;
+      const saves =
+        typeof entry.saves === "number" && Number.isFinite(entry.saves) && entry.saves >= 0 ? Math.trunc(entry.saves) : null;
+      if (delta === null || saves === null) continue;
+      out[key] = { delta, saves };
+    }
+  }
+  return out;
+}
+
 async function readStatsFile(gateway: ProjectGateway): Promise<StatsFile> {
   try {
     const raw = await fs.readFile(join(gateway.root, STATS_PATH), "utf8");
@@ -60,7 +81,7 @@ async function readStatsFile(gateway: ProjectGateway): Promise<StatsFile> {
               : DEFAULT_DAILY_GOAL,
         },
         updated_at: typeof data.updated_at === "string" ? data.updated_at : "",
-        daily: data.daily,
+        daily: sanitizeDaily(data.daily),
       };
     }
   } catch {
@@ -78,11 +99,33 @@ async function writeStatsFile(gateway: ProjectGateway, file: StatsFile): Promise
 }
 
 /**
+ * 记账 / 目标设置的串行队列（第 16 轮复核修复）：两者都是对 stats.json 的「读-改-写」，
+ * 并发（如自动保存 flush 与 AI 采纳同时落盘、面板保存目标与记账重叠）会互相覆盖丢记账。
+ * 与快照存储同一处理（snapshot-ops withSnapshotLock）：主进程内串行，不跨进程。
+ */
+let statsQueue: Promise<unknown> = Promise.resolve();
+function withStatsLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = statsQueue.then(fn, fn);
+  statsQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
  * 记账一次章节保存（净增字数；delta=0 不计入）。
  * 实现内部不吞异常（便于单测断言）；调用方须以 `.catch(() => undefined)` 兜底——
  * 统计失败绝不能阻断保存（统计是辅助数据，非真源）。
  */
-export async function recordChapterDelta(
+export function recordChapterDelta(
+  gateway: ProjectGateway,
+  payload: { path: string; oldWords: number; newWords: number; now?: Date },
+): Promise<boolean> {
+  return withStatsLock(() => recordChapterDeltaLocked(gateway, payload));
+}
+
+async function recordChapterDeltaLocked(
   gateway: ProjectGateway,
   payload: { path: string; oldWords: number; newWords: number; now?: Date },
 ): Promise<boolean> {
@@ -100,10 +143,14 @@ export async function recordChapterDelta(
 }
 
 /** 设置每日目标（0 = 清除目标） */
-export async function setStatsGoal(gateway: ProjectGateway, daily: number): Promise<{ daily: number }> {
+export function setStatsGoal(gateway: ProjectGateway, daily: number): Promise<{ daily: number }> {
   if (!Number.isInteger(daily) || daily < 0) {
-    throw new YushuError("E_INVALID_INPUT", "每日目标必须为 ≥0 的整数（0 表示不设目标）");
+    return Promise.reject(new YushuError("E_INVALID_INPUT", "每日目标必须为 ≥0 的整数（0 表示不设目标）"));
   }
+  return withStatsLock(() => setStatsGoalLocked(gateway, daily));
+}
+
+async function setStatsGoalLocked(gateway: ProjectGateway, daily: number): Promise<{ daily: number }> {
   const file = await readStatsFile(gateway);
   file.goal = { daily };
   file.updated_at = new Date().toISOString();
