@@ -89,6 +89,10 @@ contextBridge.exposeInMainWorld("yushu", {
   naming: {
     generate: (payload) => invoke("naming:generate", payload),
   },
+  library: {
+    /** 稿件总览（T2-4 切片 A：全库视图；只读大纲 + 章节文件的汇总） */
+    list: () => invoke("library:list"),
+  },
   app: {
     writeClipboard: (text) => invoke("app:writeClipboard", { text }),
     /**

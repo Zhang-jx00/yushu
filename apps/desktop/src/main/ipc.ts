@@ -35,6 +35,7 @@ import {
   type IndexRebuildResultPayload,
   type IndexSearchResultPayload,
   type IndexStatusPayload,
+  type LibraryViewPayload,
   type IpcResult,
   type NamingGeneratePayload,
   type NamingResultPayload,
@@ -71,6 +72,7 @@ import {
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
 import { IndexRefreshScheduler } from "./index-scheduler.js";
+import { readLibrary } from "./library-ops.js";
 import { closeCoordinatorFor } from "./close-coordinator.js";
 import { generateNames } from "./naming-ops.js";
 import { readChapter, writeChapterBody, writeChapterSidecar } from "./chapter-ops.js";
@@ -424,6 +426,9 @@ export function registerIpcHandlers(): void {
       searchProjectIndex(requireGateway(), payload.keyword, payload.limit ?? 20),
     ),
   );
+
+  // 稿件总览（T2-4 切片 A：全库视图）
+  ipcMain.handle(CHANNELS.libraryList, () => wrap<LibraryViewPayload>(() => readLibrary(requireGateway())));
 
   /* ---------- 命名生成器（S2） ---------- */
 

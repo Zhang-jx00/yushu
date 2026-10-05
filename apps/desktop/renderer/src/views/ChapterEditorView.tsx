@@ -119,6 +119,7 @@ export function ChapterEditorView({
   focusMode = false,
   onToggleFocus,
   recoveryFocus,
+  libraryFocus,
 }: {
   onOpenCard?: (path: string) => void;
   /** 无干扰（专注）模式：由 ProjectScreen 统一隐藏顶栏 / 标签栏 / 侧栏（T2-3 切片 A） */
@@ -126,6 +127,8 @@ export function ChapterEditorView({
   onToggleFocus?: (next: boolean) => void;
   /** 崩溃恢复入口（T2-8 切片 A）：ProjectScreen 恢复面板跳转目标（tick 触发；经 selectTarget 先 flush 再切换） */
   recoveryFocus?: { path: string; tick: number } | null;
+  /** 稿件总览入口（T2-4 切片 A）：总览页点「打开」跳转目标（同 tick 触发机制） */
+  libraryFocus?: { path: string; tick: number } | null;
 }) {
   const [targets, setTargets] = useState<AiDraftTarget[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -648,6 +651,11 @@ export function ChapterEditorView({
   useEffect(() => {
     if (recoveryFocus) selectTargetRef.current(recoveryFocus.path);
   }, [recoveryFocus]);
+
+  // 稿件总览入口（T2-4 切片 A）：总览页「打开」→ 经 selectTarget 选中该章节（先 flush 再切换）
+  useEffect(() => {
+    if (libraryFocus) selectTargetRef.current(libraryFocus.path);
+  }, [libraryFocus]);
 
   useEffect(() => {
     // 竞态回滚选择：本次 selectedPath 变化由回滚产生，跳过自动加载（编辑器内容本就属于该章节）

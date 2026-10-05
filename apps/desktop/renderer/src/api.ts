@@ -32,6 +32,7 @@ import type {
   IndexRebuildResultPayload,
   IndexSearchResultPayload,
   IndexStatusPayload,
+  LibraryViewPayload,
   NamingGeneratePayload,
   NamingResultPayload,
   OutlineChapterDraftResult,
@@ -117,6 +118,10 @@ export interface YushuApi {
   };
   naming: {
     generate: (payload: NamingGeneratePayload) => Promise<NamingResultPayload>;
+  };
+  library: {
+    /** 稿件总览（T2-4 切片 A：全库视图；全部章节 + 草稿状态 / 字数汇总） */
+    list: () => Promise<LibraryViewPayload>;
   };
   app: {
     /** 通用剪贴板写入（走主进程 Electron clipboard，生产 file:// 下更可靠） */

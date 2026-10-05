@@ -43,6 +43,8 @@ export const CHANNELS = {
   indexRebuild: "index:rebuild",
   indexSearch: "index:search",
   indexProgress: "index:progress",
+  /** 稿件总览（T2-4 切片 A：全库视图） */
+  libraryList: "library:list",
   namingGenerate: "naming:generate",
   /** 通用剪贴板写入（主进程 Electron clipboard；渲染层 file:// 下 navigator.clipboard 不可靠） */
   appWriteClipboard: "app:writeClipboard",
@@ -714,6 +716,30 @@ export interface IndexSearchResultPayload {
   keyword: string;
   chunks: IndexChunkHitPayload[];
   entities: IndexEntityHitPayload[];
+}
+
+/* ---------- 稿件总览（T2-4 切片 A：全库视图 + 虚拟滚动） ---------- */
+
+export interface LibraryChapterEntry {
+  volumeId: string;
+  volumeTitle: string;
+  /** 章纲 id（co-*） */
+  chapterId: string;
+  /** 章序（卷内） */
+  idx: number;
+  title: string;
+  /** 已建草稿的章节文件相对路径；未建草稿为 null */
+  chapterPath: string | null;
+  /** 字数（frontmatter 记录值；缺失时按正文回算） */
+  wordCount: number;
+  /** 章节状态（frontmatter status；未建草稿为空串） */
+  status: string;
+}
+
+export interface LibraryViewPayload {
+  bookTitle: string;
+  chapters: LibraryChapterEntry[];
+  totals: { chapters: number; drafted: number; words: number };
 }
 
 /* ---------- 命名生成器（S2；T1-8） ---------- */

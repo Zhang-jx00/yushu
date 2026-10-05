@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-22 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计 / 会话与快照恢复）。
+ * 步骤 10-23 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计 / 会话与快照恢复 / 稿件总览全库视图）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -1008,6 +1008,55 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 23,
+    title: "稿件总览：全库视图 + 虚拟滚动 + 跳转编辑器（T2-4 切片 A）",
+    file: "step23-library.png",
+    body: String.raw`
+      await tab('稿件总览');
+      const head = await waitFor(() => document.querySelector('.library .panel-title'), 12000);
+      if (!head) return { ok: false, note: '稿件总览未渲染：' + pageText() };
+      const headText = String(head.textContent || '');
+      const list = await waitFor(() => document.querySelector('.library-list'), 8000);
+      if (!list) return { ok: false, note: '找不到虚拟列表容器：' + pageText() };
+      const rowsTop = document.querySelectorAll('.library-row').length;
+      const firstTop = String((document.querySelector('.library-row .library-idx') || {}).textContent || '');
+      const spacer = document.querySelector('.library-spacer');
+      const totalHeight = spacer ? spacer.offsetHeight : 0;
+      // 滚动到中部：虚拟窗口应平移（渲染行不同、总数不变）
+      list.scrollTop = Math.floor(totalHeight / 2);
+      list.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await sleep(300);
+      const rowsMid = document.querySelectorAll('.library-row').length;
+      const firstMid = String((document.querySelector('.library-row .library-idx') || {}).textContent || '');
+      const totalChapters = Number((headText.match(/共\s*(\d+)\s*章/) || [])[1] || 0);
+      const draftedMatch = headText.match(/已建草稿\s*(\d+)/);
+      const virtualized = totalChapters > rowsMid && rowsMid > 0;
+      const windowMoved = firstTop !== '' && firstMid !== '' && firstTop !== firstMid;
+      // 回到顶部并「打开」第一章（已建草稿）→ 跳转编辑器并选中
+      list.scrollTop = 0;
+      list.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await sleep(300);
+      const openBtn = [...document.querySelectorAll('.library-row button')].find((b) => !b.disabled);
+      if (!openBtn) return { ok: false, note: '没有可打开的草稿章节：' + pageText() };
+      openBtn.click();
+      const editorTab = await waitFor(() => {
+        const on = document.querySelector('.tab.on');
+        return on && on.textContent.includes('编辑器') ? true : null;
+      }, 8000);
+      const selected = await waitFor(() => (document.querySelector('.draft-list li.on') ? true : null), 8000);
+      // 回到总览供截图取证（跳转断言已在上方完成）
+      await tab('稿件总览');
+      await sleep(300);
+      return {
+        ok: headText.includes('共') && draftedMatch !== null && rowsTop > 0 && virtualized && windowMoved && editorTab === true && selected === true,
+        note: '汇总：' + headText.replace(/\s+/g, ' ').slice(0, 80) +
+          '；虚拟滚动：总章数=' + totalChapters + ' 顶部渲染=' + rowsTop + ' 中部渲染=' + rowsMid +
+          '（只渲染视窗窗口=' + virtualized + '，滚动后首行 ' + firstTop + '→' + firstMid + '=' + windowMoved + '）' +
+          '；「打开」跳转编辑器=' + (editorTab === true) + '，草稿列表选中=' + (selected === true),
+      };
+    `,
+  },
 ];
 
 /**
@@ -1089,7 +1138,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-22）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-23）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

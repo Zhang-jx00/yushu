@@ -512,6 +512,9 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingPlace = await api.naming.generate({ kind: "place", count: 3 });
 
+    // 稿件总览（T2-4 切片 A）：全库视图汇总（全部章节 + 草稿状态 / 字数）
+    const library = await api.library.list();
+
     // 保存管线（M2 / T2-6 切片）：外部改动 → baseHash 冲突拒绝（不盲覆盖）→ 冲突旁路写入，主文件保持外部版本
     let pipeline = { conflict: "", sidecarOk: false, mainKeptExternal: false };
     try {
@@ -635,6 +638,14 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         allValid: naming.names.every((name) => name.length >= 2),
         placeCount: namingPlace.names.length,
       },
+      library: {
+        chapters: library.totals.chapters,
+        drafted: library.totals.drafted,
+        words: library.totals.words,
+        draftedPathOk: library.chapters.some(
+          (item) => item.chapterPath === draft.chapterPath && item.wordCount > 0 && item.status === "draft",
+        ),
+      },
       chapter: {
         readWords: chapterInfo.readWords,
         writeWords: chapterInfo.writeWords,
@@ -724,6 +735,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         deterministic: boolean;
         allValid: boolean;
         placeCount: number;
+      };
+      library: {
+        chapters: number;
+        drafted: number;
+        words: number;
+        draftedPathOk: boolean;
       };
       chapter: {
         readWords: number;
@@ -1370,6 +1387,10 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.naming.deterministic &&
       result.naming.allValid &&
       result.naming.placeCount === 3 &&
+      result.library.chapters >= 6 &&
+      result.library.drafted >= 1 &&
+      result.library.words > 0 &&
+      result.library.draftedPathOk &&
       result.chapter.readWords > 0 &&
       result.chapter.error === "" &&
       result.chapter.grew &&

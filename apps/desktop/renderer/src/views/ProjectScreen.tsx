@@ -7,16 +7,18 @@ import { ArchiveView } from "./ArchiveView";
 import { ChapterEditorView } from "./ChapterEditorView";
 import { ExportView } from "./ExportView";
 import { GenesisView } from "./GenesisView";
+import { LibraryView } from "./LibraryView";
 import { OutlineView } from "./OutlineView";
 import { ProjectView } from "./ProjectView";
 import { StatsView } from "./StatsView";
 
-type Tab = "workbench" | "outline" | "editor" | "ai" | "export" | "archive" | "files" | "stats";
+type Tab = "workbench" | "outline" | "editor" | "library" | "ai" | "export" | "archive" | "files" | "stats";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "workbench", label: "起源工作台" },
   { key: "outline", label: "三级大纲" },
   { key: "editor", label: "编辑器" },
+  { key: "library", label: "稿件总览" },
   { key: "ai", label: "AI 副驾" },
   { key: "export", label: "导出与自查" },
   { key: "archive", label: "世界观档案" },
@@ -24,7 +26,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "files", label: "项目文件" },
 ];
 
-/** 项目主容器：八个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A） */
+/** 项目主容器：九个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A）；稿件总览全库视图（T2-4 切片 A） */
 export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [tab, setTab] = useState<Tab>("workbench");
   const [archiveFocus, setArchiveFocus] = useState<{ path: string; tick: number } | null>(null);
@@ -33,6 +35,8 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   /** 崩溃恢复（T2-8 切片 A）：进入项目（或切换项目）时检测编辑日志与磁盘不一致的未保存编辑 */
   const [recovery, setRecovery] = useState<RecoveryEntry[]>([]);
   const [recoveryFocus, setRecoveryFocus] = useState<{ path: string; tick: number } | null>(null);
+  /** 稿件总览（T2-4 切片 A）：点「打开」跳转编辑器并选中该章 */
+  const [libraryFocus, setLibraryFocus] = useState<{ path: string; tick: number } | null>(null);
   /** 会话异常退出检测（T2-8 切片 B）：仅在检出「上次会话异常退出」时展示提示 */
   const [session, setSession] = useState<SessionStatusPayload | null>(null);
 
@@ -160,6 +164,15 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
             focusMode={focusMode}
             onToggleFocus={setFocusMode}
             recoveryFocus={recoveryFocus}
+            libraryFocus={libraryFocus}
+          />
+        )}
+        {tab === "library" && (
+          <LibraryView
+            onOpen={(path) => {
+              setLibraryFocus({ path, tick: Date.now() });
+              setTab("editor");
+            }}
           />
         )}
         {tab === "ai" && <AiView />}
