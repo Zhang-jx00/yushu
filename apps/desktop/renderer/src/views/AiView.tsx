@@ -187,7 +187,11 @@ export function AiView() {
 
   const adopt = async (mode: "replace" | "append") => {
     if (!result || !selected) return;
-    if (mode === "replace" && selected.hasBody && !confirm("替换将覆盖该章节现有正文，确定继续？")) {
+    if (
+      mode === "replace" &&
+      selected.hasBody &&
+      !confirm("替换将覆盖该章节现有正文（覆盖前会自动创建「破坏前」快照，可整体回退），确定继续？")
+    ) {
       return;
     }
     try {

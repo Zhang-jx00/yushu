@@ -1565,3 +1565,19 @@ select {
 .recovery-banner li .spacer {
   flex: 1;
 }
+
+/* ---------- 会话异常退出提示（T2-8 切片 B） ---------- */
+
+.session-banner {
+  margin: 10px 18px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: #fdf7e8;
+  font-size: 13px;
+}
+
+.session-banner .recovery-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}

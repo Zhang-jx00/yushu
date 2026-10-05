@@ -21,13 +21,15 @@ function indexRefreshLabel(status: IndexStatusPayload): string {
   return "自动增量：保存后自动刷新";
 }
 
-/** 快照来源文案（T2-7 切片 A） */
+/** 快照来源文案（T2-7 切片 A；T2-8 切片 B 增补破坏前） */
 function snapshotReasonLabel(reason: string): string {
   switch (reason) {
     case "manual":
       return "手动";
     case "pre_restore":
       return "恢复前";
+    case "pre_destructive":
+      return "破坏前";
     default:
       return "自动";
   }

@@ -61,6 +61,8 @@ export const CHANNELS = {
   snapshotState: "snapshot:state",
   snapshotTake: "snapshot:take",
   snapshotRestore: "snapshot:restore",
+  /** 会话异常退出检测（T2-8 切片 B）：打开项目后读取检出结果与快照新鲜度 */
+  sessionStatus: "session:status",
   /** 码字统计（T2-9 切片 A）：读取统计 / 设置目标 */
   statsRead: "stats:read",
   statsSetGoal: "stats:setGoal",
@@ -765,8 +767,11 @@ export interface ChapterSidecarResult {
 
 /* ---------- 本地快照（M2 / T2-7 切片 A：内容寻址快照） ---------- */
 
-/** auto = 自动（60s 最小间隔，非强制）；manual = 手动（强制）；pre_restore = 恢复前自动（强制） */
-export type SnapshotReasonPayload = "auto" | "manual" | "pre_restore";
+/**
+ * auto = 自动（60s 最小间隔，非强制）；manual = 手动（强制）；
+ * pre_restore = 恢复前自动（强制）；pre_destructive = 破坏性操作前自动（强制，T2-8 切片 B）
+ */
+export type SnapshotReasonPayload = "auto" | "manual" | "pre_restore" | "pre_destructive";
 
 export interface SnapshotSummaryPayload {
   /** snap-YYYYMMDD-HHMMSS-<rand4>（字典序 = 时间序） */
@@ -804,6 +809,24 @@ export interface SnapshotRestoreResultPayload {
   recreatedFiles: number;
   /** 磁盘上存在、但不在该快照中的文件（保守保留，不删除） */
   extraFiles: string[];
+}
+
+/* ---------- 会话异常退出检测（M2 / T2-8 切片 B） ---------- */
+
+/** 上次会话异常退出的信息（state=active 且 pid ≠ 当前进程时检出） */
+export interface SessionAbnormalExitPayload {
+  startedAt: string;
+  /** 上次会话的心跳时间（60s 随快照循环刷新） */
+  lastSeenAt: string;
+}
+
+export interface SessionStatusPayload {
+  /** 本次打开项目时检出的上次异常退出（正常退出 / 无历史会话为 null） */
+  abnormalExit: SessionAbnormalExitPayload | null;
+  /** 当前最新一份快照（无快照为 null） */
+  lastSnapshot: SnapshotSummaryPayload | null;
+  /** 脏快照提示：最近快照早于上次会话的最后可见时间（或无快照）→ 可能不含崩溃前的最后修改 */
+  snapshotStale: boolean;
 }
 
 /* ---------- 码字统计（M2 / T2-9 切片 A） ---------- */

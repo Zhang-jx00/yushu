@@ -101,6 +101,11 @@ export interface PrepareProjectOptions {
   /** 共享的本地 mock（provider 指向它的 base_url） */
   mock: MockOpenAI;
   logPrefix?: string;
+  /**
+   * 预演用（T2-8 切片 B）：挂载前写入一份「上次会话 active + 旧 pid」的模拟崩溃标记，
+   * 让本窗口打开项目时走真实的异常退出检出路径（UI 预演展示会话恢复提示；trial 不启用）。
+   */
+  simulateCrash?: boolean;
 }
 
 /**
@@ -135,7 +140,28 @@ export async function prepareProjectForDir(options: PrepareProjectOptions): Prom
   await fs.mkdir(join(dir, "config"), { recursive: true });
   await fs.writeFile(join(dir, LLM_CONFIG_PATH), llmYaml, "utf8");
 
-  attachProject(dir);
+  // T2-8 切片 B 预演：写入模拟崩溃标记（旧 pid → 挂载时按真实检出路走出「异常退出」结果）
+  if (options.simulateCrash) {
+    await fs.mkdir(join(dir, ".yushu"), { recursive: true });
+    await fs.writeFile(
+      join(dir, ".yushu", "session.json"),
+      JSON.stringify(
+        {
+          schema_version: 1,
+          state: "active",
+          pid: 999999,
+          startedAt: "2026-10-05T09:00:00.000Z",
+          lastSeenAt: "2026-10-05T09:30:00.000Z",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    console.log(`${logPrefix} 已写入模拟崩溃会话标记（展示异常退出检出；pid=999999）`);
+  }
+
+  await attachProject(dir);
 }
 
 /**
@@ -159,6 +185,7 @@ export async function prepareWalkthrough(dirArg: string): Promise<WalkthroughCon
     },
     mock,
     logPrefix: "[walkthrough]",
+    simulateCrash: true, // T2-8 切片 B：展示会话异常退出检出（见 step19）
   });
 
   await fs.mkdir(join(repoRoot, SCREENSHOT_REL_DIR), { recursive: true });
@@ -328,8 +355,14 @@ const STEPS: StepDef[] = [
       if (!btn) return { ok: false, note: '「整段采纳（替换正文）」不可用：' + pageText() };
       btn.click();
       const notice = await waitFor(() => (document.body.innerText.includes('替换采纳') ? true : null), 15000);
-      const usage = document.querySelector('.usage-list');
-      const usageText = lines(usage);
+      // 使用记录在采纳回执之后异步刷新（refreshDrafts → refreshUsage 两次 IPC）：
+      // 等待「采纳」行进入列表再断言，避免读到刷新前的旧列表（第 16 轮：采纳前快照使 IPC 变慢后暴露出的竞态）
+      const usageSeen = await waitFor(() => {
+        const usage = document.querySelector('.usage-list');
+        const text = usage ? lines(usage) : '';
+        return text.includes('采纳') ? text : null;
+      }, 8000);
+      const usageText = usageSeen || lines(document.querySelector('.usage-list'));
       return {
         ok: notice === true && usageText.includes('生成') && usageText.includes('采纳'),
         note: '采纳回执含「替换采纳」=' + (notice === true) + '；使用记录：' + usageText.slice(0, 160),
@@ -760,6 +793,23 @@ const STEPS: StepDef[] = [
         ok: todayWords > 0 && saved === true && goalShown === true && progressShown && bars >= 28,
         note: '今日字数=' + todayWords + '；目标保存回执=' + (saved === true) +
           '；目标进度可见=' + (goalShown === true) + '（进度条=' + progressShown + '）；柱状图 ' + bars + ' 根',
+      };
+    `,
+  },
+  {
+    step: 19,
+    title: "会话异常退出检测：上次会话未正常退出提示（T2-8 切片 B）",
+    file: "step19-session.png",
+    body: String.raw`
+      // 本项目在挂载前写入了模拟崩溃标记（旧 pid），走真实检出路 → 横幅应自进入项目起可见
+      const banner = await waitFor(() => document.querySelector('.session-banner'), 12000);
+      if (!banner) return { ok: false, note: '会话提示横幅未出现：' + pageText() };
+      const text = String(banner.textContent);
+      const titleShown = text.includes('上次会话未正常退出');
+      const snapshotHint = text.includes('本地快照');
+      return {
+        ok: titleShown && snapshotHint,
+        note: '横幅文本：' + text.replace(/\s+/g, ' ').slice(0, 120),
       };
     `,
   },

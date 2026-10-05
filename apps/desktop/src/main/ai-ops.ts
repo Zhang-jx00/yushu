@@ -32,6 +32,7 @@ import type {
 import { appendAiUsage, newUsageId, readAiUsage } from "./ai-usage.js";
 import { ProjectGateway } from "./file-gateway.js";
 import { analyzeDraft, assembleMessages, buildContextPreview, type DraftTask } from "./prompt-ops.js";
+import { takePreDestructiveSnapshot } from "./snapshot-ops.js";
 import { recordChapterDelta } from "./stats-ops.js";
 
 /**
@@ -306,6 +307,11 @@ export async function adoptDraft(
 
   const { chapter, body } = readChapterFile(snapshot.content);
   const nextBody = payload.mode === "replace" ? payload.text.trim() : joinBody(body, payload.text);
+  // T2-8 切片 B：整段替换属破坏性操作（清空 / 覆盖既有正文）——写入前强制 pre_destructive 快照；
+  // append 保留原文，不触发。快照失败按 K10 阻断（E_SNAPSHOT_REQUIRED，绝不无备份替换）。
+  if (payload.mode === "replace") {
+    await takePreDestructiveSnapshot(gateway);
+  }
   const updated = { ...chapter, word_count: countWords(nextBody) };
   const written = await gateway.writeDoc(path, serializeChapterFile(updated, nextBody), snapshot.hash);
   // T2-9 码字统计：AI 采纳计入章节净增字数（失败不阻断采纳）

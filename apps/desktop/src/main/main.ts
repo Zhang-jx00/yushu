@@ -214,7 +214,7 @@ async function runKillEdit(dir: string): Promise<void> {
     });
     console.log(`[kill-edit] 夹具就绪：${draft.chapterPath}`);
   }
-  attachProject(dir);
+  await attachProject(dir);
   const win = createWindow();
   await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
   await win.webContents.executeJavaScript("window.__yushuDebug = true;");
@@ -240,7 +240,10 @@ async function runKillRecover(dir: string): Promise<void> {
   const { readFile, readdir } = await import("node:fs/promises");
   const { ProjectGateway } = await import("./file-gateway.js");
   const { listDraftTargets } = await import("./ai-ops.js");
-  attachProject(dir);
+  await attachProject(dir);
+  // T2-8 切片 B：二阶段重启应检出「上次会话（被强杀的一阶段）异常退出」——作为崩溃检测证据
+  const { currentSessionAbnormal } = await import("./ipc.js");
+  const sessionAbnormal = currentSessionAbnormal() !== null;
   const win = createWindow();
   await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
   await win.webContents.executeJavaScript("window.__yushuDebug = true;");
@@ -264,12 +267,14 @@ async function runKillRecover(dir: string): Promise<void> {
       probe.restoredInEditor === true &&
       probe.savedShown === true &&
       disk.includes(KILL_TEST_MARKER) &&
-      remaining.length === 0,
+      remaining.length === 0 &&
+      sessionAbnormal, // T2-8 切片 B：重启检出上次会话异常退出
     journalDetected: probe.listed === true,
     restoredInEditor: probe.restoredInEditor === true,
     savedShown: probe.savedShown === true,
     persisted: disk.includes(KILL_TEST_MARKER),
     journalCleared: remaining.length === 0,
+    sessionAbnormal,
     chapterPath,
     note: probe.note ?? "",
   };
@@ -530,6 +535,26 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     } catch (err) {
       pipeline = { conflict: "throw:" + String(err && err.message).slice(0, 80), sidecarOk: false, mainKeptExternal: false };
     }
+
+    // 破坏前快照（T2-8 切片 B）：三类破坏性操作（删卷 / 删章 / 采纳替换）→ 每次写入前强制 pre_destructive 快照
+    const preCount = async () =>
+      (await api.snapshot.state()).snapshots.filter((s) => s.reason === "pre_destructive").length;
+    const preBefore = await preCount();
+    const outlineNow = await api.outline.read();
+    const trimVolumes = JSON.parse(JSON.stringify(outlineNow.doc));
+    trimVolumes.volumes = trimVolumes.volumes.slice(0, 2); // 删最后一卷（其章纲未绑定草稿，不影响后续探针）
+    await api.outline.write({ doc: trimVolumes, baseHash: outlineNow.hash });
+    const afterVolumes = await api.outline.read();
+    const trimChapters = JSON.parse(JSON.stringify(afterVolumes.doc));
+    trimChapters.volumes[1].chapters = trimChapters.volumes[1].chapters.slice(0, 1); // 删一个未绑定草稿的章纲
+    const savedTrim = await api.outline.write({ doc: trimChapters, baseHash: afterVolumes.hash });
+    await api.ai.adopt({ usageId: "e2e-pre", volumeId: volume.id, chapterId: co.id, text: "替换后的正文（破坏前快照探针）。", mode: "replace" });
+    const preDestructive = {
+      taken: (await preCount()) - preBefore,
+      volumesAfterTrim: savedTrim.doc.volumes.length,
+      chaptersAfterTrim: savedTrim.doc.volumes.reduce((n, v) => n + v.chapters.length, 0),
+    };
+
     return {
       packs: catalog.packs.length, ready: preview.ready, root: snap.root, cards: list.length,
       worldTitle: world && world.title, cardPath: card.path, readBack: doc.card.name,
@@ -603,6 +628,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       incremental,
       autoIndex,
       pipeline,
+      preDestructive,
     };
   })()`;
   try {
@@ -702,8 +728,50 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         sidecarOk: boolean;
         mainKeptExternal: boolean;
       };
+      preDestructive: {
+        taken: number;
+        volumesAfterTrim: number;
+        chaptersAfterTrim: number;
+      };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
+
+    // 会话异常退出检测（T2-8 切片 B）：伪造「上次会话 active + 他进程 pid」→ beginSession 检出异常；
+    // 心跳刷新 lastSeenAt；正常关闭（closed）后重开不再检出。探针直接调用主进程会话模块（不依赖 UI）。
+    const sessionProbe = await (async () => {
+      const { ProjectGateway } = await import("./file-gateway.js");
+      const { beginSession, endSession, touchSession } = await import("./session-ops.js");
+      const probeGateway = new ProjectGateway(dir);
+      const sessionFile = join(dir, ".yushu", "session.json");
+      await writeFile(
+        sessionFile,
+        JSON.stringify({
+          schema_version: 1,
+          state: "active",
+          pid: 1,
+          startedAt: "2026-10-05T09:00:00.000Z",
+          lastSeenAt: "2026-10-05T09:30:00.000Z",
+        }),
+        "utf8",
+      );
+      const detected = await beginSession(probeGateway);
+      await touchSession(probeGateway, new Date("2026-10-05T09:40:00.000Z"));
+      const touched = JSON.parse(await readFile(sessionFile, "utf8")).lastSeenAt === "2026-10-05T09:40:00.000Z";
+      await endSession(probeGateway);
+      const clean = await beginSession(probeGateway); // 上次为 closed → 不报异常
+      await endSession(probeGateway);
+      return {
+        ok:
+          detected.abnormalExit !== null &&
+          detected.abnormalExit.startedAt === "2026-10-05T09:00:00.000Z" &&
+          touched &&
+          clean.abnormalExit === null,
+        abnormalDetected: detected.abnormalExit !== null,
+        touchOk: touched,
+        cleanReopenDetected: clean.abnormalExit !== null,
+      };
+    })();
+    console.log("[e2e] 会话异常退出检测:", JSON.stringify(sessionProbe));
 
     // 关闭前 flush（T2-6 完整版）：编辑器内输入（不等自动保存）→ 立即关闭窗口 →
     // 协调器拦截 close 并请求渲染层落盘 → 回执后真正关闭。从「输入」到「窗口 closed」
@@ -1217,6 +1285,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.pipeline.conflict === "E_DOC_CONFLICT" &&
       result.pipeline.sidecarOk &&
       result.pipeline.mainKeptExternal &&
+      result.preDestructive.taken === 3 &&
+      sessionProbe.ok &&
       result.incremental.mode === "incremental" &&
       result.incremental.updated === 1 &&
       result.incremental.reused === result.indexed.files - 1 &&
@@ -1245,7 +1315,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 码字统计（净增记账） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 码字统计（净增记账）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

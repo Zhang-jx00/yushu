@@ -32,6 +32,8 @@
 - **kill-test 编排健壮性修复（第 15 轮复核）**：① 强杀后等待子进程退出增加超时（`waitExit`，A 15s / B 10s）——taskkill 静默失败不再让脚本**永久挂起**；② 清理阶段改为统一强杀**全部登记子进程**（含子进程 B 异常挂起场景），不残留 Electron 进程。修复后 kill-test 复跑通过。
 - **码字统计切片（T2-9 切片 A）**：`.yushu/stats.json` 以「章节净增字数」记账（编辑器保存与 AI 采纳两挂点；frontmatter 记录值为旧值、缺失回算；删改为负；空保存不计；失败不阻断保存；本地时区日键；原子写、损坏回退默认值）；新增「码字统计」标签页——今日字数 + 目标进度条、断更预警（≥2 天）与连续写作天数、周 / 月 / 累计 / 活跃天数 / 日均（活跃日）/ 最佳单日、**最近 30 天柱状图**（缺失日补 0、负值红标）、每日目标设置（默认 3000，0 = 清除）；新增 `stats:read` / `stats:setGoal` 两通道。单测 6 例（净增 / 负值 / 空保存、AI 采纳计入、多日汇总与断更连续天数、目标校验、损坏回退、日键边界）；e2e 探针三项断言；UI 预演 step18（walkthrough 18/18）。
 - **码字统计存储修复（第 16 轮复核）**：① `recordChapterDelta` / `setStatsGoal` 对 `stats.json` 的读-改-写改为**串行队列**（`withStatsLock`）——自动保存 flush 与 AI 采纳重叠、面板保存目标与记账重叠时不再互相覆盖丢更新；② 读取改为逐条清洗 `sanitizeDaily`——`daily` 内单条损坏（null / 字符串 / 非数字 delta）不再让汇总抛错或产生 NaN（保守丢弃坏条目）。单测 +2 例。
+- **会话异常退出检测（T2-8 切片 B）**：`.yushu/session.json` 会话标记（打开项目写 active + 主进程 pid；快照循环 60s 心跳 lastSeenAt；正常退出经 `before-quit` 同步原子写置 closed；切换 / 关闭项目亦置 closed）；启动检出「上次会话异常退出」（`state=active 且 pid ≠ 当前进程`，**pid 守卫**使渲染层 reload / 同进程重开不误报）；「脏快照」提示（最近快照早于会话最后可见时间或无快照 → 可能不含崩溃前最后修改）；新增 `session:status` 通道与项目页顶部横幅（含本地快照回退指引）。单测 7 例；e2e 探针四项（异常检出 / 心跳 / 正常关闭不重报）；kill-test 二阶段新增 `sessionAbnormal=true` 实证（重启真实检出被强杀会话）；UI 预演 step19（walkthrough 19/19）。
+- **破坏性操作强制快照（T2-8 切片 B；K10 `destructive-without-backup`）**：新增 `takePreDestructiveSnapshot`（强制、不受 60s 间隔限制；失败**阻断操作** `E_SNAPSHOT_REQUIRED`），接入四条破坏性路径——覆盖既有大纲（重新生成 / 空白创建）、保存大纲时的删卷 / 删章（新旧文档 ID 对比检出）、AI 采纳「整段替换正文」；快照来源文案新增「破坏前」，相关二次确认文案标明「可整体回退」。单测 4 例；e2e 探针 `preDestructive.taken=3`（删卷 / 删章 / 采纳替换各一次）。
 
 ### Added
 

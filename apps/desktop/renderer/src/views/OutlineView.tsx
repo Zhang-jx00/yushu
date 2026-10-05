@@ -102,7 +102,10 @@ export function OutlineView() {
   const projectTitle = () => worldTitle || doc?.master.title || "未命名作品";
 
   const generate = async () => {
-    if (state?.exists && !confirm("重新生成将覆盖当前大纲（未保存的修改会丢失），确定继续？")) {
+    if (
+      state?.exists &&
+      !confirm("重新生成将覆盖当前大纲（未保存的修改会丢失；覆盖前会自动创建「破坏前」快照，可整体回退），确定继续？")
+    ) {
       return;
     }
     setBusy(true);
@@ -255,7 +258,7 @@ export function OutlineView() {
     );
 
   const removeVolume = (volumeId: string) => {
-    if (!confirm("删除该卷及其全部章纲？")) return;
+    if (!confirm("删除该卷及其全部章纲？（保存大纲时会自动创建「破坏前」快照，可整体回退）")) return;
     setDoc((prev) => (prev ? { ...prev, volumes: prev.volumes.filter((v) => v.id !== volumeId) } : prev));
   };
 
@@ -616,7 +619,8 @@ export function OutlineView() {
                               type="button"
                               className="link"
                               title="删除本章纲"
-                              onClick={() =>
+                              onClick={() => {
+                                if (!confirm("删除本章纲？（保存大纲时会自动创建「破坏前」快照，可整体回退）")) return;
                                 setDoc((prev) =>
                                   prev
                                     ? {
@@ -631,8 +635,8 @@ export function OutlineView() {
                                         ),
                                       }
                                     : prev,
-                                )
-                              }
+                                );
+                              }}
                             >
                               ✕
                             </button>
@@ -713,7 +717,13 @@ export function OutlineView() {
   );
 
   async function generateEmpty() {
-    if (!confirm(state?.exists ? "空白创建将覆盖当前大纲，确定继续？" : "创建空白大纲（不使用模板）？")) {
+    if (
+      !confirm(
+        state?.exists
+          ? "空白创建将覆盖当前大纲（覆盖前会自动创建「破坏前」快照，可整体回退），确定继续？"
+          : "创建空白大纲（不使用模板）？",
+      )
+    ) {
       return;
     }
     setBusy(true);

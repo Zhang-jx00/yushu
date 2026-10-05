@@ -117,6 +117,10 @@ contextBridge.exposeInMainWorld("yushu", {
     /** 整体回滚到指定快照（恢复前自动生成 pre_restore 快照） */
     restore: (id) => invoke("snapshot:restore", { id }),
   },
+  session: {
+    /** 会话异常退出检测（T2-8 切片 B）：上次会话是否异常退出 + 最近快照新鲜度 */
+    status: () => invoke("session:status"),
+  },
   stats: {
     /** 码字统计（T2-9 切片 A）：今日 / 日序列 / 周月汇总 / 目标 / 断更 */
     read: () => invoke("stats:read"),

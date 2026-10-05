@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ProjectSnapshot, RecoveryEntry } from "../../../src/shared/ipc";
+import type { ProjectSnapshot, RecoveryEntry, SessionStatusPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { putPendingRecovery } from "../recovery-inbox";
 import { AiView } from "./AiView";
@@ -33,12 +33,19 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   /** 崩溃恢复（T2-8 切片 A）：进入项目（或切换项目）时检测编辑日志与磁盘不一致的未保存编辑 */
   const [recovery, setRecovery] = useState<RecoveryEntry[]>([]);
   const [recoveryFocus, setRecoveryFocus] = useState<{ path: string; tick: number } | null>(null);
+  /** 会话异常退出检测（T2-8 切片 B）：仅在检出「上次会话异常退出」时展示提示 */
+  const [session, setSession] = useState<SessionStatusPayload | null>(null);
 
   useEffect(() => {
     // snapshot.root 变化 = 打开了另一个项目：重新检测该项目的编辑日志
     void api()
       .recovery.list()
       .then((entries) => setRecovery(entries))
+      .catch(() => undefined);
+    // 同时读取本次打开项目时检出的「上次会话异常退出」与快照新鲜度（脏快照提示）
+    void api()
+      .session.status()
+      .then((status) => setSession(status.abnormalExit ? status : null))
       .catch(() => undefined);
   }, [snapshot.root]);
 
@@ -109,6 +116,18 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
         ))}
       </div>
       <div className="tab-body">
+        {session?.abnormalExit && (
+          <div className="session-banner">
+            <div className="recovery-title">
+              检测到上次会话未正常退出（开始于 {session.abnormalExit.startedAt.replace("T", " ").slice(0, 19)}）
+            </div>
+            <div className="muted">
+              {session.snapshotStale || !session.lastSnapshot
+                ? "最近快照早于上次会话退出（或无快照），可能不含崩溃前的最后修改；如发现内容缺失，可在「项目文件 → 本地快照」回退，或检查章节旁的 .conflict-*.md 旁路文件。"
+                : `最近快照 ${session.lastSnapshot.createdAt.replace("T", " ").slice(0, 19)} 可在「项目文件 → 本地快照」整体回退。`}
+            </div>
+          </div>
+        )}
         {recovery.length > 0 && (
           <div className="recovery-banner">
             <div className="recovery-title">

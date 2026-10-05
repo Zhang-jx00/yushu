@@ -43,6 +43,7 @@ import type {
   ProjectSnapshot,
   RecoveryEntry,
   RecoveryWritePayload,
+  SessionStatusPayload,
   SnapshotRestoreResultPayload,
   SnapshotStatePayload,
   SnapshotTakeResultPayload,
@@ -150,6 +151,10 @@ export interface YushuApi {
     take: () => Promise<SnapshotTakeResultPayload>;
     /** 整体回滚到指定快照（恢复前自动生成 pre_restore 快照；快照后新增文件保守保留） */
     restore: (id: string) => Promise<SnapshotRestoreResultPayload>;
+  };
+  session: {
+    /** 会话异常退出检测（T2-8 切片 B）：上次会话异常退出信息 + 最近快照（含脏快照提示） */
+    status: () => Promise<SessionStatusPayload>;
   };
   stats: {
     /** 码字统计（T2-9 切片 A）：今日 / 日序列 / 周月汇总 / 目标 / 断更与连续天数 */

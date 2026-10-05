@@ -66,6 +66,7 @@ import type {
 } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
 import { packsRoot } from "./paths.js";
+import { takePreDestructiveSnapshot } from "./snapshot-ops.js";
 
 /**
  * 项目级业务操作（纯 Node，无 Electron 依赖；可被 IPC 路由与测试直接复用）。
@@ -407,6 +408,7 @@ export async function readOutlineState(gateway: ProjectGateway): Promise<Outline
 /**
  * 一键生成大纲骨架（T1-11）。
  * 已存在大纲时必须携带 baseHash（覆盖前经用户确认）；生成后仍可任意增删改（生成≠写死）。
+ * T2-8 切片 B：覆盖既有大纲属破坏性操作——写入前强制生成 `pre_destructive` 快照（撤销窗口）。
  */
 export async function generateOutline(
   gateway: ProjectGateway,
@@ -414,6 +416,11 @@ export async function generateOutline(
 ): Promise<OutlineMutateResult> {
   if (!payload.title.trim()) {
     throw new YushuError("E_INVALID_INPUT", "生成大纲需要项目名");
+  }
+  // 覆盖既有大纲（含空白创建分支）：先备份再覆盖；快照失败按 K10 阻断（E_SNAPSHOT_REQUIRED）
+  const existing = await gateway.readDoc(OUTLINE_PATH).catch(() => null);
+  if (existing) {
+    await takePreDestructiveSnapshot(gateway);
   }
   // 空 templateId = 空白创建（不使用模板，由作者自建）
   if (!payload.templateId) {
@@ -445,12 +452,29 @@ export async function generateOutline(
   return { path: OUTLINE_PATH, hash: snap.hash, doc: toOutlinePayload(outline) };
 }
 
-/** 保存大纲：先归一化（补齐缺失 ID + 重编号章序），再携带 baseHash 原子写入 */
+/**
+ * 保存大纲：先归一化（补齐缺失 ID + 重编号章序），再携带 baseHash 原子写入。
+ * T2-8 切片 B：与磁盘版本对比，若本次保存**删除了卷 / 章纲**（删卷、删章、清空重建的批量替换），
+ * 属破坏性操作——写入前强制 `pre_destructive` 快照（撤销窗口）；仅编辑文本 / 增补则不触发。
+ */
 export async function writeOutline(
   gateway: ProjectGateway,
   payload: OutlineWritePayload,
 ): Promise<OutlineMutateResult> {
   const normalized = normalizeOutline(payload.doc as unknown as Outline);
+  const before = await gateway.readDoc(OUTLINE_PATH).catch(() => null);
+  if (before) {
+    const oldOutline = parseOutline(before.content);
+    const oldVolumeIds = new Set(oldOutline.volumes.map((volume) => volume.id));
+    const oldChapterIds = new Set(oldOutline.volumes.flatMap((volume) => volume.chapters.map((chapter) => chapter.id)));
+    const newVolumeIds = new Set(normalized.volumes.map((volume) => volume.id));
+    const newChapterIds = new Set(normalized.volumes.flatMap((volume) => volume.chapters.map((chapter) => chapter.id)));
+    const removedVolume = [...oldVolumeIds].some((id) => !newVolumeIds.has(id));
+    const removedChapter = [...oldChapterIds].some((id) => !newChapterIds.has(id));
+    if (removedVolume || removedChapter) {
+      await takePreDestructiveSnapshot(gateway);
+    }
+  }
   const snap = await gateway.writeDoc(OUTLINE_PATH, serializeOutline(normalized), payload.baseHash);
   return { path: OUTLINE_PATH, hash: snap.hash, doc: toOutlinePayload(normalized) };
 }

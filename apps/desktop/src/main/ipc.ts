@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { clipboard, dialog, ipcMain } from "electron";
+import { app, clipboard, dialog, ipcMain } from "electron";
 import { YushuError } from "@yushu/core";
 import {
   CHANNELS,
@@ -48,6 +48,7 @@ import {
   type ProjectSnapshot,
   type RecoveryEntry,
   type RecoveryWritePayload,
+  type SessionStatusPayload,
   type SnapshotRestoreResultPayload,
   type SnapshotStatePayload,
   type SnapshotTakeResultPayload,
@@ -85,6 +86,14 @@ import {
   snapshotState,
   takeSnapshot,
 } from "./snapshot-ops.js";
+import {
+  beginSession,
+  endSession,
+  endSessionSync,
+  isSnapshotStale,
+  touchSession,
+  type SessionOpenResult,
+} from "./session-ops.js";
 import { readStatsState, setStatsGoal } from "./stats-ops.js";
 import {
   buildFusionPreview,
@@ -125,12 +134,22 @@ const indexRefresh = new IndexRefreshScheduler(async () => {
 /**
  * 本地快照（T2-7 切片 A）：打开项目即检查一次（基线），此后每 60s 检查——
  * 距上一份不足最小间隔 / 内容无变化则跳过（快照管理器内部判定）。
+ * T2-8 切片 B：同一周期刷新会话心跳（lastSeenAt），供异常退出后的「脏快照」提示判定。
  */
 const snapshotLoop = new SnapshotLoop(async () => {
   const current = gateway;
   if (!current) return;
   await takeSnapshot(current, "auto");
+  await touchSession(current).catch(() => undefined);
 });
+
+/** 最近一次 attachProject 检出的「上次会话异常退出」（供 session:status 与实测脚本读取） */
+let lastAbnormalExit: SessionOpenResult["abnormalExit"] = null;
+
+/** 最近一次检出结果（kill-test 二阶段用作崩溃检测证据） */
+export function currentSessionAbnormal(): SessionOpenResult["abnormalExit"] {
+  return lastAbnormalExit;
+}
 
 function requireGateway(): ProjectGateway {
   if (!gateway) {
@@ -139,10 +158,19 @@ function requireGateway(): ProjectGateway {
   return gateway;
 }
 
-/** 挂载项目根目录为当前 gateway（project:create 的副作用；UI walkthrough 预演复用） */
-export function attachProject(root: string): void {
+/**
+ * 挂载项目根目录为当前 gateway（project:create 的副作用；UI walkthrough 预演复用）。
+ * T2-8 切片 B：同时做会话标记——先检出上次会话是否异常退出（对比 pid），再写入本次 active。
+ */
+export async function attachProject(root: string): Promise<void> {
   indexRefresh.reset();
+  const previous = gateway;
   gateway = new ProjectGateway(root);
+  // 切换项目：把上一个项目标记为正常关闭（否则下次打开会被误判为「异常退出」）
+  if (previous && previous.root !== gateway.root) {
+    await endSession(previous).catch(() => undefined);
+  }
+  lastAbnormalExit = (await beginSession(gateway)).abnormalExit;
   snapshotLoop.stop();
   snapshotLoop.start();
 }
@@ -185,19 +213,19 @@ export function registerIpcHandlers(): void {
       if (!stat?.isDirectory()) {
         throw new PathSafetyError(`目录不存在或不是文件夹：${root}`);
       }
-      gateway = new ProjectGateway(root);
-      indexRefresh.reset();
-      snapshotLoop.stop();
-      snapshotLoop.start();
-      return { root: gateway.root, tree: await gateway.listTree() };
+      await attachProject(root);
+      return { root: gateway!.root, tree: await gateway!.listTree() };
     }),
   );
 
   ipcMain.handle(CHANNELS.projectClose, () =>
-    wrap<boolean>(() => {
+    wrap<boolean>(async () => {
+      const current = gateway;
+      if (current) await endSession(current).catch(() => undefined);
       indexRefresh.reset();
       snapshotLoop.stop();
       gateway = null;
+      lastAbnormalExit = null;
       return true;
     }),
   );
@@ -227,7 +255,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNELS.projectCreate, (_event, payload: CreateProjectPayload) =>
     wrap<ProjectSnapshot>(async () => {
       const snapshot = await createProject(payload);
-      attachProject(snapshot.root);
+      await attachProject(snapshot.root);
       return snapshot;
     }),
   );
@@ -459,6 +487,23 @@ export function registerIpcHandlers(): void {
     wrapWrite<SnapshotRestoreResultPayload>(() => restoreSnapshot(requireGateway(), payload.id)),
   );
 
+  /* ---------- 会话异常退出检测（M2 / T2-8 切片 B） ---------- */
+
+  // 本次打开项目时检出的上次异常退出（含 pid 守卫，同进程 reload 不误报）+ 快照新鲜度（脏快照提示）
+  ipcMain.handle(CHANNELS.sessionStatus, () =>
+    wrap<SessionStatusPayload>(async () => {
+      const current = requireGateway();
+      const latest = await snapshotState(current)
+        .then((state) => state.snapshots[0] ?? null)
+        .catch(() => null);
+      return {
+        abnormalExit: lastAbnormalExit,
+        lastSnapshot: latest,
+        snapshotStale: isSnapshotStale(lastAbnormalExit, latest),
+      };
+    }),
+  );
+
   /* ---------- 码字统计（M2 / T2-9 切片 A） ---------- */
 
   ipcMain.handle(CHANNELS.statsRead, () => wrap<StatsStatePayload>(() => readStatsState(requireGateway())));
@@ -466,4 +511,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNELS.statsSetGoal, (_event, payload: StatsSetGoalPayload) =>
     wrap<{ daily: number }>(() => setStatsGoal(requireGateway(), payload.daily)),
   );
+
+  // 正常退出（窗口关闭 → app.quit）：before-quit 不能等待异步——同步原子写把会话标记为 closed，
+  // 确保下次打开不误报「异常退出」（崩溃 / taskkill 到不了这里，标记保持 active 供检出）。
+  app.on("before-quit", () => {
+    if (gateway) endSessionSync(gateway);
+  });
 }

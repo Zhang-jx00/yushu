@@ -46,7 +46,7 @@ const SNAPSHOT_EXCLUDE_PREFIXES = ["exports/"];
  */
 const SNAPSHOT_ID_RE = /^snap-\d{8}-\d{6}-[0-9a-f]{4,32}$/;
 const SNAPSHOT_BLOB_RE = /^[0-9a-f]{64}$/;
-const SNAPSHOT_REASONS = new Set<SnapshotReasonPayload>(["auto", "manual", "pre_restore"]);
+const SNAPSHOT_REASONS = new Set<SnapshotReasonPayload>(["auto", "manual", "pre_restore", "pre_destructive"]);
 
 function isSafeRelPath(path: string): boolean {
   return (
@@ -275,6 +275,22 @@ async function takeSnapshotLocked(
   await atomicWrite(join(gateway.root, SNAPSHOT_MANIFESTS_DIR, `${manifest.id}.json`), JSON.stringify(manifest, null, 2));
   await pruneSnapshots(gateway, options?.keep ?? SNAPSHOT_RING_KEEP);
   return { outcome: "taken", snapshot: manifestSummary(manifest), latest: manifestSummary(manifest) };
+}
+
+/**
+ * 破坏性操作前强制快照（T2-8 切片 B；docs/03 §12「删卷 / 清空章节 / 批量替换前强制 pre_destructive
+ * 快照 + 二次确认 + 撤销窗口」）：不受 60s 最小间隔限制；失败按 K10 规则**阻断操作**
+ * （`destructive-without-backup` → error），由调用方抛出，保证「破坏必有备份」。
+ */
+export async function takePreDestructiveSnapshot(gateway: ProjectGateway): Promise<SnapshotTakeResultPayload> {
+  try {
+    return await takeSnapshot(gateway, "pre_destructive", { force: true });
+  } catch (err) {
+    throw new YushuError(
+      "E_SNAPSHOT_REQUIRED",
+      `破坏性操作前的快照创建失败，操作已取消：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 /** 环形保留：仅留最新 keep 份 manifest；删除不再被任何保留 manifest 引用的 blob */
