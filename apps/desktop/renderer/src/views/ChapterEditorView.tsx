@@ -149,6 +149,12 @@ export function ChapterEditorView({
    * （清理执行顺序不确定），此时 flush 仍须落盘最后输入——以快照兜底读取正文。
    */
   const latestMarkdownRef = useRef("");
+  /**
+   * 当前「脏」内容所属章节（第 13 轮复核修复）：
+   * 仅在"同一章节由脏转净"（撤销 / 删回磁盘态）时清理残留 journal，
+   * 章节切换等载入路径导致的转净不得清理其他章节的编辑日志。
+   */
+  const dirtyPathRef = useRef<string | null>(null);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -282,17 +288,29 @@ export function ChapterEditorView({
     (text: string) => {
       latestMarkdownRef.current = text;
       setLiveWords(localCountWords(text));
+      const wasDirty = dirtyRef.current;
       const nextDirty = text !== savedBodyRef.current;
       dirtyRef.current = nextDirty;
       setDirty(nextDirty);
       setMentioned(collectMentionedEntities(text, entitiesRef.current));
       // T2-6：文本有变化即登记自动保存（防抖 800ms / 高频上限 5s）；还原为磁盘态则撤销待发保存
       if (nextDirty) {
+        dirtyPathRef.current = selectedPathRef.current;
         getScheduler().schedule();
         getJournal().note(text); // T2-8：编辑日志（500ms 快照，崩溃恢复用）
       } else {
         getScheduler().cancel();
-        getJournal().cancel(); // 回到磁盘态：取消待发日志（已存在的 journal 文件不动，供异常终止场景恢复）
+        getJournal().cancel();
+        // 第 13 轮复核修复：用户把本章改回磁盘态（撤销 / 删回原样）——500ms 快照可能已写下中途内容，
+        // 若不清理会在下次进入项目时误报「崩溃前的未保存编辑」（恢复反而复活已撤销内容）。
+        // 仅限"同一章节由脏转净"：章节切换 / 载入导致的转净不得清理其他章节的日志。
+        const path = selectedPathRef.current;
+        if (wasDirty && path && dirtyPathRef.current === path) {
+          void api()
+            .recovery.clearJournal(path)
+            .catch(() => undefined);
+        }
+        dirtyPathRef.current = null;
       }
     },
     [getScheduler, getJournal],

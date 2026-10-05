@@ -41,11 +41,27 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   }, [snapshot.root]);
 
   const restoreEntry = (entry: RecoveryEntry) => {
-    // 投递到收件箱 → 编辑器载入该章节时取出（脏态呈现，随后自动保存落盘）
-    putPendingRecovery(entry.path, entry.body);
-    setRecovery((prev) => prev.filter((item) => item.path !== entry.path));
-    setRecoveryFocus({ path: entry.path, tick: Date.now() });
-    setTab("editor");
+    void (async () => {
+      // 第 13 轮复核修复：面板条目可能已过期——进入项目后该章又被编辑并保存（journal 已被保存
+      // 成功清除），或内容已与磁盘一致被自愈清除。恢复前用同一检测逻辑复核：
+      // 条目已失效则不再恢复，避免把过期内容载入编辑器、经自动保存覆盖更新版本的正文。
+      let fresh: RecoveryEntry[];
+      try {
+        fresh = await api().recovery.list();
+      } catch {
+        return; // 检测失败：不冒险恢复（面板保持原样，下次进入项目自动重试）
+      }
+      const hit = fresh.find((item) => item.path === entry.path);
+      if (!hit) {
+        setRecovery(fresh); // 同步为最新列表（过期条目随之移除）
+        return;
+      }
+      // 投递到收件箱 → 编辑器载入该章节时取出（脏态呈现，随后自动保存落盘）
+      putPendingRecovery(hit.path, hit.body);
+      setRecovery(fresh.filter((item) => item.path !== hit.path));
+      setRecoveryFocus({ path: hit.path, tick: Date.now() });
+      setTab("editor");
+    })();
   };
 
   const discardEntry = async (entry: RecoveryEntry) => {

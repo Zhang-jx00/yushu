@@ -706,6 +706,118 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     }
     console.log("[e2e] 崩溃恢复:", JSON.stringify(crashRecovery));
 
+    // 恢复边界（第 13 轮复核）：
+    // ① 撤销回磁盘态（编辑内容回到与磁盘一致）→ 残留 journal 不应在下一次检测中误报为可恢复条目；
+    // ② 恢复面板条目失效（进入项目后该章又被编辑并保存 → journal 已被保存清除）→
+    //    点击「恢复」不得把过期内容载入编辑器并自动保存、覆盖更新版本的正文。
+    const revertProbeScript = `(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const waitFor = async (fn, timeout = 8000) => {
+        const t0 = Date.now();
+        for (;;) {
+          let r = null;
+          try { r = await fn(); } catch { r = null; }
+          if (r) return r;
+          if (Date.now() - t0 > timeout) return null;
+          await sleep(50);
+        }
+      };
+      const view = await waitFor(() => (window.__yushuCmView && window.__yushuCmView.state.doc.length > 0 ? window.__yushuCmView : null));
+      if (!view) return { ok: false, note: '编辑器未就绪' };
+      const original = view.state.doc.toString();
+      const marker = '撤销回退验证：孤帆远影。';
+      const dispatchAt = Date.now();
+      view.dispatch({ changes: { from: view.state.doc.length, insert: '\\n\\n' + marker } });
+      const seen = await waitFor(async () => {
+        const entries = await window.yushu.recovery.list();
+        return entries.some((e) => String(e.body).includes(marker)) ? true : null;
+      }, 5000);
+      if (!seen) return { ok: false, marker, note: '编辑日志未在预期时间内检出' };
+      const revertAt = Date.now();
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: original } });
+      const cleared = await waitFor(async () => {
+        const entries = await window.yushu.recovery.list();
+        return entries.length === 0 ? true : null;
+      }, 5000);
+      return { ok: cleared === true, marker, seenMs: revertAt - dispatchAt, cleared: cleared === true, reverted: view.state.doc.toString() === original };
+    })()`;
+    let recoveryEdge = { revertCleared: false, revertNote: "未执行", staleBlocked: false, staleNote: "未执行" };
+    try {
+      const probeA2 = (await win.webContents.executeJavaScript(revertProbeScript)) as {
+        ok: boolean;
+        marker?: string;
+        cleared?: boolean;
+        reverted?: boolean;
+        seenMs?: number;
+        note?: string;
+      };
+      const chapterAfterRevert = await readFile(join(dir, result.chapterPath), "utf8");
+      const markerNotSaved = probeA2.marker ? !chapterAfterRevert.includes(probeA2.marker) : false;
+      recoveryEdge = {
+        ...recoveryEdge,
+        revertCleared: probeA2.cleared === true && probeA2.reverted === true && markerNotSaved,
+        revertNote:
+          `撤销回退 → journal 清理=${probeA2.cleared === true}；内容已还原=${probeA2.reverted === true}；磁盘未含标记=${markerNotSaved}` +
+          `（journal 检出耗时 ${probeA2.seenMs ?? -1}ms）` +
+          (probeA2.note ? `；脚本：${probeA2.note}` : ""),
+      };
+
+      // ② 失效条目：直接写入 journal（模拟崩溃残留）→ reload 出现恢复面板 → 清除 journal（模拟"该章随后被保存"）→ 点「恢复」
+      const { ProjectGateway } = await import("./file-gateway.js");
+      const { writeRecoveryJournal, clearRecoveryJournal } = await import("./recovery-ops.js");
+      const { readChapterFile } = await import("@yushu/world-engine");
+      const gateway = new ProjectGateway(dir);
+      const chapterNow = await readFile(join(dir, result.chapterPath), "utf8");
+      const staleMarker = "失效条目验证：旧雪故人。";
+      const staleBody = `${readChapterFile(chapterNow).body}\n\n${staleMarker}`;
+      await writeRecoveryJournal(gateway, { path: result.chapterPath, body: staleBody });
+      const reloaded3 = new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
+      win.webContents.reload();
+      await reloaded3;
+      await win.webContents.executeJavaScript("window.__yushuDebug = true;");
+      const listProbe = (await win.webContents.executeJavaScript(`(async () => {
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        for (let i = 0; i < 200; i += 1) {
+          const banner = document.querySelector('.recovery-banner');
+          if (banner && banner.querySelectorAll('li').length > 0) return { listed: true, count: banner.querySelectorAll('li').length };
+          await sleep(100);
+        }
+        return { listed: false, count: 0 };
+      })()`)) as { listed: boolean; count: number };
+      // 模拟：该章随后被编辑并保存（保存成功会清除 journal；面板状态此时已是过期快照）
+      await clearRecoveryJournal(gateway, result.chapterPath);
+      const clickProbe = (await win.webContents.executeJavaScript(`(async () => {
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const banner = document.querySelector('.recovery-banner');
+        const button = banner ? [...banner.querySelectorAll('button')].find((b) => b.textContent.trim() === '恢复') : null;
+        if (!button) return { clicked: false, entryGone: false };
+        button.click();
+        for (let i = 0; i < 60; i += 1) {
+          const b = document.querySelector('.recovery-banner');
+          if (!b || b.querySelectorAll('li').length === 0) return { clicked: true, entryGone: true };
+          await sleep(100);
+        }
+        return { clicked: true, entryGone: false };
+      })()`)) as { clicked: boolean; entryGone: boolean };
+      // 若有"过期恢复"路径：自动保存（800ms）应已把过期内容写入磁盘——等待其窗口后断言
+      await new Promise((resolve) => setTimeout(resolve, 1800));
+      const chapterAfterStale = await readFile(join(dir, result.chapterPath), "utf8");
+      const staleNotPersisted = !chapterAfterStale.includes(staleMarker);
+      recoveryEdge = {
+        ...recoveryEdge,
+        staleBlocked: listProbe.listed && clickProbe.clicked && clickProbe.entryGone && staleNotPersisted,
+        staleNote:
+          `失效条目：面板列出=${listProbe.listed}；点击恢复=${clickProbe.clicked}；条目移除=${clickProbe.entryGone}；` +
+          `过期内容未落盘=${staleNotPersisted}`,
+      };
+    } catch (err) {
+      recoveryEdge = {
+        ...recoveryEdge,
+        revertNote: `${recoveryEdge.revertNote}；异常：${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    console.log("[e2e] 恢复边界:", JSON.stringify(recoveryEdge));
+
     const closeProbeScript = `(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const waitFor = async (fn, timeout = 12000) => {
@@ -841,11 +953,13 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       crashRecovery.restoredInEditor &&
       crashRecovery.persisted &&
       crashRecovery.journalCleared &&
+      recoveryEdge.revertCleared &&
+      recoveryEdge.staleBlocked &&
       closeFlush.ok &&
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
