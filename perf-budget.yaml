@@ -72,3 +72,20 @@ measurements:
       idle_rss_mb: 435                 # ≤600
       million_chars_rss_mb: 485        # ≤1200
     report: docs/assets/perf/perf-report-local-dev-20261005-r23-large-doc-throttle.json
+  - date: 2026-10-05
+    runner: local-dev          # 第 24 轮复跑：全量解析移入 utilityProcess（T2-11 切片 A）
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,107,963 字 + 100k 大章靶子
+    result: pass_10_of_10
+    metrics:
+      cold_to_editable_ms: 1433        # ≤2000
+      hot_to_editable_ms: 563          # ≤800
+      project_open_ms: 195             # ≤3000
+      keystroke_p95_ms: 1.0            # ≤16
+      keystroke_mega_p95_ms: 2.5       # ≤16
+      save_to_indexed_ms: 395          # ≤500（增量仍在主进程）
+      query_p95_ms: 14.4               # ≤80
+      rebuild_cpm: 37248714            # ≥20000（全量 1.785s / 1.108M 字；较主进程解析 ~5,700 万略降——
+                                       #  结构化克隆回传整份索引输入的开销；远高于下限，切片 B 可评估分片回传优化）
+      idle_rss_mb: 432                 # ≤600
+      million_chars_rss_mb: 754        # ≤1200
+    report: docs/assets/perf/perf-report-local-dev-20261005-r24-utility-parse.json

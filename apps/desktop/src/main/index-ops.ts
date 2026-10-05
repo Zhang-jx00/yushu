@@ -32,6 +32,7 @@ import type {
   IndexStatusPayload,
 } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
+import { collectInWorker } from "./repo-worker.js";
 
 /**
  * 桌面端索引操作（T1-21；T2-5 切片 A：增量与自愈）：
@@ -240,6 +241,7 @@ export async function rebuildProjectIndex(
           removedFiles: outcome.removedFiles,
           integrityIssues: [],
           shards: 0,
+          parseVia: "main", // 增量 diff 与校验在主进程完成（切片 B 再评估下沉）
         };
       }
       // 自愈（T2-5）：索引损坏 → 放弃增量，回退全量重建（问题项回报给 UI）
@@ -252,7 +254,22 @@ export async function rebuildProjectIndex(
       if (progress.phase === "chunks") shards += 1;
       onProgress?.(progress);
     };
-    const input = await collectIndexInput(progressReader(reader, forward));
+    // T2-11 切片 A：全量解析优先走 utilityProcess（只读解析；索引库写入仍由主进程独占）；
+    // 不可用 / 超时 / 越界拒绝 → 回退主进程解析（功能不受影响），回执注明解析进程
+    let input: Awaited<ReturnType<typeof collectIndexInput>>;
+    let parseVia: "utility" | "main" = "utility";
+    try {
+      const files = await reader.listFiles();
+      input = await collectInWorker(gateway.root, files, (done, total, currentPath) =>
+        forward({ phase: "parse", done, total, currentPath }),
+      );
+    } catch (err) {
+      console.warn(
+        `[index] utilityProcess 解析不可用，回退主进程：${err instanceof Error ? err.message : String(err)}`,
+      );
+      parseVia = "main";
+      input = await collectIndexInput(progressReader(reader, forward));
+    }
     const stats = rebuildIndex(db, input, undefined, { onProgress: forward });
     return {
       path: INDEX_DB_RELATIVE,
@@ -266,6 +283,7 @@ export async function rebuildProjectIndex(
       removedFiles: 0,
       integrityIssues,
       shards,
+      parseVia,
     };
   } finally {
     closeIndex(db);

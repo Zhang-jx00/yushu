@@ -624,6 +624,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         snippetHasHit: indexSearch.chunks.some((chunk) => chunk.snippet.includes("夜色")),
         statusChunks: indexStatus.stats ? indexStatus.stats.chunks : -1,
         shards: indexRebuild.shards,
+        parseVia: indexRebuild.parseVia,
         progressOk:
           indexProgressEvents.some((event) => event.phase === "parse") &&
           indexProgressEvents.some((event) => event.phase === "chunks") &&
@@ -726,6 +727,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         snippetHasHit: boolean;
         statusChunks: number;
         shards: number;
+        parseVia: string;
         progressOk: boolean;
         progressShardsMatch: boolean;
       };
@@ -1376,6 +1378,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.indexed.ftsRows === result.indexed.chunks &&
       result.indexed.skipped === 0 &&
       result.indexed.shards >= 1 &&
+      result.indexed.parseVia === "utility" &&
       result.indexed.progressOk &&
       result.indexed.progressShardsMatch &&
       result.indexed.searchEntities >= 1 &&

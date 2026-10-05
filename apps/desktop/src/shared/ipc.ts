@@ -682,6 +682,8 @@ export interface IndexRebuildResultPayload extends IndexStatusPayload {
   integrityIssues: string[];
   /** 全量重建的正文块分片批次数（T2-5 切片 B；增量路径为 0） */
   shards: number;
+  /** 解析执行位置（T2-11 切片 A）：utility = utilityProcess 只读解析；main = 回退主进程 */
+  parseVia: "utility" | "main";
 }
 
 /** 重建请求（T2-5：默认全量；incremental=true 时增量，索引缺失/损坏自动回退全量） */

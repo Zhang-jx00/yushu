@@ -205,7 +205,7 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
       const modeText =
         result.mode === "incremental"
           ? `增量：复用 ${result.reusedFiles} · 更新 ${result.updatedFiles} · 移除 ${result.removedFiles} 个文件`
-          : `全量 · 分片 ${result.shards} 批`;
+          : `全量 · 分片 ${result.shards} 批 · 解析 ${result.parseVia === "utility" ? "utility 进程" : "主进程（回退）"}`;
       setStatus(
         `索引已重建（${modeText}）：${result.stats.files} 文件 / ${result.stats.entities} 实体 / ${result.stats.refs} 引用 / ${result.stats.chunks} 块` +
           (result.skipped.length > 0 ? `（跳过 ${result.skipped.length} 个解析失败文件）` : "") +

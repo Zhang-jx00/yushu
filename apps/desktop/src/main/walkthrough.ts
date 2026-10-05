@@ -432,9 +432,12 @@ const STEPS: StepDef[] = [
       if (!rebuild) return { ok: false, note: '找不到「重建索引」按钮：' + pageText() };
       rebuild.click();
       const built = await waitFor(() => (document.body.innerText.includes('已构建') ? true : null), 25000);
-      // 分片写入回执（T2-5 切片 B：全量重建以分片写入 + 进度流执行）
+      // 分片写入回执（T2-5 切片 B：全量重建以分片写入 + 进度流执行；T2-11：解析在 utilityProcess）
       const sharded = await waitFor(
-        () => (document.body.innerText.includes('索引已重建（全量 · 分片') ? true : null),
+        () => {
+          const text = document.body.innerText;
+          return text.includes('索引已重建（全量 · 分片') && text.includes('解析 utility 进程') ? true : null;
+        },
         8000,
       );
       const input = await waitFor(() => document.querySelector('.dir-row input'), 10000);
