@@ -4,6 +4,7 @@ import { CHANNELS } from "../shared/ipc.js";
 import { CloseCoordinator, registerCloseCoordinator, unregisterCloseCoordinator } from "./close-coordinator.js";
 import { attachProject, registerIpcHandlers } from "./ipc.js";
 import { appRoot } from "./paths.js";
+import { runPerfProbe } from "./perf-runner.js";
 import { parseTrialDir, runTrial } from "./trial.js";
 import { parseWalkthroughDir, prepareWalkthrough, runWalkthrough, startMockOpenAI } from "./walkthrough.js";
 
@@ -155,6 +156,17 @@ void app.whenReady().then(() => {
     autoQuitDisabled = true;
     void runKillRecover(killRecoverArg.slice("--kill-recover=".length)).catch((err: unknown) => {
       console.error("[kill-recover] 失败:", err);
+      app.exit(2);
+    });
+    return;
+  }
+  // --perf-probe[=<dir>]：性能实测探针（M2 / T2-10；synth-1m 百万字夹具 + perf-budget.yaml 全指标）
+  const perfProbeArg = process.argv.find((arg) => arg.startsWith("--perf-probe"));
+  if (perfProbeArg) {
+    autoQuitDisabled = true;
+    const dirArg = perfProbeArg.includes("=") ? perfProbeArg.slice(perfProbeArg.indexOf("=") + 1) : "";
+    void runPerfProbe({ dirArg, createWindow }).catch((err: unknown) => {
+      console.error("[perf] 实测失败:", err);
       app.exit(2);
     });
     return;

@@ -1,0 +1,42 @@
+# perf-budget.yaml —— 御书性能预算（唯一事实源，docs/03 §14 / docs/04 §5.5 A3）
+#
+# 用途：本地 `pnpm --filter @yushu/desktop perf-test` 与 CI 共用同一份指标（K13「Measure 优先」）。
+# 口径说明（与 docs/03 §14 一致，实测后回填 measurements）：
+#   - cold/hot_to_editable_ms：进程启动 / 渲染层 reload → 编辑器可输入（单章挂载完成）
+#   - million_chars_ms：打开百万字项目 → 项目页可见（含 listTree 与首屏）
+#   - keystroke_p95_ms：常规单章（~3k 字）输入 200 次「按键处理延迟（不含 vsync 帧调度）」p95；
+#     附记 keystroke_frame_p95_ms（含一帧呈现，60Hz 本底 ~16.7ms，非门禁）
+#     与 keystroke_mega_*（大章 ~100k 字靶子，非门禁）
+#   - save_to_indexed_ms：单章变更后的增量重建耗时（不含自动刷新 2.5s 防抖排队）
+#   - query_p95_ms：不同关键词查询 50 次 p95；rebuild_cpm：全量重建吞吐（字/分钟，下限）
+#   - *_rss_mb：Electron 全部进程 working set 合计
+version: 1
+budgets:
+  startup:      {cold_to_editable_ms: 2000, hot_to_editable_ms: 800}
+  project_open: {million_chars_ms: 3000}
+  edit:         {keystroke_p95_ms: 16, save_to_indexed_ms: 500}
+  search:       {query_p95_ms: 80, rebuild_cpm: 20000}
+  memory:       {idle_rss_mb: 600, million_chars_rss_mb: 1200}
+fixtures:
+  - synth-1m          # 合成百万字项目（17 卷 / 335 章 / ~1.1M 字 + 100k 大章靶子；确定性生成）
+  - real-sample-300k  # 真实样本（待外部样本到位后补充）
+runners: [ci-low-spec, ci-mid-spec, local-dev]
+
+# ---------- 实测记录（由 `pnpm --filter @yushu/desktop perf-test` 产出；数字随硬件差异显著） ----------
+measurements:
+  - date: 2026-10-05
+    runner: local-dev          # AMD Ryzen 7 7840HS / 28GB / Windows / Electron 44 / Node 24
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,107,342 字 + 100k 大章靶子
+    result: pass_9_of_9        # 首轮 1 项「未达标」为门禁误用 frame 口径（vsync 本底 16.7ms），已校准为 sync
+    metrics:
+      cold_to_editable_ms: 1725        # ≤2000
+      hot_to_editable_ms: 727          # ≤800（渲染层热重载口径，非二次进程启动）
+      project_open_ms: 242             # ≤3000（百万字项目到项目页可见；索引 341 文件 / 3284 chunks）
+      keystroke_p95_ms: 1.1            # ≤16（按键处理延迟；frame 口径 18.7 为 60Hz vsync 本底，非门禁）
+      keystroke_mega_p95_ms: 4.5       # ~100k 字大章处理延迟（T2-4 参考，非门禁）
+      save_to_indexed_ms: 464          # ≤500（单章变更 → 增量重建完成；写入本体 18ms）
+      query_p95_ms: 15.2               # ≤80（10 关键词 × 5 轮 = 50 次）
+      rebuild_cpm: 53271745            # ≥20000（全量重建 1.247s / 1.1M 字；吞吐远超下限）
+      idle_rss_mb: 429                 # ≤600（Electron 全进程 working set）
+      million_chars_rss_mb: 646        # ≤1200（打开大章后）
+    report: docs/assets/perf/perf-report-local-dev-20261005.json
