@@ -61,6 +61,9 @@ export const CHANNELS = {
   snapshotState: "snapshot:state",
   snapshotTake: "snapshot:take",
   snapshotRestore: "snapshot:restore",
+  /** 码字统计（T2-9 切片 A）：读取统计 / 设置目标 */
+  statsRead: "stats:read",
+  statsSetGoal: "stats:setGoal",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -801,6 +804,49 @@ export interface SnapshotRestoreResultPayload {
   recreatedFiles: number;
   /** 磁盘上存在、但不在该快照中的文件（保守保留，不删除） */
   extraFiles: string[];
+}
+
+/* ---------- 码字统计（M2 / T2-9 切片 A） ---------- */
+
+/** 单日聚合（本地时区日期键） */
+export interface StatsDailyEntryPayload {
+  /** YYYY-MM-DD */
+  date: string;
+  /** 当日净增字数（删改可为负） */
+  delta: number;
+  /** 当日计入的保存次数（delta=0 的保存不计） */
+  saves: number;
+}
+
+export interface StatsStatePayload {
+  /** 每日目标（0 = 未设目标） */
+  goal: { daily: number };
+  /** 今日（无记录时 delta=0 / saves=0） */
+  today: StatsDailyEntryPayload;
+  /** 按日期升序（最多 90 天，供柱状图） */
+  daily: StatsDailyEntryPayload[];
+  summary: {
+    /** 最近 7 天（含今日） */
+    week: number;
+    /** 最近 30 天（含今日） */
+    month: number;
+    /** 全部历史 */
+    total: number;
+    /** 有记录的活跃天数 */
+    activeDays: number;
+    /** total / activeDays（四舍五入；无记录为 0） */
+    avgActiveDay: number;
+    bestDay: StatsDailyEntryPayload | null;
+  };
+  /** 断更：距最后活跃日的天数（今天写过 = 0；从未写过 = null） */
+  daysSinceLastWriting: number | null;
+  /** 连续写作天数（含最后活跃日向前回推；从未写过 = 0） */
+  streakDays: number;
+}
+
+export interface StatsSetGoalPayload {
+  /** 每日目标字数（0 清除目标；必须为 ≥0 的整数） */
+  daily: number;
 }
 
 export interface IpcOk<T> {

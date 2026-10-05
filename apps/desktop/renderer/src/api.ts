@@ -46,6 +46,8 @@ import type {
   SnapshotRestoreResultPayload,
   SnapshotStatePayload,
   SnapshotTakeResultPayload,
+  StatsSetGoalPayload,
+  StatsStatePayload,
   TreeEntry,
   WorldSummary,
 } from "../../src/shared/ipc";
@@ -148,6 +150,12 @@ export interface YushuApi {
     take: () => Promise<SnapshotTakeResultPayload>;
     /** 整体回滚到指定快照（恢复前自动生成 pre_restore 快照；快照后新增文件保守保留） */
     restore: (id: string) => Promise<SnapshotRestoreResultPayload>;
+  };
+  stats: {
+    /** 码字统计（T2-9 切片 A）：今日 / 日序列 / 周月汇总 / 目标 / 断更与连续天数 */
+    read: () => Promise<StatsStatePayload>;
+    /** 设置每日目标（0 = 清除目标） */
+    setGoal: (payload: StatsSetGoalPayload) => Promise<{ daily: number }>;
   };
 }
 

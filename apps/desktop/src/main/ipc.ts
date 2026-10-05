@@ -51,6 +51,8 @@ import {
   type SnapshotRestoreResultPayload,
   type SnapshotStatePayload,
   type SnapshotTakeResultPayload,
+  type StatsSetGoalPayload,
+  type StatsStatePayload,
   type TreeEntry,
   type WorldSummary,
 } from "../shared/ipc.js";
@@ -83,6 +85,7 @@ import {
   snapshotState,
   takeSnapshot,
 } from "./snapshot-ops.js";
+import { readStatsState, setStatsGoal } from "./stats-ops.js";
 import {
   buildFusionPreview,
   buildPackCatalog,
@@ -454,5 +457,13 @@ export function registerIpcHandlers(): void {
   // 整体回滚：恢复前由 restoreSnapshot 强制生成 pre_restore 快照；恢复改写真源 → 触发后台增量索引
   ipcMain.handle(CHANNELS.snapshotRestore, (_event, payload: { id: string }) =>
     wrapWrite<SnapshotRestoreResultPayload>(() => restoreSnapshot(requireGateway(), payload.id)),
+  );
+
+  /* ---------- 码字统计（M2 / T2-9 切片 A） ---------- */
+
+  ipcMain.handle(CHANNELS.statsRead, () => wrap<StatsStatePayload>(() => readStatsState(requireGateway())));
+
+  ipcMain.handle(CHANNELS.statsSetGoal, (_event, payload: StatsSetGoalPayload) =>
+    wrap<{ daily: number }>(() => setStatsGoal(requireGateway(), payload.daily)),
   );
 }

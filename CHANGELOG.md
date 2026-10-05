@@ -30,6 +30,7 @@
 - **快照存储健壮性复核修复（第 14 轮复核）**：① **并发 take 竞态（快照损坏）**——两个 take 并发时，后完成者的环形保留清理会把先完成者「已写 blob、尚未写 manifest」的内容当孤儿删除，导致 manifest 引用缺失 blob → take / restore 改为**串行队列**（同时消除"恢复写文件与自动快照读取交错"把半恢复状态拍成快照）；② **blob 损坏静默写回**——恢复读取 blob 时增加 sha256 内容校验，损坏 / 被改写 → `E_SNAPSHOT_INVALID` 明确报错，绝不把坏内容写回项目；③ **manifest 解析防御纵深**——id / blob / entry.path 校验不合法时视为损坏 manifest 跳过（原实现中手工构造的 id/blob 参与路径拼接）；④ 环形保留顺带清理 blob 目录中原子写崩溃残留的 `.tmp`。单测 +4 例（并发串行化 / blob 损坏 / 非法 manifest / .tmp 清理，先红灯复现后转绿）。
 - **杀进程不丢稿实测（T2-8 切片 B·第一项；M2 门禁 §5.5 A1）**：新增**真实强杀**集成测试 `pnpm --filter @yushu/desktop kill-test`——`scripts/kill-recovery.mjs` 编排两个应用阶段：子进程 A（`--kill-edit`：建夹具（项目 / 大纲 / 草稿章节）+ 编辑器**持续输入**使自动保存防抖永不触发、编辑日志照常落盘，经产品自身检测接口确认后打印 KILL_READY）→ `taskkill /F` 真强杀 → harness 磁盘取证（章节不含标记、journal 含标记）→ 子进程 B（`--kill-recover`）重启进入项目 → 恢复面板 → 「恢复」→ 编辑器载入恢复内容 → 自动保存落盘 + journal 清除；证据 JSON（killedExit=1 / journalHasMarker / diskNotSaved / persisted / journalCleared），连跑 3 次稳定。
 - **kill-test 编排健壮性修复（第 15 轮复核）**：① 强杀后等待子进程退出增加超时（`waitExit`，A 15s / B 10s）——taskkill 静默失败不再让脚本**永久挂起**；② 清理阶段改为统一强杀**全部登记子进程**（含子进程 B 异常挂起场景），不残留 Electron 进程。修复后 kill-test 复跑通过。
+- **码字统计切片（T2-9 切片 A）**：`.yushu/stats.json` 以「章节净增字数」记账（编辑器保存与 AI 采纳两挂点；frontmatter 记录值为旧值、缺失回算；删改为负；空保存不计；失败不阻断保存；本地时区日键；原子写、损坏回退默认值）；新增「码字统计」标签页——今日字数 + 目标进度条、断更预警（≥2 天）与连续写作天数、周 / 月 / 累计 / 活跃天数 / 日均（活跃日）/ 最佳单日、**最近 30 天柱状图**（缺失日补 0、负值红标）、每日目标设置（默认 3000，0 = 清除）；新增 `stats:read` / `stats:setGoal` 两通道。单测 6 例（净增 / 负值 / 空保存、AI 采纳计入、多日汇总与断更连续天数、目标校验、损坏回退、日键边界）；e2e 探针三项断言；UI 预演 step18（walkthrough 18/18）。
 
 ### Added
 

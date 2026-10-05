@@ -1240,6 +1240,105 @@ select {
   font-size: 12px;
 }
 
+/* ---------- 码字统计（T2-9 切片 A） ---------- */
+
+.stats {
+  padding: 14px 18px;
+  overflow: auto;
+}
+
+.stats-today {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.stats-today-main {
+  font-size: 22px;
+}
+
+.stats-today-main strong {
+  font-size: 30px;
+  margin: 0 2px;
+  color: var(--accent);
+}
+
+.stats-progress {
+  height: 10px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  overflow: hidden;
+  max-width: 520px;
+}
+
+.stats-progress-bar {
+  height: 100%;
+  background: var(--good);
+  transition: width 0.2s ease;
+}
+
+.stats-warn {
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.stats-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border-radius: 8px;
+}
+
+.stats-grid strong {
+  font-size: 16px;
+}
+
+.stats-goal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.stats-goal input {
+  width: 110px;
+}
+
+.stats-chart {
+  margin-top: 10px;
+}
+
+.stats-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 120px;
+  margin-top: 8px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-bar {
+  flex: 1;
+  min-width: 4px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+
+.stats-bar.neg {
+  background: var(--bad);
+}
+
 /* ---------- 取名助手（世界观档案） ---------- */
 
 .naming-pattern {

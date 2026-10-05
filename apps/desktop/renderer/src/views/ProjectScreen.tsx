@@ -9,8 +9,9 @@ import { ExportView } from "./ExportView";
 import { GenesisView } from "./GenesisView";
 import { OutlineView } from "./OutlineView";
 import { ProjectView } from "./ProjectView";
+import { StatsView } from "./StatsView";
 
-type Tab = "workbench" | "outline" | "editor" | "ai" | "export" | "archive" | "files";
+type Tab = "workbench" | "outline" | "editor" | "ai" | "export" | "archive" | "files" | "stats";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "workbench", label: "起源工作台" },
@@ -19,10 +20,11 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "ai", label: "AI 副驾" },
   { key: "export", label: "导出与自查" },
   { key: "archive", label: "世界观档案" },
+  { key: "stats", label: "码字统计" },
   { key: "files", label: "项目文件" },
 ];
 
-/** 项目主容器：七个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A） */
+/** 项目主容器：八个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A） */
 export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [tab, setTab] = useState<Tab>("workbench");
   const [archiveFocus, setArchiveFocus] = useState<{ path: string; tick: number } | null>(null);
@@ -144,6 +146,7 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
         {tab === "ai" && <AiView />}
         {tab === "export" && <ExportView />}
         {tab === "archive" && <ArchiveView focusCardPath={archiveFocus} />}
+        {tab === "stats" && <StatsView />}
         {tab === "files" && <ProjectView snapshot={snapshot} />}
       </div>
     </div>

@@ -117,4 +117,10 @@ contextBridge.exposeInMainWorld("yushu", {
     /** 整体回滚到指定快照（恢复前自动生成 pre_restore 快照） */
     restore: (id) => invoke("snapshot:restore", { id }),
   },
+  stats: {
+    /** 码字统计（T2-9 切片 A）：今日 / 日序列 / 周月汇总 / 目标 / 断更 */
+    read: () => invoke("stats:read"),
+    /** 设置每日目标（0 = 清除目标） */
+    setGoal: (payload) => invoke("stats:setGoal", payload),
+  },
 });

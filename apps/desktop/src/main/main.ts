@@ -419,6 +419,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     } catch (err) {
       chapterInfo.error = String(err && err.message).slice(0, 200);
     }
+    // 码字统计（T2-9 切片 A）：章节保存后记账可见（净增口径）
+    const statsProbe = await api.stats.read();
     const exportPreview = await api.export.preview();
     let confirmError = "";
     let confirmMessage = "";
@@ -592,6 +594,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         grew: chapterInfo.grew,
         error: chapterInfo.error,
       },
+      stats: {
+        todayDelta: statsProbe.today.delta,
+        todaySaves: statsProbe.today.saves,
+        goal: statsProbe.goal.daily,
+        dailyDays: statsProbe.daily.length,
+      },
       incremental,
       autoIndex,
       pipeline,
@@ -668,6 +676,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         writeWords: number;
         grew: boolean;
         error: string;
+      };
+      stats: {
+        todayDelta: number;
+        todaySaves: number;
+        goal: number;
+        dailyDays: number;
       };
       incremental: {
         mode: string;
@@ -1197,6 +1211,9 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.chapter.error === "" &&
       result.chapter.grew &&
       result.chapter.writeWords > result.chapter.readWords &&
+      result.stats.todayDelta > 0 &&
+      result.stats.todaySaves >= 1 &&
+      result.stats.dailyDays >= 1 &&
       result.pipeline.conflict === "E_DOC_CONFLICT" &&
       result.pipeline.sidecarOk &&
       result.pipeline.mainKeptExternal &&
@@ -1228,7 +1245,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 码字统计（净增记账） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

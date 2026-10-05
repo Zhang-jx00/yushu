@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-17 为 M2 扩展（双形态 / 实体提及 / 自动保存 / 写作视图 / 索引增量与保存即增量 / 本地快照）。
+ * 步骤 10-18 为 M2 扩展（双形态 / 实体提及 / 自动保存 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -733,6 +733,36 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 18,
+    title: "码字统计：今日净增记账 / 目标设置（T2-9 切片 A）",
+    file: "step18-stats.png",
+    body: String.raw`
+      await tab('码字统计');
+      const today = await waitFor(() => document.querySelector('.stats-today-main'), 12000);
+      if (!today) return { ok: false, note: '统计面板未出现：' + pageText() };
+      const match = String(today.textContent).match(/今日\s*([\d,]+)\s*字/);
+      const todayWords = match ? Number(match[1].replace(/,/g, '')) : -1;
+      // 设置每日目标 2000 → 回执 + 面板「/ 目标」文本更新（含进度条与柱状图）
+      const input = document.querySelector('.stats-goal input');
+      const saveBtn = [...document.querySelectorAll('.stats-goal button')].find((b) => b.textContent.includes('保存目标'));
+      if (!input || !saveBtn) return { ok: false, note: '找不到目标输入/保存按钮：' + pageText() };
+      setV(input, '2000');
+      saveBtn.click();
+      const saved = await waitFor(() => (document.body.innerText.includes('已设置每日目标 2,000 字') ? true : null), 12000);
+      const goalShown = await waitFor(() => {
+        const el = document.querySelector('.stats-today-main');
+        return el && String(el.textContent).includes('/ 目标 2,000 字') ? true : null;
+      }, 8000);
+      const bars = document.querySelectorAll('.stats-bar').length;
+      const progressShown = document.querySelector('.stats-progress-bar') !== null;
+      return {
+        ok: todayWords > 0 && saved === true && goalShown === true && progressShown && bars >= 28,
+        note: '今日字数=' + todayWords + '；目标保存回执=' + (saved === true) +
+          '；目标进度可见=' + (goalShown === true) + '（进度条=' + progressShown + '）；柱状图 ' + bars + ' 根',
+      };
+    `,
+  },
 ];
 
 /**
@@ -814,7 +844,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-17）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-18）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

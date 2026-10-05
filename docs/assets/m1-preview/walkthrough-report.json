@@ -1,13 +1,13 @@
 {
   "mode": "--ui-walkthrough",
-  "scene": "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-17）",
-  "startedAt": "2026-10-05T09:56:06.798Z",
-  "finishedAt": "2026-10-05T09:56:25.928Z",
-  "totalMs": 19131,
-  "projectDir": "D:\\Temp\\yushu-walkthrough-v37",
-  "mockBaseUrl": "http://127.0.0.1:64582/v1",
+  "scene": "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-18）",
+  "startedAt": "2026-10-05T10:13:56.390Z",
+  "finishedAt": "2026-10-05T10:14:15.954Z",
+  "totalMs": 19564,
+  "projectDir": "D:\\Temp\\yushu-walkthrough-v39",
+  "mockBaseUrl": "http://127.0.0.1:56678/v1",
   "screenshotsDir": "docs/assets/m1-preview",
-  "okCount": 17,
+  "okCount": 18,
   "failCount": 0,
   "bypasses": [
     "步骤 1：UI 的存放目录为 readOnly 输入 + 系统对话框，无法自动化；改由主进程等价执行 createProject（与 project:create 同一函数）",
@@ -28,9 +28,9 @@
       "step": 1,
       "title": "进入项目页（App 自动加载已挂载项目）",
       "ok": true,
-      "detail": "项目页已就绪，标签 7 个；root=D:\\Temp\\yushu-walkthrough-v37",
+      "detail": "项目页已就绪，标签 8 个；root=D:\\Temp\\yushu-walkthrough-v39",
       "screenshot": "docs/assets/m1-preview/step1-project.png",
-      "ms": 174
+      "ms": 167
     },
     {
       "step": 2,
@@ -38,7 +38,7 @@
       "ok": true,
       "detail": "已完成步骤 5 / 5；计数文本：世界构建层级 | 已建卡 5 张",
       "screenshot": "docs/assets/m1-preview/step2-genesis.png",
-      "ms": 1235
+      "ms": 1219
     },
     {
       "step": 3,
@@ -46,7 +46,7 @@
       "ok": true,
       "detail": "卷纲 3 条；当前卷章纲 10 条",
       "screenshot": "docs/assets/m1-preview/step3-outline.png",
-      "ms": 438
+      "ms": 426
     },
     {
       "step": 4,
@@ -54,7 +54,7 @@
       "ok": true,
       "detail": "草稿章节已创建，章纲显示「草稿章节已建」（chapter_id 已回填）",
       "screenshot": "docs/assets/m1-preview/step4-chapter-draft.png",
-      "ms": 759
+      "ms": 758
     },
     {
       "step": 5,
@@ -62,15 +62,15 @@
       "ok": true,
       "detail": "候选文本=\"天启界的夜色\"（长度 6，含「生成完成」=true）",
       "screenshot": "docs/assets/m1-preview/step5-ai-stream.png",
-      "ms": 642
+      "ms": 652
     },
     {
       "step": 6,
       "title": "整段采纳（替换正文）并留痕",
       "ok": true,
-      "detail": "采纳回执含「替换采纳」=true；使用记录：采纳 | 2026-10-05 09:56:10 · - · ok · 6 字 · 关联 ai-ba88505a | 生成 | 2026-10-05 09:56:09 · mock-model · ok · 6 字",
+      "detail": "采纳回执含「替换采纳」=true；使用记录：采纳 | 2026-10-05 10:13:59 · - · ok · 6 字 · 关联 ai-9a5eb089 | 生成 | 2026-10-05 10:13:59 · mock-model · ok · 6 字",
       "screenshot": "docs/assets/m1-preview/step6-adopt.png",
-      "ms": 184
+      "ms": 167
     },
     {
       "step": 7,
@@ -78,7 +78,7 @@
       "ok": true,
       "detail": "导出回执=true；对账全部一致=true；存在失配=false",
       "screenshot": "docs/assets/m1-preview/step7-export.png",
-      "ms": 645
+      "ms": 647
     },
     {
       "step": 8,
@@ -86,7 +86,7 @@
       "ok": true,
       "detail": "命中表可见「加微信」=true；片段=\"误 1 / 警告 0 / 提示 0）\\n级别\\t词条\\t位置\\t上下文\\t替换建议\\n错误\\t加微信\\t第1章（待拟题） · 第 17 字符\\t夜色 临走时他低声说：加微信详谈。\"",
       "screenshot": "docs/assets/m1-preview/step8-sensitive.png",
-      "ms": 452
+      "ms": 485
     },
     {
       "step": 9,
@@ -94,7 +94,7 @@
       "ok": true,
       "detail": "索引状态含「已构建」=true；「林渊」结果：「林渊」：实体 0 · 正文块 0；「测试设定」命中行数=10",
       "screenshot": "docs/assets/m1-preview/step9-index.png",
-      "ms": 1146
+      "ms": 1180
     },
     {
       "step": 10,
@@ -102,7 +102,7 @@
       "ok": true,
       "detail": "CodeMirror 已挂载；正文前 40 字=天启界的夜色临走时他低声说：加微信详谈。；富文本已挂载=true（富文本正文前 30 字=天启界的夜色临走时他低声说：加微信详谈。）；已切回源码=true；含实时字数=true",
       "screenshot": "docs/assets/m1-preview/step10-editor.png",
-      "ms": 727
+      "ms": 720
     },
     {
       "step": 11,
@@ -110,15 +110,15 @@
       "ok": true,
       "detail": "实体提及装饰=true；提及面板=本章提及（1）：测试设定1；点击跳转档案并选中=true",
       "screenshot": "docs/assets/m1-preview/step11-mentions.png",
-      "ms": 970
+      "ms": 984
     },
     {
       "step": 12,
       "title": "编辑器：自动保存落盘 + frontmatter 字数同步（T2-6 切片）",
       "ok": true,
-      "detail": "自动保存状态=已自动保存 17:56:15；重新读盘（chapters/vol-f2lgbh/ch-q5wbog.md）含「自动保存测试段落。」=true；frontmatter 字数=42（正文实际=42，一致=true）",
+      "detail": "自动保存状态=已自动保存 18:14:04；重新读盘（chapters/vol-f2lgbh/ch-q5wbog.md）含「自动保存测试段落。」=true；frontmatter 字数=42（正文实际=42，一致=true）",
       "screenshot": "docs/assets/m1-preview/step12-autosave.png",
-      "ms": 1189
+      "ms": 1194
     },
     {
       "step": 13,
@@ -126,7 +126,7 @@
       "ok": true,
       "detail": "标签栏隐藏=true；侧栏隐藏=true；提示可见=true；scrollTop=450；光标行居中偏差=0px（<120 判定=true）；Esc 退出后标签栏恢复=true、提示消失=true",
       "screenshot": "docs/assets/m1-preview/step13-focus.png",
-      "ms": 1780
+      "ms": 1764
     },
     {
       "step": 14,
@@ -134,7 +134,7 @@
       "ok": true,
       "detail": "设定栏出现=true；卡片含「测试设定1」=true；摘要=\"问卷回答 创世事件：测试设定1 代价与遗留物：（待补充） 神话母题：（待补充）\"；底部提及面板隐藏=true；打开设定卡跳转档案=true；切页返回后重开双栏=true、加载卡片=true",
       "screenshot": "docs/assets/m1-preview/step14-split.png",
-      "ms": 1635
+      "ms": 1617
     },
     {
       "step": 15,
@@ -142,7 +142,7 @@
       "ok": true,
       "detail": "增量回执=增量：复用 10 · 更新 0 · 移除 0 个文件；复用>0=true；更新=0",
       "screenshot": "docs/assets/m1-preview/step15-incremental.png",
-      "ms": 444
+      "ms": 429
     },
     {
       "step": 16,
@@ -150,15 +150,23 @@
       "ok": true,
       "detail": "未点击重建按钮；「自动增量：已同步」可见=true；检索「落霞峰」命中行数=1",
       "screenshot": "docs/assets/m1-preview/step16-auto-index.png",
-      "ms": 5744
+      "ms": 5767
     },
     {
       "step": 17,
       "title": "项目文件：本地快照（立即快照 → 列表 → 恢复二次确认）（T2-7 切片 A）",
       "ok": true,
-      "detail": "快照列表 2 条（最新：2026-10-05 09:56:25 · 手动 · 10 文件 · 14.4 KB | 恢复）；二次确认行出现并可取消=true",
+      "detail": "快照列表 2 条（最新：2026-10-05 10:14:14 · 手动 · 10 文件 · 14.4 KB | 恢复）；二次确认行出现并可取消=true",
       "screenshot": "docs/assets/m1-preview/step17-snapshot.png",
-      "ms": 938
+      "ms": 931
+    },
+    {
+      "step": 18,
+      "title": "码字统计：今日净增记账 / 目标设置（T2-9 切片 A）",
+      "ok": true,
+      "detail": "今日字数=882；目标保存回执=true；目标进度可见=true（进度条=true）；柱状图 30 根",
+      "screenshot": "docs/assets/m1-preview/step18-stats.png",
+      "ms": 430
     }
   ],
   "failures": []

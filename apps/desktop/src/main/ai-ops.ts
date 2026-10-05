@@ -32,6 +32,7 @@ import type {
 import { appendAiUsage, newUsageId, readAiUsage } from "./ai-usage.js";
 import { ProjectGateway } from "./file-gateway.js";
 import { analyzeDraft, assembleMessages, buildContextPreview, type DraftTask } from "./prompt-ops.js";
+import { recordChapterDelta } from "./stats-ops.js";
 
 /**
  * AI 副驾主进程编排（S4/S5；T1-13 ~ T1-17）：
@@ -307,6 +308,9 @@ export async function adoptDraft(
   const nextBody = payload.mode === "replace" ? payload.text.trim() : joinBody(body, payload.text);
   const updated = { ...chapter, word_count: countWords(nextBody) };
   const written = await gateway.writeDoc(path, serializeChapterFile(updated, nextBody), snapshot.hash);
+  // T2-9 码字统计：AI 采纳计入章节净增字数（失败不阻断采纳）
+  const oldWords = chapter.word_count > 0 ? chapter.word_count : countWords(body);
+  await recordChapterDelta(gateway, { path, oldWords, newWords: updated.word_count }).catch(() => undefined);
 
   const chars = countWords(payload.text);
   await appendAiUsage(gateway.root, {
