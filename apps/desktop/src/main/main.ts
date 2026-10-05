@@ -2,7 +2,7 @@ import { BrowserWindow, app } from "electron";
 import { join } from "node:path";
 import { CHANNELS } from "../shared/ipc.js";
 import { CloseCoordinator, registerCloseCoordinator, unregisterCloseCoordinator } from "./close-coordinator.js";
-import { registerIpcHandlers } from "./ipc.js";
+import { attachProject, registerIpcHandlers } from "./ipc.js";
 import { appRoot } from "./paths.js";
 import { parseTrialDir, runTrial } from "./trial.js";
 import { parseWalkthroughDir, prepareWalkthrough, runWalkthrough, startMockOpenAI } from "./walkthrough.js";
@@ -139,11 +139,214 @@ void app.whenReady().then(() => {
     });
     return;
   }
+  // --kill-edit=<dir> / --kill-recover=<dir>：杀进程不丢稿实测（M2 门禁 §5.5 A1）两阶段，
+  // 由 scripts/kill-recovery.mjs 编排：A 持续输入 → 外部 taskkill 强杀 → B 重启恢复。
+  const killEditArg = process.argv.find((arg) => arg.startsWith("--kill-edit="));
+  if (killEditArg) {
+    autoQuitDisabled = true; // 保持存活等待被强杀（不做任何退出 / 落盘逻辑）
+    void runKillEdit(killEditArg.slice("--kill-edit=".length)).catch((err: unknown) => {
+      console.error("[kill-edit] 失败:", err);
+      app.exit(2);
+    });
+    return;
+  }
+  const killRecoverArg = process.argv.find((arg) => arg.startsWith("--kill-recover="));
+  if (killRecoverArg) {
+    autoQuitDisabled = true;
+    void runKillRecover(killRecoverArg.slice("--kill-recover=".length)).catch((err: unknown) => {
+      console.error("[kill-recover] 失败:", err);
+      app.exit(2);
+    });
+    return;
+  }
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+/** 杀进程实测的全局唯一标记（harness 与两个阶段共用；改这里需同步 scripts/kill-recovery.mjs） */
+const KILL_TEST_MARKER = "杀进程实测：孤灯残卷。";
+
+/**
+ * 杀进程不丢稿实测（一阶段·--kill-edit）：空目录 → 夹具（项目 / 大纲 / 草稿章节 / 初始正文）→
+ * 驱动编辑器**持续输入**（自动保存防抖 800ms 永不触发，编辑日志 500ms 照常落盘）→
+ * 经产品自身检测接口确认 journal 后打印 KILL_READY → 保持存活等待被外部强杀（taskkill /F）。
+ */
+async function runKillEdit(dir: string): Promise<void> {
+  const { existsSync } = await import("node:fs");
+  if (!existsSync(join(dir, "world", "world.yaml"))) {
+    const { ProjectGateway } = await import("./file-gateway.js");
+    const { createOutlineChapter, createProject, generateOutline } = await import("./project-ops.js");
+    const { writeChapterBody } = await import("./chapter-ops.js");
+    const { readChapterFile } = await import("@yushu/world-engine");
+    await createProject({
+      dir,
+      title: "杀进程实测",
+      packIds: ["xuanhuan-xitong"],
+      axes: {
+        channel: ["男频"],
+        world: ["玄幻"],
+        technique: ["系统流"],
+        tone: ["爽文"],
+        romance_mode_default: "无女主",
+      },
+    });
+    const gateway = new ProjectGateway(dir);
+    const generated = await generateOutline(gateway, {
+      templateId: "xuanhuan-xitong/three-act-upgrade",
+      title: "杀进程实测",
+      volumeCount: 1,
+      chaptersPerVolume: 1,
+    });
+    const volume = generated.doc.volumes[0]!;
+    const chapter = volume.chapters[0]!;
+    const draft = await createOutlineChapter(gateway, {
+      volumeId: volume.id,
+      chapterId: chapter.id,
+      baseHash: generated.hash,
+    });
+    const snapshot = await gateway.readDoc(draft.chapterPath);
+    await writeChapterBody(gateway, {
+      path: draft.chapterPath,
+      body: `${readChapterFile(snapshot.content).body}\n\n初始正文（杀进程实测夹具）。`,
+      baseHash: snapshot.hash,
+    });
+    console.log(`[kill-edit] 夹具就绪：${draft.chapterPath}`);
+  }
+  attachProject(dir);
+  const win = createWindow();
+  await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
+  await win.webContents.executeJavaScript("window.__yushuDebug = true;");
+  const probe = (await win.webContents.executeJavaScript(killEditScript)) as {
+    ok: boolean;
+    marker?: string;
+    note?: string;
+  };
+  if (!probe.ok) {
+    console.error("[kill-edit] 输入失败:", probe.note ?? "(无详情)");
+    app.exit(2);
+    return;
+  }
+  console.log(`KILL_READY ${probe.marker ?? ""}`);
+  // 不退出：窗口保持打开、输入定时器持续使自动保存防抖不到来——等待 taskkill /F 强杀
+}
+
+/**
+ * 杀进程不丢稿实测（二阶段·--kill-recover）：重启进入项目 → 恢复面板检出编辑日志 → 点「恢复」→
+ * 编辑器载入恢复内容 → 自动保存落盘 → journal 清除；文件级断言在主进程侧完成，输出 KILL_RESULT JSON。
+ */
+async function runKillRecover(dir: string): Promise<void> {
+  const { readFile, readdir } = await import("node:fs/promises");
+  const { ProjectGateway } = await import("./file-gateway.js");
+  const { listDraftTargets } = await import("./ai-ops.js");
+  attachProject(dir);
+  const win = createWindow();
+  await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
+  await win.webContents.executeJavaScript("window.__yushuDebug = true;");
+  const probe = (await win.webContents.executeJavaScript(killRecoverScript)) as {
+    ok: boolean;
+    listed?: boolean;
+    restoredInEditor?: boolean;
+    savedShown?: boolean;
+    note?: string;
+  };
+  const gateway = new ProjectGateway(dir);
+  const drafts = await listDraftTargets(gateway).catch(() => []);
+  const chapterPath = drafts[0]?.chapterPath ?? "";
+  const disk = chapterPath ? await readFile(join(dir, chapterPath), "utf8").catch(() => "") : "";
+  const remaining = (await readdir(join(dir, ".yushu", "recovery")).catch(() => [] as string[])).filter((name) =>
+    name.endsWith(".json"),
+  );
+  const result = {
+    ok:
+      probe.listed === true &&
+      probe.restoredInEditor === true &&
+      probe.savedShown === true &&
+      disk.includes(KILL_TEST_MARKER) &&
+      remaining.length === 0,
+    journalDetected: probe.listed === true,
+    restoredInEditor: probe.restoredInEditor === true,
+    savedShown: probe.savedShown === true,
+    persisted: disk.includes(KILL_TEST_MARKER),
+    journalCleared: remaining.length === 0,
+    chapterPath,
+    note: probe.note ?? "",
+  };
+  console.log(`KILL_RESULT ${JSON.stringify(result)}`);
+  app.exit(result.ok ? 0 : 1);
+}
+
+/** 一阶段注入脚本：编辑器持续输入 + 经 recovery:list 确认 journal（与恢复面板同一检测逻辑） */
+const killEditScript = `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const waitFor = async (fn, timeout = 25000) => {
+    const t0 = Date.now();
+    for (;;) {
+      let r = null;
+      try { r = fn(); } catch { r = null; }
+      if (r) return r;
+      if (Date.now() - t0 > timeout) return null;
+      await sleep(80);
+    }
+  };
+  const tabs = await waitFor(() => (document.querySelectorAll('.tab').length > 0 ? true : null), 25000);
+  if (!tabs) return { ok: false, note: '项目页标签未出现' };
+  const tab = [...document.querySelectorAll('.tab')].find((x) => x.textContent.includes('编辑器'));
+  if (!tab) return { ok: false, note: '找不到编辑器标签页' };
+  tab.click();
+  const view = await waitFor(() => (window.__yushuCmView && window.__yushuCmView.state.doc.length > 0 ? window.__yushuCmView : null), 20000);
+  const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+  if (!view || !ie) return { ok: false, note: '编辑器未就绪' };
+  await ie.reload();
+  const marker = ${JSON.stringify(KILL_TEST_MARKER)};
+  let n = 0;
+  setInterval(() => {
+    n += 1;
+    view.dispatch({ changes: { from: view.state.doc.length, insert: n === 1 ? '\\n\\n' + marker : '·' } });
+  }, 150);
+  let confirmed = false;
+  for (let i = 0; i < 100 && !confirmed; i += 1) {
+    try {
+      const entries = await window.yushu.recovery.list();
+      confirmed = entries.some((e) => String(e.body).includes(marker));
+    } catch { /* 检测失败重试 */ }
+    await sleep(80);
+  }
+  if (!confirmed) return { ok: false, note: '编辑日志未在超时内检出 marker' };
+  return { ok: true, marker };
+})()`;
+
+/** 二阶段注入脚本：恢复面板 → 「恢复」→ 编辑器载入 → 自动保存 */
+const killRecoverScript = `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const waitFor = async (fn, timeout = 25000) => {
+    const t0 = Date.now();
+    for (;;) {
+      let r = null;
+      try { r = fn(); } catch { r = null; }
+      if (r) return r;
+      if (Date.now() - t0 > timeout) return null;
+      await sleep(100);
+    }
+  };
+  const marker = ${JSON.stringify(KILL_TEST_MARKER)};
+  const banner = await waitFor(() => document.querySelector('.recovery-banner'), 25000);
+  if (!banner) return { ok: false, note: '恢复面板未出现：' + document.body.innerText.slice(0, 160) };
+  const listed = String(banner.textContent).includes('崩溃前的未保存编辑');
+  const restoreBtn = [...banner.querySelectorAll('button')].find((b) => b.textContent.trim() === '恢复');
+  if (!restoreBtn) return { ok: false, listed, note: '找不到「恢复」按钮' };
+  restoreBtn.click();
+  const inEditor = await waitFor(() => {
+    const el = document.querySelector('.cm-content');
+    return el && el.textContent.includes(marker) ? true : null;
+  }, 20000);
+  const saved = await waitFor(() => {
+    const el = document.querySelector('.autosave-status');
+    return el && el.textContent.includes('已自动保存') ? true : null;
+  }, 20000);
+  return { ok: true, listed, restoredInEditor: inEditor === true, savedShown: saved === true };
+})()`;
 
 async function runE2E(win: BrowserWindow): Promise<void> {
   const { mkdtemp, rm, readFile, readdir, writeFile } = await import("node:fs/promises");

@@ -14,7 +14,8 @@
     "start": "electron .",
     "dev": "pnpm run build:main && node scripts/dev.mjs",
     "smoke": "pnpm run build:main && electron . --smoke",
-    "e2e": "pnpm run build:main && electron . --e2e-smoke"
+    "e2e": "pnpm run build:main && electron . --e2e-smoke",
+    "kill-test": "pnpm run build:main && node scripts/kill-recovery.mjs"
   },
   "dependencies": {
     "@yushu/core": "workspace:*",
