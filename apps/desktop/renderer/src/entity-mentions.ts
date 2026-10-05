@@ -14,6 +14,12 @@ export interface EntityIndexEntry {
   filePath: string;
 }
 
+/**
+ * 大文档提及重算阈值（T2-4 切片 B）：超过后逐键的「全文提及扫描 / 装饰重建」改为节流合并
+ * （250ms 只算最后一次），避免 O(全文长度 × 实体数) 的逐键成本拖慢大章输入。
+ */
+export const LARGE_DOC_MENTION_CHARS = 30_000;
+
 export interface MentionMatch {
   entity: EntityIndexEntry;
   /** 命中的名称（可能是别名） */

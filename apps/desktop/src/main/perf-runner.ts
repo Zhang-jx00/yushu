@@ -30,12 +30,13 @@ export interface PerfProbeDeps {
   createWindow: () => BrowserWindow;
 }
 
-/** 门禁值（与仓库根 perf-budget.yaml 保持一致；T2-10 基线） */
+/** 门禁值（与仓库根 perf-budget.yaml 保持一致；T2-10 基线；大章按键门禁为 T2-4 切片 B 纳入） */
 const BUDGETS = {
   cold_to_editable_ms: 2000,
   hot_to_editable_ms: 800,
   project_open_ms: 3000,
   keystroke_p95_ms: 16,
+  keystroke_mega_p95_ms: 16,
   save_to_indexed_ms: 500,
   query_p95_ms: 80,
   rebuild_cpm_min: 20000,
@@ -248,6 +249,8 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
     hot_to_editable: hotToEditableMs <= BUDGETS.hot_to_editable_ms,
     project_open: projectOpenMs <= BUDGETS.project_open_ms,
     keystroke_p95: normal.syncP95 <= BUDGETS.keystroke_p95_ms,
+    // 大章（~100k 字靶子）按键门禁（T2-4 切片 B 纳入）：超限视为大章性能回退
+    keystroke_mega_p95: mega ? mega.syncP95 <= BUDGETS.keystroke_mega_p95_ms : false,
     save_to_indexed: index.incMs <= BUDGETS.save_to_indexed_ms,
     query_p95: index.queryP95 <= BUDGETS.query_p95_ms,
     rebuild_cpm: rebuildCpm >= BUDGETS.rebuild_cpm_min,

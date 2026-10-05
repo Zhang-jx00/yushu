@@ -9,7 +9,8 @@ import type { AiDraftTarget, ChapterWriteResult } from "../../../src/shared/ipc"
 import { api } from "../api";
 import { findUnsupportedSyntax, htmlToMd, mdToHtml } from "../markdown-bridge";
 import { merge3 } from "../chapter-merge";
-import { collectMentionedEntities, type EntityIndexEntry } from "../entity-mentions";
+import { collectMentionedEntities, type EntityIndexEntry, LARGE_DOC_MENTION_CHARS } from "../entity-mentions";
+import { createMentionThrottle, type MentionThrottle } from "../mention-throttle";
 import { detectMentionQuery, filterMentionCandidates } from "../mention-suggest";
 import { entityMentionPlugin } from "../entity-mention-plugin";
 import { createAutosaveScheduler, type AutosaveScheduler, type AutosaveState } from "../autosave";
@@ -238,6 +239,18 @@ export function ChapterEditorView({
 
   const journalRef = useRef<RecoveryJournalScheduler | null>(null);
 
+  /** 提及面板重算节流（T2-4 切片 B）：大文档逐键不再全量扫描（250ms 合并为一次） */
+  const mentionThrottleRef = useRef<MentionThrottle | null>(null);
+  const getMentionThrottle = useCallback((): MentionThrottle => {
+    if (!mentionThrottleRef.current) {
+      mentionThrottleRef.current = createMentionThrottle({
+        threshold: LARGE_DOC_MENTION_CHARS,
+        run: (text) => setMentioned(collectMentionedEntities(text, entitiesRef.current)),
+      });
+    }
+    return mentionThrottleRef.current;
+  }, []);
+
   /**
    * 编辑日志（T2-8 切片 A）：输入期间以固定间隔（500ms）把当前正文快照写入 .yushu/recovery/——
    * 进程被杀 / 崩溃时最多丢失该间隔内的输入；保存成功后取消并清除 journal 文件。
@@ -279,6 +292,7 @@ export function ChapterEditorView({
     () => () => {
       void getScheduler().flush();
       getJournal().dispose(); // T2-8：停掉日志定时器（journal 文件保留；flush 落盘成功后会清除它）
+      mentionThrottleRef.current?.dispose(); // T2-4：丢弃未执行的提及节流任务
     },
     [getScheduler, getJournal],
   );
@@ -306,6 +320,8 @@ export function ChapterEditorView({
             entityMentionPlugin({
               getEntities: () => entitiesRef.current,
               onOpen: (entity) => onOpenCardRef.current?.(entity.filePath),
+              largeDocThreshold: LARGE_DOC_MENTION_CHARS, // T2-4 切片 B：大文档装饰重建节流
+              debounceMs: 250,
             }).plugin,
           ),
         });
@@ -327,7 +343,8 @@ export function ChapterEditorView({
       const nextDirty = text !== savedBodyRef.current;
       dirtyRef.current = nextDirty;
       setDirty(nextDirty);
-      setMentioned(collectMentionedEntities(text, entitiesRef.current));
+      // 提及面板（T2-4 切片 B）：小文档即时重算；大文档节流合并（O(全文×实体数) 不再逐键执行）
+      getMentionThrottle().push(text);
       // T2-6：文本有变化即登记自动保存（防抖 800ms / 高频上限 5s）；还原为磁盘态则撤销待发保存
       if (nextDirty) {
         dirtyPathRef.current = selectedPathRef.current;
@@ -348,7 +365,7 @@ export function ChapterEditorView({
         dirtyPathRef.current = null;
       }
     },
-    [getScheduler, getJournal],
+    [getScheduler, getJournal, getMentionThrottle],
   );
   updateDerivedRef.current = updateDerived;
 

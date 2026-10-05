@@ -1,0 +1,64 @@
+{
+  "kind": "yushu-perf-probe/v1",
+  "date": "2026-10-05T13:57:00.860Z",
+  "fixture": {
+    "dir": "D:\\Temp\\yushu-perf-synth1m",
+    "reused": true,
+    "volumes": 17,
+    "chapters": 335,
+    "totalChars": 1107756,
+    "megaPath": "chapters/vol-4318d905/ch-1eayd5o.md"
+  },
+  "env": {
+    "electron": "44.4.5",
+    "node": "24.21.0",
+    "chrome": "152.0.7977.130",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7840HS with Radeon 780M Graphics",
+    "totalMemMb": 28484
+  },
+  "metrics": {
+    "cold_to_editable_ms": 1559,
+    "hot_to_editable_ms": 646,
+    "project_open_ms": 242,
+    "keystroke_p95_ms": 1.2,
+    "keystroke_frame_p95_ms": 20.7,
+    "keystroke_mega_p95_ms": 2.9,
+    "keystroke_mega_frame_p95_ms": 21.7,
+    "save_to_indexed_ms": 413,
+    "chapter_write_ms": 16,
+    "query_p95_ms": 14.7,
+    "index_rebuild_ms": 1167,
+    "rebuild_cpm": 56973564,
+    "idle_rss_mb": 435,
+    "million_chars_rss_mb": 485
+  },
+  "budgets": {
+    "cold_to_editable_ms": 2000,
+    "hot_to_editable_ms": 800,
+    "project_open_ms": 3000,
+    "keystroke_p95_ms": 16,
+    "keystroke_mega_p95_ms": 16,
+    "save_to_indexed_ms": 500,
+    "query_p95_ms": 80,
+    "rebuild_cpm_min": 20000,
+    "idle_rss_mb": 600,
+    "million_chars_rss_mb": 1200
+  },
+  "checks": {
+    "cold_to_editable": true,
+    "hot_to_editable": true,
+    "project_open": true,
+    "keystroke_p95": true,
+    "keystroke_mega_p95": true,
+    "save_to_indexed": true,
+    "query_p95": true,
+    "rebuild_cpm": true,
+    "idle_rss": true,
+    "million_chars_rss": true
+  },
+  "indexFiles": 341,
+  "indexChunks": 3286,
+  "incrementalUpdatedFiles": 1
+}
