@@ -23,6 +23,7 @@
 - **索引口径与 racy 防护修复（第 10 轮复核）**：① 增量快速跳过仅在文件 mtime **早于**上次索引写入（builtAt）时可信，同刻 / 更晚一律退回 hash 确认（借鉴 Git index 的 racy timestamp 处理）——修复"同大小 + mtime 未变的同刻改写被静默漏索引"（单测先红灯复现再转绿）；② `ftsRows` 改为 FTS5 影子表 `chunks_fts_docsize` 真实行数口径（原 `count(*) FROM chunks_fts` 在 external content 表上回落 content 表、恒等于 chunks——自愈单测的"对齐"断言实为空断言，现能暴露"索引缺行"）；③ `docs/06` §一 / §五 复跑数字按 M1 时点标注并修正 typecheck 表述（9 个包/应用）。
 - **关闭前 flush 切片（T2-6 完整版·第一项）**：关闭窗口时主进程的 `CloseCoordinator` 拦截 close → 请求渲染层落盘（新增通道 `app:beforeClose` 单向推送）→ 回执（`app:flushDone`，载荷含调度器状态 / 路径 / dirty，供主进程日志诊断；渲染层无论成败必回执）后 `win.destroy()` 真正关闭；**5s 超时兜底**（渲染层无响应 / 崩溃不阻塞退出），页面未加载完成直接放行。单测 5 例（拦截 / 回执放行 / 重复点击 / 超时 / 无法请求）；e2e 两段式探针「编辑器输入（不等自动保存）→ 立即关窗 → 输入到窗口 closed **23ms**（<800ms 自动保存防抖窗口）→ 重读磁盘含标记」；`--open-and-quit` 冒烟验证 app.quit 退出链路兼容。顺带修复：e2e 入口 `did-finish-load` 在探针 reload 后二次触发会并发跑两遍（曾表现为"flush 成功但磁盘无标记"的伪缺陷）→ 改 `once`。
 - **保存即增量测试补强（第 11 轮复核）**：补 `IndexRefreshScheduler` reset 代际保护单测（运行中 reset → 不回写状态、不触发脏补跑）；修正注释中英混排。边缘项复验记录见 `docs/06` §八（exists 检查与 rebuild 的毫秒级 TOCTOU、每次自动刷新全库 `integrity_check` 的性能事项、写通道覆盖清单）。
+- **关闭前 flush 复核修复（第 12 轮复核）**：① `requestFlush` 调用包 try/catch——`isDestroyed` 检查与 `send` 之间的毫秒竞态抛异常不再冒泡进 Electron close 事件处理器（视为"无法送达"立即放行；单测 +1）；② **切页卸载即 flush**（此前"切页后 800ms 防抖窗口内关窗"没有任何落盘路径）并修复清理顺序问题——形态编辑器可能先于 flush 被销毁（读到空正文，且 run() 清掉自动保存定时器导致彻底不落盘）→ 正文读取增加「最近一次编辑快照」兜底；e2e 新增「切页落盘」探针（输入 → 切页 **55ms** 落盘、<800ms 证明非自动保存）。
 
 ### Added
 

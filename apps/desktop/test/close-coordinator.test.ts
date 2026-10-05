@@ -112,6 +112,23 @@ describe("CloseCoordinator（关闭前 flush）", () => {
     expect(coordinator.state()).toEqual({ waiting: false, done: true });
   });
 
+  it("requestFlush 抛异常（渲染层同刻被销毁）：不冒泡、视为无法送达并立即放行", () => {
+    const closes: number[] = [];
+    const flows: CloseFlowEvent[] = [];
+    const coordinator = new CloseCoordinator({
+      requestFlush: () => {
+        throw new Error("Object has been destroyed");
+      },
+      forceClose: () => closes.push(1),
+      onEvent: (event) => flows.push(event),
+    });
+    const event = makeEvent();
+    expect(() => coordinator.handleClose(event.event)).not.toThrow();
+    expect(event.prevented()).toBe(1);
+    expect(closes).toHaveLength(1);
+    expect(flows).toEqual(["skipped"]);
+  });
+
   it("无请求的误触回执：忽略（不关闭窗口）", () => {
     const closes: number[] = [];
     const coordinator = new CloseCoordinator({

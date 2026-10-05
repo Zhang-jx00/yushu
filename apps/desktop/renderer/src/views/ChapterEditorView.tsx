@@ -139,6 +139,11 @@ export function ChapterEditorView({
   const forceLoadRef = useRef<string | null>(null);
   /** 专注模式标记（供 CM 打字机滚动插件读取，避免插件随 prop 重建） */
   const focusModeRef = useRef(focusMode);
+  /**
+   * 最近一次编辑快照（第 12 轮复核修复）：卸载清理阶段形态编辑器可能已先被销毁
+   * （清理执行顺序不确定），此时 flush 仍须落盘最后输入——以快照兜底读取正文。
+   */
+  const latestMarkdownRef = useRef("");
 
   useEffect(() => {
     modeRef.current = mode;
@@ -199,6 +204,16 @@ export function ChapterEditorView({
     [getScheduler],
   );
 
+  // 切页（组件卸载）立即落盘（第 12 轮复核修复）：消除"切页后 800ms 防抖窗口内关窗"的丢稿窗口——
+  // 切页时关闭前 flush 的注册表随卸载清空，若此时窗口被关闭将没有 flush 路径覆盖待发改动。
+  // 注：渲染层 reload / 进程被杀不触发 React 卸载清理（该场景由 T2-8 编辑日志覆盖）。
+  useEffect(
+    () => () => {
+      void getScheduler().flush();
+    },
+    [getScheduler],
+  );
+
   const refreshEntities = useCallback(async () => {
     try {
       const cards = await api().card.list();
@@ -237,6 +252,7 @@ export function ChapterEditorView({
 
   const updateDerived = useCallback(
     (text: string) => {
+      latestMarkdownRef.current = text;
       setLiveWords(localCountWords(text));
       const nextDirty = text !== savedBodyRef.current;
       dirtyRef.current = nextDirty;
@@ -330,9 +346,14 @@ export function ChapterEditorView({
     };
   }, [editor, getScheduler]);
 
+  /** 当前正文（第 12 轮复核修复：兜底「最近一次编辑快照」——卸载清理阶段编辑器可能已被先销毁，仍能落盘最后输入） */
   const currentMarkdown = (): string => {
-    if (modeRef.current === "rich" && editor) return htmlToMd(editor.getHTML());
-    return viewRef.current?.state.doc.toString() ?? "";
+    if (modeRef.current === "rich") {
+      if (editor && !editor.isDestroyed) return htmlToMd(editor.getHTML());
+    } else if (viewRef.current) {
+      return viewRef.current.state.doc.toString();
+    }
+    return latestMarkdownRef.current;
   };
 
   const loadChapter = useCallback(

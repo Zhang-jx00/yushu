@@ -42,7 +42,15 @@ export class CloseCoordinator {
     event.preventDefault();
     if (this.waiting) return; // 已在等待回执：用户重复点击关闭不重复请求
     this.waiting = true;
-    if (this.options.requestFlush()) {
+    // send 在「isDestroyed 检查」与「实际发送」之间仍可能抛（渲染层同刻被销毁）：
+    // 异常一律视为「请求无法送达」，不冒泡进 Electron close 事件处理器
+    let sent = false;
+    try {
+      sent = this.options.requestFlush();
+    } catch {
+      sent = false;
+    }
+    if (sent) {
       this.options.onEvent?.("requested");
       this.timer = setTimeout(() => {
         this.timer = null;
