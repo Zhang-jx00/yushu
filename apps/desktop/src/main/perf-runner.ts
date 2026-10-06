@@ -3,12 +3,14 @@ import { cpus, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
 import { app, type BrowserWindow } from "electron";
 import { attachProject } from "./ipc.js";
+import { comparePerfMetrics } from "./perf-compare.js";
 import { ensureSynthFixture } from "./perf-fixture.js";
 
 /**
  * 性能实测探针（M2 / T2-10；`pnpm --filter @yushu/desktop perf-test`）：
  * 在真实 Electron 里对 synth-1m 百万字夹具跑一遍性能预算指标（perf-budget.yaml），
- * 输出 PERF_RESULT JSON（终端 + 夹具目录 `.yushu/perf-report.json`）。
+ * 输出 PERF_RESULT JSON（终端 + 夹具目录 `.yushu/perf-report.json`）；
+ * 报告内含与「上一次同夹具报告」的逐项回归对比（T2-10 遗留：diff 防退化，超阈值标记 ⚠）。
  *
  * 口径（首版基线，如实标注）：
  * - cold_to_editable_ms：探针进程入口（模块加载时间戳）→ 编辑器可输入（首章挂载完成）；
@@ -257,6 +259,18 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
     idle_rss: idleRssMb <= BUDGETS.idle_rss_mb,
     million_chars_rss: millionCharsRssMb <= BUDGETS.million_chars_rss_mb,
   };
+  // T2-10 遗留：回归对比基线 = 夹具目录中的上一次报告（同夹具同机同口径）；首次运行无基线则如实跳过
+  const reportPath = join(dir, ".yushu", "perf-report.json");
+  let previousReport: { date?: string; metrics?: Record<string, unknown> } | null = null;
+  try {
+    previousReport = JSON.parse(await fs.readFile(reportPath, "utf8")) as {
+      date?: string;
+      metrics?: Record<string, unknown>;
+    };
+  } catch {
+    /* 首次运行：无基线 */
+  }
+  const comparison = comparePerfMetrics(previousReport, { metrics });
   const report = {
     kind: "yushu-perf-probe/v1",
     date: new Date().toISOString(),
@@ -280,17 +294,37 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
     metrics,
     budgets: BUDGETS,
     checks,
+    // T2-10 遗留：与「上一次同夹具报告」逐项对比（>阈值标记回退；无基线如实标注）
+    comparison,
     indexFiles: index.files,
     indexChunks: index.chunks,
     incrementalUpdatedFiles: index.incUpdated,
   };
 
-  const reportPath = join(dir, ".yushu", "perf-report.json");
   await fs.mkdir(join(dir, ".yushu"), { recursive: true }).catch(() => undefined);
   await fs.writeFile(reportPath, JSON.stringify(report, null, 2), "utf8").catch(() => undefined);
 
   console.log(`PERF_RESULT ${JSON.stringify(report)}`);
   console.log(`[perf] 报告已写入：${reportPath}`);
   console.log(`[perf] 达标情况：${Object.entries(checks).map(([k, v]) => `${k}=${v ? "✅" : "❌"}`).join("  ")}`);
+  if (comparison.baselineDate) {
+    const summary = comparison.rows
+      .map(
+        (row) =>
+          `${row.metric}=${row.deltaPct > 0 ? "+" : ""}${row.deltaPct}%` +
+          (row.status === "regression" ? "⚠" : row.status === "improved" ? "↑" : ""),
+      )
+      .join("  ");
+    console.log(
+      `[perf] 回归对比（基线 ${comparison.baselineDate} / 阈值 ${Math.round(comparison.thresholdRatio * 100)}%）：${summary}`,
+    );
+    if (!comparison.ok) {
+      console.log(
+        `[perf] ⚠ 性能回退：${comparison.regressions.map((row) => `${row.metric}(+${row.deltaPct}%)`).join(" / ")}`,
+      );
+    }
+  } else {
+    console.log("[perf] 回归对比：无基线报告（首次运行），跳过");
+  }
   app.exit(0);
 }

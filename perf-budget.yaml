@@ -21,6 +21,9 @@ fixtures:
   - synth-1m          # 合成百万字项目（17 卷 / 335 章 / ~1.1M 字 + 100k 大章靶子；确定性生成）
   - real-sample-300k  # 真实样本（待外部样本到位后补充）
 runners: [ci-low-spec, ci-mid-spec, local-dev]
+# 回归对比（T2-10 遗留）：perf runner 自动读取夹具目录上一次报告逐项对比——
+# 变差超过 threshold_ratio 的指标标记 ⚠ 回退（rebuild_cpm 为吞吐、越高越好，方向取反；无基线跳过）
+regression: {threshold_ratio: 0.2}
 
 # ---------- 实测记录（由 `pnpm --filter @yushu/desktop perf-test` 产出；数字随硬件差异显著） ----------
 measurements:
@@ -121,3 +124,19 @@ measurements:
       idle_rss_mb: 430                 # ≤600
       million_chars_rss_mb: 766        # ≤1200
     report: docs/assets/perf/perf-report-local-dev-20261006-r26-activity-heartbeat.json
+  - date: 2026-10-06
+    runner: local-dev          # 第 27 轮复跑：回归对比接入（T2-10 遗留；报告内含 comparison 字段）
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,108,740 字 + 100k 大章靶子（索引 341 文件 / 3,291 chunks）
+    result: pass_10_of_10      # 对上一轮逐项对比：唯一 ⚠ 为 keystroke_mega +21.4%（4.2→5.1ms，远低于 16ms 门禁，属运行间波动）
+    metrics:
+      cold_to_editable_ms: 1319        # ≤2000（对比上一轮 -18.4%）
+      hot_to_editable_ms: 610          # ≤800
+      project_open_ms: 195             # ≤3000
+      keystroke_p95_ms: 1.8            # ≤16
+      keystroke_mega_p95_ms: 5.1       # ≤16（+21.4% ⚠ 运行间波动，门禁余量充足）
+      save_to_indexed_ms: 373          # ≤500（-12.9%）
+      query_p95_ms: 12.9               # ≤80（-40% ↑）
+      rebuild_cpm: 39145816            # ≥20000（全量 1.699s）
+      idle_rss_mb: 429                 # ≤600
+      million_chars_rss_mb: 749        # ≤1200
+    report: docs/assets/perf/perf-report-local-dev-20261006-r27-regression-diff.json

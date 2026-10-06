@@ -1,0 +1,178 @@
+{
+  "kind": "yushu-perf-probe/v1",
+  "date": "2026-10-06T13:28:59.555Z",
+  "fixture": {
+    "dir": "D:\\Temp\\yushu-perf-synth1m",
+    "reused": true,
+    "volumes": 17,
+    "chapters": 335,
+    "totalChars": 1108740,
+    "megaPath": "chapters/vol-4318d905/ch-1eayd5o.md"
+  },
+  "env": {
+    "electron": "44.4.5",
+    "node": "24.21.0",
+    "chrome": "152.0.7977.130",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7840HS with Radeon 780M Graphics",
+    "totalMemMb": 28484
+  },
+  "metrics": {
+    "cold_to_editable_ms": 1319,
+    "hot_to_editable_ms": 610,
+    "project_open_ms": 195,
+    "keystroke_p95_ms": 1.8,
+    "keystroke_frame_p95_ms": 19.3,
+    "keystroke_mega_p95_ms": 5.1,
+    "keystroke_mega_frame_p95_ms": 19.5,
+    "save_to_indexed_ms": 373,
+    "chapter_write_ms": 17,
+    "query_p95_ms": 12.9,
+    "index_rebuild_ms": 1699,
+    "rebuild_cpm": 39145816,
+    "idle_rss_mb": 429,
+    "million_chars_rss_mb": 749
+  },
+  "budgets": {
+    "cold_to_editable_ms": 2000,
+    "hot_to_editable_ms": 800,
+    "project_open_ms": 3000,
+    "keystroke_p95_ms": 16,
+    "keystroke_mega_p95_ms": 16,
+    "save_to_indexed_ms": 500,
+    "query_p95_ms": 80,
+    "rebuild_cpm_min": 20000,
+    "idle_rss_mb": 600,
+    "million_chars_rss_mb": 1200
+  },
+  "checks": {
+    "cold_to_editable": true,
+    "hot_to_editable": true,
+    "project_open": true,
+    "keystroke_p95": true,
+    "keystroke_mega_p95": true,
+    "save_to_indexed": true,
+    "query_p95": true,
+    "rebuild_cpm": true,
+    "idle_rss": true,
+    "million_chars_rss": true
+  },
+  "comparison": {
+    "ok": false,
+    "thresholdRatio": 0.2,
+    "baselineDate": "2026-10-06T13:24:52.847Z",
+    "rows": [
+      {
+        "metric": "cold_to_editable_ms",
+        "previous": 1616,
+        "current": 1319,
+        "deltaPct": -18.4,
+        "status": "stable"
+      },
+      {
+        "metric": "hot_to_editable_ms",
+        "previous": 724,
+        "current": 610,
+        "deltaPct": -15.7,
+        "status": "stable"
+      },
+      {
+        "metric": "project_open_ms",
+        "previous": 242,
+        "current": 195,
+        "deltaPct": -19.4,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_p95_ms",
+        "previous": 1.6,
+        "current": 1.8,
+        "deltaPct": 12.5,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_frame_p95_ms",
+        "previous": 20,
+        "current": 19.3,
+        "deltaPct": -3.5,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_mega_p95_ms",
+        "previous": 4.2,
+        "current": 5.1,
+        "deltaPct": 21.4,
+        "status": "regression"
+      },
+      {
+        "metric": "keystroke_mega_frame_p95_ms",
+        "previous": 19.9,
+        "current": 19.5,
+        "deltaPct": -2,
+        "status": "stable"
+      },
+      {
+        "metric": "save_to_indexed_ms",
+        "previous": 428,
+        "current": 373,
+        "deltaPct": -12.9,
+        "status": "stable"
+      },
+      {
+        "metric": "chapter_write_ms",
+        "previous": 16,
+        "current": 17,
+        "deltaPct": 6.3,
+        "status": "stable"
+      },
+      {
+        "metric": "query_p95_ms",
+        "previous": 21.5,
+        "current": 12.9,
+        "deltaPct": -40,
+        "status": "improved"
+      },
+      {
+        "metric": "index_rebuild_ms",
+        "previous": 1874,
+        "current": 1699,
+        "deltaPct": -9.3,
+        "status": "stable"
+      },
+      {
+        "metric": "rebuild_cpm",
+        "previous": 35488884,
+        "current": 39145816,
+        "deltaPct": -10.3,
+        "status": "stable"
+      },
+      {
+        "metric": "idle_rss_mb",
+        "previous": 430,
+        "current": 429,
+        "deltaPct": -0.2,
+        "status": "stable"
+      },
+      {
+        "metric": "million_chars_rss_mb",
+        "previous": 766,
+        "current": 749,
+        "deltaPct": -2.2,
+        "status": "stable"
+      }
+    ],
+    "regressions": [
+      {
+        "metric": "keystroke_mega_p95_ms",
+        "previous": 4.2,
+        "current": 5.1,
+        "deltaPct": 21.4,
+        "status": "regression"
+      }
+    ]
+  },
+  "indexFiles": 341,
+  "indexChunks": 3291,
+  "incrementalUpdatedFiles": 1
+}
