@@ -4,9 +4,13 @@
 
 ## [Unreleased]
 
-目标版本：`v0.1.0-alpha`（M1 世界基座 MVP，退出条件见 docs/04 §4.7）
+目标版本：M3（AI Provider 与上下文记忆，见 `docs/04-开发计划.md` §6）——下一增量从此开始。
 
-### M2 增量（T2-1 / T2-2 / T2-6 切片）
+## [0.2.0] - 2026-10-06
+
+M2 收口：A1–A5 验收机器验证全绿（证据见 `docs/04-开发计划.md` §5.5 与 `docs/06-M1验收与自查清单.md` §八 第 29 轮）；`v0.2.0` 为本地 tag（远端推送推迟到项目完成后一并执行，见 `docs/06` §七）。
+
+### M2 增量（T2-1～T2-11）
 
 - **章节编辑器（双形态）**：新增「编辑器」标签页——源码形态（CodeMirror 6 + Markdown 高亮 / 行号 / 历史）与富文本形态（TipTap StarterKit：标题、粗斜、引用、列表、分隔线）自由切换；磁盘真源始终为章节 Markdown 文件（`markdown-it` 解析进富文本、`turndown` 序列化回 Markdown）。
 - **防丢数据策略**：富文本暂不支持表格/代码块/图片/链接/原始 HTML——切换前检测并提示，建议保持源码形态；切换章节先落盘再切换（T2-6 起，见下），仅自动保存失败冻结时才需确认。
@@ -47,6 +51,10 @@
 - **写作会话与真实速度（T2-9 切片 C；I08 sessions 本地实现）**：编辑器输入（两形态共用 `updateDerived`）经 `activity-ping.ts` 节流上报（20s 一次，失败静默并重置窗口）→ 新增 `stats:activity` 通道；主进程 `recordActivity` 按空闲阈值（120s）切会话并累计当日活跃时长（首次 / 跨日 / 超阈值开新会话，挂机大间隔不计、时钟回拨忽略；与记账 / 目标共用串行队列）；`todaySpeedCpm = 净增 / 活跃分钟`（活跃 <1 分钟或净增非正为 null）；「码字统计」页新增「今日速度」行（字/分钟 + 活跃分钟 + 会话数，如实标注本地估算），写作日历单日详情补「活跃 X 分钟 / N 会话」；旧数据兼容（读取按 0、写回不补造）。单测 +8；e2e 探针 `statsActivity`（90s 间隔心跳 → activeMs=90,000 / sessions=1 / speedCpm=20）；walkthrough step24；perf-test 10/10（心跳进入输入路径无回退：按键 p95 1.6ms、报告 `docs/assets/perf/perf-report-local-dev-20261006-r26-activity-heartbeat.json`）。
 - **Git 版本管理（T2-7 切片 B，T2-7 收口；isomorphic-git 集成）**：新增主进程 `git-ops.ts`——**状态**（分支 / HEAD / 变更三分类 new·modified·deleted / 最近 20 提交；口径与快照一致：内容白名单且排除 `.yushu/`、`exports/`、`node_modules/`）、**初始化**（`main` 分支；幂等；作者身份取 git 配置、缺失时仅写仓库级内置默认）、**一次批量改动 = 一次提交**（全部变更一次提交；无变更给可操作错误）、**整体回滚（K10，工作区语义）**：文件精确回到该提交内容而 HEAD 不动（不改写历史、回滚结果成为新的待提交改动）、回滚前强制 `pre_restore` 快照（失败阻断）、该提交之后新增的文件保守保留；init/commit/rollback 主进程内串行。IPC `git:state/init/commit/rollback` + 「项目文件」页 Git 面板（未初始化引导 / 变更清单 / 提交信息 / 提交列表 + 回滚页内二次确认）；依赖 isomorphic-git（纯 JS、本地、不经网络、无原生依赖；**惰性加载**——首次 Git 操作才动态 import，不拖累冷启动）。单测 +5；e2e 探针 11 项断言；walkthrough step25（25/25）；perf-test 10/10——首跑启动即加载被 R27 回归工具标记（cold +21.2%⚠ / open +23.6%⚠）→ 改惰性加载后复跑无回退标记（cold 1519 / open 191；报告 `docs/assets/perf/perf-report-local-dev-20261006-r28-git-ops.json`）。
 - **性能回归对比（T2-10 遗留，报告 diff 防退化）**：新增纯逻辑模块 `perf-compare.ts`——本次 PERF_RESULT 指标与「上一次同夹具报告」逐项对比：变差超过阈值（默认 20%）标 ⚠ 回退、显著变好标 ↑、阈值内稳定；`rebuild_cpm`（吞吐）越高越好、方向取反；无基线（首次运行）/ 非数值项（大章缺失）如实跳过，不制造伪回退。perf runner 写入报告前读取夹具目录上一份报告，对比结果并入 PERF_RESULT（`comparison` 字段）与终端输出（回退项单列告警行）；`perf-budget.yaml` 增 `regression.threshold_ratio`。单测 +3；perf-test 实跑 **10/10 达标**（对比上一轮：query p95 -40%↑、cold -18.4%、save_to_indexed -12.9%；唯一 ⚠ 为 `keystroke_mega +21.4%`（4.2→5.1ms，远低于 16ms 门禁，属运行间波动，如实登记）；报告 `docs/assets/perf/perf-report-local-dev-20261006-r27-regression-diff.json`）。
+
+## [0.1.0-alpha]
+
+M1 世界基座 MVP（退出条件见 `docs/04-开发计划.md` §4.7）。
 
 ### Added
 
