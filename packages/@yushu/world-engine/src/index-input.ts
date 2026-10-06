@@ -101,6 +101,73 @@ function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
+/** 增量 diff 结果（T2-5 切片 A；语义见 diffIndexSources） */
+export interface IndexSourceDiff {
+  /** 基线中存在、当前文件列表中已消失的路径（需清理派生数据） */
+  removedPaths: string[];
+  /** 新增或内容变更、需重新解析的文件 */
+  changed: IndexSourceFile[];
+  /** 内容未变、仅需刷新 mtime 记录的文件（不触碰派生数据） */
+  touchedFiles: IndexFileRow[];
+  /** 直接复用的文件数（= 文件总数 - changed；含快速跳过、touch 与读取失败保留旧记录） */
+  reusedFiles: number;
+}
+
+/**
+ * 增量 diff（T2-5 切片 A 引入；T2-11 切片 B 下沉 utilityProcess 后主进程与 worker 共用同一实现）：
+ * 与 file_index 基线逐文件比对，把"当前文件列表"分成 changed / touched / removed 三类。
+ *
+ * racy 防护：mtime+size 快速跳过仅在 mtime **早于**上次索引写入（builtAt）时可信——
+ * mtime 与索引写入同刻或更晚时，无法排除"与索引写入并发发生的同刻改写（mtime 未变）"，
+ * 此时退回 hash 确认（借鉴 Git index 的 racy timestamp 处理）。
+ *
+ * 读取失败的文件保留旧记录（不计入 changed / touched，下次增量再试），不阻断整体。
+ * 注：`files` 应为已按 isIndexablePath 过滤的列表（与收集侧同口径）。
+ */
+export async function diffIndexSources(
+  files: IndexSourceFile[],
+  prev: IndexFileRow[],
+  builtAt: string,
+  readText: (path: string) => Promise<string>,
+): Promise<IndexSourceDiff> {
+  const prevMap = new Map(prev.map((row) => [row.path, row]));
+  const currentPaths = new Set(files.map((file) => file.path));
+  const removedPaths = [...prevMap.keys()].filter((path) => !currentPaths.has(path));
+  const changed: IndexSourceFile[] = [];
+  const touchedFiles: IndexFileRow[] = [];
+
+  for (const file of files) {
+    const old = prevMap.get(file.path);
+    if (!old) {
+      changed.push(file);
+      continue;
+    }
+    if (
+      old.mtime &&
+      file.mtime &&
+      old.mtime === file.mtime &&
+      old.bytes === file.size &&
+      old.mtime < builtAt
+    ) {
+      continue;
+    }
+    let text: string;
+    try {
+      text = await readText(file.path);
+    } catch {
+      continue; // 读取失败：保留旧记录（下次增量再试），不阻断整体
+    }
+    const hash = sha256(text);
+    if (hash === old.hash) {
+      touchedFiles.push({ path: file.path, ...(file.mtime ? { mtime: file.mtime } : {}), hash, bytes: file.size });
+      continue;
+    }
+    changed.push(file);
+  }
+
+  return { removedPaths, changed, touchedFiles, reusedFiles: files.length - changed.length };
+}
+
 /** 按段落聚合切块：保留字符区间（M3 事实级记忆定位用） */
 export function chunkText(
   text: string,

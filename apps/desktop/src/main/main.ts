@@ -478,6 +478,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       issues: indexIncremental.integrityIssues.length,
       hit: indexIncSearch.chunks.length,
       filesKeep: indexIncremental.stats.files === indexRebuild.stats.files,
+      parseVia: indexIncremental.parseVia,
     };
 
     // 保存即增量（T2-5 切片 B）：保存后自动刷新索引——不点任何重建按钮，新内容即可检索
@@ -767,6 +768,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         issues: number;
         hit: number;
         filesKeep: boolean;
+        parseVia: string;
       };
       autoIndex: {
         hit: number;
@@ -1416,6 +1418,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.incremental.removed === 0 &&
       result.incremental.issues === 0 &&
       result.incremental.hit >= 1 &&
+      result.incremental.parseVia === "utility" &&
       result.incremental.filesKeep &&
       result.autoIndex.hit >= 1 &&
       result.autoIndex.lastRunAt !== null &&

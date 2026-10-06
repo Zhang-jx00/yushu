@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   chunkText,
@@ -5,11 +6,14 @@ import {
   createChapterDraft,
   createEmptyOutline,
   createSettingCard,
+  diffIndexSources,
   serializeCardFile,
   serializeChapterFile,
   serializeOutline,
   type IndexSourceReader,
 } from "@yushu/world-engine";
+
+const sha = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
 function readerOf(files: Record<string, string>): IndexSourceReader {
   return {
@@ -128,5 +132,51 @@ describe("collectIndexInput（T1-21 生产侧）", () => {
     expect(second.chunks.map((chunk) => chunk.textHash)).toEqual(
       first.chunks.map((chunk) => chunk.textHash),
     );
+  });
+});
+
+describe("diffIndexSources 增量 diff（T2-5 / T2-11 切片 B 主与 worker 共用）", () => {
+  const BUILT_AT = "2026-02-01T00:00:00.000Z";
+
+  it("快速跳过 / hash 确认 touch / changed / removed 分类正确；快速跳过不读内容", async () => {
+    const files = [
+      { path: "a.md", size: 1, mtime: "2026-01-01T00:00:00.000Z" }, // mtime 早于 builtAt 且未变 → 快速跳过
+      { path: "b.md", size: 5, mtime: BUILT_AT }, // racy（mtime 不早于 builtAt）→ hash 确认 → 变更
+      { path: "c.md", size: 2 }, // 新增 → 变更
+      { path: "e.md", size: 1, mtime: "2026-03-01T00:00:00.000Z" }, // mtime 变 → hash 相同 → touch
+      { path: "g.md", size: 9 }, // 读取失败 → 保留旧记录（计入复用）
+    ];
+    const prev = [
+      { path: "a.md", mtime: "2026-01-01T00:00:00.000Z", hash: sha("A"), bytes: 1 },
+      { path: "b.md", mtime: BUILT_AT, hash: sha("B-old"), bytes: 5 },
+      { path: "d.md", mtime: "2026-01-01T00:00:00.000Z", hash: sha("D"), bytes: 1 },
+      { path: "e.md", mtime: "2026-01-01T00:00:00.000Z", hash: sha("E"), bytes: 1 },
+      { path: "g.md", mtime: "2026-01-01T00:00:00.000Z", hash: sha("G"), bytes: 9 },
+    ];
+    const texts: Record<string, string> = { "b.md": "B-new", "c.md": "CC", "e.md": "E" };
+    const reads: string[] = [];
+    const diff = await diffIndexSources(files, prev, BUILT_AT, async (path) => {
+      reads.push(path);
+      const text = texts[path];
+      if (text === undefined) throw new Error(`ENOENT: ${path}`);
+      return text;
+    });
+
+    expect(diff.removedPaths).toEqual(["d.md"]);
+    expect(diff.changed.map((file) => file.path)).toEqual(["b.md", "c.md"]);
+    expect(diff.touchedFiles.map((file) => file.path)).toEqual(["e.md"]);
+    expect(diff.touchedFiles[0]).toMatchObject({ hash: sha("E"), bytes: 1, mtime: "2026-03-01T00:00:00.000Z" });
+    // 复用 = 快速跳过 a + touch e + 读取失败 g（不计入 changed）
+    expect(diff.reusedFiles).toBe(3);
+    expect(reads).not.toContain("a.md"); // racy 防护之外的未变文件不读内容
+    expect(reads).toContain("g.md");
+  });
+
+  it("racy 防护：mtime 与 builtAt 同刻不快速跳过（同大小改写仍被 hash 确认）", async () => {
+    const files = [{ path: "x.md", size: 3, mtime: BUILT_AT }];
+    const prev = [{ path: "x.md", mtime: BUILT_AT, hash: sha("v1\n"), bytes: 3 }];
+    const diff = await diffIndexSources(files, prev, BUILT_AT, async () => "v2\n");
+    expect(diff.changed.map((file) => file.path)).toEqual(["x.md"]);
+    expect(diff.reusedFiles).toBe(0);
   });
 });

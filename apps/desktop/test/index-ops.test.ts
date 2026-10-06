@@ -183,6 +183,26 @@ describe("桌面端索引（T1-21 / T1-22）", () => {
     expect((await searchProjectIndex(gateway, "沧溟")).chunks.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("增量解析下沉 utilityProcess（T2-11 切片 B）：worker 不可用时回退主进程，回执注明且结果一致", async () => {
+    const { gateway, cardPath } = await setupProject();
+    await rebuildProjectIndex(gateway);
+    const snapshot = await gateway.readDoc(cardPath);
+    await gateway.writeDoc(
+      cardPath,
+      snapshot.content.replace("剑指苍穹", "剑指苍穹，持有玄铁令"),
+      snapshot.hash,
+    );
+
+    const inc = await rebuildProjectIndex(gateway, { incremental: true });
+    expect(inc.mode).toBe("incremental");
+    expect(inc.updatedFiles).toBe(1);
+    expect(inc.reusedFiles).toBe(inc.stats.files - 1);
+    // vitest 无 Electron：utilityProcess 不可用 → 回退主进程（真实 Electron 下由 e2e 断言 utility）
+    expect(inc.parseVia).toBe("main");
+    expect((await searchProjectIndex(gateway, "玄铁令")).chunks.length).toBeGreaterThanOrEqual(1);
+    expect(inc.stats.ftsRows).toBe(inc.stats.chunks);
+  });
+
   it("完整性自愈（T2-5）：FTS 不一致时增量自动回退全量重建并回报问题项", async () => {
     const { gateway } = await setupProject();
     const full = await rebuildProjectIndex(gateway);

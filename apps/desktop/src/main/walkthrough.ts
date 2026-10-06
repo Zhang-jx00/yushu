@@ -686,12 +686,13 @@ const STEPS: StepDef[] = [
       const done = await waitFor(() => (document.body.innerText.includes('索引已重建（增量') ? true : null), 20000);
       if (done === null) return { ok: false, note: '未出现增量重建回执：' + pageText() };
       const text = document.body.innerText;
-      const m = text.match(/增量：复用 (\d+) · 更新 (\d+) · 移除 (\d+) 个文件/);
+      const m = text.match(/增量：复用 (\d+) · 更新 (\d+) · 移除 (\d+) 个文件 · 解析 ([^）\n]+)/);
       const reused = m ? Number(m[1]) : -1;
       const updated = m ? Number(m[2]) : -1;
+      const via = m ? m[4].trim() : '(未匹配)';
       return {
-        ok: reused > 0 && updated >= 0,
-        note: '增量回执=' + (m ? m[0] : '(未匹配)') + '；复用>0=' + (reused > 0) + '；更新=' + updated,
+        ok: reused > 0 && updated >= 0 && via === 'utility 进程',
+        note: '增量回执=' + (m ? m[0] : '(未匹配)') + '；复用>0=' + (reused > 0) + '；更新=' + updated + '；解析=' + via,
       };
     `,
   },

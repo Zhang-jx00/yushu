@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -21,6 +20,7 @@ import {
 import {
   INDEX_DIR,
   collectIndexInput,
+  diffIndexSources,
   isIndexablePath,
   type IndexSourceFile,
   type IndexSourceReader,
@@ -32,7 +32,7 @@ import type {
   IndexStatusPayload,
 } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
-import { collectInWorker } from "./repo-worker.js";
+import { collectInWorker, incrementalInWorker } from "./repo-worker.js";
 
 /**
  * 桌面端索引操作（T1-21；T2-5 切片 A：增量与自愈）：
@@ -114,11 +114,6 @@ export async function readIndexStatus(gateway: ProjectGateway): Promise<IndexSta
   }
 }
 
-/** 内容 sha256（hex；与 world-engine / search 的 hash 口径一致） */
-function sha256Hex(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
-}
-
 interface IncrementalOutcome {
   stats: IndexStats;
   skipped: { path: string; error: string }[];
@@ -128,14 +123,12 @@ interface IncrementalOutcome {
 }
 
 /**
- * 增量重建（T2-5 切片 A）：
+ * 增量重建（T2-5 切片 A；T2-11 切片 B 起为**回退路径**）：主进程内完成 diff + 定向解析。
  * 1. 与 file_index 逐文件比对：mtime 与大小都未变 → 直接复用（不读内容）；
  * 2. 疑似变化 → 读内容算 hash：相同则只刷新 mtime 记录（touch），不同才重新解析；
  * 3. 真源已删除的路径 → 从索引移除；变更文件定向走 collectIndexInput（wrapper reader）。
  *
- * racy 防护（复核修复）：快速跳过仅在 mtime **早于**上次索引写入（builtAt）时可信——
- * mtime 与索引写入同刻或更晚时，无法排除"与索引写入并发发生的同刻改写（mtime 未变）"，
- * 此时退回 hash 确认（借鉴 Git index 的 racy timestamp 处理）。
+ * diff 语义（含 racy 防护）已下沉 @yushu/world-engine 的 diffIndexSources，与 utilityProcess 共用。
  */
 async function applyIncremental(
   reader: IndexSourceReader,
@@ -143,50 +136,17 @@ async function applyIncremental(
   db: DatabaseSync,
   builtAt: string,
 ): Promise<IncrementalOutcome> {
-  const prev = new Map(readFileIndex(db).map((row) => [row.path, row]));
-  const currentPaths = new Set(files.map((file) => file.path));
-  const removedPaths = [...prev.keys()].filter((path) => !currentPaths.has(path));
-  const changed: IndexSourceFile[] = [];
-  const touchedFiles: { path: string; mtime?: string; hash: string; bytes: number }[] = [];
-
-  for (const file of files) {
-    const old = prev.get(file.path);
-    if (!old) {
-      changed.push(file);
-      continue;
-    }
-    if (
-      old.mtime &&
-      file.mtime &&
-      old.mtime === file.mtime &&
-      old.bytes === file.size &&
-      old.mtime < builtAt
-    ) {
-      continue;
-    }
-    let text: string;
-    try {
-      text = await reader.readText(file.path);
-    } catch {
-      continue; // 读取失败：保留旧记录（下次增量再试），不阻断整体
-    }
-    const hash = sha256Hex(text);
-    if (hash === old.hash) {
-      touchedFiles.push({ path: file.path, ...(file.mtime ? { mtime: file.mtime } : {}), hash, bytes: file.size });
-      continue;
-    }
-    changed.push(file);
-  }
+  const diff = await diffIndexSources(files, readFileIndex(db), builtAt, (path) => reader.readText(path));
 
   const scopedReader: IndexSourceReader = {
-    listFiles: async () => changed,
+    listFiles: async () => diff.changed,
     readText: (path) => reader.readText(path),
   };
-  const deltaInput = changed.length > 0 ? await collectIndexInput(scopedReader) : null;
+  const deltaInput = diff.changed.length > 0 ? await collectIndexInput(scopedReader) : null;
   const stats = applyIndexDelta(db, {
-    removedPaths,
+    removedPaths: diff.removedPaths,
     files: deltaInput?.files ?? [],
-    touchedFiles,
+    touchedFiles: diff.touchedFiles,
     entities: deltaInput?.entities ?? [],
     refs: deltaInput?.refs ?? [],
     chunks: deltaInput?.chunks ?? [],
@@ -194,9 +154,45 @@ async function applyIncremental(
   return {
     stats,
     skipped: deltaInput?.skipped ?? [],
-    reusedFiles: files.length - changed.length,
-    updatedFiles: changed.length,
-    removedFiles: removedPaths.length,
+    reusedFiles: diff.reusedFiles,
+    updatedFiles: diff.changed.length,
+    removedFiles: diff.removedPaths.length,
+  };
+}
+
+/**
+ * 增量重建（T2-11 切片 B）：diff 与定向解析整体下沉 utilityProcess（只读文件），
+ * 主进程仅从索引库读基线（readFileIndex）并应用 delta 写库（写库独占不变，docs/04 §5.6）。
+ */
+async function applyIncrementalInWorker(
+  gateway: ProjectGateway,
+  files: IndexSourceFile[],
+  db: DatabaseSync,
+  builtAt: string,
+  onProgress?: (progress: IndexProgressPayload) => void,
+): Promise<IncrementalOutcome> {
+  const prev = readFileIndex(db);
+  const delta = await incrementalInWorker(
+    gateway.root,
+    files,
+    prev,
+    builtAt,
+    (done, total, currentPath) => onProgress?.({ phase: "parse", done, total, currentPath }),
+  );
+  const stats = applyIndexDelta(db, {
+    removedPaths: delta.removedPaths,
+    files: delta.input?.files ?? [],
+    touchedFiles: delta.touchedFiles,
+    entities: delta.input?.entities ?? [],
+    refs: delta.input?.refs ?? [],
+    chunks: delta.input?.chunks ?? [],
+  });
+  return {
+    stats,
+    skipped: delta.input?.skipped ?? [],
+    reusedFiles: delta.reusedFiles,
+    updatedFiles: delta.updatedFiles,
+    removedFiles: delta.removedFiles,
   };
 }
 
@@ -223,12 +219,24 @@ export async function rebuildProjectIndex(
       if (integrity.ok) {
         // 增量 diff 与收集侧同口径过滤（导出产物 / 引擎目录 / 旁路文件不参与，避免"伪变更"）
         const files = (await reader.listFiles()).filter((file) => isIndexablePath(file.path));
-        const outcome = await applyIncremental(
-          progressReader(reader, options.onProgress),
-          files,
-          db,
-          existingStats.builtAt,
-        );
+        // T2-11 切片 B：diff 与定向解析优先走 utilityProcess（只读；写库仍由主进程独占）；
+        // 不可用 / 超时 / 越界拒绝 → 回退主进程内增量（功能不受影响），回执注明解析进程
+        let outcome: IncrementalOutcome;
+        let parseVia: "utility" | "main" = "utility";
+        try {
+          outcome = await applyIncrementalInWorker(gateway, files, db, existingStats.builtAt, options.onProgress);
+        } catch (err) {
+          console.warn(
+            `[index] utilityProcess 增量解析不可用，回退主进程：${err instanceof Error ? err.message : String(err)}`,
+          );
+          parseVia = "main";
+          outcome = await applyIncremental(
+            progressReader(reader, options.onProgress),
+            files,
+            db,
+            existingStats.builtAt,
+          );
+        }
         return {
           path: INDEX_DB_RELATIVE,
           exists: true,
@@ -241,7 +249,7 @@ export async function rebuildProjectIndex(
           removedFiles: outcome.removedFiles,
           integrityIssues: [],
           shards: 0,
-          parseVia: "main", // 增量 diff 与校验在主进程完成（切片 B 再评估下沉）
+          parseVia,
         };
       }
       // 自愈（T2-5）：索引损坏 → 放弃增量，回退全量重建（问题项回报给 UI）

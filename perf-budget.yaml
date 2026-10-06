@@ -89,3 +89,19 @@ measurements:
       idle_rss_mb: 432                 # ≤600
       million_chars_rss_mb: 754        # ≤1200
     report: docs/assets/perf/perf-report-local-dev-20261005-r24-utility-parse.json
+  - date: 2026-10-06
+    runner: local-dev          # 第 25 轮复跑：增量 diff / 定向解析下沉 utilityProcess（T2-11 切片 B）
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,108,170 字 + 100k 大章靶子（索引 341 文件 / 3,288 chunks）
+    result: pass_10_of_10
+    metrics:
+      cold_to_editable_ms: 1445        # ≤2000
+      hot_to_editable_ms: 553          # ≤800
+      project_open_ms: 196             # ≤3000
+      keystroke_p95_ms: 1.5            # ≤16
+      keystroke_mega_p95_ms: 4.8       # ≤16
+      save_to_indexed_ms: 393          # ≤500（增量经 worker：diff + 定向解析下沉后仍余量充足）
+      query_p95_ms: 13.2               # ≤80
+      rebuild_cpm: 34500934            # ≥20000（全量 1.927s / 1.108M 字；全量路径同切片 A 的克隆开销口径）
+      idle_rss_mb: 441                 # ≤600
+      million_chars_rss_mb: 730        # ≤1200
+    report: docs/assets/perf/perf-report-local-dev-20261006-r25-incremental-worker.json
