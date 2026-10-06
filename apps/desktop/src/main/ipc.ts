@@ -54,6 +54,7 @@ import {
   type SnapshotStatePayload,
   type SnapshotTakeResultPayload,
   type StatsSetGoalPayload,
+  type StatsActivityPayload,
   type StatsStatePayload,
   type TreeEntry,
   type WorldSummary,
@@ -96,7 +97,7 @@ import {
   touchSession,
   type SessionOpenResult,
 } from "./session-ops.js";
-import { readStatsState, setStatsGoal } from "./stats-ops.js";
+import { recordActivity, readStatsState, setStatsGoal } from "./stats-ops.js";
 import {
   buildFusionPreview,
   buildPackCatalog,
@@ -523,6 +524,11 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNELS.statsSetGoal, (_event, payload: StatsSetGoalPayload) =>
     wrap<{ daily: number }>(() => setStatsGoal(requireGateway(), payload.daily)),
+  );
+
+  // 写作活动心跳（T2-9 切片 C）：编辑器输入期间节流上报；失败由渲染层静默（统计非真源）
+  ipcMain.handle(CHANNELS.statsActivity, () =>
+    wrap<StatsActivityPayload>(() => recordActivity(requireGateway())),
   );
 
   // 正常退出（窗口关闭 → app.quit）：before-quit 不能等待异步——同步原子写把会话标记为 closed，

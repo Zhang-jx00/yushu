@@ -49,6 +49,7 @@ import type {
   SnapshotRestoreResultPayload,
   SnapshotStatePayload,
   SnapshotTakeResultPayload,
+  StatsActivityPayload,
   StatsSetGoalPayload,
   StatsStatePayload,
   TreeEntry,
@@ -172,6 +173,8 @@ export interface YushuApi {
     read: () => Promise<StatsStatePayload>;
     /** 设置每日目标（0 = 清除目标） */
     setGoal: (payload: StatsSetGoalPayload) => Promise<{ daily: number }>;
+    /** 写作活动心跳（T2-9 切片 C）：编辑输入期间节流上报（活跃时长 / 会话）；失败由调用方静默 */
+    activity: () => Promise<StatsActivityPayload>;
   };
 }
 

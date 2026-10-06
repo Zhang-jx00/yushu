@@ -438,6 +438,14 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     }
     // 码字统计（T2-9 切片 A/B）：章节保存后记账可见（净增口径 + 有效字数口径 + 速度序列）
     const statsProbe = await api.stats.read();
+    // 写作会话与真实速度（T2-9 切片 C）：心跳由主进程在脚本前注入（间隔 90s，确定性）
+    const statsActivityState = await api.stats.read();
+    const statsActivity = {
+      activeMs: statsActivityState.today.activeMs,
+      sessions: statsActivityState.today.sessions,
+      speedCpm: statsActivityState.todaySpeedCpm,
+      delta: statsActivityState.today.delta,
+    };
     const exportPreview = await api.export.preview();
     let confirmError = "";
     let confirmMessage = "";
@@ -663,6 +671,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         speedPoints: statsProbe.speed.length,
         tiers: statsProbe.tiers,
       },
+      statsActivity,
       incremental,
       autoIndex,
       pipeline,
@@ -670,6 +679,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     };
   })()`;
   try {
+    // T2-9 切片 C：主进程侧注入两次活动心跳（间隔 90s，确定性）——脚本内的 statsActivity 探针随后读取
+    {
+      const { ProjectGateway } = await import("./file-gateway.js");
+      const { recordActivity } = await import("./stats-ops.js");
+      const activityGateway = new ProjectGateway(dir);
+      const base = Date.now();
+      await recordActivity(activityGateway, new Date(base - 90_000));
+      await recordActivity(activityGateway, new Date(base));
+    }
     const result = (await win.webContents.executeJavaScript(script)) as {
       packs: number;
       ready: boolean;
@@ -759,6 +777,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         todayEffective: number;
         speedPoints: number;
         tiers: { basic: number; advanced: number };
+      };
+      statsActivity: {
+        activeMs: number;
+        sessions: number;
+        speedCpm: number | null;
+        delta: number;
       };
       incremental: {
         mode: string;
@@ -1407,6 +1431,10 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.stats.speedPoints === 30 &&
       result.stats.tiers.basic === 4000 &&
       result.stats.tiers.advanced === 6000 &&
+      result.statsActivity.sessions >= 1 &&
+      result.statsActivity.activeMs >= 85_000 &&
+      result.statsActivity.speedCpm !== null &&
+      result.statsActivity.speedCpm > 0 &&
       result.pipeline.conflict === "E_DOC_CONFLICT" &&
       result.pipeline.sidecarOk &&
       result.pipeline.mainKeptExternal &&

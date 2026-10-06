@@ -105,3 +105,19 @@ measurements:
       idle_rss_mb: 441                 # ≤600
       million_chars_rss_mb: 730        # ≤1200
     report: docs/assets/perf/perf-report-local-dev-20261006-r25-incremental-worker.json
+  - date: 2026-10-06
+    runner: local-dev          # 第 26 轮复跑：写作活动心跳进入输入路径（T2-9 切片 C）
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,108,377 字 + 100k 大章靶子（索引 341 文件 / 3,289 chunks）
+    result: pass_10_of_10      # 心跳路径无按键回退（p95 1.6ms / 大章 4.2ms）
+    metrics:
+      cold_to_editable_ms: 1616        # ≤2000
+      hot_to_editable_ms: 724          # ≤800
+      project_open_ms: 242             # ≤3000
+      keystroke_p95_ms: 1.6            # ≤16（ping 判定为同步微开销；上报走异步 IPC 不阻塞按键）
+      keystroke_mega_p95_ms: 4.2       # ≤16
+      save_to_indexed_ms: 428          # ≤500
+      query_p95_ms: 21.5               # ≤80
+      rebuild_cpm: 35488884            # ≥20000（全量 1.874s / 1.108M 字）
+      idle_rss_mb: 430                 # ≤600
+      million_chars_rss_mb: 766        # ≤1200
+    report: docs/assets/perf/perf-report-local-dev-20261006-r26-activity-heartbeat.json

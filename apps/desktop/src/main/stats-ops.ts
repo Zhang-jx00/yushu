@@ -12,7 +12,9 @@ import { ProjectGateway } from "./file-gateway.js";
  *   （countWords 口径，与导出对账一致；删改可为负；delta=0 的保存不计入，避免"空保存"污染活跃日）；
  * - **切片 B**：同一挂点附加「平台口径有效字数」净增（`countEffectiveChars`：去空白 / 换行 / 格式符，
  *   参考番茄作家后台「有效更新字数」换算，I08 §3；档位参考 4,000 普通 / 6,000 进阶）与
- *   **速度曲线**（最近 30 天「7 日滑动平均净增」，字/天——识别产能节律；真实字/分钟速度属专注中心，后续切片）；
+ *   **速度曲线**（最近 30 天「7 日滑动平均净增」，字/天——识别产能节律）；
+ * - **切片 C**：写作会话与真实速度——编辑器输入心跳（渲染层节流上报）→ 主进程按空闲阈值切会话
+ *   并累计当日活跃时长（挂机大间隔不计，防虚增），面板展示「字/分钟 + 活跃分钟 + 会话数」（本地估算）；
  * - 日键为**本地时区** YYYY-MM-DD（写作日历按本地日）；`updated_at` 供诊断；
  * - 读写原子（tmp → rename）；文件损坏时读取回退默认值（不静默删，下一次记账覆盖写）；
  * - 汇总：今日 / 最近 7 天 / 最近 30 天 / 全部 / 活跃天数 / 日均（活跃日）/ 最佳单日 / 断更天数 / 连续天数。
@@ -29,14 +31,23 @@ export const SPEED_WINDOW_DAYS = 30;
 export const SPEED_AVG_DAYS = 7;
 /** 平台档位参考（番茄全勤：普通 4,000 / 进阶 6,000；I08 §3） */
 export const EFFECTIVE_TIERS = { basic: 4000, advanced: 6000 } as const;
+/**
+ * 会话空闲阈值（T2-9 切片 C）：两次活动心跳间隔超过该值时视为「上一会话结束、新会话开始」，
+ * 间隔不计入活跃时长（防挂机虚增）；≤ 阈值时把间隔计入当日活跃时长。
+ * 展示速度的最小活跃样本：不足 1 分钟不出字/分钟（避免个位数秒样本放大噪声）。
+ */
+export const ACTIVITY_IDLE_GAP_MS = 120_000;
+export const SPEED_MIN_ACTIVE_MS = 60_000;
 
-/** 每日聚合（`effective` 为切片 B 新增：旧文件 / 旧条目可能缺失） */
-type DailyAgg = { delta: number; saves: number; effective?: number };
+/** 每日聚合（`effective` / `activeMs` / `sessions` 为后续切片新增：旧文件 / 旧条目可能缺失） */
+type DailyAgg = { delta: number; saves: number; effective?: number; activeMs?: number; sessions?: number };
 
 interface StatsFile {
   schema_version: number;
   goal: { daily: number };
   updated_at: string;
+  /** 最近一次活动心跳时刻（ISO；跨日判定与会话间隔的基准） */
+  last_active_at?: string;
   /** date(YYYY-MM-DD) → 当日聚合 */
   daily: Record<string, DailyAgg>;
 }
@@ -76,23 +87,39 @@ export function countEffectiveChars(text: string): number {
 
 /**
  * daily 逐条清洗（第 16 轮复核修复）：只保留 { delta, saves } 均为有限数字的条目；
- * `effective`（切片 B）可选——为有限数字时保留（可为负），否则按缺失处理（不补造）。
+ * `effective` / `activeMs` / `sessions`（后续切片）可选——为有限数字（activeMs/sessions ≥0）时保留，
+ * 否则按缺失处理（不补造）。
  * 部分损坏（如 `"2026-10-05": null` 或字符串）此前会让汇总抛错 / NaN——按「保守丢弃坏条目」处理，
  * 与顶层损坏回退默认值同一策略（不静默删文件）。
  */
 function sanitizeDaily(raw: unknown): Record<string, DailyAgg> {
   const out: Record<string, DailyAgg> = {};
+  const finite = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : undefined;
   if (raw && typeof raw === "object") {
     for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
       if (!value || typeof value !== "object") continue;
-      const entry = value as { delta?: unknown; saves?: unknown; effective?: unknown };
-      const delta = typeof entry.delta === "number" && Number.isFinite(entry.delta) ? Math.trunc(entry.delta) : null;
-      const saves =
-        typeof entry.saves === "number" && Number.isFinite(entry.saves) && entry.saves >= 0 ? Math.trunc(entry.saves) : null;
-      if (delta === null || saves === null) continue;
-      const effective =
-        typeof entry.effective === "number" && Number.isFinite(entry.effective) ? Math.trunc(entry.effective) : undefined;
-      out[key] = effective === undefined ? { delta, saves } : { delta, saves, effective };
+      const entry = value as {
+        delta?: unknown;
+        saves?: unknown;
+        effective?: unknown;
+        activeMs?: unknown;
+        sessions?: unknown;
+      };
+      const delta = finite(entry.delta);
+      const savesRaw = finite(entry.saves);
+      const saves = savesRaw !== undefined && savesRaw >= 0 ? savesRaw : null;
+      if (delta === undefined || saves === null) continue;
+      const effective = finite(entry.effective);
+      const activeMsRaw = finite(entry.activeMs);
+      const sessionsRaw = finite(entry.sessions);
+      const activeMs = activeMsRaw !== undefined && activeMsRaw >= 0 ? activeMsRaw : undefined;
+      const sessions = sessionsRaw !== undefined && sessionsRaw >= 0 ? sessionsRaw : undefined;
+      const cleaned: DailyAgg = { delta, saves };
+      if (effective !== undefined) cleaned.effective = effective;
+      if (activeMs !== undefined) cleaned.activeMs = activeMs;
+      if (sessions !== undefined) cleaned.sessions = sessions;
+      out[key] = cleaned;
     }
   }
   return out;
@@ -112,6 +139,9 @@ async function readStatsFile(gateway: ProjectGateway): Promise<StatsFile> {
               : DEFAULT_DAILY_GOAL,
         },
         updated_at: typeof data.updated_at === "string" ? data.updated_at : "",
+        ...(typeof data.last_active_at === "string" && data.last_active_at
+          ? { last_active_at: data.last_active_at }
+          : {}),
         daily: sanitizeDaily(data.daily),
       };
     }
@@ -192,6 +222,44 @@ async function recordChapterDeltaLocked(
   return true;
 }
 
+/**
+ * 写作活动心跳（T2-9 切片 C；编辑器输入期间节流上报，见渲染层 activity-ping）：
+ * - 会话：首次活动 / 跨日 / 距上次活动超过空闲阈值（ACTIVITY_IDLE_GAP_MS）→ `sessions += 1`；
+ * - 活跃时长：同会话内把「两次心跳间隔」累加到当日 `activeMs`（挂机大间隔不计，防虚增；时钟回拨忽略）；
+ * - 与记账 / 目标共用一个串行队列（withStatsLock），并发不互相覆盖。
+ * 调用方可 `.catch(() => undefined)` 兜底——心跳失败绝不能影响编辑。
+ */
+export function recordActivity(
+  gateway: ProjectGateway,
+  now?: Date,
+): Promise<{ activeMs: number; sessions: number }> {
+  return withStatsLock(() => recordActivityLocked(gateway, now ?? new Date()));
+}
+
+async function recordActivityLocked(
+  gateway: ProjectGateway,
+  at: Date,
+): Promise<{ activeMs: number; sessions: number }> {
+  const file = await readStatsFile(gateway);
+  const key = localDateKey(at);
+  const entry: DailyAgg = file.daily[key] ?? { delta: 0, saves: 0 };
+  const lastAt = file.last_active_at ? Date.parse(file.last_active_at) : Number.NaN;
+  const sameDay = Number.isFinite(lastAt) && localDateKey(new Date(lastAt)) === key;
+  const gap = Number.isFinite(lastAt) ? at.getTime() - lastAt : null;
+
+  if (gap !== null && sameDay && gap >= 0 && gap <= ACTIVITY_IDLE_GAP_MS) {
+    entry.activeMs = (entry.activeMs ?? 0) + gap;
+  } else if (gap === null || !sameDay || gap > ACTIVITY_IDLE_GAP_MS) {
+    // 首次活动 / 跨日 / 超过空闲阈值：开启新会话（大间隔不计入活跃时长）
+    entry.sessions = (entry.sessions ?? 0) + 1;
+  }
+  file.daily[key] = entry;
+  file.last_active_at = at.toISOString();
+  file.updated_at = at.toISOString();
+  await writeStatsFile(gateway, file);
+  return { activeMs: entry.activeMs ?? 0, sessions: entry.sessions ?? 0 };
+}
+
 /** 设置每日目标（0 = 清除目标） */
 export function setStatsGoal(gateway: ProjectGateway, daily: number): Promise<{ daily: number }> {
   if (!Number.isInteger(daily) || daily < 0) {
@@ -209,9 +277,14 @@ async function setStatsGoalLocked(gateway: ProjectGateway, daily: number): Promi
 }
 
 function toEntry(date: string, value: DailyAgg): StatsDailyEntryPayload {
-  return value.effective === undefined
-    ? { date, delta: value.delta, saves: value.saves, effective: 0 }
-    : { date, delta: value.delta, saves: value.saves, effective: value.effective };
+  return {
+    date,
+    delta: value.delta,
+    saves: value.saves,
+    effective: value.effective ?? 0,
+    activeMs: value.activeMs ?? 0,
+    sessions: value.sessions ?? 0,
+  };
 }
 
 /**
@@ -242,7 +315,14 @@ export async function readStatsState(gateway: ProjectGateway, now?: Date): Promi
     .filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key))
     .sort();
   const entries = dates.map((date) => toEntry(date, file.daily[date]!));
-  const today = entries.find((entry) => entry.date === todayKey) ?? { date: todayKey, delta: 0, saves: 0, effective: 0 };
+  const today =
+    entries.find((entry) => entry.date === todayKey) ??
+    { date: todayKey, delta: 0, saves: 0, effective: 0, activeMs: 0, sessions: 0 };
+  // 今日真实速度（切片 C）：净增字数 / 活跃分钟；活跃样本不足 1 分钟或净增非正时不给出（UI 显示「—」）
+  const todaySpeedCpm =
+    today.activeMs >= SPEED_MIN_ACTIVE_MS && today.delta > 0
+      ? Math.round(today.delta / (today.activeMs / 60_000))
+      : null;
 
   const inWindow = (entry: StatsDailyEntryPayload, days: number) =>
     diffDays(entry.date, todayKey) >= 0 && diffDays(entry.date, todayKey) < days;
@@ -279,6 +359,7 @@ export async function readStatsState(gateway: ProjectGateway, now?: Date): Promi
   return {
     goal: file.goal,
     today,
+    todaySpeedCpm,
     daily: entries.slice(-STATS_WINDOW_DAYS),
     speed: buildSpeedSeries(entries, todayKey),
     tiers: { ...EFFECTIVE_TIERS },

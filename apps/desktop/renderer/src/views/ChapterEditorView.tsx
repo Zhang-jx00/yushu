@@ -16,6 +16,7 @@ import { entityMentionPlugin } from "../entity-mention-plugin";
 import { createAutosaveScheduler, type AutosaveScheduler, type AutosaveState } from "../autosave";
 import { registerEditorFlusher } from "../editor-flush";
 import { createRecoveryJournalScheduler, type RecoveryJournalScheduler } from "../recovery-journal";
+import { createActivityPing, type ActivityPing } from "../activity-ping";
 import { takePendingRecovery } from "../recovery-inbox";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 
@@ -28,7 +29,8 @@ import { cardTypeLabel, layerLabel } from "../card-labels";
  * - 保存管线（T2-6 切片）：编辑即登记自动保存（防抖 800ms / 高频上限 5s），
  *   失焦与切换章节前 flush；冲突冻结时提供「写入旁路文件」与「重新载入」两条人工处置路径；
  * - 实体提及（T2-2）：正文 `@名称`/`@别名` 在源码形态高亮（悬停提示，Ctrl/⌘+点击打开设定卡），
- *   底部「本章提及」面板可一键跳转档案（点击跳转由 ProjectScreen 协调）。
+ *   底部「本章提及」面板可一键跳转档案（点击跳转由 ProjectScreen 协调）；
+ * - 写作活动心跳（T2-9 切片 C）：输入即节流上报 `stats:activity`（活跃时长 / 会话记账），失败静默。
  */
 
 /** UI 预演（--ui-walkthrough）经 window.__yushuDebug 暴露的调试句柄（生产不设置该标志则不可见） */
@@ -239,6 +241,23 @@ export function ChapterEditorView({
 
   const journalRef = useRef<RecoveryJournalScheduler | null>(null);
 
+  /**
+   * 写作活动心跳（T2-9 切片 C）：输入期间节流上报（20s 一次）——主进程按心跳间隔累计活跃时长、
+   * 按空闲阈值切会话；统计失败静默（统计非真源，绝不能影响编辑）。
+   */
+  const activityPingRef = useRef<ActivityPing | null>(null);
+  const getActivityPing = useCallback((): ActivityPing => {
+    if (!activityPingRef.current) {
+      activityPingRef.current = createActivityPing({
+        send: () =>
+          api()
+            .stats.activity()
+            .then(() => undefined),
+      });
+    }
+    return activityPingRef.current;
+  }, []);
+
   /** 提及面板重算节流（T2-4 切片 B）：大文档逐键不再全量扫描（250ms 合并为一次） */
   const mentionThrottleRef = useRef<MentionThrottle | null>(null);
   const getMentionThrottle = useCallback((): MentionThrottle => {
@@ -293,6 +312,7 @@ export function ChapterEditorView({
       void getScheduler().flush();
       getJournal().dispose(); // T2-8：停掉日志定时器（journal 文件保留；flush 落盘成功后会清除它）
       mentionThrottleRef.current?.dispose(); // T2-4：丢弃未执行的提及节流任务
+      activityPingRef.current?.dispose(); // T2-9 切片 C：重置心跳节流窗口
     },
     [getScheduler, getJournal],
   );
@@ -350,6 +370,7 @@ export function ChapterEditorView({
         dirtyPathRef.current = selectedPathRef.current;
         getScheduler().schedule();
         getJournal().note(text); // T2-8：编辑日志（500ms 快照，崩溃恢复用）
+        getActivityPing().ping(); // T2-9 切片 C：写作活动心跳（节流 20s，失败静默）
       } else {
         getScheduler().cancel();
         getJournal().cancel();
@@ -365,7 +386,7 @@ export function ChapterEditorView({
         dirtyPathRef.current = null;
       }
     },
-    [getScheduler, getJournal, getMentionThrottle],
+    [getScheduler, getJournal, getMentionThrottle, getActivityPing],
   );
   updateDerivedRef.current = updateDerived;
 

@@ -1377,6 +1377,16 @@ select {
   flex-wrap: wrap;
 }
 
+/* 切片 C：今日速度（字/分钟 + 活跃分钟 + 会话数；注：节奏曲线容器已占用 .stats-speed） */
+.stats-speed-today {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
 .stats-tier {
   padding: 1px 8px;
   border-radius: 999px;

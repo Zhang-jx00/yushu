@@ -13,6 +13,7 @@ import {
   diffDays,
   localDateKey,
   readStatsState,
+  recordActivity,
   recordChapterDelta,
   setStatsGoal,
   shiftDateKey,
@@ -122,13 +123,13 @@ describe("码字统计（T2-9 切片 A）", () => {
 
     // 当日（10-05）视角：连续 2 天（05、04 连续；03 缺）
     const today = await readStatsState(gateway, new Date("2026-10-05T12:00:00"));
-    expect(today.today).toEqual({ date: "2026-10-05", delta: 300, saves: 1, effective: 0 });
+    expect(today.today).toEqual({ date: "2026-10-05", delta: 300, saves: 1, effective: 0, activeMs: 0, sessions: 0 });
     expect(today.summary.total).toBe(2800);
     expect(today.summary.week).toBe(2800);
     expect(today.summary.month).toBe(2800);
     expect(today.summary.activeDays).toBe(4);
     expect(today.summary.avgActiveDay).toBe(700);
-    expect(today.summary.bestDay).toEqual({ date: "2026-10-02", delta: 2000, saves: 3, effective: 0 });
+    expect(today.summary.bestDay).toEqual({ date: "2026-10-02", delta: 2000, saves: 3, effective: 0, activeMs: 0, sessions: 0 });
     expect(today.daysSinceLastWriting).toBe(0);
     expect(today.streakDays).toBe(2);
 
@@ -318,5 +319,99 @@ describe("码字统计（T2-9 切片 A）", () => {
     expect(state.speed[0]).toEqual({ date: "2026-09-08", delta: 0, avg: 0 });
     // 10-01：窗口 09-25..10-01 内仅 10-01 有数据 → 100 / 7 ≈ 14
     expect(state.speed[23]).toEqual({ date: "2026-10-01", delta: 100, avg: 14 });
+  });
+});
+
+describe("码字统计（T2-9 切片 C：写作会话与真实速度）", () => {
+  const T0 = new Date("2026-10-06T10:00:00");
+
+  it("活动心跳：首次开新会话（活跃 0）；同会话间隔累计活跃；超空闲阈值开新会话（大间隔不计）", async () => {
+    expect(await recordActivity(gateway, T0)).toEqual({ activeMs: 0, sessions: 1 });
+    expect(await recordActivity(gateway, new Date(T0.getTime() + 90_000))).toEqual({ activeMs: 90_000, sessions: 1 });
+    // 距上次 10 分钟 > 空闲阈值（2 分钟）：新会话，间隔不计入活跃
+    expect(await recordActivity(gateway, new Date(T0.getTime() + 690_000))).toEqual({
+      activeMs: 90_000,
+      sessions: 2,
+    });
+    // 新会话内继续累计
+    expect(await recordActivity(gateway, new Date(T0.getTime() + 720_000))).toEqual({
+      activeMs: 120_000,
+      sessions: 2,
+    });
+  });
+
+  it("跨日：昨日条目不并入今日（新日首 ping 开新会话，昨日保留活跃与会话数）", async () => {
+    await recordActivity(gateway, new Date("2026-10-05T23:50:00"));
+    await recordActivity(gateway, new Date("2026-10-05T23:52:00"));
+    expect(await recordActivity(gateway, new Date("2026-10-06T09:00:00"))).toEqual({ activeMs: 0, sessions: 1 });
+
+    const state = await readStatsState(gateway, new Date("2026-10-06T12:00:00"));
+    expect(state.today.activeMs).toBe(0);
+    expect(state.today.sessions).toBe(1);
+    const yesterday = state.daily.find((entry) => entry.date === "2026-10-05");
+    expect(yesterday).toMatchObject({ activeMs: 120_000, sessions: 1 });
+  });
+
+  it("今日速度：净增 / 活跃分钟；活跃不足 1 分钟或净增非正为 null", async () => {
+    await recordChapterDelta(gateway, {
+      path: "chapters/a.md",
+      oldWords: 0,
+      newWords: 10,
+      now: T0,
+    });
+    await recordActivity(gateway, T0); // 活跃 0 → 速度 null
+    expect((await readStatsState(gateway, T0)).todaySpeedCpm).toBeNull();
+
+    await recordActivity(gateway, new Date(T0.getTime() + 60_000)); // 活跃 1 分钟
+    expect((await readStatsState(gateway, T0)).todaySpeedCpm).toBe(10);
+
+    // 删回 0 字（净增 10 → -10 = 0）：净增非正 → null
+    await recordChapterDelta(gateway, {
+      path: "chapters/a.md",
+      oldWords: 10,
+      newWords: 0,
+      now: new Date(T0.getTime() + 61_000),
+    });
+    const state = await readStatsState(gateway, T0);
+    expect(state.today.delta).toBe(0);
+    expect(state.todaySpeedCpm).toBeNull();
+  });
+
+  it("记账与心跳并发（同一串行队列）：互不覆盖；活跃 30s 时速度仍为 null", async () => {
+    await Promise.all([
+      recordChapterDelta(gateway, { path: "chapters/a.md", oldWords: 0, newWords: 30, now: T0 }),
+      recordActivity(gateway, T0),
+      recordActivity(gateway, new Date(T0.getTime() + 30_000)),
+    ]);
+    const state = await readStatsState(gateway, T0);
+    expect(state.today.delta).toBe(30);
+    expect(state.today.activeMs).toBe(30_000);
+    expect(state.today.sessions).toBe(1);
+    expect(state.todaySpeedCpm).toBeNull(); // 活跃不足 1 分钟
+  });
+
+  it("旧条目无 activeMs/sessions：读取按 0，写回不补造历史", async () => {
+    await mkdir(join(dir, ".yushu"), { recursive: true });
+    await writeFile(
+      join(dir, STATS_PATH),
+      JSON.stringify({
+        schema_version: 1,
+        goal: { daily: 3000 },
+        updated_at: "",
+        daily: { "2026-10-05": { delta: 100, saves: 1, effective: 90 } },
+      }),
+      "utf8",
+    );
+    await recordActivity(gateway, T0);
+    const state = await readStatsState(gateway, T0);
+    const old = state.daily.find((entry) => entry.date === "2026-10-05");
+    expect(old).toMatchObject({ activeMs: 0, sessions: 0 });
+
+    const raw = JSON.parse(await readFile(join(dir, STATS_PATH), "utf8")) as {
+      daily: Record<string, Record<string, unknown>>;
+      last_active_at?: string;
+    };
+    expect(raw.daily["2026-10-05"]).toEqual({ delta: 100, saves: 1, effective: 90 });
+    expect(raw.last_active_at).toBe(T0.toISOString());
   });
 });

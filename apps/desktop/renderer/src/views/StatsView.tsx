@@ -28,7 +28,7 @@ function fillDays(daily: StatsDailyEntryPayload[], days: number, todayKey: strin
     const day = new Date(base);
     day.setDate(day.getDate() - i);
     const key = `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
-    out.push(byDate.get(key) ?? { date: key, delta: 0, saves: 0, effective: 0 });
+    out.push(byDate.get(key) ?? { date: key, delta: 0, saves: 0, effective: 0, activeMs: 0, sessions: 0 });
   }
   return out;
 }
@@ -105,6 +105,16 @@ export function StatsView() {
   const todayEffective = state?.today.effective ?? 0;
   const tiers = state?.tiers ?? { basic: 4000, advanced: 6000 };
   const progress = goal > 0 ? Math.max(0, Math.min(100, Math.round((todayDelta / goal) * 100))) : 0;
+  // 今日速度（T2-9 切片 C）：活跃不足 1 分钟 / 尚未记录时如实标注（速度由主进程按心跳口径计算）
+  const todayActiveMs = state?.today.activeMs ?? 0;
+  const activeText =
+    todayActiveMs <= 0
+      ? (state?.today.sessions ?? 0) > 0
+        ? "不足 1 分钟"
+        : "尚未记录"
+      : todayActiveMs < 60_000
+        ? "不足 1 分钟"
+        : `${Math.round(todayActiveMs / 60_000)} 分钟`;
   const tierLabel =
     todayEffective >= tiers.advanced ? "进阶档" : todayEffective >= tiers.basic ? "普通档" : "未达标";
   const tierClass =
@@ -156,6 +166,15 @@ export function StatsView() {
                 <span className={`stats-tier ${tierClass}`}>{tierLabel}</span>
                 <span className="muted">
                   档位参考：{formatNumber(tiers.basic)} 普通 / {formatNumber(tiers.advanced)} 进阶（本地估算，以后台为准）
+                </span>
+              </div>
+              <div className="stats-speed-today">
+                <span className="muted">今日速度</span>
+                <strong>
+                  {state.todaySpeedCpm !== null ? `${formatNumber(state.todaySpeedCpm)} 字/分钟` : "—"}
+                </strong>
+                <span className="muted">
+                  活跃 {activeText} · {state.today.sessions} 个会话（本地估算：空闲 ≥2 分钟不计）
                 </span>
               </div>
               <div className="muted">
@@ -271,6 +290,8 @@ export function StatsView() {
                   <span className="muted">
                     {heatPick.date}：净增 {formatNumber(heatPick.delta)} 字 · 保存 {heatPick.saves} 次 · 有效{" "}
                     {formatNumber(heatPick.effective)} 字
+                    {(heatPick.activeMs > 0 || heatPick.sessions > 0) &&
+                      ` · 活跃 ${Math.max(1, Math.round(heatPick.activeMs / 60_000))} 分钟 / ${heatPick.sessions} 会话`}
                   </span>
                 )}
               </div>

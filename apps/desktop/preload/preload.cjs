@@ -139,5 +139,7 @@ contextBridge.exposeInMainWorld("yushu", {
     read: () => invoke("stats:read"),
     /** 设置每日目标（0 = 清除目标） */
     setGoal: (payload) => invoke("stats:setGoal", payload),
+    /** 写作活动心跳（T2-9 切片 C）：编辑输入期间节流上报（活跃时长 / 会话） */
+    activity: () => invoke("stats:activity"),
   },
 });

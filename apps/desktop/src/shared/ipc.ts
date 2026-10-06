@@ -69,6 +69,7 @@ export const CHANNELS = {
   /** 码字统计（T2-9 切片 A）：读取统计 / 设置目标 */
   statsRead: "stats:read",
   statsSetGoal: "stats:setGoal",
+  statsActivity: "stats:activity",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -870,7 +871,7 @@ export interface SessionStatusPayload {
   snapshotStale: boolean;
 }
 
-/* ---------- 码字统计（M2 / T2-9 切片 A/B） ---------- */
+/* ---------- 码字统计（M2 / T2-9 切片 A/B/C） ---------- */
 
 /** 单日聚合（本地时区日期键） */
 export interface StatsDailyEntryPayload {
@@ -882,6 +883,10 @@ export interface StatsDailyEntryPayload {
   saves: number;
   /** 当日平台口径有效字数净增（去空白换算，T2-9 切片 B；旧数据 / 缺失为 0） */
   effective: number;
+  /** 当日活跃时长（毫秒；T2-9 切片 C：输入心跳按空闲阈值累计，旧数据 / 缺失为 0） */
+  activeMs: number;
+  /** 当日写作会话数（T2-9 切片 C：首次活动 / 跨日 / 超空闲阈值开启新会话；旧数据 / 缺失为 0） */
+  sessions: number;
 }
 
 /** 速度曲线单点（T2-9 切片 B）：当日净增 + 7 日滑动平均（字/天；缺失日按 0 计入窗口） */
@@ -894,8 +899,10 @@ export interface StatsSpeedPointPayload {
 export interface StatsStatePayload {
   /** 每日目标（0 = 未设目标） */
   goal: { daily: number };
-  /** 今日（无记录时 delta=0 / saves=0 / effective=0） */
+  /** 今日（无记录时 delta=0 / saves=0 / effective=0 / activeMs=0 / sessions=0） */
   today: StatsDailyEntryPayload;
+  /** 今日真实速度（字/分钟；T2-9 切片 C）：净增 / 活跃分钟；活跃不足 1 分钟或净增非正为 null（UI 显示「—」） */
+  todaySpeedCpm: number | null;
   /** 按日期升序（最多 90 天，供柱状图 / 热力图） */
   daily: StatsDailyEntryPayload[];
   /** 最近 30 天连续速度序列（含今日，补零；供速度曲线） */
@@ -926,6 +933,14 @@ export interface StatsStatePayload {
 export interface StatsSetGoalPayload {
   /** 每日目标字数（0 清除目标；必须为 ≥0 的整数） */
   daily: number;
+}
+
+/** 写作活动心跳回执（T2-9 切片 C：编辑器输入期间节流上报） */
+export interface StatsActivityPayload {
+  /** 今日累计活跃时长（毫秒） */
+  activeMs: number;
+  /** 今日会话数 */
+  sessions: number;
 }
 
 export interface IpcOk<T> {

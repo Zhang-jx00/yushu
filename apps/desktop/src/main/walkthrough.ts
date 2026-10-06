@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-23 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计 / 会话与快照恢复 / 稿件总览全库视图）。
+ * 步骤 10-24 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -1061,6 +1061,39 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 24,
+    title: "码字统计：写作会话与真实速度（活动心跳 → 今日速度）（T2-9 切片 C）",
+    file: "step24-stats-speed.png",
+    body: String.raw`
+      await tab('编辑器');
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      const view = await waitFor(() => window.__yushuCmView, 8000);
+      if (!view) return { ok: false, note: 'CodeMirror 未挂载：' + pageText() };
+      // 对齐磁盘（前序步骤有外部改动）后经真实 CodeMirror 事务输入——updateDerived 触发活动心跳（首键即上报）
+      await ie.reload();
+      view.dispatch({ changes: { from: view.state.doc.length, insert: '\n\n会话速度验证段落。' } });
+      await sleep(600);
+      // 切到码字统计：今日速度行（字/分钟 / 活跃 / 会话数）应已由心跳记账驱动
+      await tab('码字统计');
+      const speedRow = await waitFor(() => document.querySelector('.stats-speed-today'), 12000);
+      if (!speedRow) return { ok: false, note: '统计页未出现「今日速度」行：' + pageText() };
+      const rowText = String(speedRow.textContent || '').replace(/\s+/g, ' ').trim();
+      const sessions = Number((rowText.match(/·\s*(\d+)\s*个会话/) || [])[1] || -1);
+      const apiState = await window.yushu.stats.read();
+      const apiActiveMs = apiState.today.activeMs;
+      const apiSessions = apiState.today.sessions;
+      return {
+        ok:
+          rowText.includes('今日速度') && rowText.includes('活跃') && sessions >= 1 &&
+          apiSessions >= 1 && apiActiveMs >= 0,
+        note:
+          '今日速度行="' + rowText + '"；UI 会话数=' + sessions +
+          '；心跳回执：活跃 ' + apiActiveMs + 'ms / 会话 ' + apiSessions +
+          '（真实键入触发；空闲 ≥2 分钟不计，首次键入即开新会话）',
+      };
+    `,
+  },
 ];
 
 /**
@@ -1142,7 +1175,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-23）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-24）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,
