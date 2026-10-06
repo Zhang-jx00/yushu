@@ -27,11 +27,13 @@
 
 ## 当前状态
 
-**M0 规划期**：调研与规划文档建设中，尚未开始产品编码。里程碑见[开发计划](docs/04-开发计划.md)。
+**M2 已收口（v0.2.0）**：桌面端可运行（Electron + React/TypeScript），已具备——双形态章节编辑器（CodeMirror 源码 / TipTap 富文本）与实体 `@` 提及、写作视图（专注 / 打字机 / 双栏）、起源工作台与三级大纲、AI 流式生成与整段采纳、TXT 导出与敏感词自查、中文全文检索索引（FTS5：增量重建、utilityProcess 解析、分片写入与进度流）、内容寻址快照与 Git 版本管理（一次批量改动 = 一次提交、可整体回滚）、崩溃恢复（编辑日志 / 真实强杀不丢稿实测）、码字统计（净增 / 有效字数 / 写作会话与真实速度）、性能门禁（synth-1m 百万字夹具 10/10 达标）。
 
-## 技术基线（规划中）
+路线图与验收证据见 [docs/04-开发计划.md](docs/04-开发计划.md) 与 [docs/06-M1验收与自查清单.md](docs/06-M1验收与自查清单.md)。
 
-Electron + React/TypeScript + TipTap 编辑器；Markdown 正文 + YAML 设定卡为真源，SQLite（FTS5 中文检索 + sqlite-vec 向量检索）为可重建索引；OpenAI 兼容多模型接入主干（DeepSeek/智谱/Kimi/百炼/Ollama 等全兼容）；Pandoc 导出 EPUB/DOCX。
+## 技术基线
+
+Electron + React/TypeScript + TipTap / CodeMirror 6；Markdown 正文 + YAML 设定卡为真源，SQLite（FTS5 中文检索）为可重建索引（向量检索规划中）；OpenAI 兼容多模型接入主干（DeepSeek / 智谱 / Kimi / 百炼 / Ollama 等全兼容）；EPUB / DOCX 导出规划中。
 
 ---
 
