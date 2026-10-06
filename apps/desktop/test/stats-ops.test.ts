@@ -194,8 +194,13 @@ describe("码字统计（T2-9 切片 A）", () => {
     expect(state.summary.activeDays).toBe(1);
     expect(state.today.delta).toBe(100);
 
-    // 记账写回仅含清洗后的数据：坏条目不会复活、累计正确
-    await recordChapterDelta(gateway, { path: "chapters/vol-a/ch-1.md", oldWords: 0, newWords: 5 });
+    // 记账写回仅含清洗后的数据：坏条目不会复活、累计正确（now 注入与读取同口径，避免日历跨天致断言漂移）
+    await recordChapterDelta(gateway, {
+      path: "chapters/vol-a/ch-1.md",
+      oldWords: 0,
+      newWords: 5,
+      now: new Date("2026-10-05T12:00:00"),
+    });
     const after = await readStatsState(gateway, new Date("2026-10-05T12:00:00"));
     expect(after.today.delta).toBe(105);
   });
@@ -270,7 +275,14 @@ describe("码字统计（T2-9 切片 A）", () => {
     expect(state.today.effective).toBe(0);
     expect(state.summary.monthEffective).toBe(480);
 
-    await recordChapterDelta(gateway, { path: "chapters/x.md", oldWords: 0, newWords: 5, oldEffective: 0, newEffective: 6 });
+    await recordChapterDelta(gateway, {
+      path: "chapters/x.md",
+      oldWords: 0,
+      newWords: 5,
+      oldEffective: 0,
+      newEffective: 6,
+      now: new Date("2026-10-05T12:00:00"),
+    });
     const after = await readStatsState(gateway, new Date("2026-10-05T12:00:00"));
     expect(after.today.effective).toBe(6);
     expect(after.summary.monthEffective).toBe(486);
