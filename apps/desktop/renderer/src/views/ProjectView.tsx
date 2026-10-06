@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   DocSnapshot,
+  GitStatePayload,
   IndexProgressPayload,
   IndexSearchResultPayload,
   IndexStatusPayload,
@@ -85,6 +86,13 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
   /** 恢复需二次确认（页内确认行，不用系统对话框——防手滑且可自动化取证） */
   const [restoreConfirmId, setRestoreConfirmId] = useState<string | null>(null);
 
+  /** Git 版本管理（T2-7 切片 B）：状态 / 提交信息 / 回滚二次确认 */
+  const [gitStateData, setGitStateData] = useState<GitStatePayload | null>(null);
+  const [gitBusy, setGitBusy] = useState(false);
+  const [gitMessage, setGitMessage] = useState("");
+  const [gitStatus, setGitStatus] = useState("");
+  const [gitRollbackConfirm, setGitRollbackConfirm] = useState<string | null>(null);
+
   const dirty = doc !== null && draft !== doc.content;
 
   const refresh = useCallback(async () => {
@@ -111,11 +119,21 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
     }
   }, []);
 
+  /** Git 状态（T2-7 切片 B） */
+  const refreshGit = useCallback(async () => {
+    try {
+      setGitStateData(await api().git.state());
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
     void refreshIndex();
     void refreshSnapshots();
-  }, [refresh, refreshIndex, refreshSnapshots]);
+    void refreshGit();
+  }, [refresh, refreshIndex, refreshSnapshots, refreshGit]);
 
   // 重建进度订阅（T2-5 切片 B）：主进程经 index:progress 推送（仅手动重建期间有事件）
   useEffect(() => api().index.onProgress(setIndexProgress), []);
@@ -159,6 +177,57 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
       setError((err as Error).message);
     } finally {
       setSnapBusy(false);
+    }
+  };
+
+  /** Git：初始化仓库（幂等） */
+  const initGit = async () => {
+    setGitBusy(true);
+    setError(null);
+    try {
+      setGitStateData(await api().git.init());
+      setGitStatus("仓库已初始化（main 分支，作者身份取 git 配置或内置默认）");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
+  /** Git：提交全部变更（一次批量改动 = 一次提交） */
+  const commitGit = async () => {
+    setGitBusy(true);
+    setError(null);
+    try {
+      const result = await api().git.commit({ message: gitMessage });
+      setGitStatus(`已提交 ${result.shortOid}：${result.files} 个文件（一次批量改动 = 一次提交）`);
+      setGitMessage("");
+      await refreshGit();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
+  /** Git：整体回滚到指定提交（二次确认后；工作区语义——不改写历史；服务端回滚前强制 pre_restore 快照） */
+  const rollbackGit = async (oid: string) => {
+    setGitBusy(true);
+    setError(null);
+    setGitRollbackConfirm(null);
+    try {
+      const result = await api().git.rollback({ oid });
+      setGitStatus(
+        `已回滚工作区到 ${result.shortOid}：写回 ${result.restored} · 重建 ${result.recreated} · 保留 ${result.kept.length} 个文件` +
+          `（不改写历史；回滚前快照 ${result.preRestoreId ?? "—"} 可再回滚）`,
+      );
+      await refreshGit();
+      await refresh();
+      void refreshIndex();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setGitBusy(false);
     }
   };
 
@@ -363,6 +432,97 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
           <div className="muted">
             恢复 = 整体回滚到该快照：被删文件重建、被改文件写回；快照之后新增的文件保守保留（列出不删除），绝不静默丢内容
           </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">
+            <span className="muted">版本管理（Git，一次批量改动 = 一次提交）（T2-7 切片 B）</span>
+            <button type="button" className="link" onClick={() => void refreshGit()}>
+              刷新
+            </button>
+          </div>
+          {!gitStateData ? (
+            <div className="muted">加载中…</div>
+          ) : !gitStateData.initialized ? (
+            <>
+              <div className="muted">
+                仓库尚未初始化：初始化后可把「一次批量改动」提交为一个版本，并可整体回滚（纯本地，不经网络）
+              </div>
+              <div className="outline-actions">
+                <button type="button" disabled={gitBusy} onClick={() => void initGit()}>
+                  {gitBusy ? "处理中…" : "初始化仓库"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="muted">
+                {`分支 ${gitStateData.branch ?? "(未创建)"} · HEAD ${gitStateData.head ?? "(暂无提交)"} · 变更 ${gitStateData.changes.length} 个文件`}
+              </div>
+              {gitStateData.changes.length > 0 && (
+                <ul className="git-changes">
+                  {gitStateData.changes.map((change) => (
+                    <li key={change.path}>
+                      <span className="muted">
+                        {change.state === "new" ? "新增" : change.state === "deleted" ? "删除" : "修改"}
+                      </span>
+                      <span className="git-path" title={change.path}>
+                        {change.path}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="git-commit-row">
+                <input
+                  value={gitMessage}
+                  placeholder="提交信息（如：第 3 章初稿 + 修订）"
+                  onChange={(event) => setGitMessage(event.target.value)}
+                />
+                <button
+                  type="button"
+                  disabled={gitBusy || gitStateData.changes.length === 0 || gitMessage.trim() === ""}
+                  onClick={() => void commitGit()}
+                >
+                  {gitBusy ? "处理中…" : `提交全部变更（${gitStateData.changes.length}）`}
+                </button>
+              </div>
+              <ul className="git-log">
+                {gitStateData.log.map((entry) => (
+                  <li key={entry.oid}>
+                    <span className="muted">
+                      {new Date(entry.timestamp).toISOString().replace("T", " ").slice(0, 16)} · {entry.shortOid} ·{" "}
+                      {entry.author}
+                    </span>
+                    <span className="git-message" title={entry.message}>
+                      {entry.message}
+                    </span>
+                    <span className="spacer" />
+                    {gitRollbackConfirm === entry.oid ? (
+                      <span className="snapshot-confirm">
+                        <span className="muted">工作区回滚到该提交？不改写历史，回滚前自动快照</span>
+                        <button type="button" disabled={gitBusy} onClick={() => void rollbackGit(entry.oid)}>
+                          确认回滚
+                        </button>
+                        <button type="button" onClick={() => setGitRollbackConfirm(null)}>
+                          取消
+                        </button>
+                      </span>
+                    ) : (
+                      <button type="button" disabled={gitBusy} onClick={() => setGitRollbackConfirm(entry.oid)}>
+                        回滚
+                      </button>
+                    )}
+                  </li>
+                ))}
+                {gitStateData.log.length === 0 && <li className="muted">暂无提交（提交全部变更后在此出现）</li>}
+              </ul>
+              {gitStatus && <div className="muted">{gitStatus}</div>}
+              <div className="muted">
+                回滚 = 工作区文件回到该提交内容（HEAD 不动，不改写历史）；该提交之后新增的文件保守保留；回滚前强制快照，可经快照再回滚
+              </div>
+            </>
+          )}
         </div>
 
         <div className="panel-title">

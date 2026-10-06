@@ -70,6 +70,11 @@ export const CHANNELS = {
   statsRead: "stats:read",
   statsSetGoal: "stats:setGoal",
   statsActivity: "stats:activity",
+  /** Git 版本管理（T2-7 切片 B：状态 / 初始化 / 提交 / 整体回滚） */
+  gitState: "git:state",
+  gitInit: "git:init",
+  gitCommit: "git:commit",
+  gitRollback: "git:rollback",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -941,6 +946,66 @@ export interface StatsActivityPayload {
   activeMs: number;
   /** 今日会话数 */
   sessions: number;
+}
+
+/* ---------- Git 版本管理（M2 / T2-7 切片 B） ---------- */
+
+/** 工作区变更（纳入范围 = 内容白名单且排除 .yushu / exports / node_modules） */
+export interface GitChangePayload {
+  path: string;
+  /** new = 新增；modified = 内容变更；deleted = 真源已删除 */
+  state: "new" | "modified" | "deleted";
+}
+
+/** 最近提交条目 */
+export interface GitCommitEntryPayload {
+  oid: string;
+  shortOid: string;
+  message: string;
+  author: string;
+  /** 毫秒时间戳 */
+  timestamp: number;
+}
+
+export interface GitStatePayload {
+  /** 仓库是否已初始化（`.git/` 存在） */
+  initialized: boolean;
+  branch: string | null;
+  /** HEAD 短 oid（空仓库为 null） */
+  head: string | null;
+  changes: GitChangePayload[];
+  log: GitCommitEntryPayload[];
+}
+
+/** 提交请求（一次性提交全部变更：一次批量改动 = 一次提交） */
+export interface GitCommitPayload {
+  message: string;
+}
+
+export interface GitCommitResultPayload {
+  oid: string;
+  shortOid: string;
+  message: string;
+  /** 本次提交包含的文件数 */
+  files: number;
+}
+
+/** 整体回滚请求（工作区语义：不改写历史，HEAD 不动） */
+export interface GitRollbackPayload {
+  oid: string;
+}
+
+export interface GitRollbackResultPayload {
+  oid: string;
+  shortOid: string;
+  /** 写回（提交中存在、内容不同的现有文件） */
+  restored: number;
+  /** 重建（提交中存在、磁盘缺失） */
+  recreated: number;
+  /** 磁盘上存在、该提交中不存在的文件（保守保留，列出不删除） */
+  kept: string[];
+  /** 回滚前强制生成的 pre_restore 快照 id（撤销窗口） */
+  preRestoreId: string | null;
 }
 
 export interface IpcOk<T> {

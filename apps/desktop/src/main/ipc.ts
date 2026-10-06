@@ -56,6 +56,11 @@ import {
   type StatsSetGoalPayload,
   type StatsActivityPayload,
   type StatsStatePayload,
+  type GitCommitPayload,
+  type GitCommitResultPayload,
+  type GitRollbackPayload,
+  type GitRollbackResultPayload,
+  type GitStatePayload,
   type TreeEntry,
   type WorldSummary,
 } from "../shared/ipc.js";
@@ -98,6 +103,7 @@ import {
   type SessionOpenResult,
 } from "./session-ops.js";
 import { recordActivity, readStatsState, setStatsGoal } from "./stats-ops.js";
+import { gitCommit, gitInit, gitRollback, gitState } from "./git-ops.js";
 import {
   buildFusionPreview,
   buildPackCatalog,
@@ -529,6 +535,20 @@ export function registerIpcHandlers(): void {
   // 写作活动心跳（T2-9 切片 C）：编辑器输入期间节流上报；失败由渲染层静默（统计非真源）
   ipcMain.handle(CHANNELS.statsActivity, () =>
     wrap<StatsActivityPayload>(() => recordActivity(requireGateway())),
+  );
+
+  /* ---------- Git 版本管理（M2 / T2-7 切片 B） ---------- */
+
+  ipcMain.handle(CHANNELS.gitState, () => wrap<GitStatePayload>(() => gitState(requireGateway())));
+
+  ipcMain.handle(CHANNELS.gitInit, () => wrap<GitStatePayload>(() => gitInit(requireGateway())));
+
+  ipcMain.handle(CHANNELS.gitCommit, (_event, payload: GitCommitPayload) =>
+    wrap<GitCommitResultPayload>(() => gitCommit(requireGateway(), payload.message)),
+  );
+
+  ipcMain.handle(CHANNELS.gitRollback, (_event, payload: GitRollbackPayload) =>
+    wrap<GitRollbackResultPayload>(() => gitRollback(requireGateway(), payload.oid)),
   );
 
   // 正常退出（窗口关闭 → app.quit）：before-quit 不能等待异步——同步原子写把会话标记为 closed，

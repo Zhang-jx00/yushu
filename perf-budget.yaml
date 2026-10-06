@@ -140,3 +140,19 @@ measurements:
       idle_rss_mb: 429                 # ≤600
       million_chars_rss_mb: 749        # ≤1200
     report: docs/assets/perf/perf-report-local-dev-20261006-r27-regression-diff.json
+  - date: 2026-10-06
+    runner: local-dev          # 第 28 轮复跑：Git 版本管理切片（isomorphic-git 惰性加载）
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,109,154 字 + 100k 大章靶子（索引 341 文件）
+    result: pass_10_of_10      # 首跑（启动即加载 isomorphic-git）cold/open 被回归工具标记 ⚠ → 改惰性加载后复跑无回退标记
+    metrics:
+      cold_to_editable_ms: 1519        # ≤2000（首跑 1598 被标 +21.2%⚠；历史带 1300–1725，属启动波动 + 模块解析，已改惰性加载）
+      hot_to_editable_ms: 611          # ≤800
+      project_open_ms: 191             # ≤3000（首跑 241 亦被标 ⚠；复跑回落）
+      keystroke_p95_ms: 1.5            # ≤16
+      keystroke_mega_p95_ms: 4.1       # ≤16
+      save_to_indexed_ms: 406          # ≤500
+      query_p95_ms: 14.5               # ≤80
+      rebuild_cpm: 35244805            # ≥20000（全量 1.888s）
+      idle_rss_mb: 434                 # ≤600
+      million_chars_rss_mb: 757        # ≤1200
+    report: docs/assets/perf/perf-report-local-dev-20261006-r28-git-ops.json

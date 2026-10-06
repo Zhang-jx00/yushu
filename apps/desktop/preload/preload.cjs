@@ -142,4 +142,14 @@ contextBridge.exposeInMainWorld("yushu", {
     /** 写作活动心跳（T2-9 切片 C）：编辑输入期间节流上报（活跃时长 / 会话） */
     activity: () => invoke("stats:activity"),
   },
+  git: {
+    /** Git 版本管理（T2-7 切片 B）：状态 / 变更 / 最近提交 */
+    state: () => invoke("git:state"),
+    /** 初始化仓库（main 分支；幂等） */
+    init: () => invoke("git:init"),
+    /** 提交全部变更（一次批量改动 = 一次提交） */
+    commit: (payload) => invoke("git:commit", payload),
+    /** 整体回滚到指定提交（工作区语义：不改写历史；回滚前强制 pre_restore 快照） */
+    rollback: (payload) => invoke("git:rollback", payload),
+  },
 });

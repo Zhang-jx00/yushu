@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-24 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图）。
+ * 步骤 10-25 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -1094,6 +1094,54 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 25,
+    title: "项目文件：版本管理（Git）——初始化 / 一次批量改动 = 一次提交（T2-7 切片 B）",
+    file: "step25-git.png",
+    body: String.raw`
+      await tab('项目文件');
+      const panel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.panel-title')].find((x) => x.textContent.includes('版本管理（Git'));
+        return title ? title.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到 Git 面板：' + pageText() };
+      // 全新项目应为未初始化 → 初始化仓库（main 分支）
+      const initBtn = [...panel.querySelectorAll('button')].find((b) => b.textContent.trim() === '初始化仓库');
+      const wasUninitialized = initBtn !== undefined;
+      if (initBtn) initBtn.click();
+      const stateLine = await waitFor(() => {
+        const matched = panel.innerText.match(/变更 \d+ 个文件/);
+        return matched ? panel.innerText : null;
+      }, 20000);
+      if (!stateLine) return { ok: false, note: '初始化后未出现状态行：' + panel.innerText.slice(0, 200) };
+      const changesBefore = Number((stateLine.match(/变更 (\d+) 个文件/) || [])[1] || 0);
+      // 输入提交信息 → 提交全部变更（一次批量改动 = 一次提交）
+      const input = panel.querySelector('.git-commit-row input');
+      if (!input) return { ok: false, note: '找不到提交信息输入框：' + panel.innerText.slice(0, 200) };
+      setV(input, '预演：批量改动一次提交');
+      const commitBtn = await waitFor(() => {
+        const b = [...panel.querySelectorAll('button')].find((x) => x.textContent.includes('提交全部变更'));
+        return b && !b.disabled ? b : null;
+      }, 8000);
+      if (!commitBtn) return { ok: false, note: '提交按钮不可用：' + panel.innerText.slice(0, 200) };
+      commitBtn.click();
+      const committed = await waitFor(
+        () => (panel.innerText.includes('已提交') && panel.innerText.includes('预演：批量改动一次提交') ? true : null),
+        20000,
+      );
+      const logCount = panel.querySelectorAll('.git-log li').length;
+      const headMatch = panel.innerText.match(/HEAD ([0-9a-f]{10})/);
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: wasUninitialized && committed === true && changesBefore > 0 && logCount >= 1 && headMatch !== null,
+        note:
+          '未初始化态=' + wasUninitialized + '；提交前变更=' + changesBefore + ' 个文件；提交回执=' + (committed === true) +
+          '；提交列表=' + logCount + ' 条；HEAD=' + (headMatch ? headMatch[1] : '(未匹配)') +
+          '（提交后变更应归零；回滚须二次确认，保留 pre_restore 快照）',
+      };
+    `,
+  },
 ];
 
 /**
@@ -1175,7 +1223,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-24）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-25）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

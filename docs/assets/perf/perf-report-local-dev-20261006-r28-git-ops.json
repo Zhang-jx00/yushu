@@ -1,0 +1,170 @@
+{
+  "kind": "yushu-perf-probe/v1",
+  "date": "2026-10-06T13:46:22.168Z",
+  "fixture": {
+    "dir": "D:\\Temp\\yushu-perf-synth1m",
+    "reused": true,
+    "volumes": 17,
+    "chapters": 335,
+    "totalChars": 1109154,
+    "megaPath": "chapters/vol-4318d905/ch-1eayd5o.md"
+  },
+  "env": {
+    "electron": "44.4.5",
+    "node": "24.21.0",
+    "chrome": "152.0.7977.130",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7840HS with Radeon 780M Graphics",
+    "totalMemMb": 28484
+  },
+  "metrics": {
+    "cold_to_editable_ms": 1519,
+    "hot_to_editable_ms": 611,
+    "project_open_ms": 191,
+    "keystroke_p95_ms": 1.5,
+    "keystroke_frame_p95_ms": 19,
+    "keystroke_mega_p95_ms": 4.1,
+    "keystroke_mega_frame_p95_ms": 18.5,
+    "save_to_indexed_ms": 406,
+    "chapter_write_ms": 17,
+    "query_p95_ms": 14.5,
+    "index_rebuild_ms": 1888,
+    "rebuild_cpm": 35244805,
+    "idle_rss_mb": 434,
+    "million_chars_rss_mb": 757
+  },
+  "budgets": {
+    "cold_to_editable_ms": 2000,
+    "hot_to_editable_ms": 800,
+    "project_open_ms": 3000,
+    "keystroke_p95_ms": 16,
+    "keystroke_mega_p95_ms": 16,
+    "save_to_indexed_ms": 500,
+    "query_p95_ms": 80,
+    "rebuild_cpm_min": 20000,
+    "idle_rss_mb": 600,
+    "million_chars_rss_mb": 1200
+  },
+  "checks": {
+    "cold_to_editable": true,
+    "hot_to_editable": true,
+    "project_open": true,
+    "keystroke_p95": true,
+    "keystroke_mega_p95": true,
+    "save_to_indexed": true,
+    "query_p95": true,
+    "rebuild_cpm": true,
+    "idle_rss": true,
+    "million_chars_rss": true
+  },
+  "comparison": {
+    "ok": true,
+    "thresholdRatio": 0.2,
+    "baselineDate": "2026-10-06T13:44:15.302Z",
+    "rows": [
+      {
+        "metric": "cold_to_editable_ms",
+        "previous": 1598,
+        "current": 1519,
+        "deltaPct": -4.9,
+        "status": "stable"
+      },
+      {
+        "metric": "hot_to_editable_ms",
+        "previous": 682,
+        "current": 611,
+        "deltaPct": -10.4,
+        "status": "stable"
+      },
+      {
+        "metric": "project_open_ms",
+        "previous": 241,
+        "current": 191,
+        "deltaPct": -20.7,
+        "status": "improved"
+      },
+      {
+        "metric": "keystroke_p95_ms",
+        "previous": 1.5,
+        "current": 1.5,
+        "deltaPct": 0,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_frame_p95_ms",
+        "previous": 19,
+        "current": 19,
+        "deltaPct": 0,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_mega_p95_ms",
+        "previous": 4,
+        "current": 4.1,
+        "deltaPct": 2.5,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_mega_frame_p95_ms",
+        "previous": 18.4,
+        "current": 18.5,
+        "deltaPct": 0.5,
+        "status": "stable"
+      },
+      {
+        "metric": "save_to_indexed_ms",
+        "previous": 399,
+        "current": 406,
+        "deltaPct": 1.8,
+        "status": "stable"
+      },
+      {
+        "metric": "chapter_write_ms",
+        "previous": 17,
+        "current": 17,
+        "deltaPct": 0,
+        "status": "stable"
+      },
+      {
+        "metric": "query_p95_ms",
+        "previous": 15.4,
+        "current": 14.5,
+        "deltaPct": -5.8,
+        "status": "stable"
+      },
+      {
+        "metric": "index_rebuild_ms",
+        "previous": 1853,
+        "current": 1888,
+        "deltaPct": 1.9,
+        "status": "stable"
+      },
+      {
+        "metric": "rebuild_cpm",
+        "previous": 35915373,
+        "current": 35244805,
+        "deltaPct": 1.9,
+        "status": "stable"
+      },
+      {
+        "metric": "idle_rss_mb",
+        "previous": 442,
+        "current": 434,
+        "deltaPct": -1.8,
+        "status": "stable"
+      },
+      {
+        "metric": "million_chars_rss_mb",
+        "previous": 757,
+        "current": 757,
+        "deltaPct": 0,
+        "status": "stable"
+      }
+    ],
+    "regressions": []
+  },
+  "indexFiles": 341,
+  "indexChunks": 3293,
+  "incrementalUpdatedFiles": 1
+}

@@ -582,6 +582,41 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       chaptersAfterTrim: savedTrim.doc.volumes.reduce((n, v) => n + v.chapters.length, 0),
     };
 
+    // Git 版本管理（T2-7 切片 B）：初始化 → 基线提交 → 二次改动提交 → 整体回滚工作区（HEAD 不动）
+    const gitProbe = await (async () => {
+      try {
+        const g0 = await api.git.state();
+        const g1 = await api.git.init();
+        const c1 = await api.git.commit({ message: "e2e Git 基线" });
+        const baseline = await api.chapter.read(draft.chapterPath); // c1 时的正文（回滚应精确回到此版本）
+        await api.chapter.write({
+          path: draft.chapterPath,
+          body: baseline.body + "\\n\\nGit 回滚验证：云隐谷。",
+          baseHash: baseline.hash,
+        });
+        const staged = await api.git.state();
+        const c2 = await api.git.commit({ message: "e2e Git 二次改动" });
+        const rb = await api.git.rollback({ oid: c1.oid });
+        const after = await api.chapter.read(draft.chapterPath);
+        const g3 = await api.git.state();
+        return {
+          initiallyUninitialized: g0.initialized === false,
+          initialized: g1.initialized === true,
+          baselineFiles: g1.changes.length,
+          commit1Files: c1.files,
+          stagedChapter: staged.changes.some((c) => c.path === draft.chapterPath && c.state === "modified"),
+          commit2Files: c2.files,
+          rollbackRestored: rb.restored,
+          reverted: !after.body.includes("云隐谷") && after.body === baseline.body,
+          preRestore: rb.preRestoreId !== null,
+          headUnchanged: g3.head === c2.shortOid,
+          pendingAfterRollback: g3.changes.some((c) => c.path === draft.chapterPath && c.state === "modified"),
+        };
+      } catch (err) {
+        return { error: String(err && err.message).slice(0, 200) };
+      }
+    })();
+
     return {
       packs: catalog.packs.length, ready: preview.ready, root: snap.root, cards: list.length,
       worldTitle: world && world.title, cardPath: card.path, readBack: doc.card.name,
@@ -676,6 +711,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       autoIndex,
       pipeline,
       preDestructive,
+      git: gitProbe,
     };
   })()`;
   try {
@@ -808,6 +844,20 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         taken: number;
         volumesAfterTrim: number;
         chaptersAfterTrim: number;
+      };
+      git: {
+        error?: string;
+        initiallyUninitialized?: boolean;
+        initialized?: boolean;
+        baselineFiles?: number;
+        commit1Files?: number;
+        stagedChapter?: boolean;
+        commit2Files?: number;
+        rollbackRestored?: number;
+        reverted?: boolean;
+        preRestore?: boolean;
+        headUnchanged?: boolean;
+        pendingAfterRollback?: boolean;
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
@@ -1439,6 +1489,17 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.pipeline.sidecarOk &&
       result.pipeline.mainKeptExternal &&
       result.preDestructive.taken === 3 &&
+      result.git.initiallyUninitialized === true &&
+      result.git.initialized === true &&
+      (result.git.baselineFiles ?? 0) >= 1 &&
+      result.git.commit1Files === result.git.baselineFiles &&
+      result.git.stagedChapter === true &&
+      (result.git.commit2Files ?? 0) >= 1 &&
+      (result.git.rollbackRestored ?? 0) >= 1 &&
+      result.git.reverted === true &&
+      result.git.preRestore === true &&
+      result.git.headUnchanged === true &&
+      result.git.pendingAfterRollback === true &&
       sessionProbe.ok &&
       result.incremental.mode === "incremental" &&
       result.incremental.updated === 1 &&

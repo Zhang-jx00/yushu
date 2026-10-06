@@ -1265,6 +1265,80 @@ select {
   font-size: 12px;
 }
 
+/* ---------- 版本管理（Git，T2-7 切片 B） ---------- */
+
+.git-changes {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 140px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+}
+
+.git-changes li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 6px;
+}
+
+.git-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-commit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.git-commit-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.git-log {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 200px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+}
+
+.git-log li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.git-log li:hover {
+  background: var(--panel-2);
+}
+
+.git-log li .muted {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.git-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- 码字统计（T2-9 切片 A） ---------- */
 
 .stats {

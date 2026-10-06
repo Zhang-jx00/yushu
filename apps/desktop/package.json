@@ -24,7 +24,8 @@
     "@yushu/genre-engine": "workspace:*",
     "@yushu/llm": "workspace:*",
     "@yushu/search": "workspace:*",
-    "@yushu/world-engine": "workspace:*"
+    "@yushu/world-engine": "workspace:*",
+    "isomorphic-git": "^1.43.0"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.11.1",
