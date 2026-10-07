@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { countWords, YushuError } from "@yushu/core";
 import {
   DEFAULT_INJECTION,
   applyAiSummary,
   applyHumanSummaryEdit,
   assembleContext,
+  buildContextSnapshot,
   buildFactSource,
   lintMemory,
   parseChapterSummary,
@@ -12,6 +15,7 @@ import {
   parseInjectionConfig,
   parseVolumeSummary,
   planInjection,
+  serializeContextSnapshot,
   serializeFact,
   serializeSummary,
   verifyFactSource,
@@ -50,6 +54,8 @@ import type {
   InjectionConfigPayload,
   MemoryAssemblePayload,
   MemoryAssemblyResult,
+  MemoryContextSnapshotPayload,
+  MemoryContextSnapshotResult,
   MemoryDeleteFactPayload,
   MemoryFactPayload,
   MemoryInjectionPreviewPayload,
@@ -750,6 +756,7 @@ export async function assembleForChapter(
       priority: entry.priority,
       recency: collected.recencyOf.get(entry.id) ?? 0,
       source: entry.reason,
+      ...(entry.matched_keys.length > 0 ? { matched_keys: [...entry.matched_keys] } : {}),
     });
   }
 
@@ -793,5 +800,55 @@ export async function assembleForChapter(
     chapterPath: collected.chapterPath,
     ...result,
     rag,
+  };
+}
+
+/**
+ * 上下文快照导出（T3-9；docs/04 §6.4 产物 → `.yushu/context-log/`）：
+ * 组装一次并把完整决策证据（槽位 / 来源 / token / 命中键 / 截断标记 + 逐出、去重、RAG 回执）
+ * 写入快照文件；`fingerprint` 只取决策内容（不含 generated_at）——同一输入两次导出一致（A1 可复现）。
+ * 快照为派生日志：位于 .yushu/（不入索引、不入 Git），可删、可重建，绝不作为真源。
+ */
+export async function exportContextSnapshot(
+  gateway: ProjectGateway,
+  payload: MemoryContextSnapshotPayload,
+): Promise<MemoryContextSnapshotResult> {
+  const assembly = await assembleForChapter(gateway, {
+    chapterId: payload.chapterId,
+    ...(payload.budget_total !== undefined ? { budget_total: payload.budget_total } : {}),
+  });
+  const snapshot = buildContextSnapshot({
+    chapter: {
+      id: assembly.chapterId,
+      title: assembly.chapterTitle,
+      ordinal: assembly.chapterOrdinal,
+      path: assembly.chapterPath,
+    },
+    assembly,
+    ...(assembly.rag
+      ? {
+          rag: {
+            status: assembly.rag.status,
+            query: assembly.rag.query,
+            hits: assembly.rag.hits,
+            store: assembly.rag.store,
+            ...(assembly.rag.note ? { note: assembly.rag.note } : {}),
+          },
+        }
+      : {}),
+    generatedAt: new Date().toISOString(),
+  });
+  const content = serializeContextSnapshot(snapshot);
+  const stamp = snapshot.generated_at.replace(/[:.]/g, "-");
+  const relative = join(".yushu", "context-log", `context-${assembly.chapterId}-${stamp}.json`);
+  await mkdir(join(gateway.root, ".yushu", "context-log"), { recursive: true });
+  await writeFile(join(gateway.root, relative), content, "utf8");
+  return {
+    path: relative.replace(/\\/g, "/"),
+    fingerprint: snapshot.fingerprint,
+    generatedAt: snapshot.generated_at,
+    bytes: Buffer.byteLength(content, "utf8"),
+    totalTokens: snapshot.totalTokens,
+    truncatedItems: snapshot.truncatedItems,
   };
 }

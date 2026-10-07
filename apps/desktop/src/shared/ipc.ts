@@ -86,6 +86,8 @@ export const CHANNELS = {
   memoryAssemble: "memory:assemble",
   /** RAG 检索预演（T3-8）：向量路 + 关键词路并行 → RRF 融合 → 可选重排（只读） */
   memoryRagPreview: "memory:ragPreview",
+  /** 上下文快照导出（T3-9）：组装 + 决策证据写入 .yushu/context-log/（可复现指纹） */
+  memoryContextSnapshot: "memory:contextSnapshot",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -1160,6 +1162,8 @@ export interface AssembledItemPayload {
   recency: number;
   stable: boolean;
   source?: string;
+  /** 触发命中键（T3-9 预览器「命中键」列） */
+  matched_keys: string[];
 }
 
 export interface AssembledSlotPayload {
@@ -1264,6 +1268,25 @@ export interface MemoryRagPreviewResult {
   paths: { vector: number; keyword: number };
   fused: RagHitPayload[];
   reranked: RagHitPayload[];
+}
+
+/* ---------- 上下文快照（T3-9；结构与 @yushu/memory ContextSnapshot 兼容） ---------- */
+
+export interface MemoryContextSnapshotPayload {
+  chapterId: string;
+  /** 总预算（token 估算；缺省 32000——小预算用于实证「被截断项」标记） */
+  budget_total?: number;
+}
+
+export interface MemoryContextSnapshotResult {
+  /** 快照文件相对路径（.yushu/context-log/……） */
+  path: string;
+  /** 决策内容 sha256（除 generated_at 外全部字段；同一输入两次导出一致） */
+  fingerprint: string;
+  generatedAt: string;
+  bytes: number;
+  totalTokens: number;
+  truncatedItems: number;
 }
 
 /**

@@ -1490,6 +1490,53 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 33,
+    title: "记忆：上下文预览器与可复现快照（槽位/来源/Token/命中键/截断 + 指纹，T3-9）",
+    file: "step33-context-snapshot.png",
+    body: String.raw`
+      await tab('记忆');
+      const panel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.panel h3')].find((x) => x.textContent.includes('组装预演与上下文预览器'));
+        return title ? title.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到组装预演与上下文预览器面板：' + pageText() };
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      // step31 把小预算改为 40——恢复默认总预算后再组装（预览器条目完整）
+      const budgetInput = panel.querySelector('.memory-assemble-budget');
+      if (!budgetInput) return { ok: false, note: '找不到预算输入：' + pageText() };
+      setV(budgetInput, '32000');
+      const asmBtn = [...panel.querySelectorAll('button')].find((b) => b.textContent.trim() === '组装预演');
+      if (!asmBtn || asmBtn.disabled) return { ok: false, note: '组装预演按钮不可用：' + pageText() };
+      asmBtn.click();
+      const previewLine = await waitFor(() => document.querySelector('.assembly-preview'), 12000);
+      if (!previewLine) return { ok: false, note: '组装预演未返回：' + pageText() };
+      await sleep(150);
+      const rows = [...document.querySelectorAll('.context-item-row')];
+      const rowText = rows.map((r) => String(r.innerText).replace(/\s+/g, ' ')).join(' | ');
+      // 表头五列（槽位 / 来源 / Token 数 / 命中键 / 是否被截断）
+      const headerText = String((panel.querySelector('.context-items thead') || {}).textContent || '').replace(/\s+/g, ' ');
+      const headerOk = ['槽位', '来源', 'Token 数', '命中键', '是否被截断'].every((name) => headerText.includes(name));
+      // 命中键列有值（事实 trigger 命中「天启界」）
+      const matchedKeys = rows.some((r) => String(r.innerText).includes('天启界'));
+      // 导出快照：回执含路径与指纹
+      const exportBtn = [...panel.querySelectorAll('button')].find((b) => b.textContent.trim() === '导出快照');
+      if (!exportBtn || exportBtn.disabled) return { ok: false, note: '导出快照按钮不可用：' + pageText() };
+      exportBtn.click();
+      const snapLine = await waitFor(() => document.querySelector('.context-snapshot'), 12000);
+      if (!snapLine) return { ok: false, note: '快照导出未返回：' + pageText() };
+      const snapText = String(snapLine.textContent).replace(/\s+/g, ' ');
+      const snapOk = snapText.includes('.yushu/context-log/') && /fingerprint [0-9a-f]{12}/.test(snapText);
+      await sleep(200);
+      return {
+        ok: rows.length >= 3 && headerOk && matchedKeys && snapOk,
+        note: '预览器条目=' + rows.length + '（表头五列=' + headerOk + '；命中键含「天启界」=' + matchedKeys + '）' +
+          '；回执：' + snapText.slice(0, 150) +
+          '；首行=' + (rowText.split(' | ')[0] || '').slice(0, 100),
+      };
+    `,
+  },
 ];
 
 /**

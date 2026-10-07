@@ -742,6 +742,20 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       slotProvenance: ragSlotItems.every((item) => String(item.source || "").includes("出处")),
     };
 
+    // T3-9 上下文快照探针：两次导出 → fingerprint 一致（可复现）；小预算（40）快照 → 「被截断项」标记
+    const snap1 = await api.memory.contextSnapshot({ chapterId: draft.chapterId });
+    const snap2 = await api.memory.contextSnapshot({ chapterId: draft.chapterId });
+    const snapSmall = await api.memory.contextSnapshot({ chapterId: draft.chapterId, budget_total: 40 });
+    const snapshotProbe = {
+      path: snap1.path,
+      pathSmall: snapSmall.path,
+      fingerprint: snap1.fingerprint,
+      reproducible: snap1.fingerprint === snap2.fingerprint,
+      bytes: snap1.bytes,
+      smallTruncated: snapSmall.truncatedItems,
+      smallTokens: snapSmall.totalTokens,
+    };
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -947,6 +961,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       injection: injectionProbe,
       assembly: assemblyProbe,
       rag: ragProbe,
+      snapshot: snapshotProbe,
     };
   })()`;
   try {
@@ -1188,6 +1203,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         slotItems: number;
         slotProvenance: boolean;
       };
+      snapshot: {
+        path: string;
+        pathSmall: string;
+        fingerprint: string;
+        reproducible: boolean;
+        bytes: number;
+        smallTruncated: number;
+        smallTokens: number;
+      };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
 
@@ -1198,6 +1222,55 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       hasLegacyV1: backupText.includes("legacy-model") && backupText.includes("format_version: 1"),
     };
     console.log("[e2e] 配置迁移备份:", JSON.stringify(migrationBackup));
+
+    // T3-9 上下文快照：读回快照文件核验（结构列 / 命中键 / 截断标记 / 指纹与回执一致 / 路径卫生）
+    const readSnapshot = async (rel: string) =>
+      JSON.parse(await readFile(join(dir, rel), "utf8")) as {
+        format: string;
+        fingerprint: string;
+        totalTokens: number;
+        truncatedItems: number;
+        dropped: { reason: string }[];
+        rag?: { status: string };
+        slots: {
+          slot: string;
+          items: { tokens: number; truncated: boolean; matched_keys: string[]; source?: string }[];
+        }[];
+      };
+    const snapDoc = await readSnapshot(result.snapshot.path);
+    const snapSmallDoc = await readSnapshot(result.snapshot.pathSmall);
+    const snapshotOk =
+      result.snapshot.reproducible &&
+      result.snapshot.fingerprint.length === 64 &&
+      result.snapshot.bytes > 0 &&
+      result.snapshot.path.startsWith(".yushu/context-log/context-") &&
+      snapDoc.format === "yushu.context-snapshot/v1" &&
+      snapDoc.fingerprint === result.snapshot.fingerprint &&
+      snapDoc.slots.length === 8 &&
+      snapDoc.slots.every((slot) =>
+        slot.items.every(
+          (item) =>
+            typeof item.tokens === "number" &&
+            typeof item.truncated === "boolean" &&
+            Array.isArray(item.matched_keys) &&
+            typeof item.source === "string",
+        ),
+      ) &&
+      snapDoc.slots.some((slot) => slot.items.some((item) => item.matched_keys.length > 0)) &&
+      snapDoc.rag?.status === "ok" &&
+      snapSmallDoc.totalTokens <= 40 &&
+      snapSmallDoc.truncatedItems >= 1 &&
+      snapSmallDoc.dropped.some((entry) => entry.reason === "budget") &&
+      snapSmallDoc.slots.find((slot) => slot.slot === "system_prompt")!.items[0]!.truncated === true;
+    console.log(
+      "[e2e] 上下文快照:",
+      JSON.stringify({
+        snapshotOk,
+        fingerprint: result.snapshot.fingerprint.slice(0, 12),
+        bytes: result.snapshot.bytes,
+        smallTruncated: result.snapshot.smallTruncated,
+      }),
+    );
 
     // T3-2：重试探针——mock 第一次返回 429（RateLimitError 策略 max_retries=2）→ 重试后成功；
     // hits ≥ 2 且 failures = 1 即端到端证明「按错误类别退避重试」真实发生。
@@ -1945,6 +2018,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.rag.slotStatus === "ok" &&
       result.rag.slotItems >= 1 &&
       result.rag.slotProvenance &&
+      snapshotOk &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
@@ -1979,7 +2053,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

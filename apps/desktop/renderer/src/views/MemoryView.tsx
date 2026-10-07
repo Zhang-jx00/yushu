@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   InjectionConfigPayload,
   MemoryAssemblyResult,
+  MemoryContextSnapshotResult,
   MemoryInjectionPreviewResult,
   MemoryRagPreviewResult,
   MemoryStatePayload,
@@ -11,7 +12,7 @@ import type {
 import { api } from "../api";
 
 /**
- * 记忆页（M3 / T3-5 五层记忆的管理界面；T3-6 注入控制；T3-7 上下文组装；T3-8 RAG 检索）：
+ * 记忆页（M3 / T3-5 五层记忆的管理界面；T3-6 注入控制；T3-7 上下文组装；T3-8 RAG 检索；T3-9 预览器）：
  * - 摘要目标（卷 / 章）：AI 生成候选（**不入库**）→ 采纳（AI 入库，rev 0）或人工修订（rev+1）；
  *   `summary_rev > 0` 后 AI 再入库被拒（E_MEMORY_REV_PROTECTED——人工修订受保护）；
  * - 事实级记忆台账：带出处徽标（出处有效 / 出处失效 / 无出处——正文改动后可检出失效）
@@ -20,6 +21,8 @@ import { api } from "../api";
  * - 组装预演（T3-7）：固定槽位顺序 + 槽位 cap + 全局预算裁剪 + 去重（逐出 / 截断证据）；
  * - RAG 检索预演（T3-8）：向量路（sqlite-vec / 本地余弦兜底）与关键词路（FTS5 bm25）并行 →
  *   RRF(k=60) 融合 → 可选重排 top-6；结果带出处（chapter_id + 字符区间 + hash）；
+ * - **上下文预览器（T3-9）**：逐条分列「槽位 / 来源 / Token 数 / 命中键 / 是否被截断」，
+ *   可导出**可复现快照**（.yushu/context-log/，fingerprint 只取决策内容——同输入两次一致）；
  * - 记录体检（findings）与跨项目拒绝清单（error 红线仅展示、不进入本项目记忆）。
  */
 
@@ -85,6 +88,9 @@ export function MemoryView() {
   const [ragQuery, setRagQuery] = useState("");
   const [ragRerank, setRagRerank] = useState(true);
   const [rag, setRag] = useState<MemoryRagPreviewResult | null>(null);
+
+  // 上下文快照导出（T3-9）
+  const [snapshot, setSnapshot] = useState<MemoryContextSnapshotResult | null>(null);
 
   const refresh = useCallback(async () => {
     const next = await api().memory.state();
@@ -203,6 +209,13 @@ export function MemoryView() {
           ...(ragRerank ? { rerankTopK: 6 } : {}),
         }),
       );
+    });
+
+  const exportSnapshot = () =>
+    guard(async () => {
+      if (!previewTarget) return;
+      setNotice(null);
+      setSnapshot(await api().memory.contextSnapshot({ chapterId: previewTarget, budget_total: assemblyBudget }));
     });
 
   const removeFact = (id: string, baseHash: string) =>
@@ -508,7 +521,7 @@ export function MemoryView() {
 
         <div className="panel">
           <h3>
-            组装预演 <span className="muted">T3-7：固定槽位顺序 + 槽位 cap + 全局预算裁剪 + 去重</span>
+            组装预演与上下文预览器 <span className="muted">T3-7 组装 + T3-9 预览器：逐条「槽位 / 来源 / Token 数 / 命中键 / 是否被截断」，可导出可复现快照</span>
           </h3>
           <div className="master-grid">
             <label className="field">
@@ -589,6 +602,42 @@ export function MemoryView() {
                     </li>
                   ))}
                 </ul>
+              )}
+              <table className="slot-table context-items">
+                <thead>
+                  <tr>
+                    <th>槽位</th>
+                    <th>来源</th>
+                    <th>Token 数</th>
+                    <th>命中键</th>
+                    <th>是否被截断</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assembly.slots.flatMap((slot) =>
+                    slot.items.map((slotItem) => (
+                      <tr key={`${slot.slot}-${slotItem.id}`} className="context-item-row">
+                        <td>{slot.slot}</td>
+                        <td className="muted">{slotItem.source ?? "—"}</td>
+                        <td>{slotItem.tokens}</td>
+                        <td>{slotItem.matched_keys.length > 0 ? slotItem.matched_keys.join("、") : "—"}</td>
+                        <td>{slotItem.truncated ? "是" : "—"}</td>
+                      </tr>
+                    )),
+                  )}
+                </tbody>
+              </table>
+              <div className="ai-foot">
+                <button type="button" className="context-export" disabled={busy || !previewTarget} onClick={() => void exportSnapshot()}>
+                  导出快照
+                </button>
+                <span className="muted">快照写入 .yushu/context-log/（派生日志）；fingerprint 只取决策内容——同输入两次导出一致（A1）</span>
+              </div>
+              {snapshot && (
+                <div className="muted context-snapshot">
+                  快照：{snapshot.path} · fingerprint {snapshot.fingerprint.slice(0, 12)} · {snapshot.bytes} B · 合计{" "}
+                  {snapshot.totalTokens} token · 截断 {snapshot.truncatedItems} 条
+                </div>
               )}
             </>
           )}

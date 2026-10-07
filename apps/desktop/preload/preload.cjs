@@ -169,5 +169,7 @@ contextBridge.exposeInMainWorld("yushu", {
     assemble: (payload) => invoke("memory:assemble", payload),
     /** RAG 检索预演（T3-8）：向量路 + 关键词路并行 → RRF 融合 → 可选重排（只读） */
     ragPreview: (payload) => invoke("memory:ragPreview", payload),
+    /** 上下文快照导出（T3-9）：组装 + 决策证据写入 .yushu/context-log/（可复现指纹） */
+    contextSnapshot: (payload) => invoke("memory:contextSnapshot", payload),
   },
 });

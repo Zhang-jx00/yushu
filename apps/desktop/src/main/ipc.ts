@@ -42,6 +42,8 @@ import {
   type MemoryAssemblyResult,
   type MemoryInjectionPreviewPayload,
   type MemoryInjectionPreviewResult,
+  type MemoryContextSnapshotPayload,
+  type MemoryContextSnapshotResult,
   type MemoryRagPreviewPayload,
   type MemoryRagPreviewResult,
   type MemorySaveFactPayload,
@@ -121,6 +123,7 @@ import { gitCommit, gitInit, gitRollback, gitState } from "./git-ops.js";
 import {
   assembleForChapter,
   deleteMemoryFact,
+  exportContextSnapshot,
   loadMemoryState,
   previewInjection,
   previewRag,
@@ -609,6 +612,11 @@ export function registerIpcHandlers(): void {
   // RAG 检索预演（T3-8）：向量路 + 关键词路并行 → RRF 融合 → 可选重排（只读）
   ipcMain.handle(CHANNELS.memoryRagPreview, (_event, payload: MemoryRagPreviewPayload) =>
     wrap<MemoryRagPreviewResult>(() => previewRag(requireGateway(), payload)),
+  );
+
+  // 上下文快照导出（T3-9）：写入 .yushu/context-log/（派生日志，不入索引；不走 wrapWrite 避免无谓索引刷新）
+  ipcMain.handle(CHANNELS.memoryContextSnapshot, (_event, payload: MemoryContextSnapshotPayload) =>
+    wrap<MemoryContextSnapshotResult>(() => exportContextSnapshot(requireGateway(), payload)),
   );
 
   // 正常退出（窗口关闭 → app.quit）：before-quit 不能等待异步——同步原子写把会话标记为 closed，
