@@ -14,3 +14,4 @@ export * from "./records.js";
 export * from "./provenance.js";
 export * from "./mentions.js";
 export * from "./injection.js";
+export * from "./assemble.js";
