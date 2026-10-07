@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import type { MemoryStatePayload, MemoryTargetPayload, MemorySummarizeResult } from "../../../src/shared/ipc";
+import type {
+  InjectionConfigPayload,
+  MemoryInjectionPreviewResult,
+  MemoryStatePayload,
+  MemoryTargetPayload,
+  MemorySummarizeResult,
+} from "../../../src/shared/ipc";
 import { api } from "../api";
 
 /**
- * 记忆页（M3 / T3-5 五层记忆的管理界面）：
+ * 记忆页（M3 / T3-5 五层记忆的管理界面；T3-6 注入控制）：
  * - 摘要目标（卷 / 章）：AI 生成候选（**不入库**）→ 采纳（AI 入库，rev 0）或人工修订（rev+1）；
  *   `summary_rev > 0` 后 AI 再入库被拒（E_MEMORY_REV_PROTECTED——人工修订受保护）；
- * - 事实级记忆台账：带出处徽标（出处有效 / 出处失效 / 无出处——正文改动后可检出失效）；
+ * - 事实级记忆台账：带出处徽标（出处有效 / 出处失效 / 无出处——正文改动后可检出失效）
+ *   与注入配置（mode / priority / position / budget_tokens / reveal_gate）；
+ * - 注入预演（T3-6）：对指定章节输出注入计划（决策 + 命中键 + 排除原因 + token 估算）；
  * - 记录体检（findings）与跨项目拒绝清单（error 红线仅展示、不进入本项目记忆）。
  */
 
@@ -15,11 +23,21 @@ const LAYER_LABELS: Record<string, string> = {
   chapter_summary: "章摘要",
 };
 
+const POSITION_LABELS: Record<string, string> = {
+  after_system: "系统后",
+  near_start: "靠前",
+  near_end: "靠后",
+};
+
 const PROVENANCE_LABELS: Record<string, { text: string; cls: string }> = {
   ok: { text: "出处有效", cls: "badge good" },
   broken: { text: "出处失效", cls: "badge bad" },
   none: { text: "无出处", cls: "badge" },
 };
+
+function injectionSummary(injection: InjectionConfigPayload): string {
+  return `注入：${injection.mode} · 优先级 ${injection.priority} · ${injection.position} · ${injection.budget_tokens} token${injection.reveal_gate ? ` · 门控 ${injection.reveal_gate}` : ""}`;
+}
 
 function firstTargetKey(state: MemoryStatePayload): string {
   const preferred = state.targets.find((item) => item.sourceChars > 0) ?? state.targets[0];
@@ -43,11 +61,24 @@ export function MemoryView() {
   const [factEnd, setFactEnd] = useState(0);
   const [factWithSource, setFactWithSource] = useState(true);
 
+  // 事实注入配置（T3-6）
+  const [factMode, setFactMode] = useState<InjectionConfigPayload["mode"]>("trigger");
+  const [factPriority, setFactPriority] = useState(50);
+  const [factPosition, setFactPosition] = useState<InjectionConfigPayload["position"]>("near_end");
+  const [factBudget, setFactBudget] = useState(400);
+  const [factGate, setFactGate] = useState("");
+
+  // 注入预演（T3-6）
+  const [previewTarget, setPreviewTarget] = useState("");
+  const [preview, setPreview] = useState<MemoryInjectionPreviewResult | null>(null);
+
   const refresh = useCallback(async () => {
     const next = await api().memory.state();
     setState(next);
     setSelectedKey((prev) => (prev && next.targets.some((item) => `${item.layer}:${item.id}` === prev) ? prev : firstTargetKey(next)));
-    setFactChapter((prev) => (prev && next.targets.some((item) => item.id === prev && item.layer === "chapter_summary") ? prev : (next.targets.find((item) => item.layer === "chapter_summary" && item.sourceChars > 0)?.id ?? "")));
+    const fallbackChapter = next.targets.find((item) => item.layer === "chapter_summary" && item.sourceChars > 0)?.id ?? "";
+    setFactChapter((prev) => (prev && next.targets.some((item) => item.id === prev && item.layer === "chapter_summary") ? prev : fallbackChapter));
+    setPreviewTarget((prev) => (prev && next.targets.some((item) => item.id === prev && item.layer === "chapter_summary") ? prev : fallbackChapter));
     return next;
   }, []);
 
@@ -118,11 +149,25 @@ export function MemoryView() {
         ...(factWithSource && factChapter
           ? { provenance: { chapter_id: factChapter, start: factStart, end: factEnd } }
           : {}),
+        injection: {
+          mode: factMode,
+          priority: factPriority,
+          position: factPosition,
+          budget_tokens: factBudget,
+          ...(factGate ? { reveal_gate: factGate } : {}),
+        },
       });
       setFactKeys("");
       setFactText("");
       await refresh();
-      setNotice("事实已登记（出处链随记录保存；正文改动后可检出失效）");
+      setNotice("事实已登记（出处链与注入配置随记录保存；正文改动后可检出失效）");
+    });
+
+  const runPreview = () =>
+    guard(async () => {
+      if (!previewTarget) return;
+      setNotice(null);
+      setPreview(await api().memory.injectionPreview({ chapterId: previewTarget }));
     });
 
   const removeFact = (id: string, baseHash: string) =>
@@ -282,6 +327,7 @@ export function MemoryView() {
                       ? `出处：${fact.source.chapter_id} [${fact.source.start}, ${fact.source.end})${fact.provenance_note ? `——${fact.provenance_note}` : ""}`
                       : "手工登记（无出处）"}
                   </div>
+                  <div className="muted memory-fact-injection">{injectionSummary(fact.injection)}</div>
                 </li>
               );
             })}
@@ -321,10 +367,108 @@ export function MemoryView() {
               <input type="checkbox" checked={factWithSource} onChange={(event) => setFactWithSource(event.target.checked)} />
               <span>登记出处（区间按正文字符下标；服务端读取正文计算摘录 hash）</span>
             </label>
+            <div className="master-grid">
+              <label className="field">
+                <span>注入模式（T3-6）</span>
+                <select className="memory-fact-mode" value={factMode} onChange={(event) => setFactMode(event.target.value as InjectionConfigPayload["mode"])}>
+                  <option value="trigger">trigger（命中关键词才注入）</option>
+                  <option value="always">always（常驻）</option>
+                  <option value="manual">manual（手动清单）</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>优先级（0-100，预算耗尽高者先留）</span>
+                <input className="memory-fact-priority" type="number" min={0} max={100} value={factPriority} onChange={(event) => setFactPriority(Number(event.target.value) || 0)} />
+              </label>
+            </div>
+            <div className="master-grid">
+              <label className="field">
+                <span>落位</span>
+                <select value={factPosition} onChange={(event) => setFactPosition(event.target.value as InjectionConfigPayload["position"])}>
+                  <option value="after_system">after_system（系统后）</option>
+                  <option value="near_start">near_start（靠前）</option>
+                  <option value="near_end">near_end（靠后）</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>单项预算（token 估算）</span>
+                <input type="number" min={1} max={32768} value={factBudget} onChange={(event) => setFactBudget(Number(event.target.value) || 1)} />
+              </label>
+            </div>
+            <label className="field">
+              <span>叙事可见性门控（早于该章不注入——防剧透；留空=无门控）</span>
+              <select className="memory-fact-gate" value={factGate} onChange={(event) => setFactGate(event.target.value)}>
+                <option value="">（无门控）</option>
+                {chapterTargets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.title}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="button" disabled={busy || factKeys.trim() === "" || factText.trim() === ""} onClick={() => void addFact()}>
               登记事实
             </button>
           </div>
+        </div>
+
+        <div className="panel">
+          <h3>
+            注入预演 <span className="muted">T3-6：对指定章节的注入决策与排除原因（token 估算）</span>
+          </h3>
+          <div className="master-grid">
+            <label className="field">
+              <span>目标章节</span>
+              <select className="memory-preview-target" value={previewTarget} onChange={(event) => setPreviewTarget(event.target.value)}>
+                {chapterTargets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.title}（{target.sourceChars} 字）
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" className="primary" disabled={busy || !previewTarget} onClick={() => void runPreview()}>
+              注入预演
+            </button>
+          </div>
+          {!preview && <p className="muted">对所选章节执行五层记忆的注入决策：摘要常驻、事实与设定卡按关键词触发、门控未到不注入。</p>}
+          {preview && (
+            <>
+              <div className="muted injection-preview">
+                第 {preview.chapterOrdinal} 章「{preview.chapterTitle}」· 触发文本 {preview.mentionChars} 字 · 注入{" "}
+                {preview.totals.injected} 条 / 排除 {preview.totals.excluded} 条 · 合计 {preview.totals.tokens} token（估算）
+              </div>
+              <ul className="injection-entries">
+                {preview.entries.map((entry) => (
+                  <li key={entry.id} className="injection-entry">
+                    <div>
+                      <span className="badge">{POSITION_LABELS[entry.position] ?? entry.position}</span>
+                      <span className="badge">优先级 {entry.priority}</span>
+                      <span className="badge">{entry.mode}</span>
+                      <strong>{entry.title}</strong>
+                      <span className="muted">
+                        {entry.tokens} token{entry.truncated ? "（截断）" : ""}
+                      </span>
+                    </div>
+                    <div className="muted">
+                      {entry.reason}
+                      {entry.matched_keys.length > 0 ? ` · 命中键：${entry.matched_keys.join("、")}` : ""}
+                    </div>
+                    <div className="muted">{entry.text.replace(/\n+/g, " ").slice(0, 140)}</div>
+                  </li>
+                ))}
+              </ul>
+              {preview.excluded.length > 0 && (
+                <ul className="injection-excluded">
+                  {preview.excluded.map((item) => (
+                    <li key={item.id} className="muted">
+                      【{item.code}】{item.title}——{item.reason}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
         </div>
       </section>
     </div>

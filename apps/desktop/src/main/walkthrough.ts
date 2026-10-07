@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-29 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵 / 任务路由与可靠性 / 本地模型接入与能力标注 / 五层记忆（摘要候选与 rev 保护 / 事实出处链））。
+ * 步骤 10-30 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵 / 任务路由与可靠性 / 本地模型接入与能力标注 / 五层记忆（摘要候选与 rev 保护 / 事实出处链）/ 注入控制与注入预演）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -1353,6 +1353,48 @@ const STEPS: StepDef[] = [
           '；AI 覆盖被拒=' + (rejected === true) +
           '；事实出处有效=' + (factOk === true) +
           '；rev 行="' + revLineAfter + '"',
+      };
+    `,
+  },
+  {
+    step: 30,
+    title: "记忆：注入控制与注入预演（trigger 命中 / 摘要常驻 / 排除原因，T3-6）",
+    file: "step30-injection.png",
+    body: String.raw`
+      await tab('记忆');
+      const panel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.panel h3')].find((x) => x.textContent.includes('注入预演'));
+        return title ? title.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到注入预演面板：' + pageText() };
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      // 事实台账显示注入配置摘要（step29 登记的事实：trigger · 优先级 50 · near_end · 400 token）
+      const factInjection = [...document.querySelectorAll('.memory-fact-injection')].map((x) => String(x.textContent));
+      const hasInjectionSummary = factInjection.some((text) => text.includes('trigger') && text.includes('优先级 50'));
+      // 执行注入预演（默认目标 = 有素材的章摘要章节）
+      const btn = [...panel.querySelectorAll('button')].find((b) => b.textContent.trim() === '注入预演');
+      if (!btn || btn.disabled) return { ok: false, note: '注入预演按钮不可用：' + pageText() };
+      btn.click();
+      const summaryLine = await waitFor(() => document.querySelector('.injection-preview'), 12000);
+      if (!summaryLine) return { ok: false, note: '注入预演未返回：' + pageText() };
+      const lineText = String(summaryLine.textContent);
+      const injected = Number((lineText.match(/注入\s*(\d+)\s*条/) || [])[1] || 0);
+      const excludedCount = Number((lineText.match(/排除\s*(\d+)\s*条/) || [])[1] || -1);
+      const entries = [...document.querySelectorAll('.injection-entry')];
+      const entryText = entries.map((x) => String(x.innerText)).join('\n');
+      // 事实（keys 天启界）按正文提及触发；已入库摘要常驻注入
+      const factTriggered = entryText.includes('trigger（命中') && entryText.includes('命中键：');
+      const summaryAlways = entryText.includes('章摘要：') || entryText.includes('卷摘要：');
+      const excludedList = [...document.querySelectorAll('.injection-excluded li')].map((x) => String(x.textContent)).join('\n');
+      const excludedReasons = excludedList.includes('no_trigger') || excludedList.includes('no_manual') || excludedList.includes('reveal_gate');
+      await sleep(200);
+      return {
+        ok: hasInjectionSummary && injected >= 1 && entries.length >= 1 && factTriggered && summaryAlways && excludedCount >= 1 && excludedReasons,
+        note: '事实注入配置摘要=' + (hasInjectionSummary ? '含（trigger · 优先级 50）' : '缺失') +
+          '；预演：' + lineText.replace(/\s+/g, ' ').slice(0, 120) +
+          '；注入条目=' + entries.length + '（trigger 命中=' + factTriggered + '、摘要常驻=' + summaryAlways + '）' +
+          '；排除=' + excludedCount + '（含原因清单=' + excludedReasons + '）',
       };
     `,
   },

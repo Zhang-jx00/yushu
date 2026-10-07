@@ -667,6 +667,31 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       summaryFindings: memState3.findings.length,
     };
 
+    // T3-6 注入控制探针：事实注入配置持久化（trigger / manual / reveal_gate）+ 注入预演决策
+    const injHit = await api.memory.saveFact({ keys: ["玄铁令"], text: "主角获得玄铁令。", injection: { mode: "trigger", priority: 90, position: "near_end", budget_tokens: 100 } });
+    const injMiss = await api.memory.saveFact({ keys: ["不存在词"], text: "无命中关键词。", injection: { mode: "trigger", priority: 10, position: "near_end", budget_tokens: 100 } });
+    const injManual = await api.memory.saveFact({ keys: ["玄铁令"], text: "手动清单事实。", injection: { mode: "manual", priority: 50, position: "near_start", budget_tokens: 100 } });
+    const injGateOk = await api.memory.saveFact({ keys: ["玄铁令"], text: "门控已到的事实。", injection: { mode: "always", priority: 60, position: "after_system", budget_tokens: 100, reveal_gate: draft.chapterId } });
+    const injGateLater = await api.memory.saveFact({ keys: ["玄铁令"], text: "门控未到的事实。", injection: { mode: "always", priority: 60, position: "after_system", budget_tokens: 100, reveal_gate: "ch-zzz999" } });
+    const injState = await api.memory.state();
+    const injPreview = await api.memory.injectionPreview({ chapterId: draft.chapterId });
+    const injPreviewManual = await api.memory.injectionPreview({ chapterId: draft.chapterId, manualIds: [injManual.id] });
+    const hitFact = injState.facts.find((f) => f.id === injHit.id) || {};
+    const gateFact = injState.facts.find((f) => f.id === injGateLater.id) || {};
+    const injectionProbe = {
+      configPersisted: (hitFact.injection || {}).mode === "trigger" && (hitFact.injection || {}).priority === 90 && (hitFact.injection || {}).budget_tokens === 100,
+      gatePersisted: (gateFact.injection || {}).reveal_gate === "ch-zzz999",
+      hitEntry: injPreview.entries.some((e) => e.id === injHit.id && (e.matched_keys || []).includes("玄铁令")),
+      missExcluded: injPreview.excluded.some((e) => e.id === injMiss.id && e.code === "no_trigger"),
+      manualExcluded: injPreview.excluded.some((e) => e.id === injManual.id && e.code === "no_manual"),
+      manualIncluded: injPreviewManual.entries.some((e) => e.id === injManual.id),
+      gateOkIncluded: injPreview.entries.some((e) => e.id === injGateOk.id),
+      gateLaterExcluded: injPreview.excluded.some((e) => e.id === injGateLater.id && e.code === "reveal_gate"),
+      summaryAlways: injPreview.entries.some((e) => e.layer === "chapter_summary"),
+      chapterOrdinal: injPreview.chapterOrdinal,
+      tokens: injPreview.totals.tokens,
+    };
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -869,6 +894,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       preDestructive,
       git: gitProbe,
       memory: memoryProbe,
+      injection: injectionProbe,
     };
   })()`;
   try {
@@ -1063,6 +1089,19 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         factDeleted: boolean;
         factGone: boolean;
         summaryFindings: number;
+      };
+      injection: {
+        configPersisted: boolean;
+        gatePersisted: boolean;
+        hitEntry: boolean;
+        missExcluded: boolean;
+        manualExcluded: boolean;
+        manualIncluded: boolean;
+        gateOkIncluded: boolean;
+        gateLaterExcluded: boolean;
+        summaryAlways: boolean;
+        chapterOrdinal: number;
+        tokens: number;
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
@@ -1780,9 +1819,20 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.memory.factBroken &&
       result.memory.factDeleted &&
       result.memory.factGone &&
+      result.injection.configPersisted &&
+      result.injection.gatePersisted &&
+      result.injection.hitEntry &&
+      result.injection.missExcluded &&
+      result.injection.manualExcluded &&
+      result.injection.manualIncluded &&
+      result.injection.gateOkIncluded &&
+      result.injection.gateLaterExcluded &&
+      result.injection.summaryAlways &&
+      result.injection.chapterOrdinal === 1 &&
+      result.injection.tokens > 0 &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
-      crossProject.factIds.length === 0 &&
+      !crossProject.factIds.includes("fact-foreign") &&
       sessionProbe.ok &&
       result.incremental.mode === "incremental" &&
       result.incremental.updated === 1 &&
@@ -1814,7 +1864,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

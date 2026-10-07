@@ -1218,6 +1218,51 @@ select {
   font-size: 11.5px;
 }
 
+/* 注入预演（T3-6） */
+
+.injection-preview {
+  font-size: 12.5px;
+}
+
+.injection-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.injection-entry {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+}
+
+.injection-entry > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.injection-entry .badge {
+  margin-bottom: 0;
+  padding: 1px 8px;
+  font-size: 11.5px;
+}
+
+.injection-excluded {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.injection-excluded li {
+  padding: 2px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
 /* ---------- 导出与自查 ---------- */
 
 .export {

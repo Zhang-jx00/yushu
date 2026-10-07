@@ -163,5 +163,7 @@ contextBridge.exposeInMainWorld("yushu", {
     saveFact: (payload) => invoke("memory:saveFact", payload),
     /** 删除事实（携带 baseHash 并发检测） */
     deleteFact: (payload) => invoke("memory:deleteFact", payload),
+    /** 注入预演（T3-6）：对指定章节输出注入计划（决策 + 排除原因 + token 估算） */
+    injectionPreview: (payload) => invoke("memory:injectionPreview", payload),
   },
 });

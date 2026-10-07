@@ -34,6 +34,8 @@ import type {
   IndexStatusPayload,
   LibraryViewPayload,
   MemoryDeleteFactPayload,
+  MemoryInjectionPreviewPayload,
+  MemoryInjectionPreviewResult,
   MemorySaveFactPayload,
   MemorySaveFactResult,
   MemorySaveSummaryPayload,
@@ -210,6 +212,8 @@ export interface YushuApi {
     saveFact: (payload: MemorySaveFactPayload) => Promise<MemorySaveFactResult>;
     /** 删除事实（携带读时 hash 并发检测） */
     deleteFact: (payload: MemoryDeleteFactPayload) => Promise<boolean>;
+    /** 注入预演（T3-6）：对指定章节输出注入计划（决策 + 排除原因 + token 估算） */
+    injectionPreview: (payload: MemoryInjectionPreviewPayload) => Promise<MemoryInjectionPreviewResult>;
   };
 }
 

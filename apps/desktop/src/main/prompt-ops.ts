@@ -46,6 +46,8 @@ interface CardDetail {
   visibility: string;
   type: string;
   body: string;
+  /** frontmatter 上的注入配置原始值（T3-6；schema 允许的扩展字段，校验由消费方进行） */
+  injection?: unknown;
 }
 
 function truncate(text: string, cap: number): { text: string; truncated: boolean } {
@@ -68,6 +70,7 @@ export async function readAllCards(gateway: ProjectGateway): Promise<CardDetail[
     try {
       const snapshot = await gateway.readDoc(path);
       const { card, body } = readCardFile(snapshot.content);
+      const rawInjection = (card as unknown as { injection?: unknown }).injection;
       cards.push({
         id: card.id,
         name: card.name,
@@ -76,6 +79,7 @@ export async function readAllCards(gateway: ProjectGateway): Promise<CardDetail[
         visibility: card.visibility,
         type: card.type,
         body,
+        ...(rawInjection !== undefined ? { injection: rawInjection } : {}),
       });
     } catch {
       // 解析失败的单卡跳过（世界观档案中仍可见并可修复）

@@ -75,12 +75,13 @@ export const CHANNELS = {
   gitInit: "git:init",
   gitCommit: "git:commit",
   gitRollback: "git:rollback",
-  /** 五层记忆（M3 / T3-5）：状态 / AI 摘要候选 / 摘要入库 / 事实登记 / 事实删除 */
+  /** 五层记忆（M3 / T3-5）：状态 / AI 摘要候选 / 摘要入库 / 事实登记 / 事实删除 / 注入预演（T3-6） */
   memoryState: "memory:state",
   memorySummarize: "memory:summarize",
   memorySaveSummary: "memory:saveSummary",
   memorySaveFact: "memory:saveFact",
   memoryDeleteFact: "memory:deleteFact",
+  memoryInjectionPreview: "memory:injectionPreview",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -1077,7 +1078,64 @@ export interface GitRollbackResultPayload {
   preRestoreId: string | null;
 }
 
-/* ---------- 五层记忆（M3 / T3-5；结构与 @yushu/memory 兼容） ---------- */
+/* ---------- 五层记忆（M3 / T3-5；T3-6 注入控制；结构与 @yushu/memory 兼容） ---------- */
+
+/** 注入配置（T3-6；docs/03 §10.1 injection） */
+export interface InjectionConfigPayload {
+  /** always=常驻 / trigger=别名·提及关键词命中才注入 / manual=手动清单显式指定 */
+  mode: "always" | "trigger" | "manual";
+  /** 预算耗尽时高者先留（0-100） */
+  priority: number;
+  position: "after_system" | "near_start" | "near_end";
+  /** 单项预算（token 估算；超限截断） */
+  budget_tokens: number;
+  /** 叙事可见性门控：早于该章不注入（章节实体 id） */
+  reveal_gate?: string;
+}
+
+/** 注入计划条目（决策结果，可解释） */
+export interface InjectionPlanEntryPayload {
+  id: string;
+  layer: "world_core" | "fact" | "volume_summary" | "chapter_summary";
+  title: string;
+  position: InjectionConfigPayload["position"];
+  priority: number;
+  mode: InjectionConfigPayload["mode"];
+  /** 注入文本（按 budget_tokens 截断后） */
+  text: string;
+  tokens: number;
+  truncated: boolean;
+  matched_keys: string[];
+  reason: string;
+}
+
+/** 排除条目（带原因：门控未到 / 未命中关键词 / 不在手动清单） */
+export interface InjectionExclusionPayload {
+  id: string;
+  layer: InjectionPlanEntryPayload["layer"];
+  title: string;
+  code: "reveal_gate" | "no_trigger" | "no_manual";
+  reason: string;
+}
+
+export interface MemoryInjectionPreviewPayload {
+  /** 目标章节（章节实体 id） */
+  chapterId: string;
+  /** 手动清单（mode=manual 的显式指定） */
+  manualIds?: string[];
+}
+
+export interface MemoryInjectionPreviewResult {
+  chapterId: string;
+  chapterTitle: string;
+  /** 全局章序（1-based） */
+  chapterOrdinal: number;
+  chapterPath: string;
+  mentionChars: number;
+  entries: InjectionPlanEntryPayload[];
+  excluded: InjectionExclusionPayload[];
+  totals: { injected: number; excluded: number; tokens: number };
+}
 
 /**
  * 摘要记录（卷/章）：真源为 memory/<layer>/<id>.md（Markdown + frontmatter）；
@@ -1122,6 +1180,8 @@ export interface MemoryFactPayload {
   source?: { chapter_id: string; start: number; end: number; hash: string };
   provenance: "ok" | "broken" | "none";
   provenance_note?: string;
+  /** 注入配置（T3-6；缺省合并默认后下发，供 UI 展示） */
+  injection: InjectionConfigPayload;
 }
 
 /** 记录体检发现（lintMemory）：跨项目泄漏 = error（红线）；无出处事实 = warn */
@@ -1196,6 +1256,8 @@ export interface MemorySaveFactPayload {
   text: string;
   /** 出处（可选）：章节实体 id + 字符区间 [start, end)；提供时服务端读取正文计算摘录 hash */
   provenance?: { chapter_id: string; start: number; end: number };
+  /** 注入配置（T3-6；省略时保留既有配置 / 新建用默认） */
+  injection?: InjectionConfigPayload;
   /** 更新既有事实时必须携带 */
   baseHash?: string;
 }

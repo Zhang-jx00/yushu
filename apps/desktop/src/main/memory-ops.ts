@@ -1,18 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { countWords, YushuError } from "@yushu/core";
 import {
+  DEFAULT_INJECTION,
   applyAiSummary,
   applyHumanSummaryEdit,
   buildFactSource,
   lintMemory,
   parseChapterSummary,
   parseFact,
+  parseInjectionConfig,
   parseVolumeSummary,
+  planInjection,
   serializeFact,
   serializeSummary,
   verifyFactSource,
   type FactRecord,
   type FactSource,
+  type InjectableItem,
+  type InjectionConfig,
   type MemoryLintFinding,
   type MemoryRecord,
   type SummaryRecord,
@@ -37,8 +42,11 @@ import {
   type OutlineVolume,
 } from "@yushu/world-engine";
 import type {
+  InjectionConfigPayload,
   MemoryDeleteFactPayload,
   MemoryFactPayload,
+  MemoryInjectionPreviewPayload,
+  MemoryInjectionPreviewResult,
   MemorySaveFactPayload,
   MemorySaveFactResult,
   MemorySaveSummaryPayload,
@@ -52,6 +60,7 @@ import type {
 import { appendAiUsage, newUsageId } from "./ai-usage.js";
 import { loadLlmConfigForUse, loadRoutingConfigForUse, reliabilityGate, sessionKeySnapshot } from "./ai-ops.js";
 import { ProjectGateway } from "./file-gateway.js";
+import { readAllCards } from "./prompt-ops.js";
 
 /**
  * 五层记忆主进程编排（M3 / T3-5）：
@@ -64,6 +73,23 @@ import { ProjectGateway } from "./file-gateway.js";
 const PROJECT_ID_FALLBACK = "";
 /** 摘要素材上限（字符）：超出截断（T3-7 的 token 预算细化前的粗保护） */
 const MAX_SOURCE_CHARS = 8000;
+
+/** 各层缺省注入配置（记录未显式声明时合并；T3-6）：摘要为常驻槽位，卡片/事实默认按提及触发 */
+const SUMMARY_INJECTION: Record<"volume_summary" | "chapter_summary", InjectionConfig> = {
+  volume_summary: { mode: "always", priority: 80, position: "after_system", budget_tokens: 800 },
+  chapter_summary: { mode: "always", priority: 70, position: "after_system", budget_tokens: 1500 },
+};
+const CARD_INJECTION: InjectionConfig = { mode: "trigger", priority: 50, position: "near_end", budget_tokens: 600 };
+
+function toInjectionPayload(config: InjectionConfig): InjectionConfigPayload {
+  return {
+    mode: config.mode,
+    priority: config.priority,
+    position: config.position,
+    budget_tokens: config.budget_tokens,
+    ...(config.reveal_gate ? { reveal_gate: config.reveal_gate } : {}),
+  };
+}
 
 async function readOutlineSafe(gateway: ProjectGateway): Promise<Outline | null> {
   const snapshot = await gateway.readDoc(OUTLINE_PATH).catch(() => null);
@@ -212,6 +238,7 @@ export async function loadMemoryState(gateway: ProjectGateway): Promise<MemorySt
         ...(record.source ? { source: { ...record.source } } : {}),
         provenance,
         ...(provenanceNote ? { provenance_note: provenanceNote } : {}),
+        injection: toInjectionPayload(record.injection ?? DEFAULT_INJECTION),
       };
       factsWithoutProvenance.push(payload);
     } catch (err) {
@@ -432,6 +459,15 @@ export async function saveMemoryFact(
     }
   }
 
+  // T3-6：注入配置（显式传入即校验落盘；省略时保留既有配置，新建用默认——落盘只写显式配置）
+  let injection: InjectionConfig | undefined;
+  const existingRecord = snapshot ? parseFact(snapshot.content) : null;
+  if (payload.injection) {
+    injection = parseInjectionConfig(payload.injection, id);
+  } else if (existingRecord?.injection) {
+    injection = existingRecord.injection;
+  }
+
   const record: FactRecord = {
     layer: "fact",
     id,
@@ -439,6 +475,7 @@ export async function saveMemoryFact(
     keys,
     text: `${text}\n`,
     ...(source ? { source } : {}),
+    ...(injection ? { injection } : {}),
     updated_at: new Date().toISOString(),
   };
   const written = await gateway.writeDoc(path, serializeFact(record), snapshot ? payload.baseHash : undefined);
@@ -455,4 +492,85 @@ export async function deleteMemoryFact(
   if (!snapshot) throw new YushuError("E_MEMORY_NOT_FOUND", `事实不存在：${payload.id}`);
   await gateway.deleteDoc(path, payload.baseHash);
   return true;
+}
+
+/**
+ * 注入预演（T3-6）：对指定章节组装五层记忆的注入计划（决策 + 排除原因 + token 估算）。
+ * 数据源：摘要（常驻槽位）/ 事实（keys 触发，含记录级注入配置）/ 设定卡（名称·别名触发，
+ * 卡片 frontmatter 可声明 `injection` 覆盖）。T3-7 的总预算裁剪与槽位落位在此决策之上进行。
+ */
+export async function previewInjection(
+  gateway: ProjectGateway,
+  payload: MemoryInjectionPreviewPayload,
+): Promise<MemoryInjectionPreviewResult> {
+  const outline = await readOutlineSafe(gateway);
+  if (!outline) throw new YushuError("E_OUTLINE", "项目尚无大纲：请先完成三级大纲");
+
+  // 全局章序（卷序 → 章序，1-based；未建草稿的章纲同样计数——门控按叙事顺序判定）
+  const ordered: { volume: OutlineVolume; chapter: OutlineChapter; path: string; ordinal: number }[] = [];
+  const volumeTitles = new Map<string, string>();
+  let ordinal = 0;
+  for (const volume of outline.volumes) {
+    volumeTitles.set(volume.id, volume.title);
+    for (const chapter of volume.chapters) {
+      ordinal += 1;
+      if (!chapter.chapter_id) continue;
+      ordered.push({ volume, chapter, path: chapterPath(volume.id, chapter.chapter_id), ordinal });
+    }
+  }
+  const locate = ordered.find((item) => item.chapter.chapter_id === payload.chapterId);
+  if (!locate) throw new YushuError("E_INVALID_INPUT", `找不到章节：${payload.chapterId}（可能尚未创建草稿章节）`);
+  const ordinalOf = (chapterId: string) => ordered.find((item) => item.chapter.chapter_id === chapterId)?.ordinal ?? null;
+  const mentionText = await readChapterBody(gateway, locate.path);
+  const chapterTitleById = new Map(ordered.map((item) => [item.chapter.chapter_id!, item.chapter.title]));
+
+  const state = await loadMemoryState(gateway);
+  const items: InjectableItem[] = [];
+  for (const summary of state.summaries) {
+    const title =
+      summary.layer === "volume_summary"
+        ? `卷摘要：${volumeTitles.get(summary.id) ?? summary.id}`
+        : `章摘要：${chapterTitleById.get(summary.id) ?? summary.id}`;
+    items.push({ id: summary.id, layer: summary.layer, title, text: summary.text, keys: [], config: SUMMARY_INJECTION[summary.layer] });
+  }
+  for (const fact of state.facts) {
+    items.push({ id: fact.id, layer: "fact", title: `事实：${fact.id}`, text: fact.text, keys: fact.keys, config: fact.injection });
+  }
+  const cards = await readAllCards(gateway);
+  for (const card of cards) {
+    let cardInjection = CARD_INJECTION;
+    if (card.injection !== undefined) {
+      try {
+        cardInjection = parseInjectionConfig(card.injection, card.id);
+      } catch {
+        // 卡上注入配置非法：保守用默认（卡片仍可在档案页修复；不影响注入链路可用）
+      }
+    }
+    const alias = card.aliases.length > 0 ? `（别名：${card.aliases.join("、")}）` : "";
+    items.push({
+      id: card.id,
+      layer: "world_core",
+      title: `设定卡：${card.name}`,
+      text: `【${card.type}｜${card.layer}】${card.name}${alias}\n${card.body.slice(0, 800)}`,
+      keys: [card.name, ...card.aliases],
+      config: cardInjection,
+    });
+  }
+
+  const plan = planInjection(items, {
+    chapterOrdinal: locate.ordinal,
+    ordinalOf,
+    mentionText,
+    ...(payload.manualIds ? { manualIds: payload.manualIds } : {}),
+  });
+  return {
+    chapterId: payload.chapterId,
+    chapterTitle: locate.chapter.title,
+    chapterOrdinal: locate.ordinal,
+    chapterPath: locate.path,
+    mentionChars: mentionText.length,
+    entries: plan.entries,
+    excluded: plan.excluded,
+    totals: { injected: plan.entries.length, excluded: plan.excluded.length, tokens: plan.totalTokens },
+  };
 }
