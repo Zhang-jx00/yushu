@@ -415,16 +415,36 @@ export interface ContextPreviewPayload {
   };
 }
 
+/** Provider 模型载荷（T3-1：能力矩阵合并保守默认后下发，供 UI 展示） */
+export interface AiModelPayload {
+  name: string;
+  tier: string;
+  capabilities: {
+    tools: boolean;
+    structured_output: boolean;
+    stream: boolean;
+    usage: boolean;
+    reasoning: boolean;
+    vision: boolean;
+    batch: boolean;
+    cache?: { mode: string; min_tokens?: number; read_mult?: number; write_mult?: number };
+  };
+  limits?: { context?: number; max_output?: number; rpm?: number; tpm?: number };
+}
+
 export interface AiProviderPayload {
   id: string;
+  /** cloud | local（T3-1） */
   kind: string;
+  /** openai_chat | anthropic_messages | gemini_generate */
+  protocol: string;
   base_url: string;
-  model: string;
+  /** ≥1；models[0] 为默认模型 */
+  models: AiModelPayload[];
   /** 只记录环境变量名；明文 key 禁止落盘（docs/03 §13） */
   api_key_env?: string;
   temperature?: number;
   max_tokens?: number;
-  context_window?: number;
 }
 
 export interface AiProviderKeyState {

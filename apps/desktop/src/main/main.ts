@@ -366,11 +366,27 @@ const killRecoverScript = `(async () => {
 })()`;
 
 async function runE2E(win: BrowserWindow): Promise<void> {
-  const { mkdtemp, rm, readFile, readdir, writeFile } = await import("node:fs/promises");
+  const { mkdtemp, rm, readFile, readdir, writeFile, mkdir } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const dir = await mkdtemp(join(tmpdir(), "yushu-e2e-"));
   const mock = await startMockOpenAI();
+  // T3-1 迁移探针：预置 v1 简表配置（读取时应迁移为 v2；保存时先备份 v1 → .bak-v1）
+  await mkdir(join(dir, "config"), { recursive: true });
+  await writeFile(
+    join(dir, "config", "llm.yaml"),
+    [
+      "apiVersion: yushu.llm/v1",
+      "format_version: 1",
+      "providers:",
+      "  - id: mock",
+      "    kind: openai-compatible",
+      `    base_url: ${mock.baseUrl}`,
+      "    model: legacy-model",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   const payload = JSON.stringify({ dir, baseUrl: mock.baseUrl });
   const script = `(async () => {
     const api = window.yushu;
@@ -392,8 +408,33 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     const chapterDoc = await api.doc.read(draft.chapterPath);
     const reread = await api.outline.read();
 
-    // AI 副驾全链路：配置 → 上下文预览 → 流式生成（含中止能力）→ 采纳 → 使用记录
-    const savedConfig = await api.ai.saveConfig({ providers: [{ id: "mock", kind: "openai-compatible", base_url: baseUrl, model: "mock-model" }] });
+    // AI 副驾全链路：配置（v1 预置 → 读取迁移为 v2 → 保存写回并备份）→ 上下文预览 → 流式生成（含中止能力）→ 采纳 → 使用记录
+    const configBefore = await api.ai.config();
+    const configMigrated = {
+      formatVersion: configBefore.config.format_version,
+      kind: configBefore.config.providers[0] ? configBefore.config.providers[0].kind : "",
+      protocol: configBefore.config.providers[0] ? configBefore.config.providers[0].protocol : "",
+      modelName: configBefore.config.providers[0] ? configBefore.config.providers[0].models[0].name : "",
+    };
+    const savedConfig = await api.ai.saveConfig({
+      providers: [{
+        id: "mock",
+        kind: "local",
+        protocol: "openai_chat",
+        base_url: baseUrl,
+        models: [{ name: "mock-model", tier: "flagship", capabilities: { stream: true, usage: true }, limits: { context: 32768, max_output: 2048 } }],
+      }],
+      ...(configBefore.hash ? { baseHash: configBefore.hash } : {}),
+    });
+    const configAfter = await api.ai.config();
+    const configProbe = {
+      formatVersion: configAfter.config.format_version,
+      modelName: configAfter.config.providers[0] ? configAfter.config.providers[0].models[0].name : "",
+      tier: configAfter.config.providers[0] ? configAfter.config.providers[0].models[0].tier : "",
+      streamCap: configAfter.config.providers[0] ? configAfter.config.providers[0].models[0].capabilities.stream : false,
+      toolsCap: configAfter.config.providers[0] ? configAfter.config.providers[0].models[0].capabilities.tools : true,
+      contextLimit: configAfter.config.providers[0] ? configAfter.config.providers[0].models[0].limits.context : 0,
+    };
     const drafts = await api.ai.drafts();
     const contextPreview = await api.ai.context({ volumeId: volume.id, chapterId: co.id });
     const events = [];
@@ -626,6 +667,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       outlineExists: reread.exists, mapped: reread.doc.volumes[0].chapters[0].chapter_id === draft.chapterId,
       ai: {
         configReady: savedConfig.canGenerate,
+        configMigrated,
+        configProbe,
         drafts: drafts.length,
         slots: contextPreview.slots.length,
         stableChars: contextPreview.stableChars,
@@ -740,6 +783,20 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       mapped: boolean;
       ai: {
         configReady: boolean;
+        configMigrated: {
+          formatVersion: number;
+          kind: string;
+          protocol: string;
+          modelName: string;
+        };
+        configProbe: {
+          formatVersion: number;
+          modelName: string;
+          tier: string;
+          streamCap: boolean;
+          toolsCap: boolean;
+          contextLimit: number;
+        };
         drafts: number;
         slots: number;
         stableChars: number;
@@ -861,6 +918,14 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
+
+    // T3-1：v1 → v2 迁移备份（首次覆盖 v1 前自动备份，幂等；探针校验备份文件内容为原 v1 文本）
+    const backupText = await readFile(join(dir, "config", "llm.yaml.bak-v1"), "utf8").catch(() => "");
+    const migrationBackup = {
+      exists: backupText !== "",
+      hasLegacyV1: backupText.includes("legacy-model") && backupText.includes("format_version: 1"),
+    };
+    console.log("[e2e] 配置迁移备份:", JSON.stringify(migrationBackup));
 
     // 会话异常退出检测（T2-8 切片 B）：伪造「上次会话 active + 他进程 pid」→ beginSession 检出异常；
     // 心跳刷新 lastSeenAt；正常关闭（closed）后重开不再检出。探针直接调用主进程会话模块（不依赖 UI）。
@@ -1421,6 +1486,17 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.outlineExists &&
       result.mapped &&
       result.ai.configReady &&
+      result.ai.configMigrated.formatVersion === 2 &&
+      result.ai.configMigrated.kind === "local" &&
+      result.ai.configMigrated.protocol === "openai_chat" &&
+      result.ai.configMigrated.modelName === "legacy-model" &&
+      result.ai.configProbe.formatVersion === 2 &&
+      result.ai.configProbe.modelName === "mock-model" &&
+      result.ai.configProbe.streamCap === true &&
+      result.ai.configProbe.toolsCap === false &&
+      result.ai.configProbe.contextLimit === 32768 &&
+      migrationBackup.exists &&
+      migrationBackup.hasLegacyV1 &&
       result.ai.drafts === 1 &&
       result.ai.slots === 5 &&
       result.ai.stableChars > 0 &&
@@ -1531,7 +1607,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

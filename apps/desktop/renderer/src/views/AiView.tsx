@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AiConfigState,
   AiDraftTarget,
+  AiModelPayload,
   AiStreamEvent,
   AiUsageEntryPayload,
   ContextPreviewPayload,
@@ -26,6 +27,24 @@ interface GenerateResult {
   usageId: string;
   hints: DraftHintPayload;
   usageText: string;
+}
+
+/** T3-1：模型层级与能力矩阵的展示标签（能力矩阵为「保守默认合并后」结果，UI 直接呈现） */
+const TIER_LABELS: Record<string, string> = { small: "小模型", flagship: "旗舰", reasoning: "推理" };
+
+const CAPABILITY_LABELS: { key: keyof AiModelPayload["capabilities"]; label: string }[] = [
+  { key: "stream", label: "流式" },
+  { key: "usage", label: "usage" },
+  { key: "structured_output", label: "结构化" },
+  { key: "tools", label: "tools" },
+  { key: "reasoning", label: "推理" },
+  { key: "vision", label: "视觉" },
+  { key: "cache", label: "缓存" },
+  { key: "batch", label: "批量" },
+];
+
+function capabilityLabels(capabilities: AiModelPayload["capabilities"]): string[] {
+  return CAPABILITY_LABELS.filter((item) => Boolean(capabilities[item.key])).map((item) => item.label);
 }
 
 export function AiView() {
@@ -62,7 +81,7 @@ export function AiView() {
     const primary = state.config.providers[0];
     if (primary) {
       setBaseUrl(primary.base_url);
-      setModel(primary.model);
+      setModel(primary.models[0]?.name ?? "");
       setApiKeyEnv(primary.api_key_env ?? "");
     }
     setKeyProvider((prev) => prev || primary?.id || "");
@@ -223,7 +242,9 @@ export function AiView() {
           ? {
               ...provider,
               base_url: baseUrl.trim(),
-              model: model.trim(),
+              models: provider.models.map((item, modelIndex) =>
+                modelIndex === 0 ? { ...item, name: model.trim() } : item,
+              ),
               ...(apiKeyEnv.trim() ? { api_key_env: apiKeyEnv.trim() } : { api_key_env: undefined }),
             }
           : provider,
@@ -274,13 +295,20 @@ export function AiView() {
               <div className="provider" key={provider.id}>
                 <div className="pack-title">
                   <strong>{provider.id}</strong>
+                  <span className="badge">{provider.kind === "local" ? "本地" : "云端"}</span>
+                  <span className="badge">{provider.protocol}</span>
                   <span className={keyState?.ready ? "badge good" : "badge bad"}>
                     {keyState?.ready ? "可用" : "缺少 Key"}
                   </span>
                 </div>
-                <div className="muted">
-                  {provider.model} · {provider.base_url}
-                </div>
+                {provider.models.map((item) => (
+                  <div className="muted" key={item.name}>
+                    {item.name} · {TIER_LABELS[item.tier] ?? item.tier} ·{" "}
+                    {capabilityLabels(item.capabilities).join(" / ") || "—"}
+                    {item.limits?.context ? ` · 上下文 ${item.limits.context}` : ""}
+                  </div>
+                ))}
+                <div className="muted">{provider.base_url}</div>
                 {provider.api_key_env && (
                   <div className="muted">
                     Key 来源：环境变量 {provider.api_key_env}

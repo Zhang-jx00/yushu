@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-25 为 M2 扩展（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理）。
+ * 步骤 10-26 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -131,9 +131,10 @@ export async function prepareProjectForDir(options: PrepareProjectOptions): Prom
     providers: [
       {
         id: "mock",
-        kind: "openai-compatible",
+        kind: "local", // 127.0.0.1 mock：本地端点（能力矩阵与隐私提示按本地处理，T3-1）
+        protocol: "openai_chat",
         base_url: mock.baseUrl,
-        model: "mock-model",
+        models: [{ name: "mock-model", tier: "flagship", limits: { context: 32768, max_output: 2048 } }],
       },
     ],
   });
@@ -1139,6 +1140,27 @@ const STEPS: StepDef[] = [
           '未初始化态=' + wasUninitialized + '；提交前变更=' + changesBefore + ' 个文件；提交回执=' + (committed === true) +
           '；提交列表=' + logCount + ' 条；HEAD=' + (headMatch ? headMatch[1] : '(未匹配)') +
           '（提交后变更应归零；回滚须二次确认，保留 pre_restore 快照）',
+      };
+    `,
+  },
+  {
+    step: 26,
+    title: "AI 副驾：Provider v2 能力矩阵展示（kind / protocol / models / limits，T3-1）",
+    file: "step26-ai-provider-v2.png",
+    body: String.raw`
+      await tab('AI 副驾');
+      const card = await waitFor(() => {
+        const provider = [...document.querySelectorAll('.provider')].find((x) => x.textContent.includes('mock'));
+        return provider || null;
+      }, 12000);
+      if (!card) return { ok: false, note: '未找到 mock provider 卡片：' + pageText() };
+      card.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      const text = card.innerText;
+      const has = (s) => text.includes(s);
+      return {
+        ok: has('mock-model') && has('旗舰') && has('本地') && has('openai_chat') && has('流式') && has('上下文 32768'),
+        note: 'Provider 卡片：' + text.replace(/\n+/g, ' | ').slice(0, 240),
       };
     `,
   },

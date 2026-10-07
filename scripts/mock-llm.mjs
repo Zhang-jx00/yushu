@@ -131,11 +131,13 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`[mock-llm] 已启动：http://127.0.0.1:${port}/v1（OpenAI 兼容，仅本机可访问）`);
   console.log("[mock-llm] config/llm.yaml 示例：");
   console.log("  apiVersion: yushu.llm/v1");
-  console.log("  format_version: 1");
+  console.log("  format_version: 2");
   console.log("  providers:");
   console.log("    - id: local-mock");
-  console.log("      kind: openai-compatible");
+  console.log("      kind: local");
+  console.log("      protocol: openai_chat");
   console.log(`      base_url: http://127.0.0.1:${port}/v1`);
-  console.log("      model: mock-novelist");
+  console.log("      models:");
+  console.log("        - {name: mock-novelist, tier: flagship}");
   console.log("[mock-llm] 按 Ctrl+C 停止");
 });

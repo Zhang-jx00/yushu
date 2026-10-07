@@ -218,29 +218,90 @@ describe("AI 使用记录（T1-17）", () => {
   });
 });
 
+/** v2 provider 载荷（T3-1：mock 为本地 openai_chat 端点） */
+function v2Providers(baseUrl: string) {
+  return [
+    {
+      id: "mock",
+      kind: "local",
+      protocol: "openai_chat",
+      base_url: baseUrl,
+      models: [
+        { name: "mock-model", tier: "flagship", limits: { context: 32768, max_output: 2048 } },
+      ],
+    },
+  ];
+}
+
 describe("AI 生成与采纳（T1-15 / T1-16 / T1-17）", () => {
-  it("配置：默认主干+本地兜底；保存后指向本地 mock 且 canGenerate", async () => {
+  it("配置：默认主干+本地兜底（v2 能力矩阵）；保存后指向本地 mock 且 canGenerate", async () => {
     const fixture = await setupProject();
     const initial = await readAiConfig(fixture.gateway);
     expect(initial.exists).toBe(false);
     expect(initial.config.providers.map((provider) => provider.id)).toEqual(["primary", "local"]);
+    expect(initial.config.format_version).toBe(2);
+    expect(initial.config.providers[0]?.kind).toBe("cloud");
+    expect(initial.config.providers[0]?.protocol).toBe("openai_chat");
+    expect(initial.config.providers[0]?.models[0]?.tier).toBe("small");
+    // 能力矩阵为保守默认合并后的完整矩阵（未声明的字段为 false）
+    expect(initial.config.providers[1]?.models[0]?.capabilities.stream).toBe(true);
+    expect(initial.config.providers[1]?.models[0]?.capabilities.tools).toBe(false);
 
     const baseUrl = await startMock();
-    const saved = await saveAiConfig(fixture.gateway, {
-      providers: [{ id: "mock", kind: "openai-compatible", base_url: baseUrl, model: "mock-model" }],
-    });
+    const saved = await saveAiConfig(fixture.gateway, { providers: v2Providers(baseUrl) });
     expect(saved.exists).toBe(true);
     expect(saved.canGenerate).toBe(true);
     expect(saved.keyStates[0]?.ready).toBe(true);
     expect(saved.hash).toBeTruthy();
+    expect(saved.config.providers[0]?.models[0]?.name).toBe("mock-model");
+  });
+
+  it("v1 配置迁移（T3-1）：读取按 v2 返回；覆盖前自动备份 v1（幂等，可回滚）", async () => {
+    const fixture = await setupProject();
+    const v1Text = [
+      "apiVersion: yushu.llm/v1",
+      "format_version: 1",
+      "providers:",
+      "  - id: mock",
+      "    kind: openai-compatible",
+      "    base_url: http://127.0.0.1:11434/v1",
+      "    model: legacy-model",
+      "    context_window: 32768",
+      "",
+    ].join("\n");
+    await fixture.gateway.writeDoc("config/llm.yaml", v1Text);
+
+    const migrated = await readAiConfig(fixture.gateway);
+    expect(migrated.config.format_version).toBe(2);
+    const provider = migrated.config.providers[0]!;
+    expect(provider.kind).toBe("local");
+    expect(provider.protocol).toBe("openai_chat");
+    expect(provider.models[0]?.name).toBe("legacy-model");
+    expect(provider.models[0]?.limits?.context).toBe(32768);
+
+    // 保存（v2）→ 覆盖前自动备份 v1 原文
+    const baseUrl = await startMock();
+    const saved = await saveAiConfig(fixture.gateway, {
+      providers: v2Providers(baseUrl),
+      baseHash: migrated.hash,
+    });
+    expect(saved.config.providers[0]?.models[0]?.name).toBe("mock-model");
+    const backup = await readFile(join(dir, "config", "llm.yaml.bak-v1"), "utf8");
+    expect(backup).toContain("legacy-model");
+    expect(backup).toContain("format_version: 1");
+
+    // 幂等：已成为 v2 后再保存不重写备份
+    await saveAiConfig(fixture.gateway, {
+      providers: v2Providers(baseUrl),
+      baseHash: saved.hash,
+    });
+    expect(await readFile(join(dir, "config", "llm.yaml.bak-v1"), "utf8")).toBe(backup);
   });
 
   it("生成：流式事件 → done（含轻提示与使用记录）；采纳写入章节正文", async () => {
     const fixture = await setupProject();
     const baseUrl = await startMock();
-    await saveAiConfig(fixture.gateway, {
-      providers: [{ id: "mock", kind: "openai-compatible", base_url: baseUrl, model: "mock-model" }],
-    });
+    await saveAiConfig(fixture.gateway, { providers: v2Providers(baseUrl) });
 
     const targets = await listDraftTargets(fixture.gateway);
     expect(targets).toHaveLength(1);
@@ -300,9 +361,7 @@ describe("AI 生成与采纳（T1-15 / T1-16 / T1-17）", () => {
   it("中止：done.aborted=true 且保留已生成部分，记录 status=aborted", async () => {
     const fixture = await setupProject();
     const baseUrl = await startMock(30);
-    await saveAiConfig(fixture.gateway, {
-      providers: [{ id: "mock", kind: "openai-compatible", base_url: baseUrl, model: "mock-model" }],
-    });
+    await saveAiConfig(fixture.gateway, { providers: v2Providers(baseUrl) });
 
     const controller = new AbortController();
     const events: AiStreamEvent[] = [];

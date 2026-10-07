@@ -4,7 +4,9 @@ import {
   LLM_FORMAT_VERSION,
   LlmAbortError,
   defaultLlmConfig,
+  detectLlmConfigVersion,
   parseLlmConfig,
+  resolveCapabilities,
   serializeLlmConfig,
   stream,
   type LlmConfig,
@@ -24,6 +26,7 @@ import type {
   AiConfigState,
   AiDraftTarget,
   AiGeneratePayload,
+  AiProviderPayload,
   AiSaveConfigPayload,
   AiStreamEvent,
   AiUsageState,
@@ -36,11 +39,14 @@ import { takePreDestructiveSnapshot } from "./snapshot-ops.js";
 import { countEffectiveChars, recordChapterDelta } from "./stats-ops.js";
 
 /**
- * AI 副驾主进程编排（S4/S5；T1-13 ~ T1-17）：
- * - 配置：config/llm.yaml（明文 key 禁落盘；会话 key 仅存内存）；
- * - 生成：上下文组装 → stream（fallback + AbortController）→ 事件流 → 使用记录；
+ * AI 副驾主进程编排（S4/S5；T1-13 ~ T1-17；T3-1 Provider 能力矩阵）：
+ * - 配置：config/llm.yaml（v2 能力矩阵；明文 key 禁落盘；会话 key 仅存内存）；
+ * - 生成：上下文组装 → stream（协议分发 + fallback + AbortController）→ 事件流 → 使用记录；
  * - 采纳：仅用户显式操作才写入章节正文（先读 hash 再原子写，拒绝盲覆盖）。
  */
+
+/** v1 配置的迁移备份路径（T3-1：首次覆盖 v1 前自动备份，幂等；可回滚） */
+const LLM_CONFIG_BACKUP_PATH = `${LLM_CONFIG_PATH}.bak-v1`;
 
 /** 会话内存 API Key（provider.id → key）；进程退出即消失，不落盘（docs/03 §13） */
 const sessionKeys = new Map<string, string>();
@@ -55,7 +61,26 @@ function sessionKeySnapshot(): Record<string, string> {
   return Object.fromEntries(sessionKeys);
 }
 
-/** 读取 config/llm.yaml 并校验；不存在时返回默认配置（主干 + 本地兜底） */
+/** provider → 载荷（能力矩阵合并保守默认后下发，UI 直接展示） */
+function toProviderPayload(provider: LlmProviderSpec): AiProviderPayload {
+  return {
+    id: provider.id,
+    kind: provider.kind,
+    protocol: provider.protocol,
+    base_url: provider.base_url,
+    models: provider.models.map((model) => ({
+      name: model.name,
+      tier: model.tier,
+      capabilities: { ...resolveCapabilities(model) },
+      ...(model.limits ? { limits: { ...model.limits } } : {}),
+    })),
+    ...(provider.api_key_env ? { api_key_env: provider.api_key_env } : {}),
+    ...(provider.temperature !== undefined ? { temperature: provider.temperature } : {}),
+    ...(provider.max_tokens !== undefined ? { max_tokens: provider.max_tokens } : {}),
+  };
+}
+
+/** 读取 config/llm.yaml 并校验；不存在时返回默认配置（云端主干 + 本地兜底） */
 export async function loadLlmConfigForUse(gateway: ProjectGateway): Promise<LlmConfig> {
   const snapshot = await gateway.readDoc(LLM_CONFIG_PATH).catch(() => null);
   if (!snapshot) return defaultLlmConfig();
@@ -65,6 +90,7 @@ export async function loadLlmConfigForUse(gateway: ProjectGateway): Promise<LlmC
 /** 配置状态（含每个 provider 的 key 就绪态；不返回 key 本身） */
 export async function readAiConfig(gateway: ProjectGateway): Promise<AiConfigState> {
   const snapshot = await gateway.readDoc(LLM_CONFIG_PATH).catch(() => null);
+  // v1 文本由 parseLlmConfig 自动迁移（内存态；写回由保存路径显式完成并先行备份）
   const config = snapshot ? parseLlmConfig(snapshot.content) : defaultLlmConfig();
   const keys = sessionKeySnapshot();
 
@@ -87,7 +113,7 @@ export async function readAiConfig(gateway: ProjectGateway): Promise<AiConfigSta
     config: {
       apiVersion: config.apiVersion,
       format_version: config.format_version,
-      providers: config.providers,
+      providers: config.providers.map((provider) => toProviderPayload(provider)),
     },
     keyStates,
     canGenerate: keyStates.some((state) => state.ready),
@@ -99,6 +125,16 @@ export async function saveAiConfig(
   gateway: ProjectGateway,
   payload: AiSaveConfigPayload,
 ): Promise<AiConfigState> {
+  // T3-1：覆盖 v1 配置前自动备份（幂等——备份已存在则跳过；备份失败不阻断保存但留下日志线索）
+  const current = await gateway.readDoc(LLM_CONFIG_PATH).catch(() => null);
+  if (current && detectLlmConfigVersion(current.content) < LLM_FORMAT_VERSION) {
+    await gateway.writeDoc(LLM_CONFIG_BACKUP_PATH, current.content).catch((err) => {
+      const code = (err as { code?: string }).code;
+      if (code !== "E_DOC_CONFLICT") {
+        console.warn(`[ai] v1 配置备份写入失败（${LLM_CONFIG_BACKUP_PATH}）：${String(err)}`);
+      }
+    });
+  }
   const candidate = {
     apiVersion: LLM_API_VERSION,
     format_version: LLM_FORMAT_VERSION,
