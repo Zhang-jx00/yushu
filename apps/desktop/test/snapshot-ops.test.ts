@@ -143,27 +143,33 @@ describe("本地快照（T2-7 切片 A）", () => {
     expect(forced.outcome).toBe("taken");
   });
 
-  it("环形保留 20：超出裁掉最旧 manifest，其独占 blob 被清理、共用 blob 保留", async () => {
-    const base = new Date("2026-01-01T00:00:00.000Z").getTime();
-    const ids: string[] = [];
-    for (let i = 1; i <= 22; i += 1) {
-      await writeFile(join(dir, "chapters/vol-a/ch-1.md"), `第${i}版。`, "utf8");
-      const take = await takeSnapshot(gateway, "manual", { force: true, now: new Date(base + i * 1000), keep: 20 });
-      expect(take.outcome).toBe("taken");
-      ids.push(take.snapshot!.id);
-    }
-    const files = await manifestFiles();
-    expect(files).toHaveLength(20);
-    expect(files).not.toContain(`${ids[0]}.json`);
-    expect(files).not.toContain(`${ids[1]}.json`);
-    expect(files).toContain(`${ids[21]}.json`);
+  it(
+    "环形保留 20：超出裁掉最旧 manifest，其独占 blob 被清理、共用 blob 保留",
+    async () => {
+      const base = new Date("2026-01-01T00:00:00.000Z").getTime();
+      const ids: string[] = [];
+      for (let i = 1; i <= 22; i += 1) {
+        await writeFile(join(dir, "chapters/vol-a/ch-1.md"), `第${i}版。`, "utf8");
+        const take = await takeSnapshot(gateway, "manual", { force: true, now: new Date(base + i * 1000), keep: 20 });
+        expect(take.outcome).toBe("taken");
+        ids.push(take.snapshot!.id);
+      }
+      const files = await manifestFiles();
+      expect(files).toHaveLength(20);
+      expect(files).not.toContain(`${ids[0]}.json`);
+      expect(files).not.toContain(`${ids[1]}.json`);
+      expect(files).toContain(`${ids[21]}.json`);
 
-    const blobs = await blobFiles();
-    expect(blobs).not.toContain(hashOf("第1版。")); // 独占内容随 manifest 裁掉
-    expect(blobs).not.toContain(hashOf("第2版。"));
-    expect(blobs).toContain(hashOf("第3版。")); // 保留范围内
-    expect(blobs).toContain(hashOf("原始乙。")); // 所有 manifest 共用 → 保留
-  });
+      const blobs = await blobFiles();
+      expect(blobs).not.toContain(hashOf("第1版。")); // 独占内容随 manifest 裁掉
+      expect(blobs).not.toContain(hashOf("第2版。"));
+      expect(blobs).toContain(hashOf("第3版。")); // 保留范围内
+      expect(blobs).toContain(hashOf("原始乙。")); // 所有 manifest 共用 → 保留
+    },
+    // 22 次 fsync 原子写快照（含环形清理）：默认 5s 在并行全量测试（含索引重建等重 IO 用例）下会偶发超时——
+    // 显式放宽测试预算（单跑约 1s，仅为负载敏感的时间预算，不改变任何产品行为）。
+    30_000,
+  );
 
   it("整体回滚：改写写回 / 被删重建 / 快照后新增保守保留；恢复前强制 pre_restore 快照", async () => {
     const s1 = await takeSnapshot(gateway, "manual", { force: true });

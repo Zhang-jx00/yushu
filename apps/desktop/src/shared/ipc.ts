@@ -84,6 +84,8 @@ export const CHANNELS = {
   memoryInjectionPreview: "memory:injectionPreview",
   /** 上下文组装（T3-7）：固定槽位顺序 + 预算裁剪 + 去重（决策与证据） */
   memoryAssemble: "memory:assemble",
+  /** RAG 检索预演（T3-8）：向量路 + 关键词路并行 → RRF 融合 → 可选重排（只读） */
+  memoryRagPreview: "memory:ragPreview",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -1190,6 +1192,78 @@ export interface MemoryAssemblyResult {
   dropped: AssemblyDropPayload[];
   dedup: { by_id: number; by_similarity: number };
   truncatedItems: number;
+  /** RAG 检索（T3-8）接入回执：ok=检索命中已进 rag_chunks 槽位；skipped=未构建索引（组装不阻断） */
+  rag?: AssemblyRagPayload;
+}
+
+/** 组装时 RAG 检索接入回执（T3-8） */
+export interface AssemblyRagPayload {
+  status: "ok" | "skipped";
+  query: string;
+  /** 进入 rag_chunks 槽位的条数 */
+  hits: number;
+  /** 向量实现：sqlite-vec / cosine（本地兜底）/ 空（跳过） */
+  store: string;
+  note?: string;
+}
+
+/* ---------- RAG 检索预演（T3-8；结构与 @yushu/search ragSearch 兼容） ---------- */
+
+export interface MemoryRagPreviewPayload {
+  /** 目标章节（章节实体 id） */
+  chapterId: string;
+  /** 查询词（缺省 = 自动查询：章纲 + 最近正文尾部） */
+  query?: string;
+  /** 每路召回上限（缺省 50） */
+  pathLimit?: number;
+  /** 融合输出条数（缺省 20） */
+  limit?: number;
+  /** >0 启用本地启发式重排（UI 启用时传 6） */
+  rerankTopK?: number;
+  weights?: { vector?: number; keyword?: number };
+}
+
+export interface RagHitPayload {
+  chunkId: string;
+  path: string;
+  kind: string;
+  /** 出处：章节实体 id + 字符区间 + 块文本 hash */
+  chapterId?: string;
+  volume?: string;
+  charStart: number;
+  charEnd: number;
+  textHash: string;
+  entities: string[];
+  text: string;
+  snippet?: string;
+  score: number;
+  rank: number;
+  sources: {
+    vector?: { rank: number; score: number };
+    keyword?: { rank: number; score: number };
+  };
+  rerank?: { rank: number; score: number; reason: string };
+}
+
+export interface MemoryRagPreviewResult {
+  chapterId: string;
+  chapterTitle: string;
+  chapterOrdinal: number;
+  /** 自动查询串（章纲 + 最近正文尾部） */
+  autoQuery: string;
+  query: string;
+  querySource: "custom" | "auto";
+  /** 向量实现（sqlite-vec = 扩展可用；cosine = 本地确定性嵌入兜底） */
+  store: "sqlite-vec" | "cosine";
+  storeNote: string;
+  dim: number;
+  vectorRows: number;
+  repairedVectors: number;
+  rrfK: number;
+  weights: { vector: number; keyword: number };
+  paths: { vector: number; keyword: number };
+  fused: RagHitPayload[];
+  reranked: RagHitPayload[];
 }
 
 /**

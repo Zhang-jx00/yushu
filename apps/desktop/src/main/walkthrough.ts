@@ -1447,6 +1447,49 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 32,
+    title: "记忆：RAG 检索预演（向量 + bm25 双路召回 / RRF 融合 / 重排 top-6 / 出处，T3-8）",
+    file: "step32-rag.png",
+    body: String.raw`
+      await tab('记忆');
+      const panel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.panel h3')].find((x) => x.textContent.includes('RAG 检索预演'));
+        return title ? title.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到 RAG 检索预演面板：' + pageText() };
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      const input = panel.querySelector('.memory-rag-query');
+      if (!input) return { ok: false, note: '找不到查询输入：' + pageText() };
+      setV(input, '天启界');
+      const btn = [...panel.querySelectorAll('button')].find((b) => b.textContent.trim() === '检索预演');
+      if (!btn || btn.disabled) return { ok: false, note: '检索预演按钮不可用：' + pageText() };
+      btn.click();
+      const line = await waitFor(() => document.querySelector('.rag-preview'), 12000);
+      if (!line) return { ok: false, note: '检索预演未返回：' + pageText() };
+      await sleep(150);
+      const rows = [...document.querySelectorAll('.rag-hit-row')];
+      const lineText = String(line.textContent).replace(/\s+/g, ' ');
+      const rowText = rows.map((r) => String(r.innerText).replace(/\s+/g, ' ')).join(' | ');
+      // 出处列：区间 [start, end) + 块 hash 前 8 位（hex）；至少一行来自章节（ch-*）
+      const provenance = rows.length >= 1 &&
+        rows.every((r) => /\[\d+, \d+\)/.test(String(r.innerText)) && /[0-9a-f]{8}/.test(String(r.innerText))) &&
+        rows.some((r) => /ch-[0-9a-z]+/.test(String(r.innerText)));
+      const dualPath = lineText.includes('向量路') && lineText.includes('关键词路');
+      const fused = lineText.includes('融合');
+      const reranked = lineText.includes('重排') && document.querySelector('.rag-hits table, .rag-hits');
+      const storeNote = String((document.querySelector('.rag-note') || {}).textContent || '');
+      await sleep(200);
+      return {
+        ok: rows.length >= 1 && provenance && dualPath && fused && Boolean(reranked) && storeNote.length > 0,
+        note: '回执：' + lineText.slice(0, 170) +
+          '；命中行=' + rows.length + '（出处列=' + provenance + '）' +
+          '；向量实现注记=' + storeNote.replace(/\s+/g, ' ').slice(0, 80) +
+          '；首行=' + (rowText.split(' | ')[0] || '').slice(0, 110),
+      };
+    `,
+  },
 ];
 
 /**

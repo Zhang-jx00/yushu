@@ -46,6 +46,7 @@ import {
   type OutlineVolume,
 } from "@yushu/world-engine";
 import type {
+  AssemblyRagPayload,
   InjectionConfigPayload,
   MemoryAssemblePayload,
   MemoryAssemblyResult,
@@ -53,6 +54,8 @@ import type {
   MemoryFactPayload,
   MemoryInjectionPreviewPayload,
   MemoryInjectionPreviewResult,
+  MemoryRagPreviewPayload,
+  MemoryRagPreviewResult,
   MemorySaveFactPayload,
   MemorySaveFactResult,
   MemorySaveSummaryPayload,
@@ -66,6 +69,7 @@ import type {
 import { appendAiUsage, newUsageId } from "./ai-usage.js";
 import { loadLlmConfigForUse, loadRoutingConfigForUse, reliabilityGate, sessionKeySnapshot } from "./ai-ops.js";
 import { ProjectGateway } from "./file-gateway.js";
+import { ragSearchIndex } from "./index-ops.js";
 import { buildContextPreview, readAllCards } from "./prompt-ops.js";
 
 /**
@@ -505,6 +509,8 @@ interface CollectedChapter {
   chapterTitle: string;
   chapterOrdinal: number;
   chapterPath: string;
+  /** 章纲七要素摘要文本（RAG 自动查询用；缺省空） */
+  chapterBriefText: string;
   mentionText: string;
   items: InjectableItem[];
   ordinalOf: (chapterId: string) => number | null;
@@ -587,12 +593,18 @@ async function collectChapterContext(gateway: ProjectGateway, chapterId: string)
   const preview = await buildContextPreview(gateway, { volumeId: locate.volume.id, chapterId: locate.chapter.id });
   const slotText = (name: string) => preview.slots.find((slot) => slot.slot === name)?.text ?? "";
   const systemText = [slotText("system_prompt"), slotText("world_constraints")].filter((text) => text.trim() !== "").join("\n\n");
+  const brief = locate.chapter.brief;
+  const chapterBriefText = [brief.who, brief.where, brief.goal, brief.obstacle, brief.turn, brief.result, brief.hook]
+    .map((part) => part.trim())
+    .filter((part) => part !== "")
+    .join("；");
 
   return {
     chapterId,
     chapterTitle: locate.chapter.title,
     chapterOrdinal: locate.ordinal,
     chapterPath: locate.path,
+    chapterBriefText,
     mentionText,
     items,
     ordinalOf,
@@ -641,8 +653,62 @@ function slotOf(entry: { layer: InjectableItem["layer"]; mode: InjectionConfig["
 }
 
 /**
+ * RAG 自动查询串（T3-8）：章纲七要素（本章意图）+ 最近正文尾部（文风与语境），
+ * 确定性拼接（同章同输入同查询——快照复现前提）；均空时返回空串（调用方提示）。
+ */
+function buildRagQuery(collected: CollectedChapter): string {
+  const tail = collected.recentProse.replace(/\s+/g, " ").trim();
+  const tailPart = tail === "" ? "" : tail.slice(-120);
+  return [collected.chapterTitle, collected.chapterBriefText, tailPart].filter((part) => part.trim() !== "").join(" ");
+}
+
+/**
+ * RAG 检索预演（T3-8）：对指定章节执行混合检索（可自定义查询词；缺省自动查询）。
+ * 只读通道——不改任何真源；索引未构建时给出可操作错误（与「项目文件」页检索一致）。
+ */
+export async function previewRag(
+  gateway: ProjectGateway,
+  payload: MemoryRagPreviewPayload,
+): Promise<MemoryRagPreviewResult> {
+  const collected = await collectChapterContext(gateway, payload.chapterId);
+  const autoQuery = buildRagQuery(collected);
+  const custom = payload.query?.trim() ?? "";
+  const query = custom !== "" ? custom : autoQuery;
+  if (query === "") {
+    throw new YushuError("E_INVALID_INPUT", "检索查询为空：请填写查询词（或先补全章纲 / 正文以生成自动查询）");
+  }
+  const result = await ragSearchIndex(gateway, {
+    query,
+    ...(payload.pathLimit !== undefined ? { pathLimit: payload.pathLimit } : {}),
+    ...(payload.limit !== undefined ? { limit: payload.limit } : {}),
+    ...(payload.rerankTopK !== undefined ? { rerankTopK: payload.rerankTopK } : {}),
+    ...(payload.weights !== undefined ? { weights: payload.weights } : {}),
+  });
+  return {
+    chapterId: collected.chapterId,
+    chapterTitle: collected.chapterTitle,
+    chapterOrdinal: collected.chapterOrdinal,
+    autoQuery,
+    query,
+    querySource: custom !== "" ? "custom" : "auto",
+    store: result.store,
+    storeNote: result.storeNote,
+    dim: result.dim,
+    vectorRows: result.vectorRows,
+    repairedVectors: result.repairedVectors,
+    rrfK: result.rrfK,
+    weights: result.weights,
+    paths: result.paths,
+    fused: result.fused,
+    reranked: result.reranked,
+  };
+}
+
+/**
  * 上下文组装（T3-7；docs/03 §10.2）：固定槽位顺序 + 槽位 cap + 全局预算裁剪 +
  * 去重（by_id / by_similarity）+ priority_then_recent 逐出；输出完整决策证据（供 T3-9 预览器与快照）。
+ * T3-8：RAG 混合检索（自动查询 → 双路 → RRF → 重排 top-6）命中进入 `rag_chunks` 槽位；
+ * 索引未构建 / 检索失败不阻断组装——如实回执 `rag.status=skipped` 与原因。
  */
 export async function assembleForChapter(
   gateway: ProjectGateway,
@@ -687,6 +753,38 @@ export async function assembleForChapter(
     });
   }
 
+  // RAG 检索（T3-8）：自动查询 → 混合检索 → 重排 top-6 进 rag_chunks 槽位
+  const ragQuery = buildRagQuery(collected);
+  let rag: AssemblyRagPayload = { status: "skipped", query: ragQuery, hits: 0, store: "" };
+  if (ragQuery !== "") {
+    try {
+      const found = await ragSearchIndex(gateway, { query: ragQuery, rerankTopK: 6 });
+      const hits = found.reranked.length > 0 ? found.reranked : found.fused.slice(0, 6);
+      for (const hit of hits) {
+        assemblyItems.push({
+          id: `rag:${hit.chunkId}`,
+          slot: "rag_chunks",
+          title: `检索命中：${hit.chapterId ?? hit.path} [${hit.charStart}, ${hit.charEnd})`,
+          text: hit.text,
+          priority: 55,
+          recency: hit.chapterId ? collected.ordinalOf(hit.chapterId) ?? 0 : 0,
+          source: `RAG 融合 #${hit.rank}${hit.rerank ? ` · 重排 #${hit.rerank.rank}` : ""} · 出处 ${hit.chapterId ?? "-"} [${hit.charStart}, ${hit.charEnd}) · ${hit.textHash.slice(0, 8)}`,
+        });
+      }
+      rag = { status: "ok", query: ragQuery, hits: hits.length, store: found.store };
+    } catch (err) {
+      rag = {
+        status: "skipped",
+        query: ragQuery,
+        hits: 0,
+        store: "",
+        note: err instanceof Error ? err.message : String(err),
+      };
+    }
+  } else {
+    rag = { status: "skipped", query: "", hits: 0, store: "", note: "自动查询为空：章纲与最近正文均无素材" };
+  }
+
   const result = assembleContext(assemblyItems, { budget_total: payload.budget_total ?? 32000 });
   return {
     chapterId: collected.chapterId,
@@ -694,5 +792,6 @@ export async function assembleForChapter(
     chapterOrdinal: collected.chapterOrdinal,
     chapterPath: collected.chapterPath,
     ...result,
+    rag,
   };
 }

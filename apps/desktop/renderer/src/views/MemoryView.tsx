@@ -3,6 +3,7 @@ import type {
   InjectionConfigPayload,
   MemoryAssemblyResult,
   MemoryInjectionPreviewResult,
+  MemoryRagPreviewResult,
   MemoryStatePayload,
   MemoryTargetPayload,
   MemorySummarizeResult,
@@ -10,13 +11,15 @@ import type {
 import { api } from "../api";
 
 /**
- * 记忆页（M3 / T3-5 五层记忆的管理界面；T3-6 注入控制；T3-7 上下文组装）：
+ * 记忆页（M3 / T3-5 五层记忆的管理界面；T3-6 注入控制；T3-7 上下文组装；T3-8 RAG 检索）：
  * - 摘要目标（卷 / 章）：AI 生成候选（**不入库**）→ 采纳（AI 入库，rev 0）或人工修订（rev+1）；
  *   `summary_rev > 0` 后 AI 再入库被拒（E_MEMORY_REV_PROTECTED——人工修订受保护）；
  * - 事实级记忆台账：带出处徽标（出处有效 / 出处失效 / 无出处——正文改动后可检出失效）
  *   与注入配置（mode / priority / position / budget_tokens / reveal_gate）；
  * - 注入预演（T3-6）：对指定章节输出注入计划（决策 + 命中键 + 排除原因 + token 估算）；
  * - 组装预演（T3-7）：固定槽位顺序 + 槽位 cap + 全局预算裁剪 + 去重（逐出 / 截断证据）；
+ * - RAG 检索预演（T3-8）：向量路（sqlite-vec / 本地余弦兜底）与关键词路（FTS5 bm25）并行 →
+ *   RRF(k=60) 融合 → 可选重排 top-6；结果带出处（chapter_id + 字符区间 + hash）；
  * - 记录体检（findings）与跨项目拒绝清单（error 红线仅展示、不进入本项目记忆）。
  */
 
@@ -77,6 +80,11 @@ export function MemoryView() {
   // 组装预演（T3-7）
   const [assemblyBudget, setAssemblyBudget] = useState(32000);
   const [assembly, setAssembly] = useState<MemoryAssemblyResult | null>(null);
+
+  // RAG 检索预演（T3-8）
+  const [ragQuery, setRagQuery] = useState("");
+  const [ragRerank, setRagRerank] = useState(true);
+  const [rag, setRag] = useState<MemoryRagPreviewResult | null>(null);
 
   const refresh = useCallback(async () => {
     const next = await api().memory.state();
@@ -181,6 +189,20 @@ export function MemoryView() {
       if (!previewTarget) return;
       setNotice(null);
       setAssembly(await api().memory.assemble({ chapterId: previewTarget, budget_total: assemblyBudget }));
+    });
+
+  const runRag = () =>
+    guard(async () => {
+      if (!previewTarget) return;
+      setNotice(null);
+      const query = ragQuery.trim();
+      setRag(
+        await api().memory.ragPreview({
+          chapterId: previewTarget,
+          ...(query !== "" ? { query } : {}),
+          ...(ragRerank ? { rerankTopK: 6 } : {}),
+        }),
+      );
     });
 
   const removeFact = (id: string, baseHash: string) =>
@@ -527,6 +549,14 @@ export function MemoryView() {
                 {assembly.budget_total} · 稳定前缀 {assembly.stableTokens} token · 截断 {assembly.truncatedItems} 条 · 去重{" "}
                 {assembly.dedup.by_id + assembly.dedup.by_similarity} 条（id {assembly.dedup.by_id} / 相似 {assembly.dedup.by_similarity}）
               </div>
+              {assembly.rag && (
+                <div className="muted assembly-preview-rag">
+                  RAG 槽位（T3-8）：
+                  {assembly.rag.status === "ok"
+                    ? `命中 ${assembly.rag.hits} 条进 rag_chunks（向量实现 ${assembly.rag.store === "sqlite-vec" ? "sqlite-vec" : "本地余弦兜底"}）· 查询「${assembly.rag.query.slice(0, 60)}${assembly.rag.query.length > 60 ? "…" : ""}」`
+                    : `跳过——${assembly.rag.note ?? "未检索"}`}
+                </div>
+              )}
               <table className="slot-table assembly-slots">
                 <thead>
                   <tr>
@@ -559,6 +589,93 @@ export function MemoryView() {
                     </li>
                   ))}
                 </ul>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="panel">
+          <h3>
+            RAG 检索预演{" "}
+            <span className="muted">T3-8：向量路（sqlite-vec；扩展不可用回退本地确定性嵌入）+ 关键词路（FTS5 bm25）并行 → RRF(k=60) 融合 → 可选重排 top-6；结果带出处</span>
+          </h3>
+          <div className="master-grid">
+            <label className="field">
+              <span>目标章节</span>
+              <select className="memory-rag-target" value={previewTarget} onChange={(event) => setPreviewTarget(event.target.value)}>
+                {chapterTargets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.title}（{target.sourceChars} 字）
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>查询词（留空 = 自动：章纲 + 最近正文尾部）</span>
+              <input
+                className="memory-rag-query"
+                value={ragQuery}
+                placeholder="如：林渊 玄铁令"
+                onChange={(event) => setRagQuery(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="ai-foot">
+            <label className="checkbox">
+              <input type="checkbox" checked={ragRerank} onChange={(event) => setRagRerank(event.target.checked)} />
+              <span>启用重排（本地启发式 top-6；bge-reranker 为后续替换点）</span>
+            </label>
+            <button type="button" className="primary" disabled={busy || !previewTarget} onClick={() => void runRag()}>
+              检索预演
+            </button>
+          </div>
+          {!rag && (
+            <p className="muted">
+              两路并行召回（各 top-50）→ RRF 融合取 top-20 → 重排至 top-6；结果为「出处（chapter_id · 字符区间 · 块 hash）+ 段落」
+              供组装与核对。检索依赖索引：请先在「项目文件」页重建索引。
+            </p>
+          )}
+          {rag && (
+            <>
+              <div className="muted rag-preview">
+                查询「{rag.query}」（{rag.querySource === "custom" ? "自定义" : "自动"}）· 向量路 {rag.paths.vector} 条 / 关键词路{" "}
+                {rag.paths.keyword} 条 · 融合 {rag.fused.length} 条{rag.reranked.length > 0 ? ` → 重排 ${rag.reranked.length} 条` : ""} ·
+                向量实现 {rag.store === "sqlite-vec" ? "sqlite-vec" : `本地余弦兜底（${rag.dim} 维）`} · 向量库存量 {rag.vectorRows}
+              </div>
+              <div className="muted rag-note">
+                {rag.storeNote}
+                {rag.repairedVectors > 0 ? `（本次惰性补齐向量 ${rag.repairedVectors} 条）` : ""}
+              </div>
+              <table className="slot-table rag-hits">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>出处（章节 · 区间 · hash）</th>
+                    <th>段落</th>
+                    <th>向量路</th>
+                    <th>关键词路</th>
+                    <th>融合分</th>
+                    <th>重排</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(rag.reranked.length > 0 ? rag.reranked : rag.fused).map((hit) => (
+                    <tr key={hit.chunkId} className="rag-hit-row">
+                      <td>{hit.rerank ? hit.rerank.rank : hit.rank}</td>
+                      <td className="muted">
+                        {hit.chapterId ?? hit.path} · [{hit.charStart}, {hit.charEnd}) · {hit.textHash.slice(0, 8)}
+                      </td>
+                      <td>{hit.text.replace(/\s+/g, " ").slice(0, 60)}</td>
+                      <td className="muted">{hit.sources.vector ? `#${hit.sources.vector.rank} · ${hit.sources.vector.score.toFixed(3)}` : "—"}</td>
+                      <td className="muted">{hit.sources.keyword ? `#${hit.sources.keyword.rank} · ${hit.sources.keyword.score.toFixed(2)}` : "—"}</td>
+                      <td>{hit.score.toFixed(4)}</td>
+                      <td className="muted">{hit.rerank ? `#${hit.rerank.rank} · ${hit.rerank.score.toFixed(3)}` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {rag.reranked.length > 0 && rag.reranked[0]?.rerank && (
+                <div className="muted">重排依据（首条）：{rag.reranked[0].rerank.reason}</div>
               )}
             </>
           )}

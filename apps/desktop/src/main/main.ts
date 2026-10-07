@@ -714,6 +714,34 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       smallKeepsSystem: slotOf(asmSmall, "system_prompt").items.length === 1,
     };
 
+    // T3-8 RAG 探针：增量确认最新正文 → 双路召回（向量 + FTS5 bm25）→ RRF 融合 → 重排 → 出处（chapter_id + 区间 + hash）
+    await api.index.rebuild({ incremental: true });
+    const ragAuto = await api.memory.ragPreview({ chapterId: draft.chapterId });
+    const ragCustom = await api.memory.ragPreview({ chapterId: draft.chapterId, query: "天启界", rerankTopK: 6 });
+    const ragAssembly = await api.memory.assemble({ chapterId: draft.chapterId });
+    const ragSlotItems = (ragAssembly.slots.find((s) => s.slot === "rag_chunks") || { items: [] }).items;
+    const ragProbe = {
+      autoQuery: ragAuto.query.trim().length > 0 && ragAuto.querySource === "auto",
+      store: ragCustom.store,
+      storeNote: ragCustom.storeNote.length > 0,
+      fused: ragCustom.fused.length,
+      reranked: ragCustom.reranked.length,
+      vectorHits: ragCustom.paths.vector,
+      keywordHits: ragCustom.paths.keyword,
+      provenanceAll: ragCustom.fused.every((h) => h.textHash.length === 64 && h.charEnd > h.charStart && h.charStart >= 0),
+      chapterProvenance: ragCustom.fused.some((h) => h.chapterId === draft.chapterId),
+      fusedSorted: ragCustom.fused.every((h, i) => i === 0 || ragCustom.fused[i - 1].score >= h.score),
+      dualPath: ragCustom.fused.some((h) => h.sources.vector && h.sources.keyword),
+      rerankOk:
+        ragCustom.reranked.length > 0 &&
+        ragCustom.reranked.length <= 6 &&
+        Boolean(ragCustom.reranked[0].rerank) &&
+        String(ragCustom.reranked[0].rerank.reason).includes("词面覆盖"),
+      slotStatus: ragAssembly.rag ? ragAssembly.rag.status : "missing",
+      slotItems: ragSlotItems.length,
+      slotProvenance: ragSlotItems.every((item) => String(item.source || "").includes("出处")),
+    };
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -918,6 +946,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       memory: memoryProbe,
       injection: injectionProbe,
       assembly: assemblyProbe,
+      rag: ragProbe,
     };
   })()`;
   try {
@@ -1141,6 +1170,23 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         smallEvicted: boolean;
         smallWithin: boolean;
         smallKeepsSystem: boolean;
+      };
+      rag: {
+        autoQuery: boolean;
+        store: string;
+        storeNote: boolean;
+        fused: number;
+        reranked: number;
+        vectorHits: number;
+        keywordHits: number;
+        provenanceAll: boolean;
+        chapterProvenance: boolean;
+        fusedSorted: boolean;
+        dualPath: boolean;
+        rerankOk: boolean;
+        slotStatus: string;
+        slotItems: number;
+        slotProvenance: boolean;
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
@@ -1883,6 +1929,22 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.assembly.smallEvicted &&
       result.assembly.smallWithin &&
       result.assembly.smallKeepsSystem &&
+      result.rag.autoQuery &&
+      result.rag.storeNote &&
+      (result.rag.store === "cosine" || result.rag.store === "sqlite-vec") &&
+      result.rag.fused >= 1 &&
+      result.rag.reranked >= 1 &&
+      result.rag.reranked <= 6 &&
+      result.rag.vectorHits >= 1 &&
+      result.rag.keywordHits >= 1 &&
+      result.rag.provenanceAll &&
+      result.rag.chapterProvenance &&
+      result.rag.fusedSorted &&
+      result.rag.dualPath &&
+      result.rag.rerankOk &&
+      result.rag.slotStatus === "ok" &&
+      result.rag.slotItems >= 1 &&
+      result.rag.slotProvenance &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
@@ -1917,7 +1979,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

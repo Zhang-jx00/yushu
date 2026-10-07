@@ -38,6 +38,8 @@ import type {
   MemoryDeleteFactPayload,
   MemoryInjectionPreviewPayload,
   MemoryInjectionPreviewResult,
+  MemoryRagPreviewPayload,
+  MemoryRagPreviewResult,
   MemorySaveFactPayload,
   MemorySaveFactResult,
   MemorySaveSummaryPayload,
@@ -218,6 +220,8 @@ export interface YushuApi {
     injectionPreview: (payload: MemoryInjectionPreviewPayload) => Promise<MemoryInjectionPreviewResult>;
     /** 上下文组装（T3-7）：固定槽位顺序 + 槽位 cap + 全局预算裁剪 + 去重（决策与证据） */
     assemble: (payload: MemoryAssemblePayload) => Promise<MemoryAssemblyResult>;
+    /** RAG 检索预演（T3-8）：向量路 + 关键词路并行 → RRF 融合 → 可选重排（只读） */
+    ragPreview: (payload: MemoryRagPreviewPayload) => Promise<MemoryRagPreviewResult>;
   };
 }
 

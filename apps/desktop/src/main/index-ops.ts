@@ -10,12 +10,15 @@ import {
   lookupEntities,
   openIndex,
   queryChunks,
+  ragSearch,
   readFileIndex,
   readStats,
   rebuildIndex,
   type ChunkHit,
   type EntityHit,
   type IndexStats,
+  type RagSearchOptions,
+  type RagSearchResult,
 } from "@yushu/search";
 import {
   INDEX_DIR,
@@ -313,6 +316,28 @@ export async function searchProjectIndex(
     const chunks: ChunkHit[] = queryChunks(db, keyword, limit);
     const entities: EntityHit[] = lookupEntities(db, keyword, limit);
     return { keyword, chunks, entities };
+  } finally {
+    closeIndex(db);
+  }
+}
+
+/**
+ * RAG 混合检索（T3-8）：向量路（sqlite-vec；扩展不可用回退本地余弦）+ FTS5 bm25 关键词路
+ * 并行 → RRF(k=60) 融合 → 可选重排；结果带出处（chapter_id + 字符区间 + hash）。
+ * 索引缺失时给出可操作错误（组装路径会捕获并如实标注 skipped——检索不阻断组装）。
+ */
+export async function ragSearchIndex(
+  gateway: ProjectGateway,
+  options: RagSearchOptions & { query: string },
+): Promise<RagSearchResult> {
+  const dbPath = resolveDbPath(gateway);
+  if (!existsSync(dbPath)) {
+    throw new YushuError("E_INDEX_MISSING", "索引尚未构建：请先在「项目文件」页重建索引（RAG 检索依赖索引）");
+  }
+  const db = openIndex(dbPath);
+  try {
+    const { query, ...rest } = options;
+    return ragSearch(db, query, rest);
   } finally {
     closeIndex(db);
   }

@@ -42,6 +42,8 @@ import {
   type MemoryAssemblyResult,
   type MemoryInjectionPreviewPayload,
   type MemoryInjectionPreviewResult,
+  type MemoryRagPreviewPayload,
+  type MemoryRagPreviewResult,
   type MemorySaveFactPayload,
   type MemorySaveFactResult,
   type MemorySaveSummaryPayload,
@@ -121,6 +123,7 @@ import {
   deleteMemoryFact,
   loadMemoryState,
   previewInjection,
+  previewRag,
   saveMemoryFact,
   saveMemorySummary,
   summarizeMemory,
@@ -601,6 +604,11 @@ export function registerIpcHandlers(): void {
   // 上下文组装（T3-7）：固定槽位顺序 + 槽位 cap + 全局预算裁剪 + 去重（只读）
   ipcMain.handle(CHANNELS.memoryAssemble, (_event, payload: MemoryAssemblePayload) =>
     wrap<MemoryAssemblyResult>(() => assembleForChapter(requireGateway(), payload)),
+  );
+
+  // RAG 检索预演（T3-8）：向量路 + 关键词路并行 → RRF 融合 → 可选重排（只读）
+  ipcMain.handle(CHANNELS.memoryRagPreview, (_event, payload: MemoryRagPreviewPayload) =>
+    wrap<MemoryRagPreviewResult>(() => previewRag(requireGateway(), payload)),
   );
 
   // 正常退出（窗口关闭 → app.quit）：before-quit 不能等待异步——同步原子写把会话标记为 closed，
