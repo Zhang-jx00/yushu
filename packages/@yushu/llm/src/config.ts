@@ -15,10 +15,14 @@ import {
   type ProviderKind,
 } from "./types.js";
 
-/** LLM 配置与调用错误（code：E_LLM_CONFIG / E_LLM_NETWORK / E_LLM_HTTP / E_LLM_ABORTED） */
+/** LLM 配置与调用错误（code：E_LLM_CONFIG / E_LLM_NETWORK / E_LLM_HTTP / E_LLM_ABORTED / E_LLM_ROUTE） */
 export class LlmError extends YushuError {
-  constructor(code: string, message: string, options?: ErrorOptions) {
+  /** HTTP 状态码（仅 E_LLM_HTTP 携带；驱动重试分类与冷却记账，T3-2） */
+  readonly httpStatus?: number;
+
+  constructor(code: string, message: string, options?: ErrorOptions & { httpStatus?: number }) {
     super(code, message, options);
+    this.httpStatus = options?.httpStatus;
   }
 }
 

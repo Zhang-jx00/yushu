@@ -6,6 +6,9 @@
  * 请求参数上限。v1 简表（单 model + openai-compatible）由 config.ts 自动迁移（幂等）。
  */
 
+import type { ReliabilityConfig } from "./routing.js";
+import type { ReliabilityGate } from "./reliability.js";
+
 export const LLM_API_VERSION = "yushu.llm/v1" as const;
 /** 配置数据格式版本：1 = M1 单 model 简表；2 = M3 Provider 能力矩阵 */
 export const LLM_FORMAT_VERSION = 2;
@@ -136,6 +139,8 @@ export interface ChatResult {
   fallbacks: LlmFallbackInfo[];
   /** 是否被 AbortController 中止（中止时保留已生成部分） */
   aborted: boolean;
+  /** 本次调用内成功前额外重试的次数（T3-2；未启用可靠性时为 0） */
+  retries?: number;
 }
 
 export interface StreamCallbacks {
@@ -152,6 +157,11 @@ export interface LlmCallOptions {
   fetchImpl?: typeof fetch;
   /** provider 切换（fallback）时回调，便于 UI 提示 */
   onFallback?: (info: LlmFallbackInfo) => void;
+  /**
+   * 可靠性（T3-2）：重试（按错误类别）/ 冷却熔断 / 并发限制。
+   * gate 为跨调用共享的状态（冷却与并发计数），config 为本次调用的配置。
+   */
+  reliability?: { config: ReliabilityConfig; gate: ReliabilityGate };
 }
 
 /**

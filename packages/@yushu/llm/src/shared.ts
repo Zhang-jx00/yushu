@@ -55,6 +55,7 @@ export async function postJson(
       throw new LlmError(
         "E_LLM_HTTP",
         `provider「${provider.id}」返回 HTTP ${response.status}${snippet ? `：${snippet}` : ""}`,
+        { httpStatus: response.status },
       );
     }
     return response;
