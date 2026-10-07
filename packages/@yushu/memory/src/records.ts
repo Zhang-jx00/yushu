@@ -1,5 +1,6 @@
 import { parseFrontmatter, serializeCard } from "@yushu/core";
 import { MemoryError } from "./errors.js";
+import { parseInjectionConfig } from "./injection.js";
 import {
   MEMORY_FORMAT_VERSION,
   type FactRecord,
@@ -111,7 +112,7 @@ function parseFactSource(raw: unknown, label: string): FactSource | undefined {
   };
 }
 
-/** 解析事实级记忆（Markdown + frontmatter；keys 必填，source 可缺省） */
+/** 解析事实级记忆（Markdown + frontmatter；keys 必填，source / injection 可缺省） */
 export function parseFact(source: string): FactRecord {
   const { data, body } = parseFrontmatter(source);
   const record = asRecord(data, "fact frontmatter");
@@ -120,14 +121,17 @@ export function parseFact(source: string): FactRecord {
   if (!Array.isArray(rawKeys) || rawKeys.some((key) => typeof key !== "string" || key.trim() === "")) {
     fail("keys 应为非空字符串数组");
   }
+  const id = readString(record, "id", "id");
   const factSource = parseFactSource(record["source"], "source");
+  const injection = record["injection"] === undefined ? undefined : parseInjectionConfig(record["injection"], id);
   return {
     layer: "fact",
-    id: readString(record, "id", "id"),
+    id,
     project_id: readString(record, "project_id", "project_id"),
     keys: (rawKeys as string[]).map((key) => key.trim()),
     text: body.replace(/\n+$/, "\n"),
     ...(factSource ? { source: factSource } : {}),
+    ...(injection ? { injection } : {}),
     updated_at: readString(record, "updated_at", "updated_at"),
   };
 }
@@ -148,6 +152,17 @@ export function serializeFact(record: FactRecord): string {
               start: record.source.start,
               end: record.source.end,
               hash: record.source.hash,
+            },
+          }
+        : {}),
+      ...(record.injection
+        ? {
+            injection: {
+              mode: record.injection.mode,
+              priority: record.injection.priority,
+              position: record.injection.position,
+              budget_tokens: record.injection.budget_tokens,
+              ...(record.injection.reveal_gate ? { reveal_gate: record.injection.reveal_gate } : {}),
             },
           }
         : {}),

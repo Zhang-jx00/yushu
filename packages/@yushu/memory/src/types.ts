@@ -7,6 +7,8 @@
  * SQLite 只做索引；每条记录携带 `project_id` 命名空间（跨项目泄漏为红线 error）。
  */
 
+import type { InjectionConfig } from "./injection.js";
+
 export const MEMORY_API_VERSION = "yushu.memory/v1" as const;
 export const MEMORY_FORMAT_VERSION = 1;
 
@@ -46,6 +48,8 @@ export interface FactRecord {
   text: string;
   /** 出处（提取自正文时必填；手工登记可缺省——lint 会给 warn） */
   source?: FactSource;
+  /** 注入控制（T3-6；缺省时消费方按层合并默认：trigger / 50 / near_end / 400） */
+  injection?: InjectionConfig;
   updated_at: string;
 }
 
