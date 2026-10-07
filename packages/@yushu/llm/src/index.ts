@@ -15,5 +15,6 @@ export * from "./reliability.js";
 export * from "./presets.js";
 export * from "./downgrade.js";
 export * from "./structured.js";
+export * from "./batch.js";
 export * from "./chat.js";
 export * from "./stream.js";
