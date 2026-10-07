@@ -93,6 +93,8 @@ export interface AssemblyItem {
   /** 新近度（越大越新；同优先级保新；缺省 0） */
   recency?: number;
   source?: string;
+  /** 触发命中键（trigger 模式命中的 keys；T3-9 预览器「命中键」列数据源） */
+  matched_keys?: string[];
 }
 
 export interface AssembleBudget {
@@ -113,6 +115,8 @@ export interface AssembledItem {
   recency: number;
   stable: boolean;
   source?: string;
+  /** 触发命中键（T3-9 预览器「命中键」列；缺省空数组） */
+  matched_keys: string[];
 }
 
 export interface AssembledSlot {
@@ -393,5 +397,6 @@ function toAssembled(item: AssemblyItem, text: string, tokens: number, truncated
     recency: item.recency ?? 0,
     stable: item.stable ?? false,
     ...(item.source ? { source: item.source } : {}),
+    matched_keys: [...(item.matched_keys ?? [])],
   };
 }
