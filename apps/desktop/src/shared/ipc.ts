@@ -82,6 +82,8 @@ export const CHANNELS = {
   memorySaveFact: "memory:saveFact",
   memoryDeleteFact: "memory:deleteFact",
   memoryInjectionPreview: "memory:injectionPreview",
+  /** 上下文组装（T3-7）：固定槽位顺序 + 预算裁剪 + 去重（决策与证据） */
+  memoryAssemble: "memory:assemble",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -1135,6 +1137,59 @@ export interface MemoryInjectionPreviewResult {
   entries: InjectionPlanEntryPayload[];
   excluded: InjectionExclusionPayload[];
   totals: { injected: number; excluded: number; tokens: number };
+}
+
+/* ---------- 上下文组装（T3-7；结构与 @yushu/memory assemble 兼容） ---------- */
+
+export interface MemoryAssemblePayload {
+  chapterId: string;
+  manualIds?: string[];
+  /** 总预算（token 估算；缺省 32000） */
+  budget_total?: number;
+}
+
+export interface AssembledItemPayload {
+  id: string;
+  title: string;
+  text: string;
+  tokens: number;
+  truncated: boolean;
+  priority: number;
+  recency: number;
+  stable: boolean;
+  source?: string;
+}
+
+export interface AssembledSlotPayload {
+  slot: string;
+  mode: string;
+  cap_tokens: number;
+  items: AssembledItemPayload[];
+  tokens: number;
+  truncated: boolean;
+}
+
+export interface AssemblyDropPayload {
+  id: string;
+  slot: string;
+  /** cap=槽位上限；budget=全局预算逐出；recent_n=近 N 条窗口；by_id / by_similarity=去重 */
+  reason: "cap" | "budget" | "recent_n" | "by_id" | "by_similarity";
+  detail: string;
+  tokens: number;
+}
+
+export interface MemoryAssemblyResult {
+  chapterId: string;
+  chapterTitle: string;
+  chapterOrdinal: number;
+  chapterPath: string;
+  slots: AssembledSlotPayload[];
+  stableTokens: number;
+  totalTokens: number;
+  budget_total: number;
+  dropped: AssemblyDropPayload[];
+  dedup: { by_id: number; by_similarity: number };
+  truncatedItems: number;
 }
 
 /**

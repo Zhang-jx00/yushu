@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-30 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵 / 任务路由与可靠性 / 本地模型接入与能力标注 / 五层记忆（摘要候选与 rev 保护 / 事实出处链）/ 注入控制与注入预演）。
+ * 步骤 10-31 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵 / 任务路由与可靠性 / 本地模型接入与能力标注 / 五层记忆（摘要候选与 rev 保护 / 事实出处链）/ 注入控制与注入预演 / 上下文组装）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -1395,6 +1395,55 @@ const STEPS: StepDef[] = [
           '；预演：' + lineText.replace(/\s+/g, ' ').slice(0, 120) +
           '；注入条目=' + entries.length + '（trigger 命中=' + factTriggered + '、摘要常驻=' + summaryAlways + '）' +
           '；排除=' + excludedCount + '（含原因清单=' + excludedReasons + '）',
+      };
+    `,
+  },
+  {
+    step: 31,
+    title: "记忆：上下文组装（固定槽位顺序 + 预算裁剪 + 去重，T3-7）",
+    file: "step31-assembly.png",
+    body: String.raw`
+      await tab('记忆');
+      const panel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.panel h3')].find((x) => x.textContent.includes('组装预演'));
+        return title ? title.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到组装预演面板：' + pageText() };
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      const findBtn = () => [...panel.querySelectorAll('button')].find((b) => b.textContent.trim() === '组装预演');
+      const btn = findBtn();
+      if (!btn || btn.disabled) return { ok: false, note: '组装预演按钮不可用：' + pageText() };
+      btn.click();
+      const line = await waitFor(() => document.querySelector('.assembly-preview'), 12000);
+      if (!line) return { ok: false, note: '组装预演未返回：' + pageText() };
+      const lineText = String(line.textContent).replace(/\s+/g, ' ');
+      const rows = [...document.querySelectorAll('.assembly-slot-row')];
+      const rowText = rows.map((r) => String(r.innerText).replace(/\s+/g, ' ')).join(' | ');
+      const slotsOk = rows.length === 8 && rowText.includes('system_prompt') && rowText.includes('recent_prose');
+      const summaryOk = lineText.includes('预算 32000') && /合计 \d+ token/.test(lineText);
+      // 小预算（40 token）：应出现逐出证据（reason=budget）且 system_prompt 仍在（只截断不丢）
+      const budgetInput = panel.querySelector('.memory-assemble-budget');
+      if (!budgetInput) return { ok: false, note: '找不到预算输入：' + pageText() };
+      setV(budgetInput, '40');
+      const btn2 = findBtn();
+      if (btn2) btn2.click();
+      const dropped = await waitFor(() => {
+        const list = document.querySelector('.assembly-drop');
+        return list && list.innerText.includes('budget') ? list.innerText : null;
+      }, 12000);
+      const smallLine = String((document.querySelector('.assembly-preview') || {}).textContent || '').replace(/\s+/g, ' ');
+      const smallRows = [...document.querySelectorAll('.assembly-slot-row')];
+      const systemRow = smallRows.find((r) => String(r.innerText).includes('system_prompt'));
+      const systemKept = systemRow !== undefined && /^\S+\s+always\s+1\s/.test(String(systemRow.innerText).replace(/\s+/g, ' '));
+      await sleep(200);
+      return {
+        ok: slotsOk && summaryOk && dropped !== null && smallLine.includes('预算 40') && systemKept,
+        note: '默认：' + lineText.slice(0, 120) +
+          '；槽位表 8 行=' + (rows.length === 8) + '（system_prompt / recent_prose 在列=' + slotsOk + '）' +
+          '；小预算逐出证据="' + (dropped !== null ? String(dropped).replace(/\s+/g, ' ').slice(0, 90) : '无') + '"' +
+          '；小预算 system_prompt 保留=' + systemKept +
+          '；小预算回执="' + smallLine.slice(0, 80) + '"',
       };
     `,
   },

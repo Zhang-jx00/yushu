@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   InjectionConfigPayload,
+  MemoryAssemblyResult,
   MemoryInjectionPreviewResult,
   MemoryStatePayload,
   MemoryTargetPayload,
@@ -9,12 +10,13 @@ import type {
 import { api } from "../api";
 
 /**
- * 记忆页（M3 / T3-5 五层记忆的管理界面；T3-6 注入控制）：
+ * 记忆页（M3 / T3-5 五层记忆的管理界面；T3-6 注入控制；T3-7 上下文组装）：
  * - 摘要目标（卷 / 章）：AI 生成候选（**不入库**）→ 采纳（AI 入库，rev 0）或人工修订（rev+1）；
  *   `summary_rev > 0` 后 AI 再入库被拒（E_MEMORY_REV_PROTECTED——人工修订受保护）；
  * - 事实级记忆台账：带出处徽标（出处有效 / 出处失效 / 无出处——正文改动后可检出失效）
  *   与注入配置（mode / priority / position / budget_tokens / reveal_gate）；
  * - 注入预演（T3-6）：对指定章节输出注入计划（决策 + 命中键 + 排除原因 + token 估算）；
+ * - 组装预演（T3-7）：固定槽位顺序 + 槽位 cap + 全局预算裁剪 + 去重（逐出 / 截断证据）；
  * - 记录体检（findings）与跨项目拒绝清单（error 红线仅展示、不进入本项目记忆）。
  */
 
@@ -71,6 +73,10 @@ export function MemoryView() {
   // 注入预演（T3-6）
   const [previewTarget, setPreviewTarget] = useState("");
   const [preview, setPreview] = useState<MemoryInjectionPreviewResult | null>(null);
+
+  // 组装预演（T3-7）
+  const [assemblyBudget, setAssemblyBudget] = useState(32000);
+  const [assembly, setAssembly] = useState<MemoryAssemblyResult | null>(null);
 
   const refresh = useCallback(async () => {
     const next = await api().memory.state();
@@ -168,6 +174,13 @@ export function MemoryView() {
       if (!previewTarget) return;
       setNotice(null);
       setPreview(await api().memory.injectionPreview({ chapterId: previewTarget }));
+    });
+
+  const runAssembly = () =>
+    guard(async () => {
+      if (!previewTarget) return;
+      setNotice(null);
+      setAssembly(await api().memory.assemble({ chapterId: previewTarget, budget_total: assemblyBudget }));
     });
 
   const removeFact = (id: string, baseHash: string) =>
@@ -463,6 +476,86 @@ export function MemoryView() {
                   {preview.excluded.map((item) => (
                     <li key={item.id} className="muted">
                       【{item.code}】{item.title}——{item.reason}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="panel">
+          <h3>
+            组装预演 <span className="muted">T3-7：固定槽位顺序 + 槽位 cap + 全局预算裁剪 + 去重</span>
+          </h3>
+          <div className="master-grid">
+            <label className="field">
+              <span>目标章节</span>
+              <select className="memory-assemble-target" value={previewTarget} onChange={(event) => setPreviewTarget(event.target.value)}>
+                {chapterTargets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.title}（{target.sourceChars} 字）
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>总预算（token 估算）</span>
+              <input
+                className="memory-assemble-budget"
+                type="number"
+                min={10}
+                max={200000}
+                value={assemblyBudget}
+                onChange={(event) => setAssemblyBudget(Number(event.target.value) || 32000)}
+              />
+            </label>
+            <button type="button" className="primary" disabled={busy || !previewTarget} onClick={() => void runAssembly()}>
+              组装预演
+            </button>
+          </div>
+          {!assembly && (
+            <p className="muted">
+              槽位顺序：system_prompt → world_core → volume_summary → chapter_summary → triggered_cards → facts → rag_chunks →
+              recent_prose；预算超限按 priority_then_recent 逐出（低价值槽位先出）。
+            </p>
+          )}
+          {assembly && (
+            <>
+              <div className="muted assembly-preview">
+                第 {assembly.chapterOrdinal} 章「{assembly.chapterTitle}」· 合计 {assembly.totalTokens} token / 预算{" "}
+                {assembly.budget_total} · 稳定前缀 {assembly.stableTokens} token · 截断 {assembly.truncatedItems} 条 · 去重{" "}
+                {assembly.dedup.by_id + assembly.dedup.by_similarity} 条（id {assembly.dedup.by_id} / 相似 {assembly.dedup.by_similarity}）
+              </div>
+              <table className="slot-table assembly-slots">
+                <thead>
+                  <tr>
+                    <th>槽位</th>
+                    <th>模式</th>
+                    <th>条目</th>
+                    <th>token / cap</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assembly.slots.map((slot) => (
+                    <tr key={slot.slot} className="assembly-slot-row">
+                      <td>{slot.slot}</td>
+                      <td className="muted">{slot.mode}</td>
+                      <td>{slot.items.length}</td>
+                      <td>
+                        {slot.tokens} / {slot.cap_tokens}
+                      </td>
+                      <td>{slot.truncated ? "截断" : slot.items.length === 0 ? "—" : "ok"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {assembly.dropped.length > 0 && (
+                <ul className="assembly-drop">
+                  {assembly.dropped.slice(0, 12).map((item, index) => (
+                    <li key={`${item.id}-${index}`} className="muted">
+                      【{item.reason}】{item.id}（{item.slot}）——{item.detail}
                     </li>
                   ))}
                 </ul>

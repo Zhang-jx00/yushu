@@ -38,6 +38,8 @@ import {
   type LibraryViewPayload,
   type IpcResult,
   type MemoryDeleteFactPayload,
+  type MemoryAssemblePayload,
+  type MemoryAssemblyResult,
   type MemoryInjectionPreviewPayload,
   type MemoryInjectionPreviewResult,
   type MemorySaveFactPayload,
@@ -115,6 +117,7 @@ import {
 import { recordActivity, readStatsState, setStatsGoal } from "./stats-ops.js";
 import { gitCommit, gitInit, gitRollback, gitState } from "./git-ops.js";
 import {
+  assembleForChapter,
   deleteMemoryFact,
   loadMemoryState,
   previewInjection,
@@ -593,6 +596,11 @@ export function registerIpcHandlers(): void {
   // 注入预演（T3-6）：对指定章节输出注入计划（决策 + 排除原因 + token 估算；只读）
   ipcMain.handle(CHANNELS.memoryInjectionPreview, (_event, payload: MemoryInjectionPreviewPayload) =>
     wrap<MemoryInjectionPreviewResult>(() => previewInjection(requireGateway(), payload)),
+  );
+
+  // 上下文组装（T3-7）：固定槽位顺序 + 槽位 cap + 全局预算裁剪 + 去重（只读）
+  ipcMain.handle(CHANNELS.memoryAssemble, (_event, payload: MemoryAssemblePayload) =>
+    wrap<MemoryAssemblyResult>(() => assembleForChapter(requireGateway(), payload)),
   );
 
   // 正常退出（窗口关闭 → app.quit）：before-quit 不能等待异步——同步原子写把会话标记为 closed，

@@ -4,6 +4,7 @@ import {
   DEFAULT_INJECTION,
   applyAiSummary,
   applyHumanSummaryEdit,
+  assembleContext,
   buildFactSource,
   lintMemory,
   parseChapterSummary,
@@ -14,10 +15,13 @@ import {
   serializeFact,
   serializeSummary,
   verifyFactSource,
+  type AssemblyItem,
+  type ContextSlotName,
   type FactRecord,
   type FactSource,
   type InjectableItem,
   type InjectionConfig,
+  type InjectionPlan,
   type MemoryLintFinding,
   type MemoryRecord,
   type SummaryRecord,
@@ -43,6 +47,8 @@ import {
 } from "@yushu/world-engine";
 import type {
   InjectionConfigPayload,
+  MemoryAssemblePayload,
+  MemoryAssemblyResult,
   MemoryDeleteFactPayload,
   MemoryFactPayload,
   MemoryInjectionPreviewPayload,
@@ -60,7 +66,7 @@ import type {
 import { appendAiUsage, newUsageId } from "./ai-usage.js";
 import { loadLlmConfigForUse, loadRoutingConfigForUse, reliabilityGate, sessionKeySnapshot } from "./ai-ops.js";
 import { ProjectGateway } from "./file-gateway.js";
-import { readAllCards } from "./prompt-ops.js";
+import { buildContextPreview, readAllCards } from "./prompt-ops.js";
 
 /**
  * 五层记忆主进程编排（M3 / T3-5）：
@@ -494,15 +500,28 @@ export async function deleteMemoryFact(
   return true;
 }
 
+interface CollectedChapter {
+  chapterId: string;
+  chapterTitle: string;
+  chapterOrdinal: number;
+  chapterPath: string;
+  mentionText: string;
+  items: InjectableItem[];
+  ordinalOf: (chapterId: string) => number | null;
+  /** 条目新近度（priority_then_recent 用；缺省 0） */
+  recencyOf: Map<string, number>;
+  /** 稳定前缀文本（system_prompt + world_constraints；人设与任务约束必须常驻） */
+  systemText: string;
+  /** 最近正文（recent_prose 槽位） */
+  recentProse: string;
+}
+
 /**
- * 注入预演（T3-6）：对指定章节组装五层记忆的注入计划（决策 + 排除原因 + token 估算）。
- * 数据源：摘要（常驻槽位）/ 事实（keys 触发，含记录级注入配置）/ 设定卡（名称·别名触发，
- * 卡片 frontmatter 可声明 `injection` 覆盖）。T3-7 的总预算裁剪与槽位落位在此决策之上进行。
+ * 收集指定章节的五层记忆可注入条目（T3-6/T3-7 共用）：
+ * 摘要（常驻槽位）/ 事实（keys 触发，记录级注入配置）/ 设定卡（名称·别名触发，
+ * 卡片 frontmatter `injection` 可覆盖）；同时给出系统提示与最近正文（来自既有上下文组装）。
  */
-export async function previewInjection(
-  gateway: ProjectGateway,
-  payload: MemoryInjectionPreviewPayload,
-): Promise<MemoryInjectionPreviewResult> {
+async function collectChapterContext(gateway: ProjectGateway, chapterId: string): Promise<CollectedChapter> {
   const outline = await readOutlineSafe(gateway);
   if (!outline) throw new YushuError("E_OUTLINE", "项目尚无大纲：请先完成三级大纲");
 
@@ -518,23 +537,30 @@ export async function previewInjection(
       ordered.push({ volume, chapter, path: chapterPath(volume.id, chapter.chapter_id), ordinal });
     }
   }
-  const locate = ordered.find((item) => item.chapter.chapter_id === payload.chapterId);
-  if (!locate) throw new YushuError("E_INVALID_INPUT", `找不到章节：${payload.chapterId}（可能尚未创建草稿章节）`);
-  const ordinalOf = (chapterId: string) => ordered.find((item) => item.chapter.chapter_id === chapterId)?.ordinal ?? null;
+  const locate = ordered.find((item) => item.chapter.chapter_id === chapterId);
+  if (!locate) throw new YushuError("E_INVALID_INPUT", `找不到章节：${chapterId}（可能尚未创建草稿章节）`);
+  const ordinalOf = (id: string) => ordered.find((item) => item.chapter.chapter_id === id)?.ordinal ?? null;
   const mentionText = await readChapterBody(gateway, locate.path);
   const chapterTitleById = new Map(ordered.map((item) => [item.chapter.chapter_id!, item.chapter.title]));
+  const chapterOrdinalById = new Map(ordered.map((item) => [item.chapter.chapter_id!, item.ordinal]));
 
   const state = await loadMemoryState(gateway);
   const items: InjectableItem[] = [];
+  const recencyOf = new Map<string, number>();
   for (const summary of state.summaries) {
     const title =
       summary.layer === "volume_summary"
         ? `卷摘要：${volumeTitles.get(summary.id) ?? summary.id}`
         : `章摘要：${chapterTitleById.get(summary.id) ?? summary.id}`;
     items.push({ id: summary.id, layer: summary.layer, title, text: summary.text, keys: [], config: SUMMARY_INJECTION[summary.layer] });
+    recencyOf.set(
+      summary.id,
+      summary.layer === "chapter_summary" ? (chapterOrdinalById.get(summary.id) ?? 0) : Date.parse(summary.updated_at) || 0,
+    );
   }
   for (const fact of state.facts) {
     items.push({ id: fact.id, layer: "fact", title: `事实：${fact.id}`, text: fact.text, keys: fact.keys, config: fact.injection });
+    recencyOf.set(fact.id, Date.parse(fact.updated_at) || 0);
   }
   const cards = await readAllCards(gateway);
   for (const card of cards) {
@@ -557,20 +583,116 @@ export async function previewInjection(
     });
   }
 
-  const plan = planInjection(items, {
-    chapterOrdinal: locate.ordinal,
-    ordinalOf,
-    mentionText,
-    ...(payload.manualIds ? { manualIds: payload.manualIds } : {}),
-  });
+  // 系统提示与最近正文（复用既有上下文组装的槽位文本——稳定前缀置头）
+  const preview = await buildContextPreview(gateway, { volumeId: locate.volume.id, chapterId: locate.chapter.id });
+  const slotText = (name: string) => preview.slots.find((slot) => slot.slot === name)?.text ?? "";
+  const systemText = [slotText("system_prompt"), slotText("world_constraints")].filter((text) => text.trim() !== "").join("\n\n");
+
   return {
-    chapterId: payload.chapterId,
+    chapterId,
     chapterTitle: locate.chapter.title,
     chapterOrdinal: locate.ordinal,
     chapterPath: locate.path,
-    mentionChars: mentionText.length,
+    mentionText,
+    items,
+    ordinalOf,
+    recencyOf,
+    systemText,
+    recentProse: slotText("recent_prose"),
+  };
+}
+
+function planFor(collected: CollectedChapter, manualIds?: string[]): InjectionPlan {
+  return planInjection(collected.items, {
+    chapterOrdinal: collected.chapterOrdinal,
+    ordinalOf: collected.ordinalOf,
+    mentionText: collected.mentionText,
+    ...(manualIds ? { manualIds } : {}),
+  });
+}
+
+/**
+ * 注入预演（T3-6）：对指定章节输出注入计划（决策 + 排除原因 + token 估算）。
+ * T3-7 的组装（assembleForChapter）在此决策之上做槽位落位、去重与预算裁剪。
+ */
+export async function previewInjection(
+  gateway: ProjectGateway,
+  payload: MemoryInjectionPreviewPayload,
+): Promise<MemoryInjectionPreviewResult> {
+  const collected = await collectChapterContext(gateway, payload.chapterId);
+  const plan = planFor(collected, payload.manualIds);
+  return {
+    chapterId: collected.chapterId,
+    chapterTitle: collected.chapterTitle,
+    chapterOrdinal: collected.chapterOrdinal,
+    chapterPath: collected.chapterPath,
+    mentionChars: collected.mentionText.length,
     entries: plan.entries,
     excluded: plan.excluded,
     totals: { injected: plan.entries.length, excluded: plan.excluded.length, tokens: plan.totalTokens },
+  };
+}
+
+/** 注入条目 → 组装槽位（T3-7）：常驻卡片进 world_core（稳定前缀），触发卡片进 triggered_cards；fact → facts */
+function slotOf(entry: { layer: InjectableItem["layer"]; mode: InjectionConfig["mode"] }): ContextSlotName {
+  if (entry.layer === "world_core") return entry.mode === "always" ? "world_core" : "triggered_cards";
+  if (entry.layer === "fact") return "facts";
+  return entry.layer;
+}
+
+/**
+ * 上下文组装（T3-7；docs/03 §10.2）：固定槽位顺序 + 槽位 cap + 全局预算裁剪 +
+ * 去重（by_id / by_similarity）+ priority_then_recent 逐出；输出完整决策证据（供 T3-9 预览器与快照）。
+ */
+export async function assembleForChapter(
+  gateway: ProjectGateway,
+  payload: MemoryAssemblePayload,
+): Promise<MemoryAssemblyResult> {
+  const collected = await collectChapterContext(gateway, payload.chapterId);
+  const plan = planFor(collected, payload.manualIds);
+
+  const assemblyItems: AssemblyItem[] = [];
+  if (collected.systemText.trim() !== "") {
+    assemblyItems.push({
+      id: "system_prompt",
+      slot: "system_prompt",
+      title: "系统提示（人设 + 世界约束）",
+      text: collected.systemText,
+      stable: true,
+      priority: 100,
+      source: "内置人设 + 派系包约束",
+    });
+  }
+  if (collected.recentProse.trim() !== "") {
+    assemblyItems.push({
+      id: "recent_prose",
+      slot: "recent_prose",
+      title: "最近正文",
+      text: collected.recentProse,
+      priority: 90,
+      recency: collected.chapterOrdinal,
+      source: collected.chapterPath,
+    });
+  }
+  for (const entry of plan.entries) {
+    assemblyItems.push({
+      id: entry.id,
+      slot: slotOf(entry),
+      title: entry.title,
+      text: entry.text,
+      stable: entry.layer === "world_core" && entry.mode === "always",
+      priority: entry.priority,
+      recency: collected.recencyOf.get(entry.id) ?? 0,
+      source: entry.reason,
+    });
+  }
+
+  const result = assembleContext(assemblyItems, { budget_total: payload.budget_total ?? 32000 });
+  return {
+    chapterId: collected.chapterId,
+    chapterTitle: collected.chapterTitle,
+    chapterOrdinal: collected.chapterOrdinal,
+    chapterPath: collected.chapterPath,
+    ...result,
   };
 }

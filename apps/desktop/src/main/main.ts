@@ -692,6 +692,28 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       tokens: injPreview.totals.tokens,
     };
 
+    // T3-7 组装探针：固定槽位顺序 / 摘要与事实落位 / 去重（同文本事实）/ 小预算逐出 + 稳定前缀保留
+    await api.memory.saveFact({ keys: ["玄铁令"], text: "主角获得玄铁令。", injection: { mode: "trigger", priority: 5, position: "near_end", budget_tokens: 100 } });
+    const asmDefault = await api.memory.assemble({ chapterId: draft.chapterId });
+    const asmSmall = await api.memory.assemble({ chapterId: draft.chapterId, budget_total: 40 });
+    const slotOf = (result, name) => result.slots.find((s) => s.slot === name) || { items: [] };
+    const assemblyProbe = {
+      slotOrder: asmDefault.slots.map((s) => s.slot).join(">"),
+      slots: asmDefault.slots.length,
+      totalTokens: asmDefault.totalTokens,
+      budget: asmDefault.budget_total,
+      systemStable: slotOf(asmDefault, "system_prompt").items.length === 1 && (slotOf(asmDefault, "system_prompt").items[0] || {}).stable === true,
+      chapterSummary: slotOf(asmDefault, "chapter_summary").items.length === 1,
+      factsInjected: slotOf(asmDefault, "facts").items.length >= 2,
+      recentProse: slotOf(asmDefault, "recent_prose").items.length === 1,
+      dedupSimilar: asmDefault.dedup.by_similarity >= 1,
+      stableTokens: asmDefault.stableTokens,
+      smallBudget: asmSmall.budget_total === 40,
+      smallEvicted: asmSmall.dropped.some((d) => d.reason === "budget"),
+      smallWithin: asmSmall.totalTokens <= 40,
+      smallKeepsSystem: slotOf(asmSmall, "system_prompt").items.length === 1,
+    };
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -895,6 +917,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       git: gitProbe,
       memory: memoryProbe,
       injection: injectionProbe,
+      assembly: assemblyProbe,
     };
   })()`;
   try {
@@ -1102,6 +1125,22 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         summaryAlways: boolean;
         chapterOrdinal: number;
         tokens: number;
+      };
+      assembly: {
+        slotOrder: string;
+        slots: number;
+        totalTokens: number;
+        budget: number;
+        systemStable: boolean;
+        chapterSummary: boolean;
+        factsInjected: boolean;
+        recentProse: boolean;
+        dedupSimilar: boolean;
+        stableTokens: number;
+        smallBudget: boolean;
+        smallEvicted: boolean;
+        smallWithin: boolean;
+        smallKeepsSystem: boolean;
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
@@ -1830,6 +1869,20 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.injection.summaryAlways &&
       result.injection.chapterOrdinal === 1 &&
       result.injection.tokens > 0 &&
+      result.assembly.slotOrder === "system_prompt>world_core>volume_summary>chapter_summary>triggered_cards>facts>rag_chunks>recent_prose" &&
+      result.assembly.slots === 8 &&
+      result.assembly.budget === 32000 &&
+      result.assembly.totalTokens > 0 &&
+      result.assembly.systemStable &&
+      result.assembly.chapterSummary &&
+      result.assembly.factsInjected &&
+      result.assembly.recentProse &&
+      result.assembly.dedupSimilar &&
+      result.assembly.stableTokens > 0 &&
+      result.assembly.smallBudget &&
+      result.assembly.smallEvicted &&
+      result.assembly.smallWithin &&
+      result.assembly.smallKeepsSystem &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
@@ -1864,7 +1917,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
