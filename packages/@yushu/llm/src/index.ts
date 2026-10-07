@@ -12,5 +12,7 @@ export * from "./types.js";
 export * from "./config.js";
 export * from "./routing.js";
 export * from "./reliability.js";
+export * from "./presets.js";
+export * from "./downgrade.js";
 export * from "./chat.js";
 export * from "./stream.js";
