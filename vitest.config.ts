@@ -11,6 +11,7 @@ export default defineConfig({
       "@yushu/genre-engine": resolve("./packages/@yushu/genre-engine/src/index.ts"),
       "@yushu/world-engine": resolve("./packages/@yushu/world-engine/src/index.ts"),
       "@yushu/llm": resolve("./packages/@yushu/llm/src/index.ts"),
+      "@yushu/memory": resolve("./packages/@yushu/memory/src/index.ts"),
       "@yushu/export": resolve("./packages/@yushu/export/src/index.ts"),
       "@yushu/search": resolve("./packages/@yushu/search/src/index.ts"),
     },

@@ -202,6 +202,9 @@ importers:
       '@yushu/llm':
         specifier: workspace:*
         version: link:../../packages/@yushu/llm
+      '@yushu/memory':
+        specifier: workspace:*
+        version: link:../../packages/@yushu/memory
       '@yushu/search':
         specifier: workspace:*
         version: link:../../packages/@yushu/search
@@ -298,6 +301,15 @@ importers:
         version: 2.9.1
 
   packages/@yushu/llm:
+    dependencies:
+      '@yushu/core':
+        specifier: workspace:*
+        version: link:../core
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.1
+
+  packages/@yushu/memory:
     dependencies:
       '@yushu/core':
         specifier: workspace:*

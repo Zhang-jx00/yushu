@@ -35,5 +35,30 @@ export function chapterPath(volume: string, id: string): string {
 /** 大纲路径（三级大纲唯一事实源） */
 export const OUTLINE_PATH = `${OUTLINE_DIR}/outline.yaml`;
 
+/**
+ * 五层记忆真源目录（T3-5；docs/03 §10.1）：
+ * 摘要与事实均为项目内 Markdown（YAML frontmatter + 正文），SQLite 只做索引不做真源。
+ * world_core 层复用既有设定卡（world/cards/），rag 层为检索派生（不落真源）。
+ */
+export const MEMORY_DIR = "memory";
+export const MEMORY_VOLUME_SUMMARIES_DIR = `${MEMORY_DIR}/volumes`;
+export const MEMORY_CHAPTER_SUMMARIES_DIR = `${MEMORY_DIR}/chapters`;
+export const MEMORY_FACTS_DIR = `${MEMORY_DIR}/facts`;
+
+/** 卷摘要路径：memory/volumes/<vol-*>.md */
+export function volumeSummaryPath(id: string): string {
+  return `${MEMORY_VOLUME_SUMMARIES_DIR}/${id}.md`;
+}
+
+/** 章摘要路径：memory/chapters/<ch-*>.md */
+export function chapterSummaryPath(id: string): string {
+  return `${MEMORY_CHAPTER_SUMMARIES_DIR}/${id}.md`;
+}
+
+/** 事实级记忆路径：memory/facts/<fact-*>.md */
+export function factPath(id: string): string {
+  return `${MEMORY_FACTS_DIR}/${id}.md`;
+}
+
 /** 项目配置（TOML，docs/01 技术基线；M1 阶段先保留路径常量） */
 export const PROJECT_CONFIG_PATH = "project.toml";

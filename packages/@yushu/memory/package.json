@@ -1,0 +1,26 @@
+{
+  "name": "@yushu/memory",
+  "version": "0.1.0-alpha.0",
+  "description": "御书记忆系统（M3 / T3-5）：五层记忆真源记录（卷/章摘要、事实级带出处）、提及追踪与跨项目隔离校验",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@yushu/core": "workspace:*",
+    "yaml": "^2.6.0"
+  }
+}

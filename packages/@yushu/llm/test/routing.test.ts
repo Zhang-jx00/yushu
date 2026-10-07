@@ -104,8 +104,16 @@ describe("routing 配置解析（T3-2）", () => {
     ).toThrowError(/global/);
   });
 
-  it("DEFAULT_TASK_ROUTES 覆盖 docs/03 §9 的五个任务", () => {
-    expect(Object.keys(DEFAULT_TASK_ROUTES).sort()).toEqual(["drafting", "naming", "outline", "polish", "review"]);
+  it("DEFAULT_TASK_ROUTES 覆盖 docs/03 §9 的五个任务 + T3-5 记忆摘要（summarize）", () => {
+    expect(Object.keys(DEFAULT_TASK_ROUTES).sort()).toEqual([
+      "drafting",
+      "naming",
+      "outline",
+      "polish",
+      "review",
+      "summarize",
+    ]);
+    expect(DEFAULT_TASK_ROUTES["summarize"]?.prefer).toEqual(["small"]);
   });
 });
 

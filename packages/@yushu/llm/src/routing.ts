@@ -70,13 +70,14 @@ export interface RoutingConfig {
   reliability: ReliabilityConfig;
 }
 
-/** 内置默认路由（docs/03 §9：outline/naming/polish → small、drafting → flagship(require stream)、review → reasoning） */
+/** 内置默认路由（docs/03 §9：outline/naming/polish → small、drafting → flagship(require stream)、review → reasoning；summarize 为 T3-5 记忆摘要——压缩类任务走小模型） */
 export const DEFAULT_TASK_ROUTES: Readonly<Record<string, TaskRoute>> = Object.freeze({
   outline: { prefer: ["small"], require: ["structured_output"] },
   naming: { prefer: ["small"] },
   polish: { prefer: ["small"] },
   drafting: { prefer: ["flagship"], require: ["stream"] },
   review: { prefer: ["reasoning"] },
+  summarize: { prefer: ["small"] },
 });
 
 export function defaultRoutingConfig(): RoutingConfig {
