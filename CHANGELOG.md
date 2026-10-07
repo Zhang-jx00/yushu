@@ -6,6 +6,10 @@
 
 目标版本：M3（AI Provider 与上下文记忆，见 `docs/04-开发计划.md` §6）——下一增量从此开始。
 
+### M3 增量（T3-1～）
+
+- **Provider 抽象与能力矩阵（T3-1）**：`config/llm.yaml` 升级 **v2** —— provider 描述 = `kind`（cloud / local）+ `protocol`（openai_chat / anthropic_messages / gemini_generate）+ `models[]`（每模型 `tier` / `capabilities` / `limits`）；能力矩阵八项（tools / structured_output / stream / usage / reasoning / vision / cache / batch）按「未声明不得假定支持」合并保守默认，`limits`（context / max_output / rpm / tpm）驱动请求上限（`max_tokens` 不超过模型 `max_output`）。**v1 配置自动迁移（幂等）**：kind 按 base_url 推断（本机回环 → local）、protocol → openai_chat、`context_window / max_tokens` 承接为 limits；读取为内存态迁移，保存覆盖 v1 前自动备份 `config/llm.yaml.bak-v1`（幂等、可回滚）。**协议适配**：新增 **Anthropic Messages**（system 提取 / max_tokens 必填 / 命名 SSE）与 **Gemini generateContent**（systemInstruction / usageMetadata / alt=sse / blockReason 明确报错）两个协议适配器，OpenAI 兼容主干重构到共享传输层（鉴权 / SSE / 角色合并）；请求模型解析支持「指定优先、未命中回落默认」（fallback 语义）；新增 `lintLlmConfig` 非阻断体检。桌面端「AI 副驾」Provider 卡片展示层级与能力标签；e2e 新增「v1 配置迁移 + 备份」探针，UI 预演新增 step26（26/26）。
+
 ## [0.2.0] - 2026-10-06
 
 M2 收口：A1–A5 验收机器验证全绿（证据见 `docs/04-开发计划.md` §5.5 与 `docs/06-M1验收与自查清单.md` §八 第 29 轮）；`v0.2.0` 为本地 tag（远端推送推迟到项目完成后一并执行，见 `docs/06` §七）。
