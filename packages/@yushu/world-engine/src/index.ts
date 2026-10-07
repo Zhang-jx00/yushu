@@ -1,6 +1,7 @@
 export * from "./layout.js";
 export * from "./world-config.js";
 export * from "./cards.js";
+export * from "./extract.js";
 export * from "./project-config.js";
 export * from "./outline.js";
 export * from "./chapters.js";

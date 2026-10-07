@@ -104,9 +104,10 @@ describe("routing 配置解析（T3-2）", () => {
     ).toThrowError(/global/);
   });
 
-  it("DEFAULT_TASK_ROUTES 覆盖 docs/03 §9 的五个任务 + T3-5 记忆摘要（summarize）", () => {
+  it("DEFAULT_TASK_ROUTES 覆盖 docs/03 §9 的五个任务 + summarize（T3-5）+ extract（T3-10）", () => {
     expect(Object.keys(DEFAULT_TASK_ROUTES).sort()).toEqual([
       "drafting",
+      "extract",
       "naming",
       "outline",
       "polish",
@@ -114,6 +115,8 @@ describe("routing 配置解析（T3-2）", () => {
       "summarize",
     ]);
     expect(DEFAULT_TASK_ROUTES["summarize"]?.prefer).toEqual(["small"]);
+    expect(DEFAULT_TASK_ROUTES["extract"]?.prefer).toEqual(["small"]);
+    expect(DEFAULT_TASK_ROUTES["extract"]?.require).toEqual(["structured_output"]);
   });
 });
 
