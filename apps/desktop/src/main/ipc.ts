@@ -37,6 +37,14 @@ import {
   type IndexStatusPayload,
   type LibraryViewPayload,
   type IpcResult,
+  type MemoryDeleteFactPayload,
+  type MemorySaveFactPayload,
+  type MemorySaveFactResult,
+  type MemorySaveSummaryPayload,
+  type MemorySaveSummaryResult,
+  type MemoryStatePayload,
+  type MemorySummarizePayload,
+  type MemorySummarizeResult,
   type NamingGeneratePayload,
   type NamingResultPayload,
   type OutlineChapterDraftResult,
@@ -104,6 +112,13 @@ import {
 } from "./session-ops.js";
 import { recordActivity, readStatsState, setStatsGoal } from "./stats-ops.js";
 import { gitCommit, gitInit, gitRollback, gitState } from "./git-ops.js";
+import {
+  deleteMemoryFact,
+  loadMemoryState,
+  saveMemoryFact,
+  saveMemorySummary,
+  summarizeMemory,
+} from "./memory-ops.js";
 import {
   buildFusionPreview,
   buildPackCatalog,
@@ -549,6 +564,27 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNELS.gitRollback, (_event, payload: GitRollbackPayload) =>
     wrap<GitRollbackResultPayload>(() => gitRollback(requireGateway(), payload.oid)),
+  );
+
+  /* ---------- 五层记忆（M3 / T3-5） ---------- */
+
+  ipcMain.handle(CHANNELS.memoryState, () => wrap<MemoryStatePayload>(() => loadMemoryState(requireGateway())));
+
+  // 摘要候选：生成不入库（候选化原则）；入库走 memory:saveSummary 的显式动作
+  ipcMain.handle(CHANNELS.memorySummarize, (_event, payload: MemorySummarizePayload) =>
+    wrap<MemorySummarizeResult>(() => summarizeMemory(requireGateway(), payload)),
+  );
+
+  ipcMain.handle(CHANNELS.memorySaveSummary, (_event, payload: MemorySaveSummaryPayload) =>
+    wrapWrite<MemorySaveSummaryResult>(() => saveMemorySummary(requireGateway(), payload)),
+  );
+
+  ipcMain.handle(CHANNELS.memorySaveFact, (_event, payload: MemorySaveFactPayload) =>
+    wrapWrite<MemorySaveFactResult>(() => saveMemoryFact(requireGateway(), payload)),
+  );
+
+  ipcMain.handle(CHANNELS.memoryDeleteFact, (_event, payload: MemoryDeleteFactPayload) =>
+    wrapWrite<boolean>(() => deleteMemoryFact(requireGateway(), payload)),
   );
 
   // 正常退出（窗口关闭 → app.quit）：before-quit 不能等待异步——同步原子写把会话标记为 closed，

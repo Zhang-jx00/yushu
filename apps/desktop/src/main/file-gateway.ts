@@ -144,6 +144,22 @@ export class ProjectGateway {
     await fs.rename(fromAbs, toAbs);
   }
 
+  /**
+   * 删除文档（T3-5 事实台账）：携带 baseHash 并发检测（文件已被外部修改即拒绝）。
+   * 路径防护与写通道一致（禁写目录同样禁止删除）。
+   */
+  async deleteDoc(relPath: string, baseHash?: string): Promise<void> {
+    const abs = this.resolveInside(relPath, true);
+    const current = await fs.readFile(abs, "utf8").catch(() => null);
+    if (current === null) {
+      throw new DocConflictError(relPath, "文件不存在或已被删除");
+    }
+    if (baseHash !== undefined && sha256(current) !== baseHash) {
+      throw new DocConflictError(relPath, "baseHash 不匹配（文件已被外部修改）");
+    }
+    await fs.unlink(abs);
+  }
+
   /** 文件是否存在（路径防护同 readDoc；快照恢复统计"重建 / 覆盖"用） */
   async exists(relPath: string): Promise<boolean> {
     const abs = this.resolveInside(relPath);

@@ -8,11 +8,12 @@ import { ChapterEditorView } from "./ChapterEditorView";
 import { ExportView } from "./ExportView";
 import { GenesisView } from "./GenesisView";
 import { LibraryView } from "./LibraryView";
+import { MemoryView } from "./MemoryView";
 import { OutlineView } from "./OutlineView";
 import { ProjectView } from "./ProjectView";
 import { StatsView } from "./StatsView";
 
-type Tab = "workbench" | "outline" | "editor" | "library" | "ai" | "export" | "archive" | "files" | "stats";
+type Tab = "workbench" | "outline" | "editor" | "library" | "ai" | "memory" | "export" | "archive" | "files" | "stats";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "workbench", label: "起源工作台" },
@@ -20,13 +21,14 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "editor", label: "编辑器" },
   { key: "library", label: "稿件总览" },
   { key: "ai", label: "AI 副驾" },
+  { key: "memory", label: "记忆" },
   { key: "export", label: "导出与自查" },
   { key: "archive", label: "世界观档案" },
   { key: "stats", label: "码字统计" },
   { key: "files", label: "项目文件" },
 ];
 
-/** 项目主容器：九个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A）；稿件总览全库视图（T2-4 切片 A） */
+/** 项目主容器：十个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A）；稿件总览全库视图（T2-4 切片 A）；记忆页（T3-5） */
 export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [tab, setTab] = useState<Tab>("workbench");
   const [archiveFocus, setArchiveFocus] = useState<{ path: string; tick: number } | null>(null);
@@ -176,6 +178,7 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
           />
         )}
         {tab === "ai" && <AiView />}
+        {tab === "memory" && <MemoryView />}
         {tab === "export" && <ExportView />}
         {tab === "archive" && <ArchiveView focusCardPath={archiveFocus} />}
         {tab === "stats" && <StatsView />}

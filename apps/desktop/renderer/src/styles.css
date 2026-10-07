@@ -1109,6 +1109,115 @@ select {
   border-bottom: 1px dashed var(--border);
 }
 
+/* ---------- 记忆（T3-5 五层记忆） ---------- */
+
+.memory {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  min-height: 0;
+}
+
+.memory aside {
+  border-right: 1px solid var(--border);
+  padding: 12px;
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory section {
+  padding: 16px 20px;
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory-targets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.memory-targets li {
+  padding: 7px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.memory-targets li:hover {
+  background: var(--panel-2);
+}
+
+.memory-targets li.on {
+  background: var(--accent-soft);
+}
+
+.memory-targets li .badge {
+  margin-right: 6px;
+  padding: 1px 8px;
+  font-size: 11.5px;
+}
+
+.memory-targets li > div {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.memory-targets li .muted {
+  font-size: 12px;
+}
+
+.memory-summary-rev {
+  font-size: 12.5px;
+}
+
+.memory-candidate {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 10px 12px;
+  line-height: 1.9;
+  font-size: 13.5px;
+  resize: vertical;
+}
+
+.memory-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.memory-fact {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+}
+
+.memory-fact > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.memory-fact .badge {
+  margin-bottom: 0;
+  padding: 1px 8px;
+  font-size: 11.5px;
+}
+
 /* ---------- 导出与自查 ---------- */
 
 .export {

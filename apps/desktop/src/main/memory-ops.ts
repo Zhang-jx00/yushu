@@ -1,0 +1,458 @@
+import { randomUUID } from "node:crypto";
+import { countWords, YushuError } from "@yushu/core";
+import {
+  applyAiSummary,
+  applyHumanSummaryEdit,
+  buildFactSource,
+  lintMemory,
+  parseChapterSummary,
+  parseFact,
+  parseVolumeSummary,
+  serializeFact,
+  serializeSummary,
+  verifyFactSource,
+  type FactRecord,
+  type FactSource,
+  type MemoryLintFinding,
+  type MemoryRecord,
+  type SummaryRecord,
+} from "@yushu/memory";
+import { chat, orderProvidersByRoute, resolveRoute, type ChatMessage } from "@yushu/llm";
+import {
+  MEMORY_DIR,
+  MEMORY_CHAPTER_SUMMARIES_DIR,
+  MEMORY_FACTS_DIR,
+  MEMORY_VOLUME_SUMMARIES_DIR,
+  OUTLINE_PATH,
+  WORLD_CONFIG_PATH,
+  chapterPath,
+  chapterSummaryPath,
+  factPath,
+  parseOutline,
+  parseWorldConfig,
+  readChapterFile,
+  volumeSummaryPath,
+  type Outline,
+  type OutlineChapter,
+  type OutlineVolume,
+} from "@yushu/world-engine";
+import type {
+  MemoryDeleteFactPayload,
+  MemoryFactPayload,
+  MemorySaveFactPayload,
+  MemorySaveFactResult,
+  MemorySaveSummaryPayload,
+  MemorySaveSummaryResult,
+  MemoryStatePayload,
+  MemorySummarizePayload,
+  MemorySummarizeResult,
+  MemorySummaryPayload,
+  MemoryTargetPayload,
+} from "../shared/ipc.js";
+import { appendAiUsage, newUsageId } from "./ai-usage.js";
+import { loadLlmConfigForUse, loadRoutingConfigForUse, reliabilityGate, sessionKeySnapshot } from "./ai-ops.js";
+import { ProjectGateway } from "./file-gateway.js";
+
+/**
+ * 五层记忆主进程编排（M3 / T3-5）：
+ * - 真源 = 项目内 Markdown（memory/volumes、memory/chapters、memory/facts），SQLite 只做索引；
+ * - AI 摘要一律候选化：生成不入库，采纳（入库）是用户显式动作；`summary_rev > 0` 时 AI 不得覆盖（红线）；
+ * - 事实级记忆带出处链（chapter_id + 字符区间 + 摘录 sha256）：正文改动 → 出处失效可检出；
+ * - 跨项目记录（project_id 不匹配）诊断为 error 并拒绝进入本项目记忆（A5 红线）。
+ */
+
+const PROJECT_ID_FALLBACK = "";
+/** 摘要素材上限（字符）：超出截断（T3-7 的 token 预算细化前的粗保护） */
+const MAX_SOURCE_CHARS = 8000;
+
+async function readOutlineSafe(gateway: ProjectGateway): Promise<Outline | null> {
+  const snapshot = await gateway.readDoc(OUTLINE_PATH).catch(() => null);
+  if (!snapshot) return null;
+  try {
+    return parseOutline(snapshot.content);
+  } catch {
+    return null;
+  }
+}
+
+async function readProjectId(gateway: ProjectGateway): Promise<string> {
+  const snapshot = await gateway.readDoc(WORLD_CONFIG_PATH).catch(() => null);
+  if (!snapshot) return PROJECT_ID_FALLBACK;
+  try {
+    return parseWorldConfig(snapshot.content).id;
+  } catch {
+    return PROJECT_ID_FALLBACK;
+  }
+}
+
+async function readWorldTitle(gateway: ProjectGateway): Promise<string> {
+  const snapshot = await gateway.readDoc(WORLD_CONFIG_PATH).catch(() => null);
+  if (!snapshot) return "本作品";
+  try {
+    return parseWorldConfig(snapshot.content).title;
+  } catch {
+    return "本作品";
+  }
+}
+
+async function readChapterBody(gateway: ProjectGateway, path: string): Promise<string> {
+  const snapshot = await gateway.readDoc(path).catch(() => null);
+  if (!snapshot) return "";
+  try {
+    return readChapterFile(snapshot.content).body;
+  } catch {
+    return "";
+  }
+}
+
+function locateChapter(
+  outline: Outline,
+  chapterEntityId: string,
+): { volume: OutlineVolume; chapter: OutlineChapter; path: string } | null {
+  for (const volume of outline.volumes) {
+    for (const chapter of volume.chapters) {
+      if (chapter.chapter_id === chapterEntityId) {
+        return { volume, chapter, path: chapterPath(volume.id, chapterEntityId) };
+      }
+    }
+  }
+  return null;
+}
+
+/** 记忆状态：摘要 / 事实台账（含出处校验）/ 目标列表 / lint 发现 / 跨项目拒绝清单 */
+export async function loadMemoryState(gateway: ProjectGateway): Promise<MemoryStatePayload> {
+  const projectId = await readProjectId(gateway);
+  const tree = await gateway.listTree();
+  const isSummaryPath = (path: string) =>
+    path.endsWith(".md") &&
+    (path.startsWith(`${MEMORY_VOLUME_SUMMARIES_DIR}/`) || path.startsWith(`${MEMORY_CHAPTER_SUMMARIES_DIR}/`));
+  const summaryPaths = tree.filter((entry) => entry.type === "file" && isSummaryPath(entry.path)).map((entry) => entry.path);
+  const factPaths = tree
+    .filter((entry) => entry.type === "file" && entry.path.startsWith(`${MEMORY_FACTS_DIR}/`) && entry.path.endsWith(".md"))
+    .map((entry) => entry.path);
+
+  const findings: MemoryLintFinding[] = [];
+  const rejected: MemoryStatePayload["rejected"] = [];
+  const records: MemoryRecord[] = [];
+  const summaries: MemorySummaryPayload[] = [];
+  const factsWithoutProvenance: MemoryFactPayload[] = [];
+
+  for (const path of summaryPaths) {
+    try {
+      const snapshot = await gateway.readDoc(path);
+      const record = path.startsWith(`${MEMORY_VOLUME_SUMMARIES_DIR}/`)
+        ? parseVolumeSummary(snapshot.content)
+        : parseChapterSummary(snapshot.content);
+      records.push(record);
+      if (record.project_id !== projectId) {
+        rejected.push({
+          path,
+          record_id: record.id,
+          project_id: record.project_id,
+          reason: "记录命名空间与当前项目不符（跨项目泄漏：不进入本项目记忆）",
+        });
+        continue;
+      }
+      summaries.push({
+        layer: record.layer,
+        id: record.id,
+        ...(record.volume_id ? { volume_id: record.volume_id } : {}),
+        summary_rev: record.summary_rev,
+        updated_at: record.updated_at,
+        text: record.text,
+        path,
+        hash: snapshot.hash,
+      });
+    } catch (err) {
+      findings.push({
+        severity: "error",
+        code: "memory-malformed",
+        record_id: path,
+        message: `摘要记录解析失败：${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  for (const path of factPaths) {
+    try {
+      const snapshot = await gateway.readDoc(path);
+      const record = parseFact(snapshot.content);
+      records.push(record);
+      if (record.project_id !== projectId) {
+        rejected.push({
+          path,
+          record_id: record.id,
+          project_id: record.project_id,
+          reason: "记录命名空间与当前项目不符（跨项目泄漏：不进入本项目记忆）",
+        });
+        continue;
+      }
+      let provenance: MemoryFactPayload["provenance"] = "none";
+      let provenanceNote: string | undefined;
+      if (record.source) {
+        const outline = await readOutlineSafe(gateway);
+        const located = outline ? locateChapter(outline, record.source.chapter_id) : null;
+        if (!located) {
+          provenance = "broken";
+          provenanceNote = `找不到出处章节：${record.source.chapter_id}（章节可能已被删除）`;
+        } else {
+          const body = await readChapterBody(gateway, located.path);
+          const check = verifyFactSource(record.source, body);
+          provenance = check.ok ? "ok" : "broken";
+          if (!check.ok) provenanceNote = check.reason;
+        }
+      }
+      const payload: MemoryFactPayload = {
+        id: record.id,
+        keys: [...record.keys],
+        text: record.text,
+        updated_at: record.updated_at,
+        path,
+        hash: snapshot.hash,
+        ...(record.source ? { source: { ...record.source } } : {}),
+        provenance,
+        ...(provenanceNote ? { provenance_note: provenanceNote } : {}),
+      };
+      factsWithoutProvenance.push(payload);
+    } catch (err) {
+      findings.push({
+        severity: "error",
+        code: "memory-malformed",
+        record_id: path,
+        message: `事实记录解析失败：${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  // lint：跨项目泄漏 = error（红线）；无出处事实 = warn（对全部记录做体检，含已拒绝记录——诊断不隐藏）
+  findings.push(...lintMemory(records, projectId));
+
+  // 目标列表（有正文素材的卷 / 章）
+  const outline = await readOutlineSafe(gateway);
+  const targets: MemoryTargetPayload[] = [];
+  if (outline) {
+    for (const volume of outline.volumes) {
+      let volumeChars = 0;
+      const chapterEntries: { chapter: OutlineChapter; body: string }[] = [];
+      for (const chapter of volume.chapters) {
+        if (!chapter.chapter_id) continue;
+        const body = await readChapterBody(gateway, chapterPath(volume.id, chapter.chapter_id));
+        volumeChars += body.length;
+        chapterEntries.push({ chapter, body });
+      }
+      const volumeSummary = summaries.find((item) => item.layer === "volume_summary" && item.id === volume.id);
+      targets.push({
+        layer: "volume_summary",
+        id: volume.id,
+        title: volume.title,
+        sourceChars: volumeChars,
+        hasSummary: volumeSummary !== undefined,
+        summaryRev: volumeSummary?.summary_rev ?? 0,
+      });
+      for (const { chapter, body } of chapterEntries) {
+        const chapterId = chapter.chapter_id!;
+        const chapterSummary = summaries.find((item) => item.layer === "chapter_summary" && item.id === chapterId);
+        targets.push({
+          layer: "chapter_summary",
+          id: chapterId,
+          title: chapter.title,
+          volume_id: volume.id,
+          volume_title: volume.title,
+          sourceChars: body.length,
+          hasSummary: chapterSummary !== undefined,
+          summaryRev: chapterSummary?.summary_rev ?? 0,
+        });
+      }
+    }
+  }
+
+  return {
+    dir: MEMORY_DIR,
+    project_id: projectId,
+    summaries,
+    targets,
+    facts: factsWithoutProvenance,
+    findings,
+    rejected,
+  };
+}
+
+function truncateSource(text: string): string {
+  if (text.length <= MAX_SOURCE_CHARS) return text;
+  return `${text.slice(0, MAX_SOURCE_CHARS)}\n……（素材超长已截断）`;
+}
+
+/** AI 摘要候选（T3-5）：生成不入库——采纳是用户显式动作（候选化原则） */
+export async function summarizeMemory(
+  gateway: ProjectGateway,
+  payload: MemorySummarizePayload,
+): Promise<MemorySummarizeResult> {
+  const outline = await readOutlineSafe(gateway);
+  if (!outline) throw new YushuError("E_OUTLINE", "项目尚无大纲：请先完成三级大纲");
+
+  let sourceLabel = "";
+  let source = "";
+  let chapterId: string | undefined;
+  if (payload.layer === "chapter_summary") {
+    const located = locateChapter(outline, payload.id);
+    if (!located) throw new YushuError("E_INVALID_INPUT", `找不到章节：${payload.id}`);
+    source = await readChapterBody(gateway, located.path);
+    sourceLabel = `章「${located.chapter.title}」（${located.volume.title}）`;
+    chapterId = payload.id;
+  } else {
+    const volume = outline.volumes.find((item) => item.id === payload.id);
+    if (!volume) throw new YushuError("E_INVALID_INPUT", `找不到卷纲：${payload.id}`);
+    const parts: string[] = [];
+    for (const chapter of volume.chapters) {
+      if (!chapter.chapter_id) continue;
+      const body = await readChapterBody(gateway, chapterPath(volume.id, chapter.chapter_id));
+      if (body.trim() !== "") parts.push(`【${chapter.title}】\n${body}`);
+    }
+    source = parts.join("\n\n");
+    sourceLabel = `卷「${volume.title}」（${volume.act}）`;
+  }
+  if (source.trim() === "") {
+    throw new YushuError("E_INVALID_INPUT", "素材正文为空：请先写出章节正文再生成摘要");
+  }
+
+  const worldTitle = await readWorldTitle(gateway);
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content:
+        `你是《${worldTitle}》的长期记忆管理助手：把给定正文压缩为可复用的记忆摘要，供后续章节续写时参考。` +
+        "要求：只输出摘要本身（纯文本 3-6 条要点，每条一行，不要标题、不要评价文笔）；" +
+        "保留关键事件、人物状态变化、新出现的设定/道具/伏笔与结尾悬念；不得引入正文中不存在的设定。",
+    },
+    {
+      role: "user",
+      content: `【对象】${sourceLabel}\n【正文】\n${truncateSource(source)}\n【任务】输出该${payload.layer === "chapter_summary" ? "章" : "卷"}的中文摘要（3-6 条要点）。`,
+    },
+  ];
+
+  const config = await loadLlmConfigForUse(gateway);
+  if (config.providers.length === 0) {
+    throw new YushuError("E_LLM_ROUTE", "无可用 provider：请先在「AI 副驾」配置模型端点");
+  }
+  const routing = await loadRoutingConfigForUse(gateway);
+  // T3-5：摘要走 summarize 任务路由（默认 prefer small——压缩类任务不必烧旗舰）
+  const route = resolveRoute("summarize", config.providers, routing);
+  const providers = orderProvidersByRoute(config.providers, route);
+  const result = await chat(providers, { messages }, {
+    sessionKeys: sessionKeySnapshot(),
+    reliability: { config: routing.reliability, gate: reliabilityGate },
+  });
+  const text = result.text.trim();
+  if (text === "") {
+    throw new YushuError("E_LLM_EMPTY", "模型返回为空：请重试或更换 provider");
+  }
+  const chars = countWords(text);
+  await appendAiUsage(gateway.root, {
+    id: newUsageId(),
+    type: "generate",
+    task: "summarize",
+    provider_id: result.provider_id,
+    model: result.model,
+    status: "ok",
+    chars,
+    ...(chapterId ? { chapter_id: chapterId } : {}),
+  });
+  return {
+    layer: payload.layer,
+    id: payload.id,
+    text,
+    chars,
+    provider_id: result.provider_id,
+    model: result.model,
+  };
+}
+
+/** 摘要入库：ai = 候选入库（rev > 0 → E_MEMORY_REV_PROTECTED）；human = 人工编辑（rev+1） */
+export async function saveMemorySummary(
+  gateway: ProjectGateway,
+  payload: MemorySaveSummaryPayload,
+): Promise<MemorySaveSummaryResult> {
+  const text = payload.text.trim();
+  if (text === "") throw new YushuError("E_INVALID_INPUT", "摘要正文为空，无法入库");
+  const projectId = await readProjectId(gateway);
+  const path = payload.layer === "volume_summary" ? volumeSummaryPath(payload.id) : chapterSummaryPath(payload.id);
+  const snapshot = await gateway.readDoc(path).catch(() => null);
+  let existing: SummaryRecord | null = null;
+  if (snapshot) {
+    existing =
+      payload.layer === "volume_summary" ? parseVolumeSummary(snapshot.content) : parseChapterSummary(snapshot.content);
+    if (!payload.baseHash) {
+      throw new YushuError("E_INVALID_INPUT", `更新既有摘要必须携带 baseHash（${path}）`);
+    }
+  }
+  const now = new Date().toISOString();
+  const input = {
+    id: payload.id,
+    project_id: projectId,
+    ...(payload.volume_id ? { volume_id: payload.volume_id } : {}),
+    text,
+  };
+  const record =
+    payload.origin === "ai"
+      ? applyAiSummary(payload.layer, existing, input, now)
+      : applyHumanSummaryEdit(existing, input, now, payload.layer);
+  const written = await gateway.writeDoc(path, serializeSummary(record), existing ? payload.baseHash : undefined);
+  return { path, hash: written.hash, summary_rev: record.summary_rev, updated_at: record.updated_at };
+}
+
+/** 事实登记（带出处可选）：出处经正文计算摘录 hash——出处链必须可验证 */
+export async function saveMemoryFact(
+  gateway: ProjectGateway,
+  payload: MemorySaveFactPayload,
+): Promise<MemorySaveFactResult> {
+  const keys = (payload.keys ?? []).map((key) => key.trim()).filter((key) => key !== "");
+  if (keys.length === 0) throw new YushuError("E_INVALID_INPUT", "事实关键词（keys）不能为空");
+  const text = payload.text.replace(/\r\n/g, "\n").trim();
+  if (text === "") throw new YushuError("E_INVALID_INPUT", "事实正文为空，无法入库");
+  const projectId = await readProjectId(gateway);
+  const id = payload.id?.trim() ? payload.id.trim() : `fact-${randomUUID().slice(0, 8)}`;
+  const path = factPath(id);
+  const snapshot = await gateway.readDoc(path).catch(() => null);
+  if (snapshot && !payload.baseHash) {
+    throw new YushuError("E_INVALID_INPUT", `更新既有事实必须携带 baseHash（${path}）`);
+  }
+
+  let source: FactSource | undefined;
+  if (payload.provenance) {
+    const outline = await readOutlineSafe(gateway);
+    const located = outline ? locateChapter(outline, payload.provenance.chapter_id) : null;
+    if (!located) {
+      throw new YushuError("E_INVALID_INPUT", `出处章节不存在：${payload.provenance.chapter_id}（请先在三级大纲创建草稿章节）`);
+    }
+    const body = await readChapterBody(gateway, located.path);
+    try {
+      source = buildFactSource(payload.provenance.chapter_id, body, payload.provenance.start, payload.provenance.end);
+    } catch (err) {
+      throw new YushuError("E_INVALID_INPUT", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const record: FactRecord = {
+    layer: "fact",
+    id,
+    project_id: projectId,
+    keys,
+    text: `${text}\n`,
+    ...(source ? { source } : {}),
+    updated_at: new Date().toISOString(),
+  };
+  const written = await gateway.writeDoc(path, serializeFact(record), snapshot ? payload.baseHash : undefined);
+  return { path, hash: written.hash, id, provenance: source ? "ok" : "none" };
+}
+
+/** 删除事实（携带 baseHash 并发检测，防误删外部修改版） */
+export async function deleteMemoryFact(
+  gateway: ProjectGateway,
+  payload: MemoryDeleteFactPayload,
+): Promise<boolean> {
+  const path = factPath(payload.id);
+  const snapshot = await gateway.readDoc(path).catch(() => null);
+  if (!snapshot) throw new YushuError("E_MEMORY_NOT_FOUND", `事实不存在：${payload.id}`);
+  await gateway.deleteDoc(path, payload.baseHash);
+  return true;
+}

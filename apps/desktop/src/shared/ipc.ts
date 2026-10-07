@@ -75,6 +75,12 @@ export const CHANNELS = {
   gitInit: "git:init",
   gitCommit: "git:commit",
   gitRollback: "git:rollback",
+  /** 五层记忆（M3 / T3-5）：状态 / AI 摘要候选 / 摘要入库 / 事实登记 / 事实删除 */
+  memoryState: "memory:state",
+  memorySummarize: "memory:summarize",
+  memorySaveSummary: "memory:saveSummary",
+  memorySaveFact: "memory:saveFact",
+  memoryDeleteFact: "memory:deleteFact",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -1069,6 +1075,142 @@ export interface GitRollbackResultPayload {
   kept: string[];
   /** 回滚前强制生成的 pre_restore 快照 id（撤销窗口） */
   preRestoreId: string | null;
+}
+
+/* ---------- 五层记忆（M3 / T3-5；结构与 @yushu/memory 兼容） ---------- */
+
+/**
+ * 摘要记录（卷/章）：真源为 memory/<layer>/<id>.md（Markdown + frontmatter）；
+ * `summary_rev > 0` = 人工已修订（AI 不得覆盖，只能作为候选展示——红线保护）。
+ */
+export interface MemorySummaryPayload {
+  layer: "volume_summary" | "chapter_summary";
+  /** 卷摘要 = 卷纲 id（vol-*）；章摘要 = 章节实体 id（ch-*） */
+  id: string;
+  volume_id?: string;
+  summary_rev: number;
+  updated_at: string;
+  text: string;
+  /** 相对路径（memory/volumes/…… 或 memory/chapters/……） */
+  path: string;
+  /** 读时内容 sha256（更新时必须携带 baseHash） */
+  hash: string;
+}
+
+/** 摘要目标（有正文素材的卷 / 章；「记忆」页列表的数据源） */
+export interface MemoryTargetPayload {
+  layer: "volume_summary" | "chapter_summary";
+  /** 卷摘要 = 卷纲 id；章摘要 = 章节实体 id（ch-*） */
+  id: string;
+  title: string;
+  volume_id?: string;
+  volume_title?: string;
+  /** 摘要素材字符数（章 = 正文长度；卷 = 各章正文之和） */
+  sourceChars: number;
+  hasSummary: boolean;
+  summaryRev: number;
+}
+
+/** 事实级记忆：provenance 为出处校验结果（正文改动 → broken，绝不静默沿用） */
+export interface MemoryFactPayload {
+  id: string;
+  keys: string[];
+  text: string;
+  updated_at: string;
+  path: string;
+  hash: string;
+  source?: { chapter_id: string; start: number; end: number; hash: string };
+  provenance: "ok" | "broken" | "none";
+  provenance_note?: string;
+}
+
+/** 记录体检发现（lintMemory）：跨项目泄漏 = error（红线）；无出处事实 = warn */
+export interface MemoryFindingPayload {
+  severity: "error" | "warn";
+  code: string;
+  record_id: string;
+  message: string;
+}
+
+/** 跨项目记录（被拒绝进入本项目记忆；仅展示，不参与注入） */
+export interface MemoryRejectedPayload {
+  path: string;
+  record_id: string;
+  project_id: string;
+  reason: string;
+}
+
+export interface MemoryStatePayload {
+  /** 记忆真源目录（memory/；无记录时目录可能尚未创建） */
+  dir: string;
+  /** 当前项目命名空间（world.yaml 的 world.id） */
+  project_id: string;
+  summaries: MemorySummaryPayload[];
+  targets: MemoryTargetPayload[];
+  facts: MemoryFactPayload[];
+  findings: MemoryFindingPayload[];
+  rejected: MemoryRejectedPayload[];
+}
+
+export interface MemorySummarizePayload {
+  layer: "volume_summary" | "chapter_summary";
+  /** 目标 id：卷纲 vol-* / 章节实体 ch-* */
+  id: string;
+  /** 章摘要所属卷（素材定位与入库分组用；缺省时按大纲查找） */
+  volumeId?: string;
+}
+
+/** 摘要候选（不自动入库——采纳是用户显式动作） */
+export interface MemorySummarizeResult {
+  layer: "volume_summary" | "chapter_summary";
+  id: string;
+  text: string;
+  chars: number;
+  provider_id: string;
+  model: string;
+}
+
+export interface MemorySaveSummaryPayload {
+  layer: "volume_summary" | "chapter_summary";
+  id: string;
+  volume_id?: string;
+  text: string;
+  /** ai = AI 候选入库（rev > 0 → 拒绝覆盖 E_MEMORY_REV_PROTECTED）；human = 人工编辑（rev+1） */
+  origin: "ai" | "human";
+  /** 更新既有摘要时必须携带（读时 hash）；新建省略 */
+  baseHash?: string;
+}
+
+export interface MemorySaveSummaryResult {
+  path: string;
+  hash: string;
+  summary_rev: number;
+  updated_at: string;
+}
+
+export interface MemorySaveFactPayload {
+  /** 省略时自动生成 fact-* */
+  id?: string;
+  /** 触发关键词（实体名 / 别名） */
+  keys: string[];
+  text: string;
+  /** 出处（可选）：章节实体 id + 字符区间 [start, end)；提供时服务端读取正文计算摘录 hash */
+  provenance?: { chapter_id: string; start: number; end: number };
+  /** 更新既有事实时必须携带 */
+  baseHash?: string;
+}
+
+export interface MemorySaveFactResult {
+  path: string;
+  hash: string;
+  id: string;
+  provenance: "ok" | "none";
+}
+
+export interface MemoryDeleteFactPayload {
+  id: string;
+  /** 读时 hash（删除前并发检测，防误删外部修改版） */
+  baseHash: string;
 }
 
 export interface IpcOk<T> {

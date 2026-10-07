@@ -23,6 +23,7 @@
     "@yushu/export": "workspace:*",
     "@yushu/genre-engine": "workspace:*",
     "@yushu/llm": "workspace:*",
+    "@yushu/memory": "workspace:*",
     "@yushu/search": "workspace:*",
     "@yushu/world-engine": "workspace:*",
     "isomorphic-git": "^1.43.0"

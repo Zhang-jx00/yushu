@@ -621,6 +621,52 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       };
     })();
 
+    // 五层记忆（T3-5）：摘要候选（不入库）→ AI 入库（rev 0）→ 人工修订（rev 1）→ AI 覆盖被拒（E_MEMORY_REV_PROTECTED）
+    const memState0 = await api.memory.state();
+    const memTarget = memState0.targets.find((t) => t.layer === "chapter_summary" && t.sourceChars > 0);
+    if (!memTarget) throw new Error("记忆探针：找不到有素材的章摘要目标");
+    const memCandidate = await api.memory.summarize({ layer: memTarget.layer, id: memTarget.id, volumeId: memTarget.volume_id });
+    const memState1 = await api.memory.state();
+    const memNotAutoSaved = !memState1.summaries.some((s) => s.id === memTarget.id);
+    const memSaved = await api.memory.saveSummary({ layer: memTarget.layer, id: memTarget.id, volume_id: memTarget.volume_id, text: memCandidate.text, origin: "ai" });
+    const memState2 = await api.memory.state();
+    const memAiRev = (memState2.summaries.find((s) => s.id === memTarget.id) || {}).summary_rev;
+    const memHuman = await api.memory.saveSummary({ layer: memTarget.layer, id: memTarget.id, volume_id: memTarget.volume_id, text: "人工修订：主角在第一章末获得玄铁令（受保护版本）。", origin: "human", baseHash: memSaved.hash });
+    let memReject = { blocked: false, code: "" };
+    try {
+      await api.memory.saveSummary({ layer: memTarget.layer, id: memTarget.id, text: "AI 覆盖尝试（应被拒绝）。", origin: "ai", baseHash: memHuman.hash });
+    } catch (err) {
+      memReject = { blocked: String(err && err.message).includes("E_MEMORY_REV_PROTECTED"), code: String(err && err.message).slice(0, 120) };
+    }
+    // 事实级出处链：登记（出处 ok）→ 涂改正文 → 出处 broken → 删除（携带 baseHash）
+    const memBodyBefore = await api.chapter.read(draft.chapterPath);
+    const memEnd = Math.min(12, memBodyBefore.body.length);
+    const memFact = await api.memory.saveFact({ keys: ["玄铁令"], text: "主角在章节开头获得玄铁令。", provenance: { chapter_id: draft.chapterId, start: 0, end: memEnd } });
+    const memState3 = await api.memory.state();
+    const memFactOk = (memState3.facts.find((f) => f.id === memFact.id) || {}).provenance === "ok";
+    const memTamper = await api.chapter.read(draft.chapterPath);
+    await api.chapter.write({ path: draft.chapterPath, body: "【涂改】" + memTamper.body.slice(memEnd), baseHash: memTamper.hash });
+    const memState4 = await api.memory.state();
+    const memFactBroken = (memState4.facts.find((f) => f.id === memFact.id) || {}).provenance === "broken";
+    const memFactHash = (memState4.facts.find((f) => f.id === memFact.id) || {}).hash;
+    const memDeleted = await api.memory.deleteFact({ id: memFact.id, baseHash: memFactHash });
+    const memState5 = await api.memory.state();
+    const memFactGone = !memState5.facts.some((f) => f.id === memFact.id);
+    const memoryProbe = {
+      targetId: memTarget.id,
+      candidateText: memCandidate.text,
+      notAutoSaved: memNotAutoSaved,
+      aiRev: memAiRev,
+      humanRev: memHuman.summary_rev,
+      rejectBlocked: memReject.blocked,
+      rejectCode: memReject.code,
+      factOk: memFactOk,
+      factBroken: memFactBroken,
+      factDeleted: memDeleted === true,
+      factGone: memFactGone,
+      summaryFindings: memState3.findings.length,
+    };
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -822,6 +868,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       pipeline,
       preDestructive,
       git: gitProbe,
+      memory: memoryProbe,
     };
   })()`;
   try {
@@ -1003,6 +1050,20 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         headUnchanged?: boolean;
         pendingAfterRollback?: boolean;
       };
+      memory: {
+        targetId: string;
+        candidateText: string;
+        notAutoSaved: boolean;
+        aiRev: number;
+        humanRev: number;
+        rejectBlocked: boolean;
+        rejectCode: string;
+        factOk: boolean;
+        factBroken: boolean;
+        factDeleted: boolean;
+        factGone: boolean;
+        summaryFindings: number;
+      };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
 
@@ -1018,6 +1079,32 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     // hits ≥ 2 且 failures = 1 即端到端证明「按错误类别退避重试」真实发生。
     const retryProbe = { hits: mock.stats.hits, failures: mock.stats.failures };
     console.log("[e2e] 重试探针:", JSON.stringify(retryProbe));
+
+    // T3-5 跨项目泄漏探针（A5 红线）：以同款序列化器写入异项目命名空间的事实 →
+    // state 应将其放入 rejected 且 findings 出现 error 级 memory-cross-project-leak（拒绝进入本项目记忆）。
+    const { serializeFact } = await import("@yushu/memory");
+    await mkdir(join(dir, "memory", "facts"), { recursive: true });
+    await writeFile(
+      join(dir, "memory", "facts", "fact-foreign.md"),
+      serializeFact({
+        layer: "fact",
+        id: "fact-foreign",
+        project_id: "world-someone-else",
+        keys: ["外来"],
+        text: "来自其它项目的事实（跨项目泄漏探针）。\n",
+        updated_at: "2026-10-07T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+    const crossProject = (await win.webContents.executeJavaScript(`(async () => {
+      const state = await window.yushu.memory.state();
+      return {
+        rejectedIds: state.rejected.map((item) => item.record_id),
+        errorCodes: state.findings.filter((item) => item.severity === "error").map((item) => item.code),
+        factIds: state.facts.map((item) => item.id),
+      };
+    })()`)) as { rejectedIds: string[]; errorCodes: string[]; factIds: string[] };
+    console.log("[e2e] 记忆跨项目泄漏:", JSON.stringify(crossProject));
 
     // 会话异常退出检测（T2-8 切片 B）：伪造「上次会话 active + 他进程 pid」→ beginSession 检出异常；
     // 心跳刷新 lastSeenAt；正常关闭（closed）后重开不再检出。探针直接调用主进程会话模块（不依赖 UI）。
@@ -1684,6 +1771,18 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.git.preRestore === true &&
       result.git.headUnchanged === true &&
       result.git.pendingAfterRollback === true &&
+      result.memory.candidateText === "非流式一次性回复" &&
+      result.memory.notAutoSaved &&
+      result.memory.aiRev === 0 &&
+      result.memory.humanRev === 1 &&
+      result.memory.rejectBlocked &&
+      result.memory.factOk &&
+      result.memory.factBroken &&
+      result.memory.factDeleted &&
+      result.memory.factGone &&
+      crossProject.rejectedIds.includes("fact-foreign") &&
+      crossProject.errorCodes.includes("memory-cross-project-leak") &&
+      crossProject.factIds.length === 0 &&
       sessionProbe.ok &&
       result.incremental.mode === "incremental" &&
       result.incremental.updated === 1 &&
@@ -1715,7 +1814,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

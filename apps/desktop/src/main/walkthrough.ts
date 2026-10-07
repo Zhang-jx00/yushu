@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-28 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵 / 任务路由与可靠性 / 本地模型接入与能力标注）。
+ * 步骤 10-29 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵 / 任务路由与可靠性 / 本地模型接入与能力标注 / 五层记忆（摘要候选与 rev 保护 / 事实出处链））。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -1268,6 +1268,91 @@ const STEPS: StepDef[] = [
           '；能力标注="' + (warningsLine || '').replace(/\n+/g, ' | ').slice(0, 120) + '"' +
           '；预设添加=ollama(' + baseOk(ollamaCard) + ')' +
           '；保存回执=' + (saved === true) + '；provider 数=' + count,
+      };
+    `,
+  },
+{
+    step: 29,
+    title: "记忆：五层记忆（候选不入库 → 采纳 rev0 → 人工修订 rev1 保护 / 事实出处链，T3-5）",
+    file: "step29-memory.png",
+    body: String.raw`
+      await tab('记忆');
+      const panel = await waitFor(() => document.querySelector('.memory'), 12000);
+      if (!panel) return { ok: false, note: '记忆页未渲染：' + pageText() };
+      // 选中有正文素材的章摘要目标
+      const target = await waitFor(() => {
+        const items = [...document.querySelectorAll('.memory-targets li')];
+        return items.find((li) => li.innerText.includes('章摘要') && !li.innerText.includes('素材 0 字')) || null;
+      }, 8000);
+      if (!target) return { ok: false, note: '找不到有素材的章摘要目标：' + pageText() };
+      target.click();
+      await sleep(250);
+      const genBtn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '生成候选');
+      if (!genBtn || genBtn.disabled) return { ok: false, note: '生成候选按钮不可用：' + pageText() };
+      genBtn.click();
+      const candidateReady = await waitFor(() => {
+        const ta = document.querySelector('.memory-candidate');
+        return ta && String(ta.value).trim().length > 0 ? true : null;
+      }, 20000);
+      if (candidateReady !== true) return { ok: false, note: '候选未生成：' + pageText() };
+      // 候选未自动入库（state 中尚无摘要；面板仍显示未入库）
+      const stateBefore = await window.yushu.memory.state();
+      const notAutoSaved = stateBefore.summaries.length === 0;
+      const revLineBefore = String((document.querySelector('.memory-summary-rev') || {}).textContent || '');
+      // 采纳（AI 入库）→ rev 0
+      const adoptBtn = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('采纳候选'));
+      if (!adoptBtn) return { ok: false, note: '找不到「采纳候选（AI 入库）」按钮：' + pageText() };
+      adoptBtn.click();
+      const aiSaved = await waitFor(() => {
+        const el = document.querySelector('.memory-summary-rev');
+        return el && el.textContent.includes('rev 0') ? true : null;
+      }, 12000);
+      // 人工修订 → rev 1（此后 AI 不得覆盖）
+      const ta = document.querySelector('.memory-candidate');
+      setV(ta, '人工修订：主角初入天启界，暗藏玄铁令伏笔。');
+      const humanBtn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存人工修订');
+      if (!humanBtn) return { ok: false, note: '找不到「保存人工修订」按钮：' + pageText() };
+      humanBtn.click();
+      const humanSaved = await waitFor(() => {
+        const el = document.querySelector('.memory-summary-rev');
+        return el && el.textContent.includes('rev 1') ? true : null;
+      }, 12000);
+      // AI 再入库 → 被拒（E_MEMORY_REV_PROTECTED：人工修订红线保护）
+      const adoptBtn2 = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('采纳候选'));
+      if (adoptBtn2) adoptBtn2.click();
+      const rejected = await waitFor(() => {
+        const el = document.querySelector('.error-text');
+        return el && el.textContent.includes('E_MEMORY_REV_PROTECTED') ? true : null;
+      }, 12000);
+      // 事实台账：登记一条带出处的事实 → 出处有效徽标
+      const chapterTarget = stateBefore.targets.find((t) => t.layer === 'chapter_summary' && t.sourceChars > 0);
+      const keysInput = document.querySelector('.memory-fact-keys');
+      const textInput = document.querySelector('.memory-fact-text');
+      const startInput = document.querySelector('.memory-fact-start');
+      const endInput = document.querySelector('.memory-fact-end');
+      if (!keysInput || !textInput || !startInput || !endInput || !chapterTarget) {
+        return { ok: false, note: '事实登记表单缺失：' + pageText() };
+      }
+      setV(keysInput, '天启界');
+      setV(textInput, '主角在开篇抵达天启界。');
+      setV(startInput, '0');
+      setV(endInput, String(Math.min(6, chapterTarget.sourceChars)));
+      const addBtn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '登记事实');
+      if (!addBtn || addBtn.disabled) return { ok: false, note: '登记事实按钮不可用：' + pageText() };
+      addBtn.click();
+      const factOk = await waitFor(() => {
+        const items = [...document.querySelectorAll('.memory-fact')];
+        return items.some((li) => li.innerText.includes('出处有效')) ? true : null;
+      }, 12000);
+      const revLineAfter = String((document.querySelector('.memory-summary-rev') || {}).textContent || '');
+      return {
+        ok: notAutoSaved && aiSaved === true && humanSaved === true && rejected === true && factOk === true,
+        note: '候选生成=' + (candidateReady === true) +
+          '；候选未自动入库=' + notAutoSaved + '（入库前 rev 行="' + revLineBefore + '"）' +
+          '；采纳后 rev0=' + (aiSaved === true) + '；人工修订后 rev1=' + (humanSaved === true) +
+          '；AI 覆盖被拒=' + (rejected === true) +
+          '；事实出处有效=' + (factOk === true) +
+          '；rev 行="' + revLineAfter + '"',
       };
     `,
   },

@@ -67,8 +67,9 @@ const LLM_CONFIG_BACKUP_PATH = `${LLM_CONFIG_PATH}.bak-v1`;
 /** 会话内存 API Key（provider.id → key）；进程退出即消失，不落盘（docs/03 §13） */
 const sessionKeys = new Map<string, string>();
 
-/** 可靠性闸门（T3-2）：冷却与并发状态跨调用共享（配置每次从 config/routing.yaml 读取） */
-const reliabilityGate = new ReliabilityGate();
+/** 可靠性闸门（T3-2）：冷却与并发状态跨调用共享（配置每次从 config/routing.yaml 读取）；
+ *  记忆摘要（T3-5）等其他任务共用同一闸门，避免每个任务各持一份冷却/并发状态。 */
+export const reliabilityGate = new ReliabilityGate();
 
 export function setSessionKey(providerId: string, apiKey: string): void {
   if (!providerId.trim()) throw new YushuError("E_INVALID_INPUT", "providerId 不能为空");
@@ -76,7 +77,8 @@ export function setSessionKey(providerId: string, apiKey: string): void {
   else sessionKeys.set(providerId, apiKey.trim());
 }
 
-function sessionKeySnapshot(): Record<string, string> {
+/** 会话内存 Key 快照（供 llm 调用选项；不落盘，不回传渲染层） */
+export function sessionKeySnapshot(): Record<string, string> {
   return Object.fromEntries(sessionKeys);
 }
 

@@ -33,6 +33,14 @@ import type {
   IndexSearchResultPayload,
   IndexStatusPayload,
   LibraryViewPayload,
+  MemoryDeleteFactPayload,
+  MemorySaveFactPayload,
+  MemorySaveFactResult,
+  MemorySaveSummaryPayload,
+  MemorySaveSummaryResult,
+  MemoryStatePayload,
+  MemorySummarizePayload,
+  MemorySummarizeResult,
   NamingGeneratePayload,
   NamingResultPayload,
   OutlineChapterDraftResult,
@@ -190,6 +198,18 @@ export interface YushuApi {
     commit: (payload: GitCommitPayload) => Promise<GitCommitResultPayload>;
     /** 整体回滚到指定提交（工作区语义：不改写历史；回滚前强制 pre_restore 快照） */
     rollback: (payload: GitRollbackPayload) => Promise<GitRollbackResultPayload>;
+  };
+  memory: {
+    /** 五层记忆（T3-5）：摘要 / 事实台账（含出处校验）/ 目标 / 体检发现 / 跨项目拒绝清单 */
+    state: () => Promise<MemoryStatePayload>;
+    /** AI 摘要候选（生成不入库——采纳是用户显式动作） */
+    summarize: (payload: MemorySummarizePayload) => Promise<MemorySummarizeResult>;
+    /** 摘要入库：origin=ai（人工已修订 rev>0 时拒绝覆盖）/ origin=human（rev+1，冻结 AI 自动覆盖） */
+    saveSummary: (payload: MemorySaveSummaryPayload) => Promise<MemorySaveSummaryResult>;
+    /** 事实登记（出处可选：章节实体 id + 字符区间 [start, end)） */
+    saveFact: (payload: MemorySaveFactPayload) => Promise<MemorySaveFactResult>;
+    /** 删除事实（携带读时 hash 并发检测） */
+    deleteFact: (payload: MemoryDeleteFactPayload) => Promise<boolean>;
   };
 }
 
