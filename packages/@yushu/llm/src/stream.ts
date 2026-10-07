@@ -1,4 +1,4 @@
-import { callChatCompletionStream } from "./openai.js";
+import { callProtocolStream } from "./dispatch.js";
 import { LlmAbortError } from "./config.js";
 import type {
   ChatRequest,
@@ -11,7 +11,8 @@ import type {
 /**
  * stream 动词：流式 + AbortController 停止。
  * - fallback 与 chat 一致，但**已经流出增量文本后不再切换 provider**（避免重复文本）；
- * - 中止时抛 LlmAbortError（携带已生成部分，由调用方决定是否保留为候选）。
+ * - 中止时抛 LlmAbortError（携带已生成部分，由调用方决定是否保留为候选）；
+ * - T3-1：每次尝试按 provider.protocol 分发到对应协议适配器。
  */
 export async function stream(
   providers: LlmProviderSpec[],
@@ -37,7 +38,7 @@ export async function stream(
       },
     };
     try {
-      const result = await callChatCompletionStream(provider, request, proxied, {
+      const result = await callProtocolStream(provider, request, proxied, {
         options,
         fetchImpl,
       });

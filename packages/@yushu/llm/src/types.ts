@@ -1,26 +1,94 @@
-/** LLM 接入的跨包类型（docs/03 §9 / J01：OpenAI 兼容为事实标准，本地端点同抽象） */
+/**
+ * LLM 接入的跨包类型（docs/03 §9 / J01）。
+ *
+ * v2（M3 / T3-1）：Provider 描述升级为「kind + protocol + models（能力矩阵 + limits）」——
+ * 云 / 本地同抽象，能力声明驱动请求前校验与自动降级（T3-3），limits 驱动预算裁剪（T3-7）与
+ * 请求参数上限。v1 简表（单 model + openai-compatible）由 config.ts 自动迁移（幂等）。
+ */
 
 export const LLM_API_VERSION = "yushu.llm/v1" as const;
-export const LLM_FORMAT_VERSION = 1;
+/** 配置数据格式版本：1 = M1 单 model 简表；2 = M3 Provider 能力矩阵 */
+export const LLM_FORMAT_VERSION = 2;
 
-/** M1 仅 openai-compatible（本地端点为同一抽象的不同 base_url） */
-export type ProviderKind = "openai-compatible";
+export type ProviderKind = "cloud" | "local";
 
+/** 协议（docs/03 §9：OpenAI 兼容为事实标准主干；Anthropic / Gemini 原生适配） */
+export type LlmProtocol = "openai_chat" | "anthropic_messages" | "gemini_generate";
+
+/** 模型档位（任务路由按档位偏好选择；T3-2） */
+export type ModelTier = "small" | "flagship" | "reasoning";
+
+/** prompt caching 能力描述（docs/03 §9） */
+export interface ModelCacheCapability {
+  mode: "explicit" | "automatic";
+  min_tokens?: number;
+  read_mult?: number;
+  write_mult?: number;
+}
+
+/**
+ * 能力矩阵（驱动请求前校验与自动降级；`cache` 未声明 = 不支持）。
+ * 声明为 false / 缺省即视为不支持——「未声明不得假定支持」。
+ */
+export interface ModelCapabilities {
+  tools: boolean;
+  structured_output: boolean;
+  stream: boolean;
+  usage: boolean;
+  reasoning: boolean;
+  vision: boolean;
+  /** 未声明 = 无 prompt caching */
+  cache?: ModelCacheCapability;
+  batch: boolean;
+}
+
+/**
+ * 保守默认（T3-1）：可流式、可回传 usage 是 OpenAI 兼容端点的普遍能力；
+ * tools / structured_output / reasoning / vision / batch 一律默认 false——降级路径（T3-3）据此判断。
+ */
+export const DEFAULT_MODEL_CAPABILITIES: Readonly<ModelCapabilities> = Object.freeze({
+  tools: false,
+  structured_output: false,
+  stream: true,
+  usage: true,
+  reasoning: false,
+  vision: false,
+  batch: false,
+});
+
+/** 模型限额（docs/03 §9）：context / max_output 驱动预算与请求上限；rpm / tpm 为可靠性节流预留（T3-2） */
+export interface ModelLimits {
+  context?: number;
+  max_output?: number;
+  rpm?: number;
+  tpm?: number;
+}
+
+export interface LlmModelSpec {
+  name: string;
+  tier: ModelTier;
+  /** 部分声明；读取时经 resolveCapabilities 合并保守默认 */
+  capabilities?: Partial<ModelCapabilities>;
+  limits?: ModelLimits;
+}
+
+/** Provider 描述（config/llm.yaml；providers 顺序即 fallback 优先级） */
 export interface LlmProviderSpec {
   id: string;
   kind: ProviderKind;
-  /** 形如 https://api.openai.com/v1 或 http://127.0.0.1:11434/v1（不含 /chat/completions） */
+  protocol: LlmProtocol;
+  /** 协议端点前缀（不含具体路径）：如 https://api.openai.com/v1、http://127.0.0.1:11434/v1 */
   base_url: string;
-  model: string;
+  /** ≥1 个模型；models[0] 为该 provider 的默认模型（fallback 落入时使用） */
+  models: LlmModelSpec[];
   /**
    * 读取 API Key 的环境变量名。
    * 安全红线（docs/03 §13）：配置/日志/项目文件禁止明文 key；空或缺省 = 无鉴权（本地端点常见）。
+   * safeStorage 加密引用（key_ref）见 T3-14。
    */
   api_key_env?: string;
   temperature?: number;
   max_tokens?: number;
-  /** 上下文窗口（token；M3 预算裁剪用，M1 仅透传展示） */
-  context_window?: number;
 }
 
 /** config/llm.yaml 根（providers 顺序即 fallback 优先级） */
@@ -84,4 +152,48 @@ export interface LlmCallOptions {
   fetchImpl?: typeof fetch;
   /** provider 切换（fallback）时回调，便于 UI 提示 */
   onFallback?: (info: LlmFallbackInfo) => void;
+}
+
+/**
+ * 解析本次请求实际使用的模型：优先请求指定的模型名，未命中回落到 provider 默认模型（models[0]）。
+ * 语义说明：`request.model` 是「模型名偏好」——fallback 到不同 provider 时，对方的默认模型即目标
+ * （跨 provider 的模型名大概率不同，不能作为硬筛选）。
+ */
+export function resolveModelSpec(provider: LlmProviderSpec, requestedName?: string): LlmModelSpec {
+  if (requestedName) {
+    const hit = provider.models.find((model) => model.name === requestedName);
+    if (hit) return hit;
+  }
+  return provider.models[0]!;
+}
+
+/** 合并保守默认后的完整能力矩阵（T3-1：未声明不得假定支持） */
+export function resolveCapabilities(model: LlmModelSpec): ModelCapabilities {
+  const declared = model.capabilities ?? {};
+  return {
+    ...DEFAULT_MODEL_CAPABILITIES,
+    ...declared,
+    ...(declared.cache ? { cache: declared.cache } : {}),
+  };
+}
+
+/** 单项能力查询（cache 为对象能力，声明即视为支持） */
+export function hasCapability(model: LlmModelSpec, key: keyof ModelCapabilities): boolean {
+  return Boolean(resolveCapabilities(model)[key]);
+}
+
+/**
+ * 请求级 max_tokens：请求参数 ?? provider 默认 ?? 模型上限兜底，且不超过模型 max_output。
+ * 返回 undefined 表示不显式下发（由服务端默认决定）。
+ */
+export function effectiveMaxTokens(
+  provider: LlmProviderSpec,
+  model: LlmModelSpec,
+  requested?: number,
+): number | undefined {
+  const base = requested ?? provider.max_tokens ?? model.limits?.max_output;
+  if (base === undefined) return undefined;
+  const cap = model.limits?.max_output;
+  const value = cap !== undefined ? Math.min(base, cap) : base;
+  return Math.max(1, Math.floor(value));
 }

@@ -2,18 +2,15 @@ import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   LlmAbortError,
-  LlmError,
   chat,
-  defaultLlmConfig,
-  parseLlmConfig,
-  serializeLlmConfig,
   stream,
   type LlmProviderSpec,
 } from "@yushu/llm";
 
 /**
- * 用本地 HTTP server 模拟 OpenAI Chat Completions（含 SSE），
- * 覆盖：非流式、流式、鉴权、fallback、AbortController 中止保留部分文本。
+ * OpenAI 兼容主干（openai_chat 协议）的既有行为回归：
+ * 非流式、流式、鉴权、fallback、AbortController 中止保留部分文本、模型解析与输出上限。
+ * （配置解析 / v1 迁移 / 能力矩阵见 config.test.ts；另两协议见 protocols.test.ts。）
  */
 
 interface MockHandle {
@@ -93,60 +90,37 @@ afterEach(async () => {
   handles = [];
 });
 
-async function mockProvider(overrides: Partial<LlmProviderSpec> = {}): Promise<LlmProviderSpec> {
-  const mock = await startMock();
-  handles.push(mock);
+/** v2 provider：mock 端点（local / openai_chat） */
+function providerAt(baseUrl: string, extra: Partial<LlmProviderSpec> = {}): LlmProviderSpec {
   return {
     id: "mock",
-    kind: "openai-compatible",
-    base_url: mock.baseUrl,
-    model: "mock-model",
-    ...overrides,
+    kind: "local",
+    protocol: "openai_chat",
+    base_url: baseUrl,
+    models: [{ name: "mock-model", tier: "small", limits: { context: 32768, max_output: 2048 } }],
+    ...extra,
   };
 }
 
-describe("config/llm.yaml 解析", () => {
-  it("默认配置含 OpenAI 兼容主干与本地兜底；序列化-解析往返一致", () => {
-    const config = defaultLlmConfig();
-    expect(config.providers.map((provider) => provider.id)).toEqual(["primary", "local"]);
-    expect(config.providers[0]?.api_key_env).toBe("YUSHU_LLM_API_KEY");
-    expect(parseLlmConfig(serializeLlmConfig(config))).toEqual(config);
-  });
-
-  it("非法配置给出明确错误", () => {
-    expect(() => parseLlmConfig("apiVersion: yushu.llm/v2\nproviders: []\n")).toThrowError(
-      /apiVersion/,
-    );
-    expect(() => parseLlmConfig("apiVersion: yushu.llm/v1\nproviders: []\n")).toThrowError(
-      /缺少 providers/,
-    );
-    expect(() =>
-      parseLlmConfig(
-        "apiVersion: yushu.llm/v1\nproviders:\n  - id: a\n    base_url: ftp://x\n    model: m\n",
-      ),
-    ).toThrowError(/base_url/);
-    expect(() =>
-      parseLlmConfig(
-        [
-          "apiVersion: yushu.llm/v1",
-          "providers:",
-          "  - {id: a, base_url: 'http://127.0.0.1:1/v1', model: m}",
-          "  - {id: a, base_url: 'http://127.0.0.1:2/v1', model: m}",
-        ].join("\n"),
-      ),
-    ).toThrowError(/id 重复/);
-  });
-});
+async function mockProvider(overrides: Partial<LlmProviderSpec> = {}): Promise<LlmProviderSpec> {
+  const mock = await startMock();
+  handles.push(mock);
+  return providerAt(mock.baseUrl, overrides);
+}
 
 describe("chat 动词（非流式，T1-15）", () => {
   it("OpenAI 兼容主干返回文本 / usage / 模型名", async () => {
     const provider = await mockProvider();
-    const result = await chat([provider], {
-      messages: [
-        { role: "system", content: "你是写作助手" },
-        { role: "user", content: "写一段开头" },
-      ],
-    }, {});
+    const result = await chat(
+      [provider],
+      {
+        messages: [
+          { role: "system", content: "你是写作助手" },
+          { role: "user", content: "写一段开头" },
+        ],
+      },
+      {},
+    );
     expect(result.text).toBe("非流式回复");
     expect(result.provider_id).toBe("mock");
     expect(result.model).toBe("mock-model");
@@ -154,30 +128,37 @@ describe("chat 动词（非流式，T1-15）", () => {
     expect(result.fallbacks).toEqual([]);
   });
 
+  it("模型解析：请求指定第二个模型时随请求下发；max_tokens 不超过模型 limits.max_output", async () => {
+    const mock = await startMock();
+    handles.push(mock);
+    const provider = providerAt(mock.baseUrl, {
+      max_tokens: 4096,
+      models: [
+        { name: "m-big", tier: "flagship", limits: { max_output: 2048 } },
+        { name: "m-small", tier: "small", limits: { max_output: 512 } },
+      ],
+    });
+    await chat(
+      [provider],
+      { messages: [{ role: "user", content: "hi" }], model: "m-small" },
+      {},
+    );
+    expect(mock.requests[0]?.body["model"]).toBe("m-small");
+    expect(mock.requests[0]?.body["max_tokens"]).toBe(512);
+  });
+
   it("HTTP 错误（401）抛 E_LLM_HTTP", async () => {
     const mock = await startMock({ requireAuth: true });
     handles.push(mock);
     await expect(
-      chat(
-        [{ id: "auth", kind: "openai-compatible", base_url: mock.baseUrl, model: "m" }],
-        { messages: [{ role: "user", content: "hi" }] },
-        {},
-      ),
+      chat([providerAt(mock.baseUrl)], { messages: [{ role: "user", content: "hi" }] }, {}),
     ).rejects.toMatchObject({ code: "E_LLM_HTTP" });
   });
 
   it("声明 api_key_env 但两处都没有 key → 提前抛 E_LLM_CONFIG", async () => {
     await expect(
       chat(
-        [
-          {
-            id: "needs-key",
-            kind: "openai-compatible",
-            base_url: "http://127.0.0.1:9/v1",
-            model: "m",
-            api_key_env: "YUSHU_TEST_KEY_MISSING",
-          },
-        ],
+        [providerAt("http://127.0.0.1:9/v1", { api_key_env: "YUSHU_TEST_KEY_MISSING" })],
         { messages: [{ role: "user", content: "hi" }] },
         { env: {} },
       ),
@@ -188,17 +169,9 @@ describe("chat 动词（非流式，T1-15）", () => {
     const mock = await startMock({ requireAuth: true });
     handles.push(mock);
     await chat(
-      [
-        {
-          id: "auth",
-          kind: "openai-compatible",
-          base_url: mock.baseUrl,
-          model: "m",
-          api_key_env: "YUSHU_TEST_KEY",
-        },
-      ],
+      [providerAt(mock.baseUrl, { api_key_env: "YUSHU_TEST_KEY" })],
       { messages: [{ role: "user", content: "hi" }] },
-      { sessionKeys: { auth: "session-key" }, env: { YUSHU_TEST_KEY: "env-key" } },
+      { sessionKeys: { mock: "session-key" }, env: { YUSHU_TEST_KEY: "env-key" } },
     );
     expect(mock.requests[0]?.headers["authorization"]).toBe("Bearer session-key");
   });
@@ -207,15 +180,7 @@ describe("chat 动词（非流式，T1-15）", () => {
     const provider = await mockProvider();
     const onFallback: string[] = [];
     const result = await chat(
-      [
-        {
-          id: "dead",
-          kind: "openai-compatible",
-          base_url: "http://127.0.0.1:9/v1",
-          model: "m",
-        },
-        provider,
-      ],
+      [providerAt("http://127.0.0.1:9/v1", { id: "dead" }), provider],
       { messages: [{ role: "user", content: "hi" }] },
       { onFallback: (info) => onFallback.push(info.provider_id) },
     );
@@ -248,7 +213,7 @@ describe("stream 动词（流式 + 停止，T1-16）", () => {
     const controller = new AbortController();
     const deltas: string[] = [];
     const failure = stream(
-      [{ id: "mock", kind: "openai-compatible", base_url: mock.baseUrl, model: "m" }],
+      [providerAt(mock.baseUrl)],
       { messages: [{ role: "user", content: "写" }], signal: controller.signal },
       {
         onDelta: (delta) => {
@@ -274,10 +239,7 @@ describe("stream 动词（流式 + 停止，T1-16）", () => {
     const deltas: string[] = [];
     await expect(
       stream(
-        [
-          { id: "flaky", kind: "openai-compatible", base_url: mock.baseUrl, model: "m" },
-          backup,
-        ],
+        [providerAt(mock.baseUrl, { id: "flaky" }), backup],
         { messages: [{ role: "user", content: "写" }] },
         { onDelta: (delta) => deltas.push(delta.text) },
         {},

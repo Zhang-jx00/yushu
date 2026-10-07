@@ -1,10 +1,11 @@
-import { callChatCompletion } from "./openai.js";
+import { callProtocolChat } from "./dispatch.js";
 import { LlmAbortError } from "./config.js";
 import type { ChatRequest, ChatResult, LlmCallOptions, LlmProviderSpec } from "./types.js";
 
 /**
  * chat 动词：非流式。按 providers 顺序逐个尝试（fallback 链）。
  * 全部失败时抛最后一个错误；中止透传 LlmAbortError。
+ * T3-1：每次尝试按 provider.protocol 分发到对应协议适配器。
  */
 export async function chat(
   providers: LlmProviderSpec[],
@@ -22,7 +23,7 @@ export async function chat(
   for (let index = 0; index < providers.length; index += 1) {
     const provider = providers[index]!;
     try {
-      const result = await callChatCompletion(provider, request, { options, fetchImpl });
+      const result = await callProtocolChat(provider, request, { options, fetchImpl });
       return { ...result, fallbacks };
     } catch (err) {
       if (err instanceof LlmAbortError) throw err;
