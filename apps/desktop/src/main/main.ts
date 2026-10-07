@@ -396,6 +396,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       "format_version: 1",
       "routes:",
       "  drafting: {prefer: [flagship], require: [stream]}",
+      "  extract: {prefer: [small], require: [structured_output]}",
       "fallback:",
       "  drafting: [mock]",
       "reliability:",
@@ -756,6 +757,44 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       smallTokens: snapSmall.totalTokens,
     };
 
+    // T3-10 设定抽取探针：JSON Schema 契约 + 后校验（mock 返回合法 JSON）→ 候选一律 status=candidate →
+    // 与既有卡三分类（林渊=补充 / 玄铁令=新增 / 林渊·location=冲突）→ 采纳仅 new；冲突入库被拒（服务端复核）
+    const extractRun = await api.extract.preview({ chapterId: draft.chapterId });
+    const extractNew = extractRun.candidates.find((c) => c.name === "玄铁令");
+    const extractAugment = extractRun.candidates.find((c) => c.name === "林渊" && c.type === "character");
+    const extractConflict = extractRun.candidates.find((c) => c.name === "林渊" && c.type === "location");
+    if (!extractNew || !extractAugment || !extractConflict) {
+      throw new Error("设定抽取探针：mock 候选未按预期返回（新增/补充/冲突三类）");
+    }
+    let extractConflictBlocked = false;
+    try {
+      await api.extract.adopt({ chapterId: draft.chapterId, candidate: extractConflict });
+    } catch (err) {
+      extractConflictBlocked = String(err && err.message).includes("E_EXTRACT_CONFLICT");
+    }
+    const extractAdopt = await api.extract.adopt({ chapterId: draft.chapterId, candidate: extractNew });
+    const extractCard = await api.card.read(extractAdopt.path);
+    const extractExt = ((extractCard.card.extensions || {}).extract || {});
+    const extractProbe = {
+      total: extractRun.candidates.length,
+      allCandidate: extractRun.candidates.every((c) => c.status === "candidate"),
+      provenance: extractRun.candidates.every(
+        (c) => c.quote.trim().length > 0 && c.confidence >= 0 && c.confidence <= 1 && c.diff.reason.length > 0,
+      ),
+      newOk: extractNew.diff.kind === "new",
+      augmentOk: extractAugment.diff.kind === "augment" && Boolean(extractAugment.diff.matched_card_id),
+      conflictOk: extractConflict.diff.kind === "conflict",
+      conflictBlocked: extractConflictBlocked,
+      adoptPath: extractAdopt.path,
+      adoptedStatus: extractExt.status === "accepted",
+      adoptedQuote: String(extractExt.quote || "").length > 0,
+      adoptedSource: (extractCard.card.source_chapters || []).includes(draft.chapterId),
+      downgrade: extractRun.downgrade.map((d) => d.strategy).join(","),
+      attempts: extractRun.attempts,
+      provider: extractRun.provider_id,
+    };
+    console.log("[e2e] 设定抽取:", JSON.stringify({ total: extractProbe.total, kinds: [extractNew.diff.kind, extractAugment.diff.kind, extractConflict.diff.kind].join("/"), blocked: extractConflictBlocked, adopted: extractAdopt.path, attempts: extractRun.attempts, downgrade: extractProbe.downgrade }));
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -962,6 +1001,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       assembly: assemblyProbe,
       rag: ragProbe,
       snapshot: snapshotProbe,
+      extract: extractProbe,
     };
   })()`;
   try {
@@ -1211,6 +1251,22 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         bytes: number;
         smallTruncated: number;
         smallTokens: number;
+      };
+      extract: {
+        total: number;
+        allCandidate: boolean;
+        provenance: boolean;
+        newOk: boolean;
+        augmentOk: boolean;
+        conflictOk: boolean;
+        conflictBlocked: boolean;
+        adoptPath: string;
+        adoptedStatus: boolean;
+        adoptedQuote: boolean;
+        adoptedSource: boolean;
+        downgrade: string;
+        attempts: number;
+        provider: string;
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
@@ -2019,6 +2075,20 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.rag.slotItems >= 1 &&
       result.rag.slotProvenance &&
       snapshotOk &&
+      result.extract.total >= 3 &&
+      result.extract.allCandidate &&
+      result.extract.provenance &&
+      result.extract.newOk &&
+      result.extract.augmentOk &&
+      result.extract.conflictOk &&
+      result.extract.conflictBlocked &&
+      result.extract.adoptPath.startsWith("world/cards/") &&
+      result.extract.adoptedStatus &&
+      result.extract.adoptedQuote &&
+      result.extract.adoptedSource &&
+      result.extract.downgrade.includes("prompt_constrained_json") &&
+      result.extract.attempts === 1 &&
+      result.extract.provider === "mock" &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
@@ -2053,7 +2123,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

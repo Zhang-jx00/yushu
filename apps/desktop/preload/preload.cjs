@@ -172,4 +172,10 @@ contextBridge.exposeInMainWorld("yushu", {
     /** 上下文快照导出（T3-9）：组装 + 决策证据写入 .yushu/context-log/（可复现指纹） */
     contextSnapshot: (payload) => invoke("memory:contextSnapshot", payload),
   },
+  extract: {
+    /** 设定抽取预演（T3-10）：JSON Schema 契约 + 后校验 + 修复回喂；候选一律 status=candidate（不入库） */
+    preview: (payload) => invoke("extract:preview", payload),
+    /** 采纳抽取候选（写设定卡真源）：仅 new 候选允许（服务端复核——augment/conflict 明确拒绝） */
+    adopt: (payload) => invoke("extract:adopt", payload),
+  },
 });

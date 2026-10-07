@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
+  ExtractPreviewResult,
+  ExtractionCandidatePayload,
   InjectionConfigPayload,
   MemoryAssemblyResult,
   MemoryContextSnapshotResult,
@@ -12,7 +14,8 @@ import type {
 import { api } from "../api";
 
 /**
- * 记忆页（M3 / T3-5 五层记忆的管理界面；T3-6 注入控制；T3-7 上下文组装；T3-8 RAG 检索；T3-9 预览器）：
+ * 记忆页（M3 / T3-5 五层记忆的管理界面；T3-6 注入控制；T3-7 上下文组装；T3-8 RAG 检索；
+ * T3-9 上下文预览器；T3-10 设定抽取）：
  * - 摘要目标（卷 / 章）：AI 生成候选（**不入库**）→ 采纳（AI 入库，rev 0）或人工修订（rev+1）；
  *   `summary_rev > 0` 后 AI 再入库被拒（E_MEMORY_REV_PROTECTED——人工修订受保护）；
  * - 事实级记忆台账：带出处徽标（出处有效 / 出处失效 / 无出处——正文改动后可检出失效）
@@ -23,8 +26,16 @@ import { api } from "../api";
  *   RRF(k=60) 融合 → 可选重排 top-6；结果带出处（chapter_id + 字符区间 + hash）；
  * - **上下文预览器（T3-9）**：逐条分列「槽位 / 来源 / Token 数 / 命中键 / 是否被截断」，
  *   可导出**可复现快照**（.yushu/context-log/，fingerprint 只取决策内容——同输入两次一致）；
+ * - **设定抽取（T3-10）**：JSON Schema 契约 + 后校验 + 修复回喂；候选一律 `status: candidate`
+ *   （与既有卡三分类：新增 / 补充 / 冲突），确认（采纳）后才写入设定卡——AI 不得覆盖既有卡；
  * - 记录体检（findings）与跨项目拒绝清单（error 红线仅展示、不进入本项目记忆）。
  */
+
+const DIFF_LABELS: Record<ExtractionCandidatePayload["diff"]["kind"], { text: string; cls: string }> = {
+  new: { text: "新增（可入库）", cls: "badge good" },
+  augment: { text: "补充（已存在同名卡）", cls: "badge warn" },
+  conflict: { text: "冲突（需人工处置）", cls: "badge bad" },
+};
 
 const LAYER_LABELS: Record<string, string> = {
   volume_summary: "卷摘要",
@@ -91,6 +102,10 @@ export function MemoryView() {
 
   // 上下文快照导出（T3-9）
   const [snapshot, setSnapshot] = useState<MemoryContextSnapshotResult | null>(null);
+
+  // 设定抽取（T3-10）
+  const [extraction, setExtraction] = useState<ExtractPreviewResult | null>(null);
+  const [extractAdopted, setExtractAdopted] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     const next = await api().memory.state();
@@ -216,6 +231,21 @@ export function MemoryView() {
       if (!previewTarget) return;
       setNotice(null);
       setSnapshot(await api().memory.contextSnapshot({ chapterId: previewTarget, budget_total: assemblyBudget }));
+    });
+
+  const runExtract = () =>
+    guard(async () => {
+      if (!previewTarget) return;
+      setNotice(null);
+      setExtractAdopted({});
+      setExtraction(await api().extract.preview({ chapterId: previewTarget }));
+    });
+
+  const adoptCandidate = (candidate: ExtractionCandidatePayload) =>
+    guard(async () => {
+      const result = await api().extract.adopt({ chapterId: previewTarget, candidate });
+      setExtractAdopted((prev) => ({ ...prev, [candidate.candidate_id]: result.path }));
+      setNotice(`候选「${candidate.name}」已入库：${result.path}（出处与置信度随 extensions.extract 落卡）`);
     });
 
   const removeFact = (id: string, baseHash: string) =>
@@ -726,6 +756,75 @@ export function MemoryView() {
               {rag.reranked.length > 0 && rag.reranked[0]?.rerank && (
                 <div className="muted">重排依据（首条）：{rag.reranked[0].rerank.reason}</div>
               )}
+            </>
+          )}
+        </div>
+
+        <div className="panel">
+          <h3>
+            设定抽取{" "}
+            <span className="muted">T3-10：JSON Schema 契约 + 后校验 + 修复回喂；候选一律 status: candidate——采纳（确认）后才写入设定卡</span>
+          </h3>
+          <div className="master-grid">
+            <label className="field">
+              <span>目标章节</span>
+              <select className="memory-extract-target" value={previewTarget} onChange={(event) => setPreviewTarget(event.target.value)}>
+                {chapterTargets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.title}（{target.sourceChars} 字）
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" className="primary" disabled={busy || !previewTarget} onClick={() => void runExtract()}>
+              抽取候选
+            </button>
+          </div>
+          {!extraction && (
+            <p className="muted">
+              从章节正文抽取人物 / 地点 / 势力 / 物品 / 功法 / 事件 / 规则候选：每条带出处引文与置信度，并与既有设定卡比对
+              （新增 / 补充 / 冲突）。仅「新增」可采纳入库；补充与冲突请到「世界观档案」人工处置（AI 不得重复建卡或覆盖）。
+            </p>
+          )}
+          {extraction && (
+            <>
+              <div className="muted extract-preview">
+                「{extraction.chapterTitle}」· 候选 {extraction.stats.total} 条（新增 {extraction.stats.new} / 补充{" "}
+                {extraction.stats.augment} / 冲突 {extraction.stats.conflict}）· {extraction.provider_id} / {extraction.model} · 请求{" "}
+                {extraction.attempts} 次
+              </div>
+              {extraction.downgrade.length > 0 && (
+                <div className="muted">降级：{extraction.downgrade.map((action) => action.message).join("；")}</div>
+              )}
+              <ul className="extract-candidates">
+                {extraction.candidates.map((candidate) => {
+                  const badge = DIFF_LABELS[candidate.diff.kind];
+                  const adoptedPath = extractAdopted[candidate.candidate_id];
+                  return (
+                    <li key={candidate.candidate_id} className="extract-candidate">
+                      <div>
+                        <span className={badge.cls}>{badge.text}</span>
+                        <span className="badge">{candidate.type}</span>
+                        <strong>{candidate.name}</strong>
+                        {candidate.aliases.length > 0 && <span className="muted">（别名：{candidate.aliases.join("、")}）</span>}
+                        <span className="muted">置信度 {candidate.confidence.toFixed(2)}</span>
+                        <span className="spacer" />
+                        {adoptedPath ? (
+                          <span className="muted">已入库：{adoptedPath}</span>
+                        ) : candidate.diff.kind === "new" ? (
+                          <button type="button" className="extract-adopt" disabled={busy} onClick={() => void adoptCandidate(candidate)}>
+                            采纳入库
+                          </button>
+                        ) : (
+                          <span className="muted">不可入库——{candidate.diff.reason}</span>
+                        )}
+                      </div>
+                      <div className="muted">{candidate.summary}</div>
+                      <div className="muted">出处：「{candidate.quote}」</div>
+                    </li>
+                  );
+                })}
+              </ul>
             </>
           )}
         </div>

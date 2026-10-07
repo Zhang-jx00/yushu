@@ -59,6 +59,52 @@ interface StepDef {
 
 const SCREENSHOT_REL_DIR = "docs/assets/m1-preview";
 
+/** T3-10 设定抽取 mock：抽取请求（系统提示含任务契约 id）返回固定候选——示例覆盖新增 / 补充 / 冲突三类 */
+const EXTRACT_MOCK_CANDIDATES = {
+  candidates: [
+    {
+      type: "character",
+      name: "林渊",
+      aliases: ["小渊"],
+      summary: "开篇登场的主角（示例候选）。",
+      quote: "天启界的夜色",
+      confidence: 0.9,
+    },
+    {
+      type: "item",
+      name: "玄铁令",
+      aliases: [],
+      summary: "第一章末获得的关键道具（示例候选）。",
+      quote: "玄铁令",
+      confidence: 0.82,
+    },
+    {
+      type: "location",
+      name: "天启界",
+      aliases: [],
+      summary: "故事开篇所在的世界（示例候选）。",
+      quote: "天启界的夜色",
+      confidence: 0.75,
+    },
+    {
+      type: "location",
+      name: "林渊",
+      aliases: [],
+      summary: "同名异类型（冲突分类探针：既有卡为人物）。",
+      quote: "临走时他低声说",
+      confidence: 0.4,
+    },
+    {
+      type: "character",
+      name: "测试设定1",
+      aliases: [],
+      summary: "与既有卡同名（补充 / 冲突分类探针——视既有卡类型而定）。",
+      quote: "走进了夜色里",
+      confidence: 0.3,
+    },
+  ],
+};
+
 /** 本地 mock OpenAI（Chat Completions + SSE）：预演不依赖外网与真实 key（与 e2e 同款） */
 export async function startMockOpenAI(
   delayMs = 2,
@@ -84,11 +130,15 @@ export async function startMockOpenAI(
       }
       // T3-3：非流式（一次性返回）分支——模型声明 stream:false 时的降级路径会走到这里
       if (body["stream"] !== true) {
+        // T3-10：设定抽取请求（系统提示含任务契约 id）返回候选 JSON；其余返回固定文本（降级探针口径）
+        const content = raw.includes("yushu.extract/entity_extraction")
+          ? JSON.stringify(EXTRACT_MOCK_CANDIDATES)
+          : "非流式一次性回复";
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
             model: typeof body["model"] === "string" ? body["model"] : "mock-model",
-            choices: [{ message: { role: "assistant", content: "非流式一次性回复" }, finish_reason: "stop" }],
+            choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
             usage: { prompt_tokens: 6, completion_tokens: 5, total_tokens: 11 },
           }),
         );
@@ -1534,6 +1584,48 @@ const STEPS: StepDef[] = [
         note: '预览器条目=' + rows.length + '（表头五列=' + headerOk + '；命中键含「天启界」=' + matchedKeys + '）' +
           '；回执：' + snapText.slice(0, 150) +
           '；首行=' + (rowText.split(' | ')[0] || '').slice(0, 100),
+      };
+    `,
+  },
+  {
+    step: 34,
+    title: "记忆：设定抽取（JSON Schema 契约 / 候选三分类 / 确认入库，T3-10）",
+    file: "step34-extract.png",
+    body: String.raw`
+      await tab('记忆');
+      const panel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.panel h3')].find((x) => x.textContent.includes('设定抽取'));
+        return title ? title.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到设定抽取面板：' + pageText() };
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      const btn = [...panel.querySelectorAll('button')].find((b) => b.textContent.trim() === '抽取候选');
+      if (!btn || btn.disabled) return { ok: false, note: '抽取候选按钮不可用：' + pageText() };
+      btn.click();
+      const line = await waitFor(() => document.querySelector('.extract-preview'), 15000);
+      if (!line) return { ok: false, note: '抽取未返回：' + pageText() };
+      await sleep(150);
+      const lineText = String(line.textContent).replace(/\s+/g, ' ');
+      const rows = [...document.querySelectorAll('.extract-candidate')];
+      const rowText = rows.map((r) => String(r.innerText).replace(/\s+/g, ' ')).join(' | ');
+      const badges = rowText.includes('新增（可入库）') && (rowText.includes('补充（已存在同名卡）') || rowText.includes('冲突（需人工处置）'));
+      const provenance = rows.length >= 3 && rows.every((r) => String(r.innerText).includes('出处：「') && String(r.innerText).includes('置信度'));
+      // 采纳「玄铁令」（新增候选）——用户确认后入库（仅 new 可入库）
+      const targetRow = rows.find((r) => String(r.innerText).includes('玄铁令'));
+      const adoptBtn = targetRow && [...targetRow.querySelectorAll('button')].find((b) => b.textContent.trim() === '采纳入库');
+      if (!adoptBtn) return { ok: false, note: '玄铁令候选「采纳入库」按钮不可用：' + rowText.slice(0, 200) };
+      adoptBtn.click();
+      const adopted = await waitFor(() => {
+        const row = [...document.querySelectorAll('.extract-candidate')].find((r) => String(r.innerText).includes('玄铁令'));
+        return row && String(row.innerText).includes('已入库：world/cards/') ? String(row.innerText).replace(/\s+/g, ' ') : null;
+      }, 12000);
+      await sleep(200);
+      return {
+        ok: rows.length >= 3 && badges && provenance && adopted !== null && /新增 \d+/.test(lineText),
+        note: '回执：' + lineText.slice(0, 150) +
+          '；候选行=' + rows.length + '（三分类徽标=' + badges + '；出处与置信度=' + provenance + '）' +
+          '；采纳回执="' + (adopted ? adopted.slice(0, 110) : '无') + '"',
       };
     `,
   },

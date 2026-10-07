@@ -46,6 +46,10 @@ import {
   type MemoryContextSnapshotResult,
   type MemoryRagPreviewPayload,
   type MemoryRagPreviewResult,
+  type ExtractAdoptPayload,
+  type ExtractAdoptResult,
+  type ExtractPreviewPayload,
+  type ExtractPreviewResult,
   type MemorySaveFactPayload,
   type MemorySaveFactResult,
   type MemorySaveSummaryPayload,
@@ -131,6 +135,7 @@ import {
   saveMemorySummary,
   summarizeMemory,
 } from "./memory-ops.js";
+import { adoptSettingCandidate, previewSettingExtraction } from "./extract-ops.js";
 import {
   buildFusionPreview,
   buildPackCatalog,
@@ -617,6 +622,16 @@ export function registerIpcHandlers(): void {
   // 上下文快照导出（T3-9）：写入 .yushu/context-log/（派生日志，不入索引；不走 wrapWrite 避免无谓索引刷新）
   ipcMain.handle(CHANNELS.memoryContextSnapshot, (_event, payload: MemoryContextSnapshotPayload) =>
     wrap<MemoryContextSnapshotResult>(() => exportContextSnapshot(requireGateway(), payload)),
+  );
+
+  // 设定抽取预演（T3-10，只读：候选不入库——采纳是用户显式动作；ai-usage 记录为派生日志）
+  ipcMain.handle(CHANNELS.extractPreview, (_event, payload: ExtractPreviewPayload) =>
+    wrap<ExtractPreviewResult>(() => previewSettingExtraction(requireGateway(), payload)),
+  );
+
+  // 采纳抽取候选（写设定卡真源：仅 new 候选允许——服务端复核分类，AI 不得重复建卡 / 覆盖）
+  ipcMain.handle(CHANNELS.extractAdopt, (_event, payload: ExtractAdoptPayload) =>
+    wrapWrite<ExtractAdoptResult>(() => adoptSettingCandidate(requireGateway(), payload)),
   );
 
   // 正常退出（窗口关闭 → app.quit）：before-quit 不能等待异步——同步原子写把会话标记为 closed，

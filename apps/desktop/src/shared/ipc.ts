@@ -88,6 +88,9 @@ export const CHANNELS = {
   memoryRagPreview: "memory:ragPreview",
   /** 上下文快照导出（T3-9）：组装 + 决策证据写入 .yushu/context-log/（可复现指纹） */
   memoryContextSnapshot: "memory:contextSnapshot",
+  /** 设定抽取预演 / 采纳（T3-10）：候选一律 status=candidate，用户确认后入库 */
+  extractPreview: "extract:preview",
+  extractAdopt: "extract:adopt",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
@@ -1287,6 +1290,54 @@ export interface MemoryContextSnapshotResult {
   bytes: number;
   totalTokens: number;
   truncatedItems: number;
+}
+
+/* ---------- 设定抽取（T3-10；结构与 @yushu/world-engine extract 兼容） ---------- */
+
+export interface ExtractionCandidatePayload {
+  candidate_id: string;
+  type: string;
+  name: string;
+  aliases: string[];
+  summary: string;
+  /** 出处引文（原文片段——无出处不得进入候选） */
+  quote: string;
+  confidence: number;
+  diff: {
+    kind: "new" | "augment" | "conflict";
+    matched_card_id?: string;
+    reason: string;
+  };
+  /** 服务端强制：抽取结果一律候选（采纳是用户显式动作） */
+  status: "candidate";
+}
+
+export interface ExtractPreviewPayload {
+  chapterId: string;
+}
+
+export interface ExtractPreviewResult {
+  chapterId: string;
+  chapterTitle: string;
+  candidates: ExtractionCandidatePayload[];
+  stats: { total: number; new: number; augment: number; conflict: number };
+  provider_id: string;
+  model: string;
+  /** 实际请求次数（1 = 首次即通过；>1 = 校验失败回喂修复） */
+  attempts: number;
+  /** T3-3 降级回执（structured_output 未满足 → 提示词约束 + JSON 后校验） */
+  downgrade: { capability: string; strategy: string; message: string }[];
+}
+
+export interface ExtractAdoptPayload {
+  chapterId: string;
+  candidate: ExtractionCandidatePayload;
+}
+
+export interface ExtractAdoptResult {
+  path: string;
+  hash: string;
+  warnings: string[];
 }
 
 /**

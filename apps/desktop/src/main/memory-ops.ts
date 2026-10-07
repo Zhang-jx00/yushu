@@ -36,14 +36,9 @@ import {
   MEMORY_CHAPTER_SUMMARIES_DIR,
   MEMORY_FACTS_DIR,
   MEMORY_VOLUME_SUMMARIES_DIR,
-  OUTLINE_PATH,
-  WORLD_CONFIG_PATH,
   chapterPath,
   chapterSummaryPath,
   factPath,
-  parseOutline,
-  parseWorldConfig,
-  readChapterFile,
   volumeSummaryPath,
   type Outline,
   type OutlineChapter,
@@ -74,6 +69,13 @@ import type {
 } from "../shared/ipc.js";
 import { appendAiUsage, newUsageId } from "./ai-usage.js";
 import { loadLlmConfigForUse, loadRoutingConfigForUse, reliabilityGate, sessionKeySnapshot } from "./ai-ops.js";
+import {
+  locateChapter,
+  readChapterBody,
+  readOutlineSafe,
+  readProjectId,
+  readWorldTitle,
+} from "./doc-readers.js";
 import { ProjectGateway } from "./file-gateway.js";
 import { ragSearchIndex } from "./index-ops.js";
 import { buildContextPreview, readAllCards } from "./prompt-ops.js";
@@ -86,7 +88,6 @@ import { buildContextPreview, readAllCards } from "./prompt-ops.js";
  * - 跨项目记录（project_id 不匹配）诊断为 error 并拒绝进入本项目记忆（A5 红线）。
  */
 
-const PROJECT_ID_FALLBACK = "";
 /** 摘要素材上限（字符）：超出截断（T3-7 的 token 预算细化前的粗保护） */
 const MAX_SOURCE_CHARS = 8000;
 
@@ -105,60 +106,6 @@ function toInjectionPayload(config: InjectionConfig): InjectionConfigPayload {
     budget_tokens: config.budget_tokens,
     ...(config.reveal_gate ? { reveal_gate: config.reveal_gate } : {}),
   };
-}
-
-async function readOutlineSafe(gateway: ProjectGateway): Promise<Outline | null> {
-  const snapshot = await gateway.readDoc(OUTLINE_PATH).catch(() => null);
-  if (!snapshot) return null;
-  try {
-    return parseOutline(snapshot.content);
-  } catch {
-    return null;
-  }
-}
-
-async function readProjectId(gateway: ProjectGateway): Promise<string> {
-  const snapshot = await gateway.readDoc(WORLD_CONFIG_PATH).catch(() => null);
-  if (!snapshot) return PROJECT_ID_FALLBACK;
-  try {
-    return parseWorldConfig(snapshot.content).id;
-  } catch {
-    return PROJECT_ID_FALLBACK;
-  }
-}
-
-async function readWorldTitle(gateway: ProjectGateway): Promise<string> {
-  const snapshot = await gateway.readDoc(WORLD_CONFIG_PATH).catch(() => null);
-  if (!snapshot) return "本作品";
-  try {
-    return parseWorldConfig(snapshot.content).title;
-  } catch {
-    return "本作品";
-  }
-}
-
-async function readChapterBody(gateway: ProjectGateway, path: string): Promise<string> {
-  const snapshot = await gateway.readDoc(path).catch(() => null);
-  if (!snapshot) return "";
-  try {
-    return readChapterFile(snapshot.content).body;
-  } catch {
-    return "";
-  }
-}
-
-function locateChapter(
-  outline: Outline,
-  chapterEntityId: string,
-): { volume: OutlineVolume; chapter: OutlineChapter; path: string } | null {
-  for (const volume of outline.volumes) {
-    for (const chapter of volume.chapters) {
-      if (chapter.chapter_id === chapterEntityId) {
-        return { volume, chapter, path: chapterPath(volume.id, chapterEntityId) };
-      }
-    }
-  }
-  return null;
 }
 
 /** 记忆状态：摘要 / 事实台账（含出处校验）/ 目标列表 / lint 发现 / 跨项目拒绝清单 */

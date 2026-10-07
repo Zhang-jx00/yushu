@@ -305,6 +305,7 @@ export async function writeCardDoc(
       ...(input.layer ? { layer: input.layer as EntityBase["layer"] } : {}),
       ...(input.aliases ? { aliases: input.aliases } : {}),
       ...(input.refs ? { refs: input.refs } : {}),
+      ...(input.source_chapters ? { sourceChapters: input.source_chapters } : {}),
       ...(input.visibility ? { visibility: input.visibility as EntityBase["visibility"] } : {}),
       ...(input.extensions ? { extensions: input.extensions } : {}),
     });
