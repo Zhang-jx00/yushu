@@ -12,6 +12,8 @@ import {
   type AiSaveConfigPayload,
   type AiStartResult,
   type AiUsageState,
+  type AiRejectPayload,
+  type AiFeedbackState,
   type AppFlushDonePayload,
   type CardReadResult,
   type CardSummary,
@@ -95,6 +97,7 @@ import {
   saveAiConfig,
   setSessionKey,
 } from "./ai-ops.js";
+import { appendAiFeedback, readAiFeedbackState } from "./ai-feedback.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
 import { IndexRefreshScheduler } from "./index-scheduler.js";
@@ -419,6 +422,16 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(CHANNELS.aiUsage, () => wrap<AiUsageState>(() => readAiUsageState(requireGateway())));
+
+  // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）
+  ipcMain.handle(CHANNELS.aiReject, (_event, payload: AiRejectPayload) =>
+    wrap<AiFeedbackState>(async () => {
+      const gateway = requireGateway();
+      await appendAiFeedback(gateway.root, payload);
+      return readAiFeedbackState(gateway.root);
+    }),
+  );
+  ipcMain.handle(CHANNELS.aiFeedback, () => wrap<AiFeedbackState>(() => readAiFeedbackState(requireGateway().root)));
 
   /* ---------- 导出与敏感词自查（S6） ---------- */
 

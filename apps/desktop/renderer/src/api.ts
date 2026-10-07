@@ -1,4 +1,6 @@
 import type {
+  AiRejectPayload,
+  AiFeedbackState,
   AiAdoptPayload,
   AiAdoptResult,
   AiConfigState,
@@ -123,6 +125,10 @@ export interface YushuApi {
     abort: (streamId: string) => Promise<boolean>;
     adopt: (payload: AiAdoptPayload) => Promise<AiAdoptResult>;
     usage: () => Promise<AiUsageState>;
+    /** 候选拒绝原因记录（T3-11，J15）：写入 .yushu/ai-feedback.jsonl 并回传统计 */
+    reject: (payload: AiRejectPayload) => Promise<AiFeedbackState>;
+    /** 拒绝原因统计（本机） */
+    feedback: () => Promise<AiFeedbackState>;
     /** 订阅流式事件（ai:event 单向推送）；返回取消订阅函数 */
     onEvent: (handler: (event: AiStreamEvent) => void) => () => void;
   };

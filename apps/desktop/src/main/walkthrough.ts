@@ -145,7 +145,11 @@ export async function startMockOpenAI(
         return;
       }
       res.writeHead(200, { "Content-Type": "text/event-stream" });
-      const chunks = ["天启", "界的", "夜色"];
+      // T3-11：多候选生成（指令含「多候选生成 #i/N」标记）返回差异化文本；其余保持既有口径
+      const multiMatch = /多候选生成 #(\d+)\//.exec(raw);
+      const chunks = multiMatch
+        ? ["夜色压下来。", `林渊拔剑而起（候选${multiMatch[1]}）。`]
+        : ["天启", "界的", "夜色"];
       let sent = 0;
       const writeNext = () => {
         if (sent >= chunks.length) {
@@ -1626,6 +1630,76 @@ const STEPS: StepDef[] = [
         note: '回执：' + lineText.slice(0, 150) +
           '；候选行=' + rows.length + '（三分类徽标=' + badges + '；出处与置信度=' + provenance + '）' +
           '；采纳回执="' + (adopted ? adopted.slice(0, 110) : '无') + '"',
+      };
+    `,
+  },
+  {
+    step: 35,
+    title: "AI 副驾：多候选对比与局部采纳 / 拒绝原因（T3-11，J15）",
+    file: "step35-multi-candidate.png",
+    body: String.raw`
+      await tab('AI 副驾');
+      const panel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.panel h3')].find((x) => x.textContent.includes('候选正文'));
+        return title ? title.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到候选正文面板：' + pageText() };
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(150);
+      // AI 副驾随标签页卸载重建：先确保开关已开（生成按钮的启用条件；step5 的开关状态随卸载重置）
+      const enableBox = document.querySelector('.ai input[type="checkbox"]');
+      if (enableBox && !enableBox.checked) enableBox.click();
+      await sleep(150);
+      const modeSelect = panel.querySelector('.ai-typewriter-mode');
+      if (!modeSelect) return { ok: false, note: '找不到打字机模式选择：' + pageText() };
+      const multiBtn = [...panel.querySelectorAll('button')].find((b) => b.textContent.includes('个候选'));
+      if (!multiBtn || multiBtn.disabled) return { ok: false, note: '多候选按钮不可用：' + pageText() };
+      multiBtn.click();
+      const cards = await waitFor(() => {
+        const list = [...document.querySelectorAll('.ai-candidate-card')];
+        return list.length >= 2 ? list : null;
+      }, 30000);
+      if (!cards) return { ok: false, note: '多候选未生成：' + pageText() };
+      const cardText = cards.map((c) => String(c.innerText).replace(/\s+/g, ' ')).join(' | ');
+      const diffOk = cardText.includes('句级差异');
+      const varied = cardText.includes('候选1') && cardText.includes('候选2');
+      const typewriter = String(modeSelect.value) === 'smooth';
+      // 局部采纳：展开候选 1 句表 → 取消第二句 → 采纳所选句（追加）
+      const first = [...document.querySelectorAll('.ai-candidate-card')][0];
+      const toggle = [...first.querySelectorAll('button')].find((b) => b.textContent.includes('按句采纳'));
+      if (!toggle) return { ok: false, note: '找不到按句采纳按钮：' + cardText.slice(0, 160) };
+      toggle.click();
+      await sleep(150);
+      const boxes = [...first.querySelectorAll('.sentences input[type="checkbox"]')];
+      if (boxes.length < 2) return { ok: false, note: '句表不足两句：' + pageText() };
+      boxes[1].click();
+      const adoptBtn = document.querySelector('.ai-sentence-adopt');
+      if (!adoptBtn) return { ok: false, note: '找不到采纳所选句按钮：' + pageText() };
+      adoptBtn.click();
+      // 回执文案为「局部采纳：已追加 X/Y 句 → …」（带全角冒号——避免误匹配面板标题中的「局部采纳 / 拒绝原因」）
+      const adoptNotice = await waitFor(() => {
+        const el = [...document.querySelectorAll('.ai .muted')].find((x) => x.textContent.includes('局部采纳：'));
+        return el ? String(el.textContent).replace(/\s+/g, ' ') : null;
+      }, 15000);
+      // 拒绝原因：候选 2 → 拒绝…（默认「太水」）→ 记录拒绝 → 统计出现
+      const second = [...document.querySelectorAll('.ai-candidate-card')][1];
+      const rejectBtn = [...second.querySelectorAll('button')].find((b) => b.textContent.trim() === '拒绝…');
+      if (!rejectBtn) return { ok: false, note: '找不到拒绝按钮：' + pageText() };
+      rejectBtn.click();
+      await sleep(150);
+      const confirmBtn = [...second.querySelectorAll('button')].find((b) => b.textContent.trim() === '记录拒绝');
+      if (!confirmBtn) return { ok: false, note: '找不到记录拒绝按钮：' + pageText() };
+      confirmBtn.click();
+      const stats = await waitFor(() => {
+        const el = document.querySelector('.ai-feedback');
+        return el && String(el.textContent).includes('太水') ? String(el.textContent).replace(/\s+/g, ' ') : null;
+      }, 12000);
+      await sleep(200);
+      return {
+        ok: diffOk && varied && typewriter && adoptNotice !== null && stats !== null,
+        note: '多候选=' + cards.length + '（差异化=' + varied + '；句级差异行=' + diffOk + '；打字机匀速=' + typewriter + '）' +
+          '；局部采纳="' + (adoptNotice ?? '无').slice(0, 90) + '"' +
+          '；拒绝统计="' + (stats ?? '无').slice(0, 90) + '"',
       };
     `,
   },

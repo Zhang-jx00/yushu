@@ -15,6 +15,7 @@ import {
   orderProvidersByRoute,
   parseLlmConfig,
   parseRoutingConfig,
+  planChannels,
   planDowngrade,
   resolveCapabilities,
   resolveRoute,
@@ -188,6 +189,13 @@ export async function readAiConfig(gateway: ProjectGateway): Promise<AiConfigSta
     })),
     keyStates,
     canGenerate: keyStates.some((state) => state.ready),
+    // T3-11（J08/J09）：批量任务半价通道规划（batch_eligible：outline / summarize / extract）
+    channels: planChannels(config.providers).map((plan) => ({
+      task: plan.task,
+      channel: plan.channel,
+      eligible: plan.eligible,
+      note: plan.note,
+    })),
   };
 }
 
@@ -283,6 +291,11 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
       ...(payload.instruction ? { instruction: payload.instruction } : {}),
       ...(payload.targetWords ? { targetWords: payload.targetWords } : {}),
     };
+    // T3-11（J15）：多候选生成——注入「独立生成、不得互相参照」标记（保证候选多样性而非同质复制）
+    if (payload.candidateTotal && payload.candidateTotal > 1 && payload.candidateIndex) {
+      const marker = `【多候选生成 #${payload.candidateIndex}/${payload.candidateTotal}：独立生成本候选，不得参照其它候选或与其保持一致】`;
+      task.instruction = task.instruction ? `${task.instruction}\n${marker}` : marker;
+    }
     const messages = assembleMessages(preview, task);
     const config = await loadLlmConfigForUse(gateway);
     // T3-2：任务路由（draft-first / continue 均归 drafting：prefer 旗舰 + require stream）

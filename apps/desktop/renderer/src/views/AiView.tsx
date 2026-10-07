@@ -11,13 +11,19 @@ import type {
   DraftHintPayload,
 } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { TypewriterBuffer, type TypewriterMode } from "../typewriter-buffer";
+import { diffSentences, mergeSelected, splitSentences } from "../candidate-diff";
+import { REJECT_REASON_PRESETS, type AiFeedbackState } from "../../../src/shared/ipc";
 
 /**
- * AI 副驾（S4/S5；T1-15 ~ T1-17）：
+ * AI 副驾（S4/S5；T1-15 ~ T1-17；M3/T3-11 写作 UX）：
  * - AI 调用默认关闭（本地功能不受影响）；开启后展示 provider / key 就绪态；
  * - 上下文预览器：槽位 / 来源 / 字符数 / 稳定前缀断点（真实发给模型的内容可审计）；
- * - 流式生成 + 停止（AbortController）；结果以候选呈现，整段采纳（替换/追加）才写正文；
- * - AI 使用记录（生成 / 采纳）来自 .yushu/ai-usage.jsonl。
+ * - 流式生成 + 停止（AbortController）；**chunk 缓冲 + rAF 打字机**（匀速 / 瞬时两档）渲染候选；
+ * - **多候选对比（J15）**：N 个候选独立生成（「不得互相参照」标记）→ 句级 diff 对照草稿 →
+ *   整段 / 追加 / **按句局部采纳**；拒绝 → 预置原因标签记录（.yushu/ai-feedback.jsonl，统计展示）；
+ * - 批量任务半价通道规划展示（T3-11，J08/J09：outline / summarize / extract）；
+ * - 结果以候选呈现，显式采纳才写正文；AI 使用记录来自 .yushu/ai-usage.jsonl。
  */
 
 interface GenerateResult {
@@ -29,6 +35,15 @@ interface GenerateResult {
   usageId: string;
   hints: DraftHintPayload;
   usageText: string;
+  streamId: string;
+}
+
+/** 多候选条目（T3-11）：生成结果 + 候选序号 + 采纳 / 拒绝处置状态 */
+interface CandidateEntry extends GenerateResult {
+  index: number;
+  total: number;
+  adopted?: "replace" | "append";
+  rejected?: boolean;
 }
 
 /** T3-1：模型层级与能力矩阵的展示标签（能力矩阵为「保守默认合并后」结果，UI 直接呈现） */
@@ -81,6 +96,20 @@ export function AiView() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const streamIdRef = useRef<string | null>(null);
+
+  // 写作 UX（T3-11）：打字机缓冲 / 多候选 / 句级 diff 与局部采纳 / 拒绝原因
+  const [typewriterMode, setTypewriterMode] = useState<TypewriterMode>("smooth");
+  const [candidateCount, setCandidateCount] = useState(2);
+  const [candidates, setCandidates] = useState<CandidateEntry[]>([]);
+  const [expandedDiff, setExpandedDiff] = useState<string | null>(null);
+  const [selectedSentences, setSelectedSentences] = useState<Record<string, boolean>>({});
+  const [feedback, setFeedback] = useState<AiFeedbackState | null>(null);
+  const [rejectDraft, setRejectDraft] = useState<{ streamId: string; reason: string; note: string } | null>(null);
+  const [draftBody, setDraftBody] = useState("");
+  const runHandlersRef = useRef(new Map<string, (event: AiStreamEvent) => void>());
+  const bufferRef = useRef<TypewriterBuffer | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const modeRef = useRef<TypewriterMode>("smooth");
 
   // 配置编辑（T3-4：provider 列表草稿——逐行编辑 / 添加本地预设 / 删除）
   const [providersDraft, setProvidersDraft] = useState<AiProviderPayload[] | null>(null);
@@ -169,47 +198,26 @@ export function AiView() {
         await refreshDrafts();
         await refreshUsage();
         await refreshPreview(null);
+        setFeedback(await api().ai.feedback());
       } catch (err) {
         setError((err as Error).message);
       }
     })();
   }, [refreshConfig, refreshDrafts, refreshUsage, refreshPreview]);
 
-  // 流式事件订阅（ai:event 单向推送）
+  // 流式事件分发（ai:event 单向推送；T3-11：按 streamId 路由到各自 runOne 处理器——支持多候选串行）
   useEffect(() => {
     const off = api().ai.onEvent((event: AiStreamEvent) => {
-      if (event.streamId !== streamIdRef.current) return;
-      if (event.type === "delta") {
-        setStreamText((prev) => prev + event.text);
-        setStreamChars(event.chars);
-      } else if (event.type === "fallback") {
-        setFallbackNote(`provider「${event.providerId}」不可用，已降级：${event.reason}`);
-      } else if (event.type === "downgrade") {
-        setDowngradeNotes((prev) => (prev.includes(event.message) ? prev : [...prev, event.message]));
-      } else if (event.type === "done") {
-        setRunning(false);
-        setStreamText(event.text);
-        setStreamChars(event.chars);
-        setResult({
-          text: event.text,
-          chars: event.chars,
-          aborted: event.aborted,
-          providerId: event.providerId,
-          model: event.model,
-          usageId: event.usageId,
-          hints: event.hints,
-          usageText: event.usage
-            ? `prompt ${event.usage.prompt_tokens ?? "-"} / completion ${event.usage.completion_tokens ?? "-"}`
-            : "（本端点未返回 usage）",
-        });
-        void refreshUsage();
-      } else {
-        setRunning(false);
-        setError(`[${event.code}] ${event.message}`);
-      }
+      runHandlersRef.current.get(event.streamId)?.(event);
     });
     return off;
-  }, [refreshUsage]);
+  }, []);
+
+  // 打字机模式同步（切换后立即作用于当前缓冲）
+  useEffect(() => {
+    modeRef.current = typewriterMode;
+    bufferRef.current?.setMode(typewriterMode);
+  }, [typewriterMode]);
 
   const selectTarget = async (key: string) => {
     setSelectedKey(key);
@@ -217,32 +225,164 @@ export function AiView() {
     if (draft) await refreshPreview({ volumeId: draft.volumeId, chapterId: draft.chapterId });
   };
 
-  const start = async () => {
-    if (!selected) return;
-    setRunning(true);
-    setStreamText("");
-    setStreamChars(0);
+  /** 拉取当前草稿正文（多候选句级 diff 的对照基线） */
+  const ensureDraftBody = useCallback(async () => {
+    if (!selected) {
+      setDraftBody("");
+      return "";
+    }
+    try {
+      const snapshot = await api().chapter.read(selected.chapterPath);
+      setDraftBody(snapshot.body);
+      return snapshot.body;
+    } catch {
+      setDraftBody("");
+      return "";
+    }
+  }, [selected]);
+
+  /** 打字机帧循环：rAF 每帧 flush 一次缓冲（未 flush 内容不触发 React 提交——J08 反模式的正面实现） */
+  const startFrameLoop = () => {
+    if (frameRef.current !== null) return;
+    const tick = () => {
+      const buffer = bufferRef.current;
+      if (buffer) {
+        const piece = buffer.flushFrame();
+        if (piece !== "") setStreamText((prev) => prev + piece);
+      }
+      frameRef.current = bufferRef.current ? requestAnimationFrame(tick) : null;
+    };
+    frameRef.current = requestAnimationFrame(tick);
+  };
+
+  const stopFrameLoop = () => {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+  };
+
+  /** 单次流式生成（多候选串行复用同一实现）：返回完整结果；事件按 streamId 分发 */
+  const runOne = (index: number, total: number): Promise<GenerateResult> =>
+    new Promise<GenerateResult>((resolve, reject) => {
+      if (!selected) {
+        reject(new Error("未选择生成目标"));
+        return;
+      }
+      const streamId = `ai-${typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 8) : Math.random().toString(36).slice(2, 10)}`;
+      streamIdRef.current = streamId;
+      bufferRef.current = new TypewriterBuffer({ mode: modeRef.current });
+      setStreamText("");
+      setStreamChars(0);
+      startFrameLoop();
+      const finish = () => {
+        runHandlersRef.current.delete(streamId);
+        stopFrameLoop();
+        bufferRef.current = null;
+      };
+      runHandlersRef.current.set(streamId, (event) => {
+        if (event.type === "delta") {
+          bufferRef.current?.push(event.text);
+          setStreamChars(event.chars);
+          return;
+        }
+        if (event.type === "fallback") {
+          setFallbackNote(`provider「${event.providerId}」不可用，已降级：${event.reason}`);
+          return;
+        }
+        if (event.type === "downgrade") {
+          setDowngradeNotes((prev) => (prev.includes(event.message) ? prev : [...prev, event.message]));
+          return;
+        }
+        if (event.type === "done") {
+          bufferRef.current?.flushAll();
+          finish();
+          setStreamText(event.text);
+          setStreamChars(event.chars);
+          resolve({
+            streamId,
+            text: event.text,
+            chars: event.chars,
+            aborted: event.aborted,
+            providerId: event.providerId,
+            model: event.model,
+            usageId: event.usageId,
+            hints: event.hints,
+            usageText: event.usage
+              ? `prompt ${event.usage.prompt_tokens ?? "-"} / completion ${event.usage.completion_tokens ?? "-"}`
+              : "（本端点未返回 usage）",
+          });
+          return;
+        }
+        finish();
+        reject(new Error(`[${event.code}] ${event.message}`));
+      });
+      void api()
+        .ai.start({
+          streamId,
+          volumeId: selected.volumeId,
+          chapterId: selected.chapterId,
+          task,
+          targetWords,
+          ...(instruction.trim() ? { instruction: instruction.trim() } : {}),
+          ...(total > 1 ? { candidateIndex: index, candidateTotal: total } : {}),
+        })
+        .catch((err: Error) => {
+          finish();
+          reject(err);
+        });
+    });
+
+  const resetRunState = () => {
     setResult(null);
     setError(null);
     setNotice(null);
     setFallbackNote(null);
     setDowngradeNotes([]);
-    // 先确定 streamId，再订阅事件（避免首个增量与 invoke 返回值的竞态）
-    const streamId = `ai-${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 8) : Math.random().toString(36).slice(2, 10)}`;
-    streamIdRef.current = streamId;
+  };
+
+  const start = async () => {
+    if (!selected) return;
+    setRunning(true);
+    resetRunState();
+    setCandidates([]);
+    setExpandedDiff(null);
     try {
-      await api().ai.start({
-        streamId,
-        volumeId: selected.volumeId,
-        chapterId: selected.chapterId,
-        task,
-        targetWords,
-        ...(instruction.trim() ? { instruction: instruction.trim() } : {}),
-      });
-      setNotice(`生成已开始（streamId ${streamId}）——候选不会写入正文`);
+      const outcome = await runOne(1, 1);
+      setResult(outcome);
+      void refreshUsage();
+      await ensureDraftBody();
     } catch (err) {
-      setRunning(false);
       setError((err as Error).message);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  /** 多候选生成（T3-11，J15）：串行 N 个候选（各自独立标记）；停止会终止整个串行队列 */
+  const startMulti = async () => {
+    if (!selected) return;
+    setRunning(true);
+    resetRunState();
+    setCandidates([]);
+    setExpandedDiff(null);
+    setSelectedSentences({});
+    const produced: CandidateEntry[] = [];
+    try {
+      await ensureDraftBody();
+      for (let index = 1; index <= candidateCount; index += 1) {
+        setNotice(`多候选生成中：第 ${index}/${candidateCount} 个…`);
+        const outcome = await runOne(index, candidateCount);
+        produced.push({ ...outcome, index, total: candidateCount });
+        setCandidates([...produced]);
+        if (outcome.aborted) break;
+      }
+      setNotice(`多候选生成完成：${produced.length} 个候选（句级差异已对照草稿；采纳 / 拒绝均需显式操作）`);
+      void refreshUsage();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -276,6 +416,97 @@ export function AiView() {
       await refreshDrafts();
       await refreshUsage();
       await refreshPreview({ volumeId: selected.volumeId, chapterId: selected.chapterId });
+      await ensureDraftBody();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  /** 多候选：整段 / 追加采纳（显式动作才写正文——与单候选同一红线） */
+  const adoptCandidate = async (entry: CandidateEntry, mode: "replace" | "append") => {
+    if (!selected) return;
+    if (
+      mode === "replace" &&
+      selected.hasBody &&
+      !confirm("替换将覆盖该章节现有正文（覆盖前会自动创建「破坏前」快照，可整体回退），确定继续？")
+    ) {
+      return;
+    }
+    try {
+      setError(null);
+      const adopted = await api().ai.adopt({
+        usageId: entry.usageId,
+        volumeId: selected.volumeId,
+        chapterId: selected.chapterId,
+        text: entry.text,
+        mode,
+      });
+      setNotice(
+        `候选 ${entry.index}/${entry.total} 已${mode === "replace" ? "替换" : "追加"}采纳 → ${adopted.chapterPath}（${adopted.wordCount} 字）`,
+      );
+      setCandidates((prev) =>
+        prev.map((item) => (item.streamId === entry.streamId ? { ...item, adopted: mode } : item)),
+      );
+      await refreshDrafts();
+      await refreshUsage();
+      await ensureDraftBody();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const toggleSentence = (key: string, checked: boolean) => {
+    setSelectedSentences((prev) => ({ ...prev, [key]: checked }));
+  };
+
+  /** 局部采纳（J15）：按句勾选合并（缺省全选）→ 追加落盘 */
+  const adoptSelectedSentences = async (entry: CandidateEntry) => {
+    if (!selected) return;
+    const sentences = splitSentences(entry.text);
+    const checked = sentences.filter((_, index) => selectedSentences[`${entry.streamId}:${index}`] ?? true);
+    const text = mergeSelected(checked);
+    if (text.trim() === "") {
+      setError("未勾选任何句子：至少选择一句后再采纳");
+      return;
+    }
+    try {
+      setError(null);
+      const adopted = await api().ai.adopt({
+        usageId: entry.usageId,
+        volumeId: selected.volumeId,
+        chapterId: selected.chapterId,
+        text,
+        mode: "append",
+      });
+      setNotice(`局部采纳：已追加 ${checked.length}/${sentences.length} 句 → ${adopted.chapterPath}（${adopted.wordCount} 字）`);
+      setCandidates((prev) =>
+        prev.map((item) => (item.streamId === entry.streamId ? { ...item, adopted: "append" } : item)),
+      );
+      await refreshDrafts();
+      await refreshUsage();
+      await ensureDraftBody();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  /** 拒绝原因记录（J15）：预置标签 + 备注 → .yushu/ai-feedback.jsonl（统计展示；不写正文） */
+  const rejectCandidate = async (entry: CandidateEntry, reason: string, note: string) => {
+    try {
+      setError(null);
+      const state = await api().ai.reject({
+        usageId: entry.usageId,
+        task: "drafting",
+        reason,
+        excerpt: entry.text.slice(0, 200),
+        ...(note.trim() ? { note: note.trim() } : {}),
+      });
+      setFeedback(state);
+      setCandidates((prev) =>
+        prev.map((item) => (item.streamId === entry.streamId ? { ...item, rejected: true } : item)),
+      );
+      setRejectDraft(null);
+      setNotice(`已记录拒绝原因「${reason}」——沉淀为提示词改进数据（本机 .yushu/ai-feedback.jsonl）`);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -416,6 +647,12 @@ export function AiView() {
             </ul>
           )}
           {config?.routing && <div className="muted routing-line">{routingSummary(config.routing)}</div>}
+          {config?.channels && config.channels.length > 0 && (
+            <div className="muted ai-channels">
+              半价通道（T3-11）：{config.channels.map((plan) => `${plan.task} → ${plan.channel === "batch" ? "batch（半价）" : "sync"}`).join(" · ")}
+              （batch_eligible：大纲候选 / 摘要回填 / 实体抽取；未声明 batch 能力时按标准通道计价）
+            </div>
+          )}
           <div className="config-form">
             <div className="master-grid">
               <label className="field">
@@ -563,21 +800,50 @@ export function AiView() {
             <h3>
               候选正文 <span className="muted">生成结果不写正文，采纳后才落盘</span>
             </h3>
-            <span>
+            <span className="ai-run-controls">
+              <select
+                className="ai-typewriter-mode"
+                value={typewriterMode}
+                onChange={(event) => setTypewriterMode(event.target.value as TypewriterMode)}
+              >
+                <option value="smooth">打字机：匀速</option>
+                <option value="instant">打字机：瞬时</option>
+              </select>
+              <select
+                className="ai-candidate-count"
+                value={candidateCount}
+                disabled={running}
+                onChange={(event) => setCandidateCount(Number(event.target.value) || 2)}
+              >
+                <option value={2}>候选数 2</option>
+                <option value={3}>候选数 3</option>
+                <option value={1}>候选数 1</option>
+              </select>
               {running ? (
                 <button type="button" onClick={stop}>
                   停止生成
                 </button>
               ) : (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={!enabled || !selected || !config?.canGenerate}
-                  title={!enabled ? "请先开启 AI 调用" : !config?.canGenerate ? "缺少可用的 provider Key" : ""}
-                  onClick={start}
-                >
-                  开始生成
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={!enabled || !selected || !config?.canGenerate}
+                    title={!enabled ? "请先开启 AI 调用" : !config?.canGenerate ? "缺少可用的 provider Key" : ""}
+                    onClick={() => void start()}
+                  >
+                    开始生成
+                  </button>
+                  <button
+                    type="button"
+                    className="ai-multi-start"
+                    disabled={!enabled || !selected || !config?.canGenerate || candidateCount < 2}
+                    title="多候选：各自独立生成（不得互相参照）——句级 diff 对照草稿"
+                    onClick={() => void startMulti()}
+                  >
+                    {`生成 ${candidateCount} 个候选`}
+                  </button>
+                </>
               )}
             </span>
           </div>
@@ -624,6 +890,134 @@ export function AiView() {
           {notice && <div className="muted">{notice}</div>}
           {error && <div className="error-text">{error}</div>}
         </div>
+
+        {candidates.length > 0 && (
+          <div className="panel">
+            <h3>
+              多候选对比{" "}
+              <span className="muted">T3-11（J15）：句级差异 / 局部采纳 / 拒绝原因；采纳与拒绝均不自动写正文（显式操作）</span>
+            </h3>
+            <div className="muted">
+              候选 {candidates.length} 个 · 对照草稿正文 {draftBody.length} 字（句级 diff；「按句采纳」缺省全选）
+            </div>
+            {feedback && feedback.total > 0 && (
+              <div className="muted ai-feedback">
+                拒绝原因统计（本机）：{feedback.counts.map((item) => `${item.reason}×${item.count}`).join("、")}（共 {feedback.total} 条，沉淀提示词改进）
+              </div>
+            )}
+            <ul className="ai-candidates">
+              {candidates.map((entry) => {
+                const diff = diffSentences(draftBody, entry.text);
+                const sentences = splitSentences(entry.text);
+                const expanded = expandedDiff === entry.streamId;
+                return (
+                  <li key={entry.streamId} className="ai-candidate-card">
+                    <div>
+                      <span className="badge">
+                        候选 {entry.index}/{entry.total}
+                      </span>
+                      <strong>{entry.chars} 字</strong>
+                      <span className="muted">
+                        {entry.providerId || "-"} / {entry.model || "-"}
+                        {entry.aborted ? " · 已停止（保留部分）" : ""}
+                      </span>
+                      {entry.adopted && <span className="badge good">已{entry.adopted === "replace" ? "替换" : "追加"}采纳</span>}
+                      {entry.rejected && <span className="badge bad">已拒绝</span>}
+                      <span className="spacer" />
+                      <button type="button" disabled={!selected || entry.rejected} onClick={() => void adoptCandidate(entry, "replace")}>
+                        整段采纳（替换）
+                      </button>
+                      <button type="button" disabled={!selected || entry.rejected} onClick={() => void adoptCandidate(entry, "append")}>
+                        追加到正文
+                      </button>
+                      <button
+                        type="button"
+                        className="link ai-sentence-toggle"
+                        disabled={entry.rejected}
+                        onClick={() => setExpandedDiff(expanded ? null : entry.streamId)}
+                      >
+                        按句采纳（{sentences.length} 句）
+                      </button>
+                      <button
+                        type="button"
+                        className="link"
+                        disabled={entry.rejected}
+                        onClick={() => setRejectDraft({ streamId: entry.streamId, reason: REJECT_REASON_PRESETS[0], note: "" })}
+                      >
+                        拒绝…
+                      </button>
+                    </div>
+                    <div className="muted">
+                      句级差异：新增 {diff.added.length} 句（+{diff.addedChars} 字） / 移除 {diff.removed.length} 句（-
+                      {diff.removedChars} 字） / 相同 {diff.shared} 句
+                    </div>
+                    <div className="candidate">
+                      {entry.text.slice(0, 400)}
+                      {entry.text.length > 400 ? "…" : ""}
+                    </div>
+                    {expanded && (
+                      <div className="sentences">
+                        {sentences.map((sentence, index) => {
+                          const key = `${entry.streamId}:${index}`;
+                          return (
+                            <label className="checkbox" key={key}>
+                              <input
+                                type="checkbox"
+                                checked={selectedSentences[key] ?? true}
+                                onChange={(event) => toggleSentence(key, event.target.checked)}
+                              />
+                              <span>{sentence}</span>
+                            </label>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          className="primary ai-sentence-adopt"
+                          disabled={!selected}
+                          onClick={() => void adoptSelectedSentences(entry)}
+                        >
+                          采纳所选句（追加）
+                        </button>
+                      </div>
+                    )}
+                    {rejectDraft?.streamId === entry.streamId && (
+                      <div className="reject-form">
+                        <label className="field">
+                          <span>拒绝原因</span>
+                          <select
+                            className="ai-reject-reason"
+                            value={rejectDraft.reason}
+                            onChange={(event) => setRejectDraft({ ...rejectDraft, reason: event.target.value })}
+                          >
+                            {REJECT_REASON_PRESETS.map((reason) => (
+                              <option key={reason} value={reason}>
+                                {reason}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field grow">
+                          <span>备注（可选）</span>
+                          <input
+                            value={rejectDraft.note}
+                            onChange={(event) => setRejectDraft({ ...rejectDraft, note: event.target.value })}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="ai-reject-confirm"
+                          onClick={() => void rejectCandidate(entry, rejectDraft.reason, rejectDraft.note)}
+                        >
+                          记录拒绝
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         <div className="panel">
           <h3>

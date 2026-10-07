@@ -57,6 +57,10 @@ contextBridge.exposeInMainWorld("yushu", {
     abort: (streamId) => invoke("ai:abort", { streamId }),
     adopt: (payload) => invoke("ai:adopt", payload),
     usage: () => invoke("ai:usage"),
+    /** 候选拒绝原因记录（T3-11，J15）：写入 .yushu/ai-feedback.jsonl 并回传统计 */
+    reject: (payload) => invoke("ai:reject", payload),
+    /** 拒绝原因统计（本机） */
+    feedback: () => invoke("ai:feedback"),
     /**
      * 订阅流式事件（主进程 → 渲染层单向推送）；返回取消订阅函数。
      * 只透传事件数据，不向渲染层暴露 ipcRenderer / event 对象。

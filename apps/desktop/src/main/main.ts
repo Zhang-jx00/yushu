@@ -795,6 +795,71 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     };
     console.log("[e2e] 设定抽取:", JSON.stringify({ total: extractProbe.total, kinds: [extractNew.diff.kind, extractAugment.diff.kind, extractConflict.diff.kind].join("/"), blocked: extractConflictBlocked, adopted: extractAdopt.path, attempts: extractRun.attempts, downgrade: extractProbe.downgrade }));
 
+    // T3-11 写作 UX 探针：多候选差异化（独立标记）→ 句级局部采纳落盘 → 拒绝原因统计 → 半价通道规划/记账
+    // （前序降级探针已把 mock 声明改为 stream:false 且保存——先恢复流式声明，让多候选走真实流式路径）
+    const configForRestore = await api.ai.config();
+    await api.ai.saveConfig({
+      providers: configForRestore.config.providers.map((provider) => ({
+        ...provider,
+        models: provider.models.map((model, index) =>
+          index === 0 ? { ...model, capabilities: { ...model.capabilities, stream: true } } : model,
+        ),
+      })),
+      ...(configForRestore.hash ? { baseHash: configForRestore.hash } : {}),
+    });
+    const multiTexts = [];
+    const multiUsageIds = [];
+    const multiRecords = [];
+    for (const candidateIndex of [1, 2]) {
+      const sid = "e2e-multi-" + candidateIndex;
+      const multiEvents = [];
+      const offMulti = api.ai.onEvent((e) => { if (e.streamId === sid) multiEvents.push(e); });
+      await api.ai.start({
+        streamId: sid,
+        volumeId: volume.id,
+        chapterId: co.id,
+        task: "draft-first",
+        targetWords: 300,
+        candidateIndex,
+        candidateTotal: 2,
+      });
+      const doneMulti = await (async () => {
+        for (let i = 0; i < 400; i += 1) {
+          const found = multiEvents.find((e) => e.type === "done" || e.type === "error");
+          if (found) return found;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        throw new Error("多候选等待 done 超时");
+      })();
+      offMulti();
+      multiTexts.push(doneMulti.type === "done" ? doneMulti.text : "");
+      multiUsageIds.push(doneMulti.type === "done" ? doneMulti.usageId : "");
+      multiRecords.push(
+        doneMulti.type + "|" + String(doneMulti.text || "").slice(0, 24) + "|" + String(doneMulti.message || "").slice(0, 80),
+      );
+    }
+    const multiVaried = multiTexts[0] !== multiTexts[1] && multiTexts[0].includes("候选1") && multiTexts[1].includes("候选2");
+    // 局部采纳（句级合并）：取候选 2 首句追加 → 正文含首句、不含第二句（未整段采纳）
+    const firstSentence = multiTexts[1].split("。")[0] + "。";
+    await api.ai.adopt({ usageId: multiUsageIds[1], volumeId: volume.id, chapterId: co.id, text: firstSentence, mode: "append" });
+    const partialBody = await api.chapter.read(draft.chapterPath);
+    const partialOk = partialBody.body.includes(firstSentence) && !partialBody.body.includes("（候选2）");
+    // 拒绝原因记录（J15）：候选 1 → 太水
+    const rejectState = await api.ai.reject({ usageId: multiUsageIds[0], task: "drafting", reason: "太水", excerpt: multiTexts[0].slice(0, 50) });
+    const configForChannels = await api.ai.config();
+    const usageForChannel = await api.ai.usage();
+    const uxProbe = {
+      multiVaried,
+      multiRecords: multiRecords.join(" ; "),
+      partialOk,
+      feedbackHasShui: rejectState.counts.some((c) => c.reason === "太水" && c.count >= 1),
+      feedbackTotal: rejectState.total,
+      channels: (configForChannels.channels || []).map((c) => c.task + ":" + c.channel).join(","),
+      channelNote: ((configForChannels.channels || []).find((c) => c.task === "extract") || {}).note || "",
+      extractUsageChannel: ((usageForChannel.entries.find((e) => e.task === "extract")) || {}).channel || "",
+    };
+    console.log("[e2e] 写作 UX:", JSON.stringify(uxProbe));
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -1002,6 +1067,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       rag: ragProbe,
       snapshot: snapshotProbe,
       extract: extractProbe,
+      ux: uxProbe,
     };
   })()`;
   try {
@@ -1267,6 +1333,16 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         downgrade: string;
         attempts: number;
         provider: string;
+      };
+      ux: {
+        multiVaried: boolean;
+        multiRecords: string;
+        partialOk: boolean;
+        feedbackHasShui: boolean;
+        feedbackTotal: number;
+        channels: string;
+        channelNote: string;
+        extractUsageChannel: string;
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
@@ -2089,6 +2165,13 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.extract.downgrade.includes("prompt_constrained_json") &&
       result.extract.attempts === 1 &&
       result.extract.provider === "mock" &&
+      result.ux.multiVaried &&
+      result.ux.partialOk &&
+      result.ux.feedbackHasShui &&
+      result.ux.feedbackTotal >= 1 &&
+      result.ux.channels.includes("extract:sync") &&
+      result.ux.channelNote.includes("未声明 batch") &&
+      result.ux.extractUsageChannel === "sync" &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
@@ -2123,7 +2206,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

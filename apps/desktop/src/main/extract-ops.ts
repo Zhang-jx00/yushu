@@ -12,6 +12,7 @@ import {
 import {
   extractStructured,
   orderProvidersByRoute,
+  planChannel,
   planDowngrade,
   resolveRoute,
   type ChatMessage,
@@ -139,6 +140,8 @@ async function runExtraction(gateway: ProjectGateway, chapterId: string): Promis
     status: result.ok ? "ok" : "error",
     chars: result.raw.length,
     chapter_id: chapterId,
+    // T3-11（J08/J09）：批量任务通道归属（batch = 半价通道；未声明 batch 时按标准通道计价）
+    channel: planChannel(providers, "extract").channel,
   });
   if (!result.ok) {
     throw new YushuError(

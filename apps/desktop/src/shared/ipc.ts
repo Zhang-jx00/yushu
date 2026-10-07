@@ -33,6 +33,9 @@ export const CHANNELS = {
   aiStart: "ai:start",
   aiAbort: "ai:abort",
   aiAdopt: "ai:adopt",
+  /** 写作 UX（T3-11）：候选拒绝原因记录 / 统计（J15） */
+  aiReject: "ai:reject",
+  aiFeedback: "ai:feedback",
   aiUsage: "ai:usage",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
@@ -521,6 +524,8 @@ export interface AiConfigState {
   keyStates: AiProviderKeyState[];
   /** 至少一个 provider 可用；false 时生成按钮禁用（离线时本地功能不受影响） */
   canGenerate: boolean;
+  /** 批量任务的半价通道规划（T3-11，J08/J09）：batch_eligible 任务 → batch / sync（含原因） */
+  channels: { task: string; channel: string; eligible: boolean; note: string }[];
 }
 
 export interface AiSaveConfigPayload {
@@ -552,6 +557,9 @@ export interface AiGeneratePayload {
   task: "draft-first" | "continue";
   instruction?: string;
   targetWords?: number;
+  /** 多候选生成（T3-11，J15）：第 i 个（1 起）与总数（≥2 时主进程注入「独立生成」标记） */
+  candidateIndex?: number;
+  candidateTotal?: number;
 }
 
 export interface AiStartResult {
@@ -605,6 +613,41 @@ export interface AiUsageEntryPayload {
   chars?: number;
   chapter_id?: string;
   usage_id?: string;
+  /** 通道归属（T3-11，J08/J09）：batch = 半价通道；sync = 标准通道 */
+  channel?: "batch" | "sync";
+}
+
+/* ---------- 候选拒绝原因（T3-11，J15 实践 6） ---------- */
+
+/** 预置拒绝原因标签（J15：太水/跑偏/人设不符/OOC/风格不符/战力崩 + 自由文本） */
+export const REJECT_REASON_PRESETS = ["太水", "跑偏", "人设不符", "OOC", "风格不符", "战力崩", "其他"] as const;
+
+export interface AiRejectPayload {
+  /** 关联生成记录（usage_id） */
+  usageId?: string;
+  task?: string;
+  /** 预置标签或自由文本 */
+  reason: string;
+  note?: string;
+  /** 被拒候选摘录（建议 ≤200 字） */
+  excerpt: string;
+}
+
+export interface AiFeedbackEntryPayload {
+  time: string;
+  task?: string;
+  reason: string;
+  note?: string;
+  excerpt: string;
+  usage_id?: string;
+}
+
+export interface AiFeedbackState {
+  path: string;
+  total: number;
+  counts: { reason: string; count: number }[];
+  /** 最近条目（倒序，展示用） */
+  entries: AiFeedbackEntryPayload[];
 }
 
 export interface AiUsageState {
