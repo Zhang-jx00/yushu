@@ -12,6 +12,7 @@ import type {
   IndexRefRow,
   IndexStats,
 } from "./types.js";
+import { embedText, vecToBlob } from "./vector.js";
 
 /**
  * 索引库（docs/03 §6）：真源永不进 SQLite——所有表都是文件派生的可重建数据。
@@ -21,9 +22,11 @@ import type {
  * - 分词：M1 使用内置 unicode61（CJK 可按词/短语命中）；
  *   M2 换 wangfenjin/simple（中文分词 + 拼音，docs/03 §1.3）；
  * - 增量索引（保存即更新）留待 M2；M1 只交付全量 rebuild。
+ * - **schema v2（T3-8）**：新增 `chunk_vectors`（正文块向量，RAG 向量路）——与正文块同事务写入；
+ *   旧库（v1）经 `ensureChunkVectors` 在首个 RAG 查询时惰性补齐，无需全量重建。
  */
 
-export const INDEX_SCHEMA_VERSION = 1;
+export const INDEX_SCHEMA_VERSION = 2;
 
 export class IndexError extends YushuError {
   constructor(message: string, options?: ErrorOptions) {
@@ -59,6 +62,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   text_fts, entities UNINDEXED,
   content='chunks', content_rowid='rowid', tokenize='unicode61'
 );
+CREATE TABLE IF NOT EXISTS chunk_vectors(
+  chunk_id TEXT PRIMARY KEY, dim INTEGER NOT NULL, vec BLOB NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_refs_target ON refs(target);
 CREATE INDEX IF NOT EXISTS idx_chunks_chapter ON chunks(chapter_id);
 `;
@@ -77,12 +83,12 @@ function toFtsText(text: string): string {
 }
 
 /** snippet 还原：去掉"汉字 空格 汉字"中的人为分隔（保留【】高亮标记） */
-function unspaceCjk(snippet: string): string {
+export function unspaceCjk(snippet: string): string {
   return snippet.replace(/([\u3400-\u9fff\uf900-\ufaff]) (?=[\u3400-\u9fff\uf900-\ufaff])/g, "$1");
 }
 
 /** 查询串 → FTS5 表达式：按空格切词，剔除法操作符字符，每词内 CJK 逐字插空并以短语包裹（AND 语义） */
-function buildMatchQuery(query: string): string {
+export function buildMatchQuery(query: string): string {
   return query
     .trim()
     .split(/\s+/)
@@ -97,10 +103,41 @@ function count(row: Record<string, unknown> | undefined): number {
   return typeof value === "number" ? value : 0;
 }
 
-/** 打开（必要时创建）索引库并确保 schema 就绪 */
+/**
+ * 索引行 → ChunkHit（queryChunks / queryChunksBm25 共用同一映射，避免两处口径漂移）。
+ * `snippetCleaner` 为 snippet 还原函数（缺省原样返回——非 FTS 路径取出的行没有高亮标记）。
+ */
+export function chunkHitFromRow(
+  row: Record<string, unknown>,
+  snippetCleaner: (snippet: string) => string = (snippet) => snippet,
+): ChunkHit {
+  return {
+    chunkId: String(row["chunk_id"]),
+    path: String(row["path"] ?? ""),
+    kind: String(row["kind"] ?? ""),
+    ...(row["chapter_id"] ? { chapterId: String(row["chapter_id"]) } : {}),
+    ...(row["volume"] ? { volume: String(row["volume"]) } : {}),
+    charStart: Number(row["char_start"] ?? 0),
+    charEnd: Number(row["char_end"] ?? 0),
+    textHash: String(row["text_hash"] ?? ""),
+    entities: String(row["entities"] ?? "")
+      .split("、")
+      .filter(Boolean),
+    snippet: snippetCleaner(String(row["snip"] ?? "")),
+  };
+}
+
+/** 打开（必要时创建）索引库并确保 schema 就绪。
+ * `allowExtension`（node:sqlite ≥ 22.13/23.5 支持）为 T3-8 的 sqlite-vec 扩展加载所必需；
+ * 旧运行时忽略 / 拒绝该选项时回退默认构造——向量路自动降级为本地余弦兜底（功能不阻断）。 */
 export function openIndex(dbPath: string): DatabaseSync {
   mkdirSync(dirname(dbPath), { recursive: true });
-  const db = new DatabaseSync(dbPath);
+  let db: DatabaseSync;
+  try {
+    db = new DatabaseSync(dbPath, { allowExtension: true });
+  } catch {
+    db = new DatabaseSync(dbPath);
+  }
   db.exec("PRAGMA journal_mode = WAL;");
   // 并发写健壮性（T2-5 切片 B）：后台自动增量与用户手动重建可能并发，
   // node:sqlite 默认 busy 超时为 0（锁冲突立即失败）——给 3s 重试窗口，避免无谓报错。
@@ -206,6 +243,7 @@ function insertRows(
     `INSERT INTO chunks(id, path, chapter_id, volume, kind, text, text_fts, char_start, char_end, text_hash, entities, tokens)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  const insertVector = db.prepare("INSERT OR REPLACE INTO chunk_vectors(chunk_id, dim, vec) VALUES (?, ?, ?)");
   const insertChunkFts = withFts
     ? db.prepare("INSERT INTO chunks_fts(rowid, text_fts, entities) VALUES (?, ?, ?)")
     : null;
@@ -229,6 +267,9 @@ function insertRows(
         chunk.entities.join("、"),
         estimateTokens(chunk.text),
       );
+      // 向量与正文块同批写入（T3-8；派生数据，RAG 向量路数据源）
+      const vector = embedText(chunk.text);
+      insertVector.run(chunk.id, vector.length, vecToBlob(vector));
       // 分片路径：正文行与 FTS 行同批写入（external content 保持一致；旧索引已由 delete-all 清空）
       if (insertChunkFts) {
         insertChunkFts.run(result.lastInsertRowid, toFtsText(chunk.text), chunk.entities.join("、"));
@@ -264,7 +305,7 @@ export function rebuildIndex(
   const { onProgress, batchSize } = options;
   db.exec("BEGIN");
   try {
-    db.exec("DELETE FROM chunks; DELETE FROM entities; DELETE FROM refs; DELETE FROM file_index;");
+    db.exec("DELETE FROM chunks; DELETE FROM entities; DELETE FROM refs; DELETE FROM file_index; DELETE FROM chunk_vectors;");
     db.exec("INSERT INTO chunks_fts(chunks_fts) VALUES('delete-all');");
     insertRows(db, input, builtAt, { onProgress, batchSize, withFts: true });
     // FTS5 特殊命令带参数时经 rank 列传入（与 checkIntegrity 的 integrity-check 同款语法）
@@ -330,20 +371,7 @@ export function queryChunks(db: DatabaseSync, query: string, limit = 20): ChunkH
     )
     .all(match, limit) as Record<string, unknown>[];
 
-  return rows.map((row) => ({
-    chunkId: String(row["chunk_id"]),
-    path: String(row["path"] ?? ""),
-    kind: String(row["kind"] ?? ""),
-    ...(row["chapter_id"] ? { chapterId: String(row["chapter_id"]) } : {}),
-    ...(row["volume"] ? { volume: String(row["volume"]) } : {}),
-    charStart: Number(row["char_start"] ?? 0),
-    charEnd: Number(row["char_end"] ?? 0),
-    textHash: String(row["text_hash"] ?? ""),
-    entities: String(row["entities"] ?? "")
-      .split("、")
-      .filter(Boolean),
-    snippet: unspaceCjk(String(row["snip"] ?? "")),
-  }));
+  return rows.map((row) => chunkHitFromRow(row, unspaceCjk));
 }
 
 /** 实体检索（名称 / 别名包含匹配；M1 用 LIKE，M3 换别名触发索引） */
@@ -441,6 +469,9 @@ export function applyIndexDelta(
   const deleteRefs = db.prepare("DELETE FROM refs WHERE referrer = ?");
   const deleteEntities = db.prepare("DELETE FROM entities WHERE file_path = ?");
   const deleteChunks = db.prepare("DELETE FROM chunks WHERE path = ?");
+  const deleteVectors = db.prepare(
+    "DELETE FROM chunk_vectors WHERE chunk_id IN (SELECT id FROM chunks WHERE path = ?)",
+  );
   const deleteFileRow = db.prepare("DELETE FROM file_index WHERE path = ?");
   const touchFileRow = db.prepare("UPDATE file_index SET mtime = ?, indexed_at = ? WHERE path = ?");
 
@@ -448,6 +479,7 @@ export function applyIndexDelta(
   try {
     for (const path of changedPaths) {
       ftsDelete.run(path);
+      deleteVectors.run(path); // 向量先于正文块删除（子查询依赖 chunks 行）
       deleteChunks.run(path);
       const ids = (entityIdsOf.all(path) as Record<string, unknown>[]).map((row) => String(row["id"] ?? ""));
       for (const id of ids) deleteRefs.run(id);
