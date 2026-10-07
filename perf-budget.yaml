@@ -156,3 +156,19 @@ measurements:
       idle_rss_mb: 434                 # ≤600
       million_chars_rss_mb: 757        # ≤1200
     report: docs/assets/perf/perf-report-local-dev-20261006-r28-git-ops.json
+  - date: 2026-10-07
+    runner: local-dev          # 第 36 轮复跑：RAG 向量嵌入进入索引写入路径（T3-8；chunk_vectors 与正文块同事务）
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,109,568 字 + 100k 大章靶子（索引 341 文件 / 3,295 chunks）
+    result: pass_10_of_10      # 首跑重建 +25% ⚠（逐字 slice 哈希）→ 改「直接码元 FNV-1a（无临时字符串）」后复跑收敛至 +9%（相对 r28 基线）
+    metrics:
+      cold_to_editable_ms: 1885        # ≤2000
+      hot_to_editable_ms: 720          # ≤800
+      project_open_ms: 261             # ≤3000
+      keystroke_p95_ms: 1.3            # ≤16（输入路径未触及）
+      keystroke_mega_p95_ms: 4.3       # ≤16
+      save_to_indexed_ms: 453          # ≤500（单章增量含该章块向量重算，量级为毫秒）
+      query_p95_ms: 13.8               # ≤80
+      rebuild_cpm: 32280995            # ≥20000（全量 2.063s / 1.109M 字；相对 r28 基线 1.888s 为 +9.3%——向量嵌入的既有成本）
+      idle_rss_mb: 437                 # ≤600
+      million_chars_rss_mb: 764        # ≤1200
+    report: docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json
