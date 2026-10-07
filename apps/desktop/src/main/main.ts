@@ -370,7 +370,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const dir = await mkdtemp(join(tmpdir(), "yushu-e2e-"));
-  const mock = await startMockOpenAI();
+  // T3-2 重试探针：mock 第一次请求返回 429，验证「按错误类别退避重试」端到端生效
+  const mock = await startMockOpenAI(2, { failFirst: 1, failStatus: 429 });
   // T3-1 迁移探针：预置 v1 简表配置（读取时应迁移为 v2；保存时先备份 v1 → .bak-v1）
   await mkdir(join(dir, "config"), { recursive: true });
   await writeFile(
@@ -383,6 +384,23 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       "    kind: openai-compatible",
       `    base_url: ${mock.baseUrl}`,
       "    model: legacy-model",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  // T3-2 路由探针：预置 config/routing.yaml（drafting 路由 + fallback 链 + 自定义重试策略）
+  await writeFile(
+    join(dir, "config", "routing.yaml"),
+    [
+      "apiVersion: yushu.llm/v1",
+      "format_version: 1",
+      "routes:",
+      "  drafting: {prefer: [flagship], require: [stream]}",
+      "fallback:",
+      "  drafting: [mock]",
+      "reliability:",
+      "  retry_policy:",
+      "    RateLimitError: {max_retries: 2, backoff: fixed, base_delay_ms: 1, max_delay_ms: 2}",
       "",
     ].join("\n"),
     "utf8",
@@ -434,6 +452,16 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       streamCap: configAfter.config.providers[0] ? configAfter.config.providers[0].models[0].capabilities.stream : false,
       toolsCap: configAfter.config.providers[0] ? configAfter.config.providers[0].models[0].capabilities.tools : true,
       contextLimit: configAfter.config.providers[0] ? configAfter.config.providers[0].models[0].limits.context : 0,
+    };
+    const routingProbe = {
+      exists: configAfter.routing.exists,
+      source: configAfter.routing.path,
+      draftingPrefer: (configAfter.routing.routes.find((item) => item.task === 'drafting') || {}).prefer || [],
+      draftingRequire: (configAfter.routing.routes.find((item) => item.task === 'drafting') || {}).require || [],
+      fallbackDrafting: configAfter.routing.fallback.drafting || [],
+      rateLimitRetries: (configAfter.routing.reliability.retry_policy.find((item) => item.kind === 'RateLimitError') || {}).max_retries,
+      cooldownS: configAfter.routing.reliability.cooldown.cooldown_s,
+      concurrencyGlobal: configAfter.routing.reliability.concurrency.global,
     };
     const drafts = await api.ai.drafts();
     const contextPreview = await api.ai.context({ volumeId: volume.id, chapterId: co.id });
@@ -669,6 +697,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         configReady: savedConfig.canGenerate,
         configMigrated,
         configProbe,
+        routingProbe,
         drafts: drafts.length,
         slots: contextPreview.slots.length,
         stableChars: contextPreview.stableChars,
@@ -796,6 +825,16 @@ async function runE2E(win: BrowserWindow): Promise<void> {
           streamCap: boolean;
           toolsCap: boolean;
           contextLimit: number;
+        };
+        routingProbe: {
+          exists: boolean;
+          source: string;
+          draftingPrefer: string[];
+          draftingRequire: string[];
+          fallbackDrafting: string[];
+          rateLimitRetries: number;
+          cooldownS: number;
+          concurrencyGlobal: number;
         };
         drafts: number;
         slots: number;
@@ -926,6 +965,11 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       hasLegacyV1: backupText.includes("legacy-model") && backupText.includes("format_version: 1"),
     };
     console.log("[e2e] 配置迁移备份:", JSON.stringify(migrationBackup));
+
+    // T3-2：重试探针——mock 第一次返回 429（RateLimitError 策略 max_retries=2）→ 重试后成功；
+    // hits ≥ 2 且 failures = 1 即端到端证明「按错误类别退避重试」真实发生。
+    const retryProbe = { hits: mock.stats.hits, failures: mock.stats.failures };
+    console.log("[e2e] 重试探针:", JSON.stringify(retryProbe));
 
     // 会话异常退出检测（T2-8 切片 B）：伪造「上次会话 active + 他进程 pid」→ beginSession 检出异常；
     // 心跳刷新 lastSeenAt；正常关闭（closed）后重开不再检出。探针直接调用主进程会话模块（不依赖 UI）。
@@ -1497,6 +1541,16 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.ai.configProbe.contextLimit === 32768 &&
       migrationBackup.exists &&
       migrationBackup.hasLegacyV1 &&
+      result.ai.routingProbe.exists &&
+      result.ai.routingProbe.source === "config/routing.yaml" &&
+      result.ai.routingProbe.draftingPrefer.join(",") === "flagship" &&
+      result.ai.routingProbe.draftingRequire.join(",") === "stream" &&
+      result.ai.routingProbe.fallbackDrafting.join(",") === "mock" &&
+      result.ai.routingProbe.rateLimitRetries === 2 &&
+      result.ai.routingProbe.cooldownS === 30 &&
+      result.ai.routingProbe.concurrencyGlobal === 4 &&
+      retryProbe.failures === 1 &&
+      retryProbe.hits >= 2 &&
       result.ai.drafts === 1 &&
       result.ai.slots === 5 &&
       result.ai.stableChars > 0 &&
@@ -1607,7 +1661,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

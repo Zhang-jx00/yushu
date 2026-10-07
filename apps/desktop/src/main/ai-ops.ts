@@ -3,18 +3,25 @@ import {
   LLM_API_VERSION,
   LLM_FORMAT_VERSION,
   LlmAbortError,
+  ReliabilityGate,
   defaultLlmConfig,
+  defaultRoutingConfig,
   detectLlmConfigVersion,
+  orderProvidersByRoute,
   parseLlmConfig,
+  parseRoutingConfig,
   resolveCapabilities,
+  resolveRoute,
   serializeLlmConfig,
   stream,
   type LlmConfig,
   type LlmProviderSpec,
+  type RoutingConfig,
 } from "@yushu/llm";
 import {
   LLM_CONFIG_PATH,
   OUTLINE_PATH,
+  ROUTING_CONFIG_PATH,
   chapterPath,
   parseOutline,
   readChapterFile,
@@ -27,6 +34,7 @@ import type {
   AiDraftTarget,
   AiGeneratePayload,
   AiProviderPayload,
+  AiRoutingState,
   AiSaveConfigPayload,
   AiStreamEvent,
   AiUsageState,
@@ -50,6 +58,9 @@ const LLM_CONFIG_BACKUP_PATH = `${LLM_CONFIG_PATH}.bak-v1`;
 
 /** 会话内存 API Key（provider.id → key）；进程退出即消失，不落盘（docs/03 §13） */
 const sessionKeys = new Map<string, string>();
+
+/** 可靠性闸门（T3-2）：冷却与并发状态跨调用共享（配置每次从 config/routing.yaml 读取） */
+const reliabilityGate = new ReliabilityGate();
 
 export function setSessionKey(providerId: string, apiKey: string): void {
   if (!providerId.trim()) throw new YushuError("E_INVALID_INPUT", "providerId 不能为空");
@@ -87,6 +98,43 @@ export async function loadLlmConfigForUse(gateway: ProjectGateway): Promise<LlmC
   return parseLlmConfig(snapshot.content);
 }
 
+/** 读取 config/routing.yaml 并校验；不存在时返回内置默认（docs/03 §9） */
+export async function loadRoutingConfigForUse(gateway: ProjectGateway): Promise<RoutingConfig> {
+  const snapshot = await gateway.readDoc(ROUTING_CONFIG_PATH).catch(() => null);
+  if (!snapshot) return defaultRoutingConfig();
+  return parseRoutingConfig(snapshot.content);
+}
+
+const RETRY_POLICY_LABELS = ["RateLimitError", "InternalServerError", "NetworkError"] as const;
+
+/** 路由载荷（任务路由 + 可靠性；UI 展示与 e2e 探针用） */
+async function readAiRouting(gateway: ProjectGateway): Promise<AiRoutingState> {
+  const snapshot = await gateway.readDoc(ROUTING_CONFIG_PATH).catch(() => null);
+  const routing = snapshot ? parseRoutingConfig(snapshot.content) : defaultRoutingConfig();
+  return {
+    path: ROUTING_CONFIG_PATH,
+    exists: snapshot !== null,
+    routes: Object.entries(routing.routes).map(([task, route]) => ({
+      task,
+      prefer: [...(route.prefer ?? [])],
+      require: [...(route.require ?? [])],
+    })),
+    fallback: Object.fromEntries(Object.entries(routing.fallback).map(([task, chain]) => [task, [...chain]])),
+    reliability: {
+      num_retries: routing.reliability.num_retries,
+      retry_policy: RETRY_POLICY_LABELS.map((kind) => ({
+        kind,
+        ...routing.reliability.retry_policy[kind],
+      })),
+      cooldown: { ...routing.reliability.cooldown },
+      concurrency: {
+        global: routing.reliability.concurrency.global,
+        per_provider: { ...routing.reliability.concurrency.per_provider },
+      },
+    },
+  };
+}
+
 /** 配置状态（含每个 provider 的 key 就绪态；不返回 key 本身） */
 export async function readAiConfig(gateway: ProjectGateway): Promise<AiConfigState> {
   const snapshot = await gateway.readDoc(LLM_CONFIG_PATH).catch(() => null);
@@ -115,6 +163,7 @@ export async function readAiConfig(gateway: ProjectGateway): Promise<AiConfigSta
       format_version: config.format_version,
       providers: config.providers.map((provider) => toProviderPayload(provider)),
     },
+    routing: await readAiRouting(gateway),
     keyStates,
     canGenerate: keyStates.some((state) => state.ready),
   };
@@ -214,6 +263,14 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
     };
     const messages = assembleMessages(preview, task);
     const config = await loadLlmConfigForUse(gateway);
+    // T3-2：任务路由（draft-first / continue 均归 drafting：prefer 旗舰 + require stream）
+    // + 可靠性（重试 / 冷却 / 并发）。require 未满足的降级路径由 T3-3 处理。
+    const routing = await loadRoutingConfigForUse(gateway);
+    const route = resolveRoute("drafting", config.providers, routing);
+    const providers = orderProvidersByRoute(config.providers, route);
+    if (route.unmet.length > 0) {
+      console.warn(`[ai] drafting 路由 require 未满足：${route.unmet.join(" / ")}（降级路径见 T3-3）`);
+    }
 
     let accumulated = "";
     const onDelta = (delta: { text: string }) => {
@@ -222,11 +279,12 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
     };
 
     const result = await stream(
-      config.providers,
+      providers,
       { messages, signal },
       { onDelta },
       {
         sessionKeys: sessionKeySnapshot(),
+        reliability: { config: routing.reliability, gate: reliabilityGate },
         onFallback: (info) =>
           sink({ streamId, type: "fallback", providerId: info.provider_id, reason: info.reason }),
       },

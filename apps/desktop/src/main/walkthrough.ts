@@ -3,8 +3,8 @@ import { existsSync, promises as fs } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LLM_API_VERSION, LLM_FORMAT_VERSION, serializeLlmConfig } from "@yushu/llm";
-import { LLM_CONFIG_PATH } from "@yushu/world-engine";
+import { LLM_API_VERSION, LLM_FORMAT_VERSION, parseRoutingConfig, serializeLlmConfig, serializeRoutingConfig } from "@yushu/llm";
+import { LLM_CONFIG_PATH, ROUTING_CONFIG_PATH } from "@yushu/world-engine";
 import type { AxisValues } from "../shared/ipc.js";
 import { attachProject } from "./ipc.js";
 import { repoRoot } from "./paths.js";
@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-26 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵）。
+ * 步骤 10-27 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵 / 任务路由与可靠性）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -26,6 +26,14 @@ import { createProject } from "./project-ops.js";
 export interface MockOpenAI {
   server: Server;
   baseUrl: string;
+  /** 请求计数与失败计数（T3-2 重试探针：e2e 断言发生过 429 且最终成功） */
+  stats: { hits: number; failures: number };
+}
+
+export interface MockOpenAIOptions {
+  /** 前 N 次请求返回错误（模拟 429，验证重试链路） */
+  failFirst?: number;
+  failStatus?: number;
 }
 
 export interface WalkthroughContext {
@@ -52,11 +60,22 @@ interface StepDef {
 const SCREENSHOT_REL_DIR = "docs/assets/m1-preview";
 
 /** 本地 mock OpenAI（Chat Completions + SSE）：预演不依赖外网与真实 key（与 e2e 同款） */
-export async function startMockOpenAI(delayMs = 2): Promise<MockOpenAI> {
+export async function startMockOpenAI(
+  delayMs = 2,
+  options: MockOpenAIOptions = {},
+): Promise<MockOpenAI> {
+  const stats = { hits: 0, failures: 0 };
   const server = createServer((req, res) => {
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", () => {
+      stats.hits += 1;
+      if ((options.failFirst ?? 0) >= stats.hits) {
+        stats.failures += 1;
+        res.writeHead(options.failStatus ?? 429, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "rate limited (mock)" } }));
+        return;
+      }
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       const chunks = ["天启", "界的", "夜色"];
       let sent = 0;
@@ -82,7 +101,7 @@ export async function startMockOpenAI(delayMs = 2): Promise<MockOpenAI> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : 0;
-  return { server, baseUrl: `http://127.0.0.1:${port}/v1` };
+  return { server, baseUrl: `http://127.0.0.1:${port}/v1`, stats };
 }
 
 /** 解析 `--ui-walkthrough[=<目录>]`；缺省值时为临时目录 */
@@ -140,6 +159,14 @@ export async function prepareProjectForDir(options: PrepareProjectOptions): Prom
   });
   await fs.mkdir(join(dir, "config"), { recursive: true });
   await fs.writeFile(join(dir, LLM_CONFIG_PATH), llmYaml, "utf8");
+
+  // T3-2：写入 config/routing.yaml（fallback 链指向 mock；其余字段取内置默认），供 step27 展示与断言
+  const routingYaml = serializeRoutingConfig(
+    parseRoutingConfig(
+      ["apiVersion: yushu.llm/v1", "format_version: 1", "fallback:", "  drafting: [mock]", ""].join("\n"),
+    ),
+  );
+  await fs.writeFile(join(dir, ROUTING_CONFIG_PATH), routingYaml, "utf8");
 
   // T2-8 切片 B 预演：写入模拟崩溃标记（旧 pid → 挂载时按真实检出路走出「异常退出」结果）
   if (options.simulateCrash) {
@@ -1161,6 +1188,24 @@ const STEPS: StepDef[] = [
       return {
         ok: has('mock-model') && has('旗舰') && has('本地') && has('openai_chat') && has('流式') && has('上下文 32768'),
         note: 'Provider 卡片：' + text.replace(/\n+/g, ' | ').slice(0, 240),
+      };
+    `,
+  },
+  {
+    step: 27,
+    title: "AI 副驾：任务路由与可靠性展示（config/routing.yaml，T3-2）",
+    file: "step27-ai-routing.png",
+    body: String.raw`
+      await tab('AI 副驾');
+      const line = await waitFor(() => document.querySelector('.routing-line'), 12000);
+      if (!line) return { ok: false, note: '未找到路由摘要行：' + pageText() };
+      line.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      const text = line.innerText;
+      const has = (s) => text.includes(s);
+      return {
+        ok: has('路由（config/routing.yaml）') && has('drafting → 旗舰') && has('require：流式') && has('重试 5') && has('冷却 30s') && has('并发 4'),
+        note: '路由摘要：' + text.slice(0, 200),
       };
     `,
   },

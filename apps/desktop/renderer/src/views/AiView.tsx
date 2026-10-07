@@ -3,6 +3,7 @@ import type {
   AiConfigState,
   AiDraftTarget,
   AiModelPayload,
+  AiRoutingState,
   AiStreamEvent,
   AiUsageEntryPayload,
   ContextPreviewPayload,
@@ -45,6 +46,19 @@ const CAPABILITY_LABELS: { key: keyof AiModelPayload["capabilities"]; label: str
 
 function capabilityLabels(capabilities: AiModelPayload["capabilities"]): string[] {
   return CAPABILITY_LABELS.filter((item) => Boolean(capabilities[item.key])).map((item) => item.label);
+}
+
+const CAPABILITY_LABEL_MAP: Record<string, string> = Object.fromEntries(
+  CAPABILITY_LABELS.map((item) => [item.key, item.label]),
+);
+
+/** T3-2：任务路由摘要（以 drafting 为例；可靠性三项：重试 / 冷却 / 并发） */
+function routingSummary(routing: AiRoutingState): string {
+  const drafting = routing.routes.find((route) => route.task === "drafting");
+  const prefer = (drafting?.prefer ?? []).map((tier) => TIER_LABELS[tier] ?? tier).join(" / ") || "默认";
+  const require = (drafting?.require ?? []).map((key) => CAPABILITY_LABEL_MAP[key] ?? key).join(" / ");
+  const rateLimit = routing.reliability.retry_policy.find((rule) => rule.kind === "RateLimitError");
+  return `路由（${routing.exists ? routing.path : "内置默认"}）：drafting → ${prefer}${require ? `（require：${require}）` : ""} · 重试 ${rateLimit?.max_retries ?? routing.reliability.num_retries} · 冷却 ${routing.reliability.cooldown.cooldown_s}s · 并发 ${routing.reliability.concurrency.global}`;
 }
 
 export function AiView() {
@@ -318,6 +332,7 @@ export function AiView() {
               </div>
             );
           })}
+          {config?.routing && <div className="muted routing-line">{routingSummary(config.routing)}</div>}
           <div className="config-form">
             <label className="field">
               <span>主 Provider base_url</span>

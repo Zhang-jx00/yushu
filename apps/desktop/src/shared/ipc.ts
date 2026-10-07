@@ -456,11 +456,33 @@ export interface AiProviderKeyState {
   ready: boolean;
 }
 
+/** 任务路由与可靠性载荷（T3-2；来自 config/routing.yaml 或内置默认） */
+export interface AiRoutingState {
+  path: string;
+  exists: boolean;
+  routes: { task: string; prefer: string[]; require: string[] }[];
+  fallback: Record<string, string[]>;
+  reliability: {
+    num_retries: number;
+    retry_policy: {
+      kind: string;
+      max_retries: number;
+      backoff: string;
+      base_delay_ms: number;
+      max_delay_ms: number;
+    }[];
+    cooldown: { allowed_fails: number; window_s: number; cooldown_s: number };
+    concurrency: { global: number; per_provider: Record<string, number> };
+  };
+}
+
 export interface AiConfigState {
   path: string;
   exists: boolean;
   hash?: string;
   config: { apiVersion: string; format_version: number; providers: AiProviderPayload[] };
+  /** 任务路由与可靠性（T3-2） */
+  routing: AiRoutingState;
   keyStates: AiProviderKeyState[];
   /** 至少一个 provider 可用；false 时生成按钮禁用（离线时本地功能不受影响） */
   canGenerate: boolean;

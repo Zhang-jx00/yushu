@@ -19,6 +19,9 @@ export const SCHEMAS_DIR = "schemas";
 /** LLM Provider 配置（apiKey 禁止落盘明文，只记环境变量名；docs/03 §13） */
 export const LLM_CONFIG_PATH = `${CONFIG_DIR}/llm.yaml`;
 
+/** 任务路由与可靠性配置（T3-2；缺省时用内置默认，见 @yushu/llm defaultRoutingConfig） */
+export const ROUTING_CONFIG_PATH = `${CONFIG_DIR}/routing.yaml`;
+
 /** 设定卡路径：world/cards/<type>/<id>.md */
 export function cardPath(type: string, id: string): string {
   return `${CARDS_DIR}/${type}/${id}.md`;
