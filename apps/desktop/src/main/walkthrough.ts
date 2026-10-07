@@ -15,7 +15,7 @@ import { createProject } from "./project-ops.js";
  *
  * 目的：用应用自身的 Electron 能力（executeJavaScript 驱动 DOM + capturePage 截图）走完场景，
  * 为真人 30 分钟试跑打磨流程并产出截图证据（docs/assets/m1-preview/）；
- * 步骤 10-27 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵 / 任务路由与可靠性）。
+ * 步骤 10-28 为 M2 扩展与 M3 首批（双形态 / 实体提及（含富文本 @ 候选菜单）/ 自动保存与三方自动合并 / 写作视图 / 索引增量与保存即增量 / 本地快照 / 码字统计（含写作会话与真实速度）/ 会话与快照恢复 / 稿件总览全库视图 / Git 版本管理 / Provider v2 能力矩阵 / 任务路由与可靠性 / 本地模型接入与能力标注）。
  *
  * 明确的两处绕过（其余步骤全部经真实 UI 操作）：
  * 1. 第 1 步「新建项目」的存放目录在 UI 中是 readOnly 输入 + 系统对话框（无法自动化）——
@@ -74,6 +74,24 @@ export async function startMockOpenAI(
         stats.failures += 1;
         res.writeHead(options.failStatus ?? 429, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: { message: "rate limited (mock)" } }));
+        return;
+      }
+      let body: Record<string, unknown> = {};
+      try {
+        body = JSON.parse(raw || "{}") as Record<string, unknown>;
+      } catch {
+        body = {};
+      }
+      // T3-3：非流式（一次性返回）分支——模型声明 stream:false 时的降级路径会走到这里
+      if (body["stream"] !== true) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            model: typeof body["model"] === "string" ? body["model"] : "mock-model",
+            choices: [{ message: { role: "assistant", content: "非流式一次性回复" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 6, completion_tokens: 5, total_tokens: 11 },
+          }),
+        );
         return;
       }
       res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -1206,6 +1224,50 @@ const STEPS: StepDef[] = [
       return {
         ok: has('路由（config/routing.yaml）') && has('drafting → 旗舰') && has('require：流式') && has('重试 5') && has('冷却 30s') && has('并发 4'),
         note: '路由摘要：' + text.slice(0, 200),
+      };
+    `,
+  },
+  {
+    step: 28,
+    title: "AI 副驾：本地模型接入与能力差异标注（T3-3 / T3-4）",
+    file: "step28-ai-local.png",
+    body: String.raw`
+      await tab('AI 副驾');
+      const privacy = await waitFor(
+        () => ([...document.querySelectorAll('.provider')].map((x) => x.innerText).join('\n').includes('本地隐私模式') ? true : null),
+        12000,
+      );
+      const warningsLine = await waitFor(() => {
+        const list = document.querySelector('.warnings');
+        return list && list.innerText.includes('未声明 capabilities') ? list.innerText : null;
+      }, 8000);
+      const addBtn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加');
+      if (!addBtn) return { ok: false, note: '找不到「添加」按钮：' + pageText() };
+      addBtn.click();
+      // base_url 渲染在输入框（不在 innerText）：按输入值判定 ollama 卡片出现
+      const baseOk = (card) => [...card.querySelectorAll('input')].some((input) => input.value.includes('127.0.0.1:11434'));
+      const ollamaCard = await waitFor(() => {
+        const card = [...document.querySelectorAll('.provider')].find((x) => x.innerText.includes('ollama'));
+        return card && baseOk(card) ? card : null;
+      }, 8000);
+      if (!ollamaCard) {
+        const cards = [...document.querySelectorAll('.provider')].map((x) => x.innerText.replace(/\n+/g, ' | ').slice(0, 80));
+        return { ok: false, note: '预设添加后未出现 ollama 卡片；当前卡片=' + JSON.stringify(cards) };
+      }
+      const saveBtn = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('保存 Provider 配置'));
+      if (!saveBtn) return { ok: false, note: '找不到保存按钮：' + pageText() };
+      saveBtn.click();
+      const saved = await waitFor(() => (document.body.innerText.includes('配置已保存') ? true : null), 12000);
+      const count = document.querySelectorAll('.provider').length;
+      ollamaCard.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: privacy === true && warningsLine !== null && saved === true && count === 2 && ollamaCard.innerText.includes('本地隐私模式'),
+        note:
+          '隐私提示=' + (privacy === true) +
+          '；能力标注="' + (warningsLine || '').replace(/\n+/g, ' | ').slice(0, 120) + '"' +
+          '；预设添加=ollama(' + baseOk(ollamaCard) + ')' +
+          '；保存回执=' + (saved === true) + '；provider 数=' + count,
       };
     `,
   },

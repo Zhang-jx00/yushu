@@ -463,6 +463,11 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       cooldownS: configAfter.routing.reliability.cooldown.cooldown_s,
       concurrencyGlobal: configAfter.routing.reliability.concurrency.global,
     };
+    // T3-4：能力差异标注（v1 迁移后的 provider 未声明 capabilities → 应有体检提示）与本地预设清单
+    const presetProbe = {
+      migrationWarnings: configBefore.warnings.length,
+      presetIds: configAfter.localPresets.map((preset) => preset.id),
+    };
     const drafts = await api.ai.drafts();
     const contextPreview = await api.ai.context({ volumeId: volume.id, chapterId: co.id });
     const events = [];
@@ -482,6 +487,37 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       : null;
     const chapterAfter = adopted ? await api.doc.read(adopted.chapterPath) : null;
     const usage = await api.ai.usage();
+
+    // T3-3 降级探针：把 mock 模型声明改为 stream:false → 生成应降级为「一次性返回」（非流式 mock 分支）
+    const config3 = await api.ai.config();
+    await api.ai.saveConfig({
+      providers: [{
+        id: "mock",
+        kind: "local",
+        protocol: "openai_chat",
+        base_url: baseUrl,
+        models: [{ name: "mock-model", tier: "flagship", capabilities: { stream: false, usage: true }, limits: { context: 32768, max_output: 2048 } }],
+      }],
+      baseHash: config3.hash,
+    });
+    const events2 = [];
+    const off2 = api.ai.onEvent((event) => events2.push(event));
+    await api.ai.start({ streamId: "e2e-downgrade", volumeId: volume.id, chapterId: co.id, task: "continue", targetWords: 500 });
+    const done2 = await (async () => {
+      for (let i = 0; i < 400; i += 1) {
+        const found = events2.find((event) => event.type === "done" || event.type === "error");
+        if (found) return found;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error("等待降级流 done 事件超时");
+    })();
+    off2();
+    const downgradeProbe = {
+      done: done2.type === "done",
+      downgradeEvent: events2.some((event) => event.type === "downgrade" && event.message.includes("降级")),
+      deltas: events2.filter((event) => event.type === "delta").length,
+      text: done2.type === "done" ? done2.text : "",
+    };
 
     // 导出与自查全链路：追加含敏感词正文 → 预览（对账 + 命中）→ 未确认被拦截 → 确认导出 → 干净剪贴板
     if (done.type === "done") {
@@ -698,6 +734,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         configMigrated,
         configProbe,
         routingProbe,
+        presetProbe,
+        downgradeProbe,
         drafts: drafts.length,
         slots: contextPreview.slots.length,
         stableChars: contextPreview.stableChars,
@@ -835,6 +873,16 @@ async function runE2E(win: BrowserWindow): Promise<void> {
           rateLimitRetries: number;
           cooldownS: number;
           concurrencyGlobal: number;
+        };
+        presetProbe: {
+          migrationWarnings: number;
+          presetIds: string[];
+        };
+        downgradeProbe: {
+          done: boolean;
+          downgradeEvent: boolean;
+          deltas: number;
+          text: string;
         };
         drafts: number;
         slots: number;
@@ -1549,6 +1597,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.ai.routingProbe.rateLimitRetries === 2 &&
       result.ai.routingProbe.cooldownS === 30 &&
       result.ai.routingProbe.concurrencyGlobal === 4 &&
+      result.ai.presetProbe.migrationWarnings >= 1 &&
+      result.ai.presetProbe.presetIds.join(",") === "ollama,lmstudio,llamacpp,vllm" &&
+      result.ai.downgradeProbe.done &&
+      result.ai.downgradeProbe.downgradeEvent &&
+      result.ai.downgradeProbe.deltas === 1 &&
+      result.ai.downgradeProbe.text === "非流式一次性回复" &&
       retryProbe.failures === 1 &&
       retryProbe.hits >= 2 &&
       result.ai.drafts === 1 &&
@@ -1661,7 +1715,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

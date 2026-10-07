@@ -3,6 +3,7 @@ import type {
   AiConfigState,
   AiDraftTarget,
   AiModelPayload,
+  AiProviderPayload,
   AiRoutingState,
   AiStreamEvent,
   AiUsageEntryPayload,
@@ -75,29 +76,59 @@ export function AiView() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+  const [downgradeNotes, setDowngradeNotes] = useState<string[]>([]);
   const [usageList, setUsageList] = useState<AiUsageEntryPayload[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const streamIdRef = useRef<string | null>(null);
 
-  // 配置表单（主 Provider）
-  const [baseUrl, setBaseUrl] = useState("");
-  const [model, setModel] = useState("");
-  const [apiKeyEnv, setApiKeyEnv] = useState("");
+  // 配置编辑（T3-4：provider 列表草稿——逐行编辑 / 添加本地预设 / 删除）
+  const [providersDraft, setProvidersDraft] = useState<AiProviderPayload[] | null>(null);
+  const [presetId, setPresetId] = useState("ollama");
   const [sessionKey, setSessionKey] = useState("");
   const [keyProvider, setKeyProvider] = useState("");
 
   const selected = drafts.find((draft) => `${draft.volumeId}:${draft.chapterId}` === selectedKey) ?? null;
+  const providers = providersDraft ?? config?.config.providers ?? [];
+
+  const updateProvider = (index: number, patch: Partial<AiProviderPayload>) => {
+    setProvidersDraft((prev) =>
+      (prev ?? config?.config.providers ?? []).map((provider, i) =>
+        i === index ? { ...provider, ...patch } : provider,
+      ),
+    );
+  };
+
+  const updateProviderModel = (index: number, name: string) => {
+    setProvidersDraft((prev) =>
+      (prev ?? config?.config.providers ?? []).map((provider, i) =>
+        i === index
+          ? { ...provider, models: provider.models.map((m, mi) => (mi === 0 ? { ...m, name } : m)) }
+          : provider,
+      ),
+    );
+  };
+
+  const removeProvider = (index: number) => {
+    setProvidersDraft((prev) => (prev ?? config?.config.providers ?? []).filter((_, i) => i !== index));
+  };
+
+  const addLocalPreset = () => {
+    const preset = config?.localPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+    const existing = providersDraft ?? config?.config.providers ?? [];
+    const ids = new Set(existing.map((provider) => provider.id));
+    let id = preset.provider.id;
+    let suffix = 2;
+    while (ids.has(id)) id = `${preset.provider.id}-${suffix++}`;
+    setProvidersDraft([...existing, { ...preset.provider, id }]);
+  };
 
   const refreshConfig = useCallback(async () => {
     const state = await api().ai.config();
     setConfig(state);
+    setProvidersDraft(state.config.providers);
     const primary = state.config.providers[0];
-    if (primary) {
-      setBaseUrl(primary.base_url);
-      setModel(primary.models[0]?.name ?? "");
-      setApiKeyEnv(primary.api_key_env ?? "");
-    }
     setKeyProvider((prev) => prev || primary?.id || "");
     return state;
   }, []);
@@ -153,6 +184,8 @@ export function AiView() {
         setStreamChars(event.chars);
       } else if (event.type === "fallback") {
         setFallbackNote(`provider「${event.providerId}」不可用，已降级：${event.reason}`);
+      } else if (event.type === "downgrade") {
+        setDowngradeNotes((prev) => (prev.includes(event.message) ? prev : [...prev, event.message]));
       } else if (event.type === "done") {
         setRunning(false);
         setStreamText(event.text);
@@ -193,6 +226,7 @@ export function AiView() {
     setError(null);
     setNotice(null);
     setFallbackNote(null);
+    setDowngradeNotes([]);
     // 先确定 streamId，再订阅事件（避免首个增量与 invoke 返回值的竞态）
     const streamId = `ai-${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 8) : Math.random().toString(36).slice(2, 10)}`;
     streamIdRef.current = streamId;
@@ -251,23 +285,12 @@ export function AiView() {
     if (!config) return;
     try {
       setError(null);
-      const providers = config.config.providers.map((provider, index) =>
-        index === 0
-          ? {
-              ...provider,
-              base_url: baseUrl.trim(),
-              models: provider.models.map((item, modelIndex) =>
-                modelIndex === 0 ? { ...item, name: model.trim() } : item,
-              ),
-              ...(apiKeyEnv.trim() ? { api_key_env: apiKeyEnv.trim() } : { api_key_env: undefined }),
-            }
-          : provider,
-      );
       const saved = await api().ai.saveConfig({
-        providers,
+        providers: providers,
         ...(config.hash ? { baseHash: config.hash } : {}),
       });
       setConfig(saved);
+      setProvidersDraft(saved.config.providers);
       setNotice(`配置已保存 → ${saved.path}（明文 Key 禁止落盘，请用环境变量或会话 Key）`);
     } catch (err) {
       setError((err as Error).message);
@@ -303,10 +326,11 @@ export function AiView() {
           <h3>
             Provider <span className="muted">{config?.exists ? "config/llm.yaml" : "内置默认（未落盘）"}</span>
           </h3>
-          {(config?.config.providers ?? []).map((provider) => {
+          {(config?.config.providers ?? []).length > 0 && <div className="muted">Provider {providers.length} 个（顺序即 fallback 优先级）</div>}
+          {providers.map((provider, index) => {
             const keyState = config?.keyStates.find((state) => state.provider_id === provider.id);
             return (
-              <div className="provider" key={provider.id}>
+              <div className="provider" key={`${provider.id}-${index}`}>
                 <div className="pack-title">
                   <strong>{provider.id}</strong>
                   <span className="badge">{provider.kind === "local" ? "本地" : "云端"}</span>
@@ -314,6 +338,11 @@ export function AiView() {
                   <span className={keyState?.ready ? "badge good" : "badge bad"}>
                     {keyState?.ready ? "可用" : "缺少 Key"}
                   </span>
+                  {providers.length > 1 && (
+                    <button type="button" className="link" onClick={() => removeProvider(index)}>
+                      删除
+                    </button>
+                  )}
                 </div>
                 {provider.models.map((item) => (
                   <div className="muted" key={item.name}>
@@ -322,40 +351,77 @@ export function AiView() {
                     {item.limits?.context ? ` · 上下文 ${item.limits.context}` : ""}
                   </div>
                 ))}
-                <div className="muted">{provider.base_url}</div>
-                {provider.api_key_env && (
-                  <div className="muted">
-                    Key 来源：环境变量 {provider.api_key_env}
-                    {keyState?.has_session_key ? " / 会话 Key 已设置" : ""}
-                  </div>
+                {provider.kind === "local" && (
+                  <div className="muted privacy-note">本地隐私模式：请求不出本机（能力差异见下方标注）</div>
                 )}
+                <div className="config-form">
+                  <label className="field">
+                    <span>base_url</span>
+                    <input
+                      value={provider.base_url}
+                      onChange={(event) => updateProvider(index, { base_url: event.target.value })}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>模型名</span>
+                    <input
+                      value={provider.models[0]?.name ?? ""}
+                      onChange={(event) => updateProviderModel(index, event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>API Key 环境变量名（留空=无鉴权，如本地端点）</span>
+                    <input
+                      value={provider.api_key_env ?? ""}
+                      placeholder="YUSHU_LLM_API_KEY"
+                      onChange={(event) =>
+                        updateProvider(index, {
+                          ...(event.target.value.trim() ? { api_key_env: event.target.value } : { api_key_env: undefined }),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
               </div>
             );
           })}
-          {config?.routing && <div className="muted routing-line">{routingSummary(config.routing)}</div>}
           <div className="config-form">
-            <label className="field">
-              <span>主 Provider base_url</span>
-              <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>主 Provider model</span>
-              <input value={model} onChange={(event) => setModel(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>API Key 环境变量名（留空=无鉴权，如本地端点）</span>
-              <input value={apiKeyEnv} onChange={(event) => setApiKeyEnv(event.target.value)} placeholder="YUSHU_LLM_API_KEY" />
-            </label>
-            <button type="button" onClick={saveConfig}>
+            <div className="master-grid">
+              <label className="field">
+                <span>添加本地模型（OpenAI 兼容端点）</span>
+                <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
+                  {(config?.localPresets ?? []).map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" onClick={addLocalPreset}>
+                添加
+              </button>
+            </div>
+            <button type="button" className="primary" onClick={saveConfig}>
               保存 Provider 配置
             </button>
           </div>
+          {(config?.warnings ?? []).length > 0 && (
+            <ul className="issues warnings">
+              {(config?.warnings ?? []).map((warning, index) => (
+                <li key={`${warning.provider_id}-${index}`} className="warn">
+                  标注：{warning.provider_id}
+                  {warning.model ? ` / ${warning.model}` : ""}——{warning.message}
+                </li>
+              ))}
+            </ul>
+          )}
+          {config?.routing && <div className="muted routing-line">{routingSummary(config.routing)}</div>}
           <div className="config-form">
             <div className="master-grid">
               <label className="field">
                 <span>会话 Key 所属 provider</span>
                 <select value={keyProvider} onChange={(event) => setKeyProvider(event.target.value)}>
-                  {(config?.config.providers ?? []).map((provider) => (
+                  {providers.map((provider) => (
                     <option key={provider.id} value={provider.id}>
                       {provider.id}
                     </option>
@@ -517,6 +583,11 @@ export function AiView() {
           </div>
           {!enabled && <p className="muted">AI 默认关闭：开启后可流式生成；离线时其余功能不受影响。</p>}
           {fallbackNote && <div className="warn">{fallbackNote}</div>}
+          {downgradeNotes.map((note) => (
+            <div className="warn" key={note}>
+              降级提示：{note}
+            </div>
+          ))}
           <div className="candidate">
             {streamText || (running ? "（等待首个增量…）" : "（尚无候选内容）")}
           </div>

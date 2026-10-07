@@ -2,19 +2,27 @@ import { YushuError, countWords } from "@yushu/core";
 import {
   LLM_API_VERSION,
   LLM_FORMAT_VERSION,
+  LOCAL_PROVIDER_PRESETS,
   LlmAbortError,
   ReliabilityGate,
+  chat,
+  createLocalProvider,
   defaultLlmConfig,
   defaultRoutingConfig,
   detectLlmConfigVersion,
+  extractJson,
+  lintLlmConfig,
   orderProvidersByRoute,
   parseLlmConfig,
   parseRoutingConfig,
+  planDowngrade,
   resolveCapabilities,
   resolveRoute,
   serializeLlmConfig,
   stream,
+  type ChatResult,
   type LlmConfig,
+  type LlmFallbackInfo,
   type LlmProviderSpec,
   type RoutingConfig,
 } from "@yushu/llm";
@@ -164,6 +172,18 @@ export async function readAiConfig(gateway: ProjectGateway): Promise<AiConfigSta
       providers: config.providers.map((provider) => toProviderPayload(provider)),
     },
     routing: await readAiRouting(gateway),
+    // T3-4：能力差异标注（非阻断）与本地模型预设（供 UI 一键添加）
+    warnings: lintLlmConfig(config).map((warning) => ({
+      provider_id: warning.provider_id,
+      ...(warning.model ? { model: warning.model } : {}),
+      message: warning.message,
+    })),
+    localPresets: LOCAL_PROVIDER_PRESETS.map((preset) => ({
+      id: preset.id,
+      label: preset.label,
+      note: preset.note,
+      provider: toProviderPayload(createLocalProvider(preset.id)),
+    })),
     keyStates,
     canGenerate: keyStates.some((state) => state.ready),
   };
@@ -264,12 +284,18 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
     const messages = assembleMessages(preview, task);
     const config = await loadLlmConfigForUse(gateway);
     // T3-2：任务路由（draft-first / continue 均归 drafting：prefer 旗舰 + require stream）
-    // + 可靠性（重试 / 冷却 / 并发）。require 未满足的降级路径由 T3-3 处理。
+    // + 可靠性（重试 / 冷却 / 并发）。
     const routing = await loadRoutingConfigForUse(gateway);
     const route = resolveRoute("drafting", config.providers, routing);
     const providers = orderProvidersByRoute(config.providers, route);
-    if (route.unmet.length > 0) {
-      console.warn(`[ai] drafting 路由 require 未满足：${route.unmet.join(" / ")}（降级路径见 T3-3）`);
+
+    // T3-3：能力矩阵驱动的自动降级——require 未满足不报错（提示词约束 / 一次性返回 / JSON 后校验）
+    const plan = planDowngrade(route.unmet);
+    for (const action of plan.actions) {
+      sink({ streamId, type: "downgrade", message: action.message });
+    }
+    if (plan.prompt_suffix) {
+      messages.push({ role: "user", content: plan.prompt_suffix });
     }
 
     let accumulated = "";
@@ -278,17 +304,35 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
       sink({ streamId, type: "delta", text: delta.text, chars: countWords(accumulated) });
     };
 
-    const result = await stream(
-      providers,
-      { messages, signal },
-      { onDelta },
-      {
-        sessionKeys: sessionKeySnapshot(),
-        reliability: { config: routing.reliability, gate: reliabilityGate },
-        onFallback: (info) =>
-          sink({ streamId, type: "fallback", providerId: info.provider_id, reason: info.reason }),
-      },
-    );
+    const callOptions = {
+      sessionKeys: sessionKeySnapshot(),
+      reliability: { config: routing.reliability, gate: reliabilityGate },
+      onFallback: (info: LlmFallbackInfo) =>
+        sink({ streamId, type: "fallback", providerId: info.provider_id, reason: info.reason }),
+    };
+    const oneShot = plan.actions.some((action) => action.strategy === "one_shot");
+    let result: ChatResult;
+    if (oneShot) {
+      // 降级：一次性返回（模型未声明 stream）；以单个 delta 形式送达，UI 保持同一渲染路径
+      result = await chat(providers, { messages, signal }, callOptions);
+      accumulated = result.text;
+      if (result.text !== "") {
+        sink({ streamId, type: "delta", text: result.text, chars: countWords(result.text) });
+      }
+    } else {
+      result = await stream(providers, { messages, signal }, { onDelta }, callOptions);
+    }
+    // T3-3：JSON 后校验（仅结构化降级路径；失败仅提示，不阻断）
+    if (plan.post_validate_json) {
+      const parsed = extractJson(result.text);
+      if (!parsed.ok) {
+        sink({
+          streamId,
+          type: "downgrade",
+          message: `JSON 后校验未通过（${parsed.error}）：请检查回复或改用支持结构化输出的模型`,
+        });
+      }
+    }
 
     const chars = countWords(result.text);
     const hints = analyzeDraft(result.text, preview.cardIndex, preview.layers);

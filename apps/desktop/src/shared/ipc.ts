@@ -476,6 +476,21 @@ export interface AiRoutingState {
   };
 }
 
+/** Provider 配置体检提示（T3-4：能力差异标注；来自 @yushu/llm lintLlmConfig） */
+export interface AiConfigWarning {
+  provider_id: string;
+  model?: string;
+  message: string;
+}
+
+/** 本地模型预设（T3-4：Ollama / LM Studio / llama.cpp / vLLM；provider 为预构造好的可用载荷） */
+export interface AiLocalPreset {
+  id: string;
+  label: string;
+  note: string;
+  provider: AiProviderPayload;
+}
+
 export interface AiConfigState {
   path: string;
   exists: boolean;
@@ -483,6 +498,10 @@ export interface AiConfigState {
   config: { apiVersion: string; format_version: number; providers: AiProviderPayload[] };
   /** 任务路由与可靠性（T3-2） */
   routing: AiRoutingState;
+  /** 配置体检提示（T3-4：能力差异标注，非阻断） */
+  warnings: AiConfigWarning[];
+  /** 本地模型预设（T3-4；由主进程下发，UI 一键添加） */
+  localPresets: AiLocalPreset[];
   keyStates: AiProviderKeyState[];
   /** 至少一个 provider 可用；false 时生成按钮禁用（离线时本地功能不受影响） */
   canGenerate: boolean;
@@ -527,6 +546,8 @@ export interface AiStartResult {
 export type AiStreamEvent =
   | { streamId: string; type: "delta"; text: string; chars: number }
   | { streamId: string; type: "fallback"; providerId: string; reason: string }
+  /** T3-3：能力矩阵驱动的降级提示（如模型未声明 stream → 一次性返回） */
+  | { streamId: string; type: "downgrade"; message: string }
   | {
       streamId: string;
       type: "done";
