@@ -1940,6 +1940,64 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 39,
+    title: "AI 副驾：关闭 AI 后本地能力无退化 + 三个联网入口一律被拒（T3 / A4）",
+    file: "step39-ai-off.png",
+    body: String.raw`
+      await tab('AI 副驾');
+      const toggle = await waitFor(() => document.querySelector('.ai-enable-toggle'), 15000);
+      if (!toggle) return { ok: false, note: '找不到 AI 开关复选框：' + pageText() };
+      const wasOn = toggle.checked === true;
+      if (wasOn) { toggle.click(); await sleep(400); }
+      // ① UI 事实：关闭后生成按钮必须禁用
+      const genBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === '开始生成');
+        return b && b.disabled ? b : null;
+      }, 12000);
+      // ② 进程事实：绕过 UI 直接 invoke 也必须被拒（否则闸门只是给眼睛看的）
+      const drafts = await window.yushu.ai.drafts();
+      const target = drafts[0];
+      let blocked = '(no-target)';
+      if (target) {
+        try {
+          await window.yushu.ai.start({ streamId: 'wt-a4-off', volumeId: target.volumeId, chapterId: target.chapterId, task: 'draft-first', targetWords: 120 });
+          blocked = 'NOT-BLOCKED';
+        } catch (err) {
+          blocked = String((err && (err.code || err.message)) || err).slice(0, 40);
+        }
+        try {
+          await window.yushu.extract.preview({ chapterId: target.chapterId });
+          blocked += ' / extract-NOT-BLOCKED';
+        } catch (err) {
+          blocked += ' / ' + String((err && (err.code || err.message)) || err).slice(0, 24);
+        }
+      }
+      const state = await window.yushu.ai.config();
+      // ③ 本地能力不受影响：纯本地命名生成 + 中文自查（都零联网）
+      const naming = await window.yushu.naming.generate({ kind: 'place', count: 3, seed: 'a4' });
+      let proofreadRows = -1;
+      if (target) {
+        const panel = await window.yushu.text.proofread({ path: target.chapterPath });
+        proofreadRows = panel.findings.length;
+      }
+      // 恢复开启态，别把关闭状态漏给后续步骤
+      if (wasOn) { toggle.click(); await sleep(400); }
+      const restored = await window.yushu.ai.config();
+      return {
+        ok:
+          genBtn !== null &&
+          state.aiEnabled === false &&
+          blocked.indexOf('E_AI_DISABLED') >= 0 &&
+          blocked.indexOf('NOT-BLOCKED') < 0 &&
+          naming.names.length === 3 &&
+          proofreadRows >= 0 &&
+          restored.aiEnabled === wasOn,
+        note: '关闭后生成按钮禁用=' + (genBtn !== null) + '；主进程 aiEnabled=' + state.aiEnabled +
+          '；绕过UI直调结果="' + blocked + '"；本地命名=' + naming.names.length + ' 个；离线自查可行=true（结果 ' + proofreadRows + ' 条）；恢复后 aiEnabled=' + restored.aiEnabled,
+      };
+    `,
+  },
 ];
 
 /**
@@ -2046,7 +2104,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-38）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-39）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

@@ -483,6 +483,10 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       migrationWarnings: configBefore.warnings.length,
       presetIds: configAfter.localPresets.map((preset) => preset.id),
     };
+    // A4 闸门落在主进程，因此自动化里必须**显式开启**一次（与真实用户点勾选等价），
+    // 而不是让 e2e 靠"主进程没有闸门"才能跑——那样闸门就成了只为 UI 准备的装饰。
+    const cfgEnabled = await api.ai.setEnabled(true);
+    if (cfgEnabled.aiEnabled !== true) throw new Error("AI 总开关未能开启");
     const drafts = await api.ai.drafts();
     const contextPreview = await api.ai.context({ volumeId: volume.id, chapterId: co.id });
     const events = [];
@@ -1303,6 +1307,68 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       routingA2 = { ...routingA2, error: String((err && err.message) || err).slice(0, 160) };
     }
 
+    // A4 取证：AI 整体关闭后（对照 docs/01 §7「除 AI 调用外的所有步骤可离线完成」）
+    //  ① 三个真会联网的入口一律 E_AI_DISABLED；
+    //  ② 端点计数不再增长（主进程侧核对 mockBad / mockGood 的 hits，等价于"一个请求都没发出去"）；
+    //  ③ M1/M2 本地能力全部可用（卡片 / 命名 / 索引 / 检索 / 导出与敏感词 / 统计 / 快照 / Git / 记忆台账 / 中文自查 / 稿件总览）。
+    let aiOffProbe = {
+      ok: false,
+      blocked: [],
+      blockedAll: false,
+      localFailed: [],
+      localCount: 0,
+      offState: false,
+      error: "",
+    };
+    try {
+      const cfgOff = await api.ai.setEnabled(false);
+      aiOffProbe.offState = cfgOff.aiEnabled === true;
+      const calls = [
+        () => api.ai.start({ streamId: "e2e-a4-off", volumeId: volume.id, chapterId: co.id, task: "draft-first", targetWords: 120 }),
+        () => api.memory.summarize({ layer: memTarget.layer, id: memTarget.id, volumeId: memTarget.volume_id }),
+        () => api.extract.preview({ chapterId: draft.chapterId }),
+      ];
+      for (const call of calls) {
+        try {
+          await call();
+          aiOffProbe.blocked.push("NOT-BLOCKED");
+        } catch (err) {
+          aiOffProbe.blocked.push(String((err && err.code) || err || "").slice(0, 30));
+        }
+      }
+      aiOffProbe.blockedAll = aiOffProbe.blocked.length === 3 && aiOffProbe.blocked.every((code) => code.indexOf("E_AI_DISABLED") >= 0);
+      const localChecks = {
+        cardWrite: async () => api.card.write({ card: { type: "character", name: "A4离线卡", layer: "characters" }, body: "关闭 AI 时仍应可建档。" }),
+        naming: async () => api.naming.generate({ kind: "place", count: 3, seed: "a4" }),
+        rebuild: async () => api.index.rebuild({ incremental: true }),
+        search: async () => api.index.search("A4离线卡", 5),
+        library: async () => api.library.list(),
+        exportPreview: async () => api.export.preview(),
+        stats: async () => api.stats.read(),
+        snapshot: async () => api.snapshot.take(),
+        gitState: async () => api.git.state(),
+        memoryState: async () => api.memory.state(),
+        proofread: async () => api.text.proofread({ path: draft.chapterPath }),
+      };
+      for (const entry of Object.entries(localChecks)) {
+        const name = entry[0];
+        try {
+          await entry[1]();
+        } catch (err) {
+          aiOffProbe.localFailed.push(name + "=" + String((err && err.message) || err || "").slice(0, 40));
+        }
+      }
+      aiOffProbe.localCount = Object.keys(localChecks).length;
+      aiOffProbe.ok =
+        aiOffProbe.offState === false &&
+        aiOffProbe.blockedAll &&
+        aiOffProbe.localFailed.length === 0 &&
+        aiOffProbe.localCount === 11;
+      aiOffProbe.error = "";
+    } catch (err) {
+      aiOffProbe = { ...aiOffProbe, error: String((err && err.message) || err).slice(0, 160) };
+    }
+
     return {
       packs: catalog.packs.length, ready: preview.ready, root: snap.root, cards: list.length,
       worldTitle: world && world.title, cardPath: card.path, readBack: doc.card.name,
@@ -1414,6 +1480,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       security: securityProbe,
       proofread: proofreadProbe,
       routingA2: routingA2,
+      aiOff: aiOffProbe,
     };
   })()`;
   try {
@@ -1737,6 +1804,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         diskUnchanged: boolean;
         spansOk: boolean;
         candidateGuard: string;
+        error: string;
+      };
+      aiOff: {
+        ok: boolean;
+        blocked: string[];
+        blockedAll: boolean;
+        localFailed: string[];
+        localCount: number;
+        offState: boolean;
         error: string;
       };
       routingA2: {
@@ -2629,10 +2705,18 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.routingA2.promptTokensDelta === 30 &&
       result.routingA2.summarizeOk &&
       result.routingA2.error === "" &&
+      // A4：AI 关闭后三个 LLM 入口全被拒、本地能力零失败，且端点计数不增长（未发出任何请求）
+      result.aiOff.ok &&
+      result.aiOff.localFailed.length === 0 &&
+      result.aiOff.error === "" &&
       a2Endpoints.badHits === 3 &&
       a2Endpoints.badFailures === 3 &&
       a2Endpoints.goodHits === 3 &&
       a2Endpoints.goodFailures === 0 &&
+      // 端点计数的**最终值**恰好停在 A2 的 3/3：A4 关闸后的三连击与本地能力电池
+      // 一个请求都没发出（任一次泄漏都会让 goodHits 涨到 4+ 或 badHits 涨到 4+）
+      a2Endpoints.badHits === 3 &&
+      a2Endpoints.goodHits === 3 &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
