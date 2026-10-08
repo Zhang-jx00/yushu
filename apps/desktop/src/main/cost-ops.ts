@@ -83,11 +83,15 @@ function toCostEntry(entry: {
   provider_id?: string;
   model?: string;
   channel?: "batch" | "sync";
+  chapter_id?: string;
+  time?: string;
   tokens?: CostTokens;
   estimate?: CostTokens;
 }): CostEntry {
   const item: CostEntry = {};
   if (entry.task) item.task = entry.task;
+  if (entry.chapter_id) item.chapter_id = entry.chapter_id;
+  if (entry.time) item.time = entry.time;
   if (entry.provider_id) item.provider_id = entry.provider_id;
   if (entry.model) item.model = entry.model;
   if (entry.channel) item.channel = entry.channel;
@@ -157,6 +161,8 @@ export async function readCostPanel(
         provider_id: entry.provider_id,
         model: entry.model,
         channel: entry.channel,
+        chapter_id: entry.chapter_id,
+        time: entry.time,
         tokens: entry.tokens as CostTokens | undefined,
         estimate: entry.estimate as CostTokens | undefined,
       }),
@@ -186,6 +192,8 @@ export async function readCostPanel(
     entries: usageEntries.length,
     byTask: summary.byTask.map(toRowPayload),
     byModel: summary.byModel.map(toRowPayload),
+    byChapter: summary.byChapter.map(toRowPayload),
+
     totals: toRowPayload(summary.totals),
     entriesWithoutTokens: summary.entriesWithoutTokens,
     currencies: summary.currencies,

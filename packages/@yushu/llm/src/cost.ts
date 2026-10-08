@@ -141,6 +141,10 @@ export interface CostEntry {
   model?: string;
   /** 通道归属（T3-11）；聚合仅记账不重复打折 */
   channel?: "batch" | "sync" | "local";
+  /** 章节 id（J09 四维的最后一维：按章节下钻） */
+  chapter_id?: string;
+  /** 记录时间（ISO 字符串）；月度预算护栏按它归月 */
+  time?: string;
   /** usage 实报 token */
   tokens?: CostTokens;
   /** 发送前的本地估算（仅 prompt 维度可对账） */
@@ -170,6 +174,8 @@ export interface CostAggregateRow {
 export interface CostSummary {
   byTask: CostAggregateRow[];
   byModel: CostAggregateRow[];
+  /** 按章节聚合（J09 四维：项目 / 任务 / 模型 / 章节）；无 chapter_id 的记录归入「（未标注章节）」 */
+  byChapter: CostAggregateRow[];
   totals: CostAggregateRow;
   /** 无 token 记录的条目数（旧记录 / provider 未回传 usage） */
   entriesWithoutTokens: number;
@@ -179,6 +185,7 @@ export interface CostSummary {
 
 const UNTASKED = "（未标注任务）";
 const UNMODELLED = "（未标注模型）";
+const UNCHAPTERED = "（未标注章节）";
 const TOTALS_KEY = "合计";
 
 interface Bucket {
@@ -280,6 +287,7 @@ export function summarizeCosts(
 ): CostSummary {
   const tasks = new Map<string, Bucket>();
   const models = new Map<string, Bucket>();
+  const chapters = new Map<string, Bucket>();
   const totals: Bucket = { row: emptyRow(TOTALS_KEY), deviations: [] };
 
   for (const entry of entries) {
@@ -294,9 +302,12 @@ export function summarizeCosts(
           : UNMODELLED;
     const pricing = resolvePricing(entry.provider_id, entry.model);
 
+    const chapterKey =
+      entry.chapter_id && entry.chapter_id.trim() !== "" ? entry.chapter_id : UNCHAPTERED;
     for (const [map, key] of [
       [tasks, taskKey],
       [models, modelKey],
+      [chapters, chapterKey],
     ] as const) {
       let bucket = map.get(key);
       if (!bucket) {
@@ -314,11 +325,13 @@ export function summarizeCosts(
   const totalsRow = finalize(totals);
   const byTask = rowsOf(tasks);
   const byModel = rowsOf(models);
+  const byChapter = rowsOf(chapters);
   const currencies = Object.keys(totalsRow.costByCurrency).sort(byCode);
 
   return {
     byTask,
     byModel,
+    byChapter,
     totals: totalsRow,
     entriesWithoutTokens: totalsRow.entries - countWithTokens(entries),
     currencies,

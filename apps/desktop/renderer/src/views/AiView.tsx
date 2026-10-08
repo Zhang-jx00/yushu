@@ -1329,6 +1329,7 @@ export function AiView() {
               <CostBreakdownTable rows={costPanel.byTask} keyLabel="任务" />
               <div className="muted">按模型分解</div>
               <CostBreakdownTable rows={costPanel.byModel} keyLabel="模型" />
+            <CostBreakdownTable rows={costPanel.byChapter} keyLabel="章节" />
 
               <div className="muted">定价表状态（config/llm.yaml 的 models[].pricing，单价按每 1M tokens）</div>
               {costPanel.pricing.length === 0 ? (

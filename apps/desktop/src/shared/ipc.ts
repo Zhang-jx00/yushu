@@ -806,6 +806,8 @@ export interface AiCostPanelPayload {
   entries: number;
   byTask: CostRowPayload[];
   byModel: CostRowPayload[];
+  /** 按章节分解（J09 四维的最后一维）；未标注章节的记录归入「（未标注章节）」一行，不静默丢弃 */
+  byChapter: CostRowPayload[];
   totals: CostRowPayload;
   /** 无 token 的记录数（旧记录 / provider 未回传 usage）——J09 的 cost-usage-missing 线索 */
   entriesWithoutTokens: number;

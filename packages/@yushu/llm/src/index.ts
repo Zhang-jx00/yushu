@@ -19,5 +19,6 @@ export * from "./structured.js";
 export * from "./batch.js";
 export * from "./cost.js";
 export * from "./cache.js";
+export * from "./budget.js";
 export * from "./chat.js";
 export * from "./stream.js";

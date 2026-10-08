@@ -447,4 +447,38 @@ describe("稳定前缀编排核对（T3-12 步骤 5）", () => {
     expect(panel.notes.some((note) => note.includes("CJK"))).toBe(true);
     expect(panel.path).toBe(".yushu/ai-usage.jsonl");
   });
+
+  it("章节维度：带 chapter_id 按章分行，缺标注者归一行而非丢弃（J09 四维）", async () => {
+    const { gateway } = await setupProject();
+    await saveAiConfig(gateway, {
+      providers: providersWith({ pricing: { currency: "CNY", input: 12, output: 36 } }) as never,
+    });
+    await appendAiUsage(dir, {
+      id: "ai-ch-1",
+      type: "generate",
+      task: "drafting",
+      provider_id: "mock",
+      model: "mock-model",
+      status: "ok",
+      chapter_id: "ch-aaa",
+      tokens: { prompt: 1000, completion: 500 },
+    });
+    await appendAiUsage(dir, {
+      id: "ai-ch-2",
+      type: "generate",
+      task: "continue",
+      provider_id: "mock",
+      model: "mock-model",
+      status: "ok",
+      chapter_id: "ch-bbb",
+      tokens: { prompt: 2000, completion: 900 },
+    });
+    const panel = await readCostPanel(gateway, {});
+    const keys = panel.byChapter.map((row) => row.key);
+    expect(keys).toEqual(["ch-aaa", "ch-bbb"]); // 本用例两条都带章节；缺标注的归并行为在引擎侧断言（budget/cost 测试）
+    const aaa = panel.byChapter.find((row) => row.key === "ch-aaa")!;
+    expect(aaa.promptTokens).toBe(1000);
+    expect(aaa.cost).not.toBeNull();
+    expect(aaa.costText.startsWith("¥")).toBe(true);
+  });
 });
