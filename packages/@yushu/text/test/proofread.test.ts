@@ -125,6 +125,19 @@ describe("applyFixes：未确认即写入是 error 红线", () => {
     expect(result.rejected[0]!.reason).toContain("重叠");
   });
 
+  it("繁简候选必须属于条目登记的候选表（任意文本一律拒绝）", () => {
+    const found = proofreadText("他头发乱了。").findings.filter(
+      (f) => f.rule === "proofread-conversion-ambiguous",
+    );
+    expect(found.length).toBe(1);
+    expect(found[0]!.candidates).toEqual(["發", "髮"]);
+    const outside = applyFixes("他头发乱了。", found, { confirmed: true, replacements: ["随手的任意文本"] });
+    expect(outside.applied).toEqual([]);
+    expect(outside.rejected[0]!.reason).toContain("不在该条目登记的候选内");
+    expect(outside.text).toBe("他头发乱了。");
+    const inside = applyFixes("他头发乱了。", found, { confirmed: true, replacements: ["髮"] });
+    expect(inside.text).toBe("他头髮乱了。"); // 只换掉命中的那一个歧义字
+  });
   it("空请求列表：文本原样返回", () => {
     const result = applyFixes("夜色压下来。", [], { confirmed: true });
     expect(result.text).toBe("夜色压下来。");

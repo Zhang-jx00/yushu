@@ -45,6 +45,12 @@ export interface ProofreadFinding {
   span: ProofreadSpan;
   /** 建议替换文本（可缺省：如长句只提示不给改法） */
   suggestion?: string;
+  /**
+   * 候选文本列表（如繁简歧义的 `["發","髮"]`）。
+   * 存在即表示：作者可以**从这些候选里选一个**作为修复文本，调用方不接受任意文本——
+   * 否则"采纳"会退化成一条能改正文任意区间的通用写通道。
+   */
+  candidates?: readonly string[];
   /** 为什么命中（命中的词表 / 规则名 / 统计依据） */
   evidence: string;
   /** 该条能否自动修复（真正的写入仍需确认） */

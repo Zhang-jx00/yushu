@@ -168,7 +168,16 @@ export function applyFixes(
       rejected.push({ reason: "与已应用的修复重叠", span: finding.span });
       continue;
     }
-    const explicit = options.replacements?.[index];
+    const requested = options.replacements?.[index];
+    // 显式候选只在该条目**登记过候选列表**时才生效——否则"采纳"就退化成能改正文任意区间的通用写通道
+    const explicit = requested !== undefined && finding.candidates?.includes(requested) ? requested : undefined;
+    if (requested !== undefined && explicit === undefined) {
+      rejected.push({
+        reason: `候选文本不在该条目登记的候选内（只接受「${finding.candidates?.join(" / ") ?? "无候选"}」），本条不改`,
+        span: finding.span,
+      });
+      continue;
+    }
     if (explicit === undefined && !finding.autofix) {
       rejected.push({
         reason: `该规则不允许自动修（需显式选定候选）：${finding.rule}`,

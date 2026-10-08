@@ -192,6 +192,7 @@ export function checkConversion(
       text: hit.char,
     },
     suggestion: `候选：${hit.candidates.join(" / ")}`,
+    candidates: hit.candidates,
     evidence: `「${hit.char}」一简对多繁／多异（${hit.gloss}）：字面无法判定，未自动改写，需作者选定`,
     autofix: false,
     source: { engine: "lexicon:conversion", conf: 1 },
