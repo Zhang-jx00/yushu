@@ -377,6 +377,10 @@ async function runE2E(win: BrowserWindow): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "yushu-e2e-"));
   // T3-2 重试探针：mock 第一次请求返回 429，验证「按错误类别退避重试」端到端生效
   const mock = await startMockOpenAI(2, { failFirst: 1, failStatus: 429 });
+  // A2 取证专用两端（docs/04 §6.5）：旗舰端点**全程 503**（触发重试 + 回落 + 冷却），小模型端点正常承接。
+  // 两个计数器各自独立，因此"哪一端被打了几次"是可精确断言的（现有单 mock 只能看全局 hits）。
+  const mockBad = await startMockOpenAI(2, { failFirst: 10_000, failStatus: 503 });
+  const mockGood = await startMockOpenAI(2, {});
   // T3-1 迁移探针：预置 v1 简表配置（读取时应迁移为 v2；保存时先备份 v1 → .bak-v1）
   await mkdir(join(dir, "config"), { recursive: true });
   await writeFile(
@@ -411,10 +415,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     ].join("\n"),
     "utf8",
   );
-  const payload = JSON.stringify({ dir, baseUrl: mock.baseUrl });
+  const payload = JSON.stringify({
+    dir,
+    baseUrl: mock.baseUrl,
+    badUrl: mockBad.baseUrl,
+    goodUrl: mockGood.baseUrl,
+  });
   const script = `(async () => {
     const api = window.yushu;
-    const { dir, baseUrl } = ${payload};
+    const { dir, baseUrl, badUrl, goodUrl } = ${payload};
     const catalog = await api.pack.catalog();
     const preview = await api.pack.fuse(["xuanhuan-xitong"]);
     const snap = await api.project.create({ dir, title: "天启界", packIds: ["xuanhuan-xitong"], axes: preview.genreAxes });
@@ -1164,6 +1173,136 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     }
     console.log("[e2e] 中文自查:", JSON.stringify(proofreadProbe));
 
+    // A2 任务路由取证（docs/04 §6.5，离线可做的那一半）：
+    //  ① 旗舰端点全程 503 → 一次动作内先重试、再按 fallback 链回落到小模型端点并成功出文；
+    //  ② 失败达阈进入冷却 → **第二次动作不再尝试坏端点**（冷却跳过事件带原因）；
+    //  ③ 一次动作只记**一条** usage 记录，token 取成功那一次（503 不产 token，故不存在重复计费）。
+    let routingA2 = {
+      ok: false,
+      summarizeOk: false,
+      firstDone: false,
+      secondDone: false,
+      firstProvider: "",
+      secondProvider: "",
+      fallbackEvents: 0,
+      cooldownSeen: false,
+      recordsDelta: 0,
+      promptTokensDelta: 0,
+      reasons: "",
+      error: "",
+    };
+    try {
+      const rt = await api.doc.read("config/routing.yaml");
+      await api.doc.write(
+        "config/routing.yaml",
+        [
+          "apiVersion: yushu.llm/v1",
+          "format_version: 1",
+          "routes:",
+          "  drafting: {prefer: [flagship], require: [stream]}",
+          "fallback:",
+          "  drafting: [flagship-bad, small-good]",
+          "reliability:",
+          "  retry_policy:",
+          "    InternalServerError: {max_retries: 2, backoff: fixed, base_delay_ms: 1, max_delay_ms: 2}",
+          "  cooldown: {allowed_fails: 1, window_s: 120, cooldown_s: 60}",
+          "",
+        ].join("\\n"),
+        rt.hash,
+      );
+      const caps = (stream) => ({
+        tools: false,
+        structured_output: true,
+        stream: stream,
+        usage: true,
+        reasoning: false,
+        vision: false,
+        batch: false,
+      });
+      const cfgA2 = await api.ai.config();
+      await api.ai.saveConfig({
+        providers: [
+          {
+            id: "flagship-bad",
+            kind: "cloud",
+            protocol: "openai_chat",
+            base_url: badUrl,
+            api_key_env: "YUSHU_E2E_UNSET_KEY",
+            models: [{ name: "bad-model", tier: "flagship", capabilities: caps(true) }],
+          },
+          {
+            id: "small-good",
+            kind: "local",
+            protocol: "openai_chat",
+            base_url: goodUrl,
+            models: [{ name: "small-model", tier: "small", capabilities: caps(true) }],
+          },
+        ],
+        ...(cfgA2.hash ? { baseHash: cfgA2.hash } : {}),
+      });
+      await api.ai.setKey("flagship-bad", "sk-e2e-session-only");
+      const usageBefore = (await api.ai.usage()).entries.length;
+      const costBefore = await api.ai.cost({});
+      const runOnce = async (streamId) => {
+        const evs = [];
+        const off = api.ai.onEvent((event) => {
+          if (event.streamId === streamId) evs.push(event);
+        });
+        await api.ai.start({ streamId, volumeId: volume.id, chapterId: co.id, task: "draft-first", targetWords: 200 });
+        const got = await (async () => {
+          for (let i = 0; i < 600; i += 1) {
+            const found = evs.find((event) => event.type === "done" || event.type === "error");
+            if (found) return found;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          return null;
+        })();
+        off();
+        return {
+          done: got !== null && got.type === "done",
+          provider: got !== null && got.type === "done" ? got.providerId : "",
+          prompt: got !== null && got.type === "done" && got.usage ? got.usage.prompt_tokens : -1,
+          fallbacks: evs.filter((event) => event.type === "fallback"),
+        };
+      };
+      const first = await runOnce("e2e-a2-1");
+      const second = await runOnce("e2e-a2-2");
+      // 第三条动作走**内置默认路由 summarize → prefer [small]**：应直接由小模型端点承接，坏端点不再被尝试
+      const memAgain = await api.memory.summarize({ layer: memTarget.layer, id: memTarget.id, volumeId: memTarget.volume_id });
+      const summarizeOk = typeof memAgain.text === "string" && memAgain.text.length > 0;
+      const usageAfter = (await api.ai.usage()).entries.length;
+      const costAfter = await api.ai.cost({});
+      const reasons = first.fallbacks.concat(second.fallbacks).map((event) => event.reason).join(" / ");
+      routingA2 = {
+        ok:
+          first.done &&
+          second.done &&
+          summarizeOk &&
+          first.provider === "small-good" &&
+          second.provider === "small-good" &&
+          first.fallbacks.length >= 1 &&
+          second.fallbacks.length >= 1 &&
+          reasons.indexOf("冷却") >= 0 &&
+          reasons.indexOf("503") >= 0 &&
+          first.prompt === 12 &&
+          usageAfter - usageBefore === 3 &&
+          (costAfter.totals.promptTokens - costBefore.totals.promptTokens) === 30,
+        summarizeOk,
+        firstDone: first.done,
+        secondDone: second.done,
+        firstProvider: first.provider,
+        secondProvider: second.provider,
+        fallbackEvents: first.fallbacks.length + second.fallbacks.length,
+        cooldownSeen: reasons.indexOf("冷却") >= 0,
+        recordsDelta: usageAfter - usageBefore,
+        promptTokensDelta: costAfter.totals.promptTokens - costBefore.totals.promptTokens,
+        reasons: reasons.slice(0, 180),
+        error: "",
+      };
+    } catch (err) {
+      routingA2 = { ...routingA2, error: String((err && err.message) || err).slice(0, 160) };
+    }
+
     return {
       packs: catalog.packs.length, ready: preview.ready, root: snap.root, cards: list.length,
       worldTitle: world && world.title, cardPath: card.path, readBack: doc.card.name,
@@ -1274,6 +1413,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       cost: costProbe,
       security: securityProbe,
       proofread: proofreadProbe,
+      routingA2: routingA2,
     };
   })()`;
   try {
@@ -1597,6 +1737,20 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         diskUnchanged: boolean;
         spansOk: boolean;
         candidateGuard: string;
+        error: string;
+      };
+      routingA2: {
+        ok: boolean;
+        summarizeOk: boolean;
+        firstDone: boolean;
+        secondDone: boolean;
+        firstProvider: string;
+        secondProvider: string;
+        fallbackEvents: number;
+        cooldownSeen: boolean;
+        recordsDelta: number;
+        promptTokensDelta: number;
+        reasons: string;
         error: string;
       };
     };
@@ -2235,6 +2389,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     }
     console.log("[e2e] 关闭前 flush:", JSON.stringify(closeFlush));
 
+    // A2 端点计数（脚本跑完后读）：坏端点被试过并全程 503，好端点恰好承接两次动作
+    const a2Endpoints = {
+      badHits: mockBad.stats.hits,
+      badFailures: mockBad.stats.failures,
+      goodHits: mockGood.stats.hits,
+      goodFailures: mockGood.stats.failures,
+    };
+    console.log("[e2e] A2 端点计数:", JSON.stringify(a2Endpoints));
+
     const ok =
       result.ready &&
       result.cards === 2 &&
@@ -2457,6 +2620,19 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.proofread.diskUnchanged &&
       result.proofread.spansOk &&
       result.proofread.error === "" &&
+      // A2 任务路由（离线那一半）：旗舰端点失败 → 回落小模型端点出文；冷却跳过坏端点；一次动作一条记录
+      result.routingA2.ok &&
+      result.routingA2.firstProvider === "small-good" &&
+      result.routingA2.secondProvider === "small-good" &&
+      result.routingA2.cooldownSeen &&
+      result.routingA2.recordsDelta === 3 &&
+      result.routingA2.promptTokensDelta === 30 &&
+      result.routingA2.summarizeOk &&
+      result.routingA2.error === "" &&
+      a2Endpoints.badHits === 3 &&
+      a2Endpoints.badFailures === 3 &&
+      a2Endpoints.goodHits === 3 &&
+      a2Endpoints.goodFailures === 0 &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
@@ -2491,16 +2667,20 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 密钥安全（加密保存后明文不落盘、真源只记 key_ref、后端不可用即拒存、含明文 llm.yaml 被 error 阻断，T3-14）→ 中文自查（别字与半角标点给候选、未确认不改稿、修复不写盘、繁简歧义须选定候选，T3-13）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 密钥安全（加密保存后明文不落盘、真源只记 key_ref、后端不可用即拒存、含明文 llm.yaml 被 error 阻断，T3-14）→ 中文自查（别字与半角标点给候选、未确认不改稿、修复不写盘、繁简歧义须选定候选，T3-13）→ 任务路由回落与冷却（旗舰端点全程 503 时由小模型端点出文、第二次动作跳过冷却端点、一次动作只记一条 usage，A2 离线半）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     mock.server.close();
+    mockBad.server.close();
+    mockGood.server.close();
     app.exit(ok ? 0 : 1);
   } catch (err) {
     console.error("[e2e] 执行失败:", err);
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     mock.server.close();
+    mockBad.server.close();
+    mockGood.server.close();
     app.exit(1);
   }
 }
