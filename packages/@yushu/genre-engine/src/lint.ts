@@ -1,4 +1,5 @@
 import { ROMANCE_MODES, WORDLIST } from "./wordlist.js";
+import { duplicateRuleIds, loadPackRuleSets } from "./rules.js";
 import {
   ELEVEN_PIECE_KEYS,
   PACK_API_VERSION,
@@ -120,6 +121,28 @@ export function lintPack(pack: LoadedPack): LintReport {
   // 引用文件存在性
   for (const missing of pack.missingFiles) {
     add("pack-file-missing", "error", `引用文件缺失：${missing}`);
+  }
+
+  // 规则件套的**内容层**校验（M4 / T4-1，R51）：解析失败与表达式问题都必须报出来，
+  // 不能让一条坏规则悄悄消失——作者看到"没发现问题"和"这条没跑成"是完全不同的两件事。
+  const ruleSets = loadPackRuleSets(pack);
+  for (const set of ruleSets) {
+    if (set.error !== null) {
+      add("rule-unparsable", "error", `规则件「${set.file}」无法解析（该文件 0 条规则生效）：${set.error}`);
+      continue;
+    }
+    for (const [ruleId, issues] of Object.entries(set.expressionIssues)) {
+      for (const issue of issues) {
+        add("rule-expression", "error", `规则「${ruleId}」（${set.file}）：${issue}`);
+      }
+    }
+  }
+  for (const duplicate of duplicateRuleIds(ruleSets)) {
+    add(
+      "rule-duplicate-id",
+      "error",
+      `规则 id「${duplicate.id}」在同包的多个文件里重复（${duplicate.files.join("、")}）：跨包覆盖走版本合并，同包撞名没有依据，拒绝按加载顺序取后者`,
+    );
   }
 
   // 演化字段（docs/05 §6：开山作 / 年代 / 演化链）

@@ -98,6 +98,52 @@ export interface ConsistencyRule {
   origin?: RuleOrigin;
 }
 
+/** 白名单快照（供 lint 静态扫描与面板展示"这条规则用到哪些原语"） */
+export const RULE_OPERATORS: readonly string[] = [...ALL_OPERATORS].sort();
+
+/** 已知"看着该有但被明令禁止"的原语原因；不在禁止表里的就是纯拼错 */
+export function forbiddenOperatorHint(operator: string): string | undefined {
+  return FORBIDDEN_OPERATORS[operator];
+}
+
+/**
+ * 静态扫描表达式的问题（**不求值**）：让坏规则在加载 / lint 阶段就暴露，而不是等一致性体检
+ * 跑到这条时抛错——那时作者看到的是"整轮失败"，不是"这条规则写错了"。
+ * 返回可直接展示的中文句子；空数组表示结构上没问题（不代表一定会命中）。
+ */
+export function collectExpressionIssues(expr: unknown): string[] {
+  const issues: string[] = [];
+  walkExpression(expr, issues, 0);
+  return issues;
+}
+
+function walkExpression(node: unknown, issues: string[], depth: number): void {
+  if (depth > RULE_MAX_DEPTH) {
+    issues.push(`嵌套超过 ${RULE_MAX_DEPTH} 层：求值会在加载期被拒，请改写或拆成多条规则`);
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) walkExpression(item, issues, depth + 1);
+    return;
+  }
+  if (node === null || typeof node !== "object") return;
+  const keys = Object.keys(node);
+  if (keys.length === 0) {
+    issues.push("空对象不是合法表达式（应为 {\"操作符\": 参数}）");
+    return;
+  }
+  if (keys.length > 1) {
+    issues.push(`对象含 ${keys.length} 个键（${keys.join("、")}）：一个表达式只能有一个操作符，多个条件请用 and / or`);
+  }
+  for (const key of keys) {
+    if (!ALL_OPERATORS.has(key)) {
+      const hint = FORBIDDEN_OPERATORS[key];
+      issues.push(`未知操作符「${key}」${hint ? `：${hint}` : "：不在白名单内（检查拼写；需要迭代 / 正则 / IO 请改到数据侧算好）"}`);
+    }
+    walkExpression((node as Record<string, unknown>)[key], issues, depth + 1);
+  }
+}
+
 export interface RuleEvaluation {
   ruleId: string;
   severity: RuleSeverity;
