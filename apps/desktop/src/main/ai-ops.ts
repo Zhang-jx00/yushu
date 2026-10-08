@@ -53,6 +53,7 @@ import type {
 } from "../shared/ipc.js";
 import { appendAiUsage, newUsageId, readAiUsage } from "./ai-usage.js";
 import { ProjectGateway } from "./file-gateway.js";
+import { SecretsRepository, type KeyCipher } from "./secrets-ops.js";
 import { analyzeDraft, assembleMessages, buildContextPreview, type DraftTask } from "./prompt-ops.js";
 import { takePreDestructiveSnapshot } from "./snapshot-ops.js";
 import { countEffectiveChars, recordChapterDelta } from "./stats-ops.js";
@@ -69,6 +70,47 @@ const LLM_CONFIG_BACKUP_PATH = `${LLM_CONFIG_PATH}.bak-v1`;
 
 /** 会话内存 API Key（provider.id → key）；进程退出即消失，不落盘（docs/03 §13） */
 const sessionKeys = new Map<string, string>();
+
+/**
+ * 凭据库加密后端（T3-14）：由 `ipc.ts` 在注册阶段注入 Electron safeStorage 包装器。
+ * 本模块不 import electron——否则主进程逻辑的单测会连带拉起 Electron 运行时；
+ * 未注入时视为「后端不可用」：只拒绝保存密文，会话内存 Key 与环境变量照常可用。
+ */
+let keyCipher: KeyCipher | null = null;
+
+export function installKeyCipher(cipher: KeyCipher): void {
+  keyCipher = cipher;
+}
+
+/** 当前项目的凭据库仓储（未注入后端时抛 E_SECRETS_BACKEND，不静默降级） */
+export function secretsOf(gateway: ProjectGateway): SecretsRepository {
+  if (!keyCipher) {
+    throw new YushuError(
+      "E_SECRETS_BACKEND",
+      "凭据加密后端未就绪（Electron safeStorage 未注入）：本次会话 Key 与环境变量仍可用，加密保存暂不可用",
+    );
+  }
+  return new SecretsRepository(gateway.root, keyCipher);
+}
+
+/** 解密供本次调用使用的凭据表（provider 未声明 key_ref 时天然为空表）；供 memory/extract 复用 */
+export async function storedKeysFor(
+  gateway: ProjectGateway,
+  providers: LlmProviderSpec[],
+): Promise<Record<string, string>> {
+  if (!keyCipher || !providers.some((provider) => Boolean(provider.key_ref))) return {};
+  return new SecretsRepository(gateway.root, keyCipher).storedKeysFor(providers);
+}
+
+/** 已登记的 key_ref 集合（凭据库不存在 / 损坏时按「无已存凭据」处理，不阻断配置页读取） */
+async function storedKeyRefs(gateway: ProjectGateway): Promise<Set<string>> {
+  if (!keyCipher) return new Set();
+  try {
+    return new Set((await new SecretsRepository(gateway.root, keyCipher).list()).map((item) => item.key_ref));
+  } catch {
+    return new Set();
+  }
+}
 
 /** 可靠性闸门（T3-2）：冷却与并发状态跨调用共享（配置每次从 config/routing.yaml 读取）；
  *  记忆摘要（T3-5）等其他任务共用同一闸门，避免每个任务各持一份冷却/并发状态。 */
@@ -101,6 +143,7 @@ function toProviderPayload(provider: LlmProviderSpec): AiProviderPayload {
       ...(model.pricing ? { pricing: { ...model.pricing } } : {}),
     })),
     ...(provider.api_key_env ? { api_key_env: provider.api_key_env } : {}),
+    ...(provider.key_ref ? { key_ref: provider.key_ref } : {}),
     ...(provider.temperature !== undefined ? { temperature: provider.temperature } : {}),
     ...(provider.max_tokens !== undefined ? { max_tokens: provider.max_tokens } : {}),
   };
@@ -156,16 +199,26 @@ export async function readAiConfig(gateway: ProjectGateway): Promise<AiConfigSta
   // v1 文本由 parseLlmConfig 自动迁移（内存态；写回由保存路径显式完成并先行备份）
   const config = snapshot ? parseLlmConfig(snapshot.content) : defaultLlmConfig();
   const keys = sessionKeySnapshot();
+  // T3-14：已加密保存的凭据清单（只取 key_ref，绝不把明文回传渲染层；后端未就绪时为空）
+  const storedRefs = await storedKeyRefs(gateway);
 
   const keyStates = config.providers.map((provider) => {
     const hasSessionKey = Boolean(keys[provider.id]);
     const hasEnvKey = Boolean(provider.api_key_env && process.env[provider.api_key_env]);
+    const hasStoredKey = Boolean(provider.key_ref && storedRefs.has(provider.key_ref));
     return {
       provider_id: provider.id,
       ...(provider.api_key_env ? { api_key_env: provider.api_key_env } : {}),
+      ...(provider.key_ref ? { key_ref: provider.key_ref } : {}),
       has_session_key: hasSessionKey,
       has_env_key: hasEnvKey,
-      ready: !provider.api_key_env || hasSessionKey || hasEnvKey,
+      has_stored_key: hasStoredKey,
+      // 既不需要鉴权（本地端点）也算就绪
+      ready:
+        hasSessionKey ||
+        hasEnvKey ||
+        hasStoredKey ||
+        (!provider.api_key_env && !provider.key_ref),
     };
   });
 
@@ -329,6 +382,7 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
 
     const callOptions = {
       sessionKeys: sessionKeySnapshot(),
+      storedKeys: await storedKeysFor(gateway, providers),
       reliability: { config: routing.reliability, gate: reliabilityGate },
       onFallback: (info: LlmFallbackInfo) =>
         sink({ streamId, type: "fallback", providerId: info.provider_id, reason: info.reason }),

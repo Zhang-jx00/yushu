@@ -69,7 +69,13 @@ import type {
   MemoryTargetPayload,
 } from "../shared/ipc.js";
 import { appendAiUsage, newUsageId } from "./ai-usage.js";
-import { loadLlmConfigForUse, loadRoutingConfigForUse, reliabilityGate, sessionKeySnapshot } from "./ai-ops.js";
+import {
+  loadLlmConfigForUse,
+  loadRoutingConfigForUse,
+  reliabilityGate,
+  sessionKeySnapshot,
+  storedKeysFor,
+} from "./ai-ops.js";
 import {
   locateChapter,
   readChapterBody,
@@ -333,6 +339,7 @@ export async function summarizeMemory(
   const promptEstimate = messages.reduce((sum, message) => sum + estimateTokens(message.content), 0);
   const result = await chat(providers, { messages }, {
     sessionKeys: sessionKeySnapshot(),
+    storedKeys: await storedKeysFor(gateway, providers),
     reliability: { config: routing.reliability, gate: reliabilityGate },
   });
   const text = result.text.trim();

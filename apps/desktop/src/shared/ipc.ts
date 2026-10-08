@@ -476,6 +476,8 @@ export interface AiProviderPayload {
   models: AiModelPayload[];
   /** 只记录环境变量名；明文 key 禁止落盘（docs/03 §13） */
   api_key_env?: string;
+  /** 凭据库引用（T3-14）：指向 `.yushu/secrets.json` 里的密文条目；真源仍不含密钥字面值 */
+  key_ref?: string;
   temperature?: number;
   max_tokens?: number;
 }
@@ -483,8 +485,12 @@ export interface AiProviderPayload {
 export interface AiProviderKeyState {
   provider_id: string;
   api_key_env?: string;
+  /** 该 provider 声明的凭据库引用（T3-14；未声明为 undefined） */
+  key_ref?: string;
   has_session_key: boolean;
   has_env_key: boolean;
+  /** 凭据库里存在该 key_ref 的密文条目（不代表能解密成功） */
+  has_stored_key: boolean;
   /** 无需 key 或 key 已就绪 */
   ready: boolean;
 }

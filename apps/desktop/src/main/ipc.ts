@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { app, clipboard, dialog, ipcMain } from "electron";
+import { app, clipboard, dialog, ipcMain, safeStorage } from "electron";
 import { YushuError } from "@yushu/core";
 import {
   CHANNELS,
@@ -100,6 +100,8 @@ import {
   setSessionKey,
 } from "./ai-ops.js";
 import { appendAiFeedback, readAiFeedbackState } from "./ai-feedback.js";
+import { createSafeStorageCipher } from "./secrets-ops.js";
+import { installKeyCipher } from "./ai-ops.js";
 import { readCostPanel } from "./cost-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
@@ -244,6 +246,9 @@ function wrapWrite<T>(fn: () => Promise<T> | T): Promise<IpcResult<T>> {
 }
 
 export function registerIpcHandlers(): void {
+  // T3-14：把 Electron safeStorage 注入凭据库后端（ai-ops 自身不 import electron，便于单测）
+  installKeyCipher(createSafeStorageCipher(safeStorage));
+
   ipcMain.handle(CHANNELS.projectOpen, (_event, payload?: { path?: string }) =>
     wrap<ProjectSnapshot | null>(async () => {
       let root = payload?.path;

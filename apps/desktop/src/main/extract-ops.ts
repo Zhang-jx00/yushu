@@ -27,7 +27,13 @@ import type {
   ExtractionCandidatePayload,
 } from "../shared/ipc.js";
 import { appendAiUsage, newUsageId } from "./ai-usage.js";
-import { loadLlmConfigForUse, loadRoutingConfigForUse, reliabilityGate, sessionKeySnapshot } from "./ai-ops.js";
+import {
+  loadLlmConfigForUse,
+  loadRoutingConfigForUse,
+  reliabilityGate,
+  sessionKeySnapshot,
+  storedKeysFor,
+} from "./ai-ops.js";
 import { locateChapter, readChapterBody, readOutlineSafe, readWorldTitle } from "./doc-readers.js";
 import { ProjectGateway } from "./file-gateway.js";
 import { writeCardDoc } from "./project-ops.js";
@@ -134,6 +140,7 @@ async function runExtraction(gateway: ProjectGateway, chapterId: string): Promis
       return { valid: parsed.issues.length === 0, issues: parsed.issues };
     },
     sessionKeys: sessionKeySnapshot(),
+    storedKeys: await storedKeysFor(gateway, providers),
     reliability: { config: routing.reliability, gate: reliabilityGate },
   });
   await appendAiUsage(gateway.root, {
