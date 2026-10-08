@@ -316,13 +316,14 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 
 **R51（规则 DSL 桌面端接入）已完成，T4-1 勾选**：内容层加载（`rules.ts`）+ `lintPack` 三条规则检查 + 两个只读通道 `rule:catalog` / `rule:dryRun` + 第 11 个标签页「规则」+ 预演 step40（终版 v114 40/40、e2e 规则探针 `diskUnchanged:true`）。详见 docs/04 §7.3 T4-1 两轮注记与 docs/06 §八 第 50–51 轮。
 
-**下一轮（R52）——M4 / T4-2 结构完整性规则落地（引擎侧，先把"能从真源独立算出"的那批做扎实）**：
-1. **范围只取结构类三条**：`ref-dangling`（引用指向不存在的实体）、`ref-cycle`（引用成环）、`layer-order-violation`（层级倒置）。语义类（战力崩塌、称呼漂移、伏笔悬空）依赖事实与声线卡比对，**留到后续轮次**，不要一次铺开十条。
-2. **先取证再动手**：`refs(referrer, relation, target)` 落在 `@yushu/search/index-db.ts`，但**索引是派生物、可以整库删除**（红线 1 / M4 §7.5 A5）。结构校验必须能**从真源独立算出**：优先复用 `collectIndexInput` / `diffIndexSources`（`@yushu/world-engine`）从 Markdown/YAML 直接得到实体与引用边，**不要把校验建在 SQL 查询结果上**——删库后结果不变才是验收口径。动手前先把这两条链路的真实输出打出来看一遍。
-3. **判定要可解释**：每条发现输出 `{rule, severity, span 或 subject, evidence（谁在哪个文件哪一行引用了谁）, fix?}`，与 T3-13 / T4-1 的 finding 同形；`layer-order` 用码点稳定排序，**不碰 localeCompare**。
-4. **环检测必须自终止**：图遍历用 visited 集合 + 路径栈，且对**单文件自引用**、A→B→A、超长链都有用例；遍历上限要有显式常量（对齐 R50 的"节点预算代替墙钟"），不要靠异常兜底。
-5. **不该命中侧同样要有**：每条规则至少一例合法结构（无悬空 / 无环 / 层级正确）断言零发现——结构类误报会直接把作者推进"忽略所有警告"的状态。**新断言一律先做红/绿配对**。
-6. 桌面端与 e2e/预演留 R53（报告格式 + 面板），本轮纯引擎；docs 计数与预演步数（现 40 步）按改动面同步。
+**下一轮（R52）——M4 / T4-2 结构完整性三条规则（引擎侧，先取证再动手）**：
+1. **已取证的事实（别重复调查）**：`collectIndexInput`（`packages/@yushu/world-engine/src/index-input.ts:258-387`）从真源产出的 `IndexInput`（`:65-70`）里，`entities`（行形状 `IndexEntityRow{id,type,layer,name,aliases,visibility,filePath}`）**只有设定卡**——扫描门在 `:293` 的 `path.startsWith("world/cards/")`，push 在 `:312`；**章节与大纲不进 entities**。`refs`（`IndexRefRow{referrer,relation,target}`）**也只有一个生产者**：设定卡 frontmatter 的 `refs`（emit 在 `:321-323`，`relation` 原样取自卡）。所以悬空判定只能对**卡内引用**下结论。`chapter.outline_ref` 与 `card.source_chapters` 目前**没有任何存在性校验**（schema 只 `minLength:1`，`packages/@yushu/schema/src/schemas.ts:65-76` 与 `:194`），别把它们当成已覆盖。
+2. **不要建在 SQL 上**：索引是可删的派生物（红线 1）。检查器的输入用 `IndexInput`（纯真源产物），**删库后结果必须不变**——这是 M4 §7.5 A5 的验收口径。
+3. **两份权威文件口径不一致，要显式裁决**：`docs/03-开发规划方案.md:381` 把 `layer-order-violation` 列为 **error**，而 `docs/research/K-软件工程与产品/K05-世界引擎数据模型与影响传播.md:122` 记 **warn**。取 docs/03（架构文档为约束源）= error，并在代码注释与 docs/04 注记里写明分歧，别装作没看见。方向按 K05 的例子定义：**上游层引用下游层即倒置**（如 geography 卡引用 characters 卡），同层引用不算。
+4. `layer-disabled-ref`（指向未启用层的引用）**本轮不做**，但「未启用层不参与校验」要落地：检查器接受 `enabledLayers?: string[]`，未启用层的卡**整条跳过**。
+5. **环检测要自终止且可解释**：visited + 路径栈，**每个环只报一次**（从环内最小 id 起笔、邻接按 id 码点排序，不碰 localeCompare），证据文案给出完整路径 `a → b → c → a`。用例至少覆盖：自引用、二元互指、长链末端回指，以及**不该命中的 DAG**。
+6. **悬空判定的口径要写死**：target 与「实体 id 精确相等」才算存在（**不做名称/别名模糊匹配**，否则会把真悬空洗成命中）；`ch-` 前缀的 target 属章节引用，本轮**不判悬空**（章节不在 entities 里），但要在证据里如实写「未纳入校验范围」，不能静默放过。
+7. 落点建议 `packages/@yushu/world-engine/src/consistency.ts`（纯逻辑、无 IO），finding 形状沿用 `{rule, severity, subject, related?, evidence}`（与 `genre-engine/src/lint.ts` 的 `LintIssue` 同族）；测试夹具直接复用 `packages/@yushu/world-engine/test/index-input.test.ts:18-28` 的 `readerOf(files)`（纯内存源，无 fs 无 SQL）。桌面接入与报告面板留 R53。
 
 > 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。**M3 功能任务（T3-1～T3-14）已全部勾选，R50 起在 M4**（docs/04 §7）。
 
