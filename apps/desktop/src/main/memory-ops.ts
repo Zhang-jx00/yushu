@@ -86,6 +86,7 @@ import {
 import { ProjectGateway } from "./file-gateway.js";
 import { ragSearchIndex } from "./index-ops.js";
 import { buildContextPreview, readAllCards } from "./prompt-ops.js";
+import { assertAiEnabled } from "./ai-ops.js";
 
 /**
  * 五层记忆主进程编排（M3 / T3-5）：
@@ -284,6 +285,9 @@ export async function summarizeMemory(
   gateway: ProjectGateway,
   payload: MemorySummarizePayload,
 ): Promise<MemorySummarizeResult> {
+  // A4 闸门：AI 关闭时不得发起任何 LLM 请求（摘要与抽取同样是联网入口）
+  assertAiEnabled();
+
   const outline = await readOutlineSafe(gateway);
   if (!outline) throw new YushuError("E_OUTLINE", "项目尚无大纲：请先完成三级大纲");
 

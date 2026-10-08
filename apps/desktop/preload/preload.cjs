@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld("yushu", {
   ai: {
     config: () => invoke("ai:config"),
     saveConfig: (payload) => invoke("ai:saveConfig", payload),
+    /** AI 总开关（A4）：翻转主进程侧事实源并回读配置 */
+    setEnabled: (enabled) => invoke("ai:setEnabled", { enabled }),
     setKey: (providerId, apiKey) => invoke("ai:setKey", { providerId, apiKey }),
     /** 加密保存 provider Key（T3-14）：apiKey 单向传给主进程，返回值只含 key_ref 与三态布尔 */
     saveKey: (providerId, apiKey) => invoke("ai:saveKey", { providerId, apiKey }),

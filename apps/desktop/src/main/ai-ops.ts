@@ -83,6 +83,34 @@ export function installKeyCipher(cipher: KeyCipher): void {
   keyCipher = cipher;
 }
 
+/**
+ * AI 总开关（A4「AI 可整体关闭」的**进程侧事实源**，默认关闭）。
+ *
+ * 为什么放在主进程而不是只看渲染层的勾选：此前「关闭 AI」只是 AiView 里一个按钮禁用，
+ * 主进程的 `ai:start` / `memory:summarize` / `extract:preview` 三个**真会发 HTTP** 的入口
+ * 没有任何闸门——渲染层一旦被程序化调用（或将来多一个入口忘了禁用），AI 就在用户以为关掉的情况下偷偷联网。
+ * docs/01 §6 的红线是「默认关闭、逐项开启、使用可审计」，默认关闭要成立就必须落在被调用那一侧。
+ */
+let aiEnabled = false;
+
+export function setAiEnabled(enabled: boolean): void {
+  aiEnabled = enabled === true;
+}
+
+export function aiEnabledFlag(): boolean {
+  return aiEnabled;
+}
+
+/** LLM 入口的统一前置断言：未开启即拒（不发任何请求），错误信息给可操作指引 */
+export function assertAiEnabled(): void {
+  if (!aiEnabled) {
+    throw new YushuError(
+      "E_AI_DISABLED",
+      "AI 调用当前已关闭（默认关闭，逐项开启）：请在「AI 副驾」勾选「启用 AI 调用」后再试；关闭状态下本地功能全部可用",
+    );
+  }
+}
+
 /** 加密后端是否可用（T3-14）：未注入后端或 safeStorage 未就绪都算不可用——UI 据此禁用「加密保存」，绝不降级存明文 */
 export function keyBackendAvailable(): boolean {
   return keyCipher !== null && keyCipher.available;
@@ -253,6 +281,7 @@ export async function readAiConfig(gateway: ProjectGateway): Promise<AiConfigSta
     keyStates,
     // T3-14：加密后端可用性随配置一并下发（渲染层据此禁用「加密保存」并如实提示，不猜）
     keyBackendAvailable: keyBackendAvailable(),
+    aiEnabled: aiEnabledFlag(),
     canGenerate: keyStates.some((state) => state.ready),
     // T3-11（J08/J09）：批量任务半价通道规划（batch_eligible：outline / summarize / extract）
     channels: planChannels(config.providers).map((plan) => ({
@@ -415,6 +444,9 @@ export interface RunGenerateArgs {
  * 生成结果只经事件流返回，绝不直接写正文（采纳是用户的显式动作）。
  */
 export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateArgs): Promise<void> {
+  // A4 闸门（第二道）：`ai:start` 是 fire-and-forget，处理器侧已先拦一次；
+  // 这里再断言一次，防"将来新增调用方绕过处理器"把闸门变成一次性护栏。
+  assertAiEnabled();
   const { streamId, payload, sink, signal } = args;
   const usageId = newUsageId();
   let preview: ContextPreviewPayload | null = null;

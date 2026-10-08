@@ -38,6 +38,7 @@ import { locateChapter, readChapterBody, readOutlineSafe, readWorldTitle } from 
 import { ProjectGateway } from "./file-gateway.js";
 import { writeCardDoc } from "./project-ops.js";
 import { readAllCards } from "./prompt-ops.js";
+import { assertAiEnabled } from "./ai-ops.js";
 
 /**
  * 设定抽取主进程编排（M3 / T3-10，J06）：
@@ -187,6 +188,9 @@ export async function previewSettingExtraction(
   gateway: ProjectGateway,
   payload: ExtractPreviewPayload,
 ): Promise<ExtractPreviewResult> {
+  // A4 闸门：AI 关闭时不得发起任何 LLM 请求（摘要与抽取同样是联网入口）
+  assertAiEnabled();
+
   const run = await runExtraction(gateway, payload.chapterId);
   const counts = { new: 0, augment: 0, conflict: 0 };
   for (const candidate of run.candidates) counts[candidate.diff.kind] += 1;

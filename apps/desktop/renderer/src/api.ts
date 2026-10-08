@@ -124,6 +124,8 @@ export interface YushuApi {
   ai: {
     config: () => Promise<AiConfigState>;
     saveConfig: (payload: AiSaveConfigPayload) => Promise<AiConfigState>;
+    /** AI 总开关（A4）：true 才允许三个 LLM 入口联网；状态由主进程回传 */
+    setEnabled: (enabled: boolean) => Promise<AiConfigState>;
     setKey: (providerId: string, apiKey: string) => Promise<boolean>;
     /** 加密保存 provider Key（T3-14）：密文入 .yushu/secrets.json，真源只写 key_ref；返回值不含密钥本体 */
     saveKey: (providerId: string, apiKey: string) => Promise<AiConfigState>;

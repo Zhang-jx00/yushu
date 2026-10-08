@@ -28,6 +28,8 @@ export const CHANNELS = {
   aiConfig: "ai:config",
   aiSaveConfig: "ai:saveConfig",
   aiSetKey: "ai:setKey",
+  /** AI 总开关（A4）：主进程侧唯一事实源，**默认关闭**；关闭时任何 LLM 入口一律 E_AI_DISABLED */
+  aiSetEnabled: "ai:setEnabled",
   /** 加密保存 provider Key（T3-14）：密文落 .yushu/secrets.json，真源只写 key_ref */
   aiSaveKey: "ai:saveKey",
   /** 清除 provider 凭据（T3-14）：删密文条目并去掉真源 key_ref */
@@ -555,6 +557,8 @@ export interface AiConfigState {
    * false 时 UI 禁用「加密保存」并如实说明原因——宁可禁用也不降级把明文写进文件。
    */
   keyBackendAvailable: boolean;
+  /** **AI 总开关的当前状态**（A4）：由主进程持有、默认 false——「可整体关闭」必须是进程事实而非按钮状态 */
+  aiEnabled: boolean;
   /** 至少一个 provider 可用；false 时生成按钮禁用（离线时本地功能不受影响） */
   canGenerate: boolean;
   /** 批量任务的半价通道规划（T3-11，J08/J09）：batch_eligible 任务 → batch / sync（含原因） */
@@ -575,6 +579,11 @@ export interface AiSaveConfigPayload {
 export interface AiSaveKeyPayload {
   providerId: string;
   apiKey: string;
+}
+
+/** AI 总开关（A4，ai:setEnabled）：true 才允许 LLM 入口发起请求 */
+export interface AiSetEnabledPayload {
+  enabled: boolean;
 }
 
 /** 清除凭据（T3-14，ai:clearKey）：删凭据库密文条目 + 去掉真源的 key_ref */

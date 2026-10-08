@@ -12,6 +12,7 @@ import {
   type AiGeneratePayload,
   type AiSaveConfigPayload,
   type AiSaveKeyPayload,
+  type AiSetEnabledPayload,
   type AiStartResult,
   type AiUsageState,
   type AiCostPanelPayload,
@@ -97,6 +98,7 @@ import {
 import { PathSafetyError, ProjectGateway } from "./file-gateway.js";
 import {
   adoptDraft,
+  assertAiEnabled,
   clearProviderKey,
   listDraftTargets,
   readAiConfig,
@@ -105,6 +107,7 @@ import {
   runAiGenerate,
   saveAiConfig,
   saveProviderKey,
+  setAiEnabled,
   setSessionKey,
 } from "./ai-ops.js";
 import { appendAiFeedback, readAiFeedbackState } from "./ai-feedback.js";
@@ -382,6 +385,14 @@ export function registerIpcHandlers(): void {
     wrap<AiConfigState>(() => saveAiConfig(requireGateway(), payload)),
   );
 
+  // AI 总开关（A4）：翻转后回读配置——状态由主进程持有，渲染层只显示事实、不当事实源
+  ipcMain.handle(CHANNELS.aiSetEnabled, (_event, payload: AiSetEnabledPayload) =>
+    wrap<AiConfigState>(() => {
+      setAiEnabled(payload?.enabled === true);
+      return readAiConfig(requireGateway());
+    }),
+  );
+
   ipcMain.handle(CHANNELS.aiSetKey, (_event, payload: { providerId: string; apiKey: string }) =>
     wrap<boolean>(() => {
       setSessionKey(payload.providerId, payload.apiKey);
@@ -420,6 +431,8 @@ export function registerIpcHandlers(): void {
   // ai:start 立即返回 streamId；增量经 ai:event 单向推送（流式 + AbortController）
   ipcMain.handle(CHANNELS.aiStart, (event, payload: AiGeneratePayload) =>
     wrap<AiStartResult>(() => {
+      // A4：AI 关闭时**不建流、不发请求**（错误直接回渲染层，按钮保持禁用提示语）
+      assertAiEnabled();
       const gatewayRef = requireGateway();
       const streamId = payload.streamId?.trim() ? payload.streamId : `ai-${randomUUID().slice(0, 8)}`;
       const controller = new AbortController();

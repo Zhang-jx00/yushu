@@ -13,6 +13,7 @@ import {
   readAiContext,
   readAiUsageState,
   runAiGenerate,
+  setAiEnabled,
   saveAiConfig,
 } from "../src/main/ai-ops.js";
 import { appendAiUsage, readAiUsage } from "../src/main/ai-usage.js";
@@ -38,9 +39,12 @@ const AXES = {
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "yushu-ai-"));
+  // A4 闸门默认关闭：本文件测的是"已开启之后"的生成链路，必须显式开启（与用户勾选等价）
+  setAiEnabled(true);
 });
 
 afterEach(async () => {
+  setAiEnabled(false);
   await rm(dir, { recursive: true, force: true });
   await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
   servers = [];

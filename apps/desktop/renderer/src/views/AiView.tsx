@@ -203,8 +203,21 @@ function CostCacheAudit({ cache }: { cache: CostCacheAuditPayload }) {
 }
 
 export function AiView() {
-  const [enabled, setEnabled] = useState(false);
   const [config, setConfig] = useState<AiConfigState | null>(null);
+
+  /**
+   * AI 开关（A4）：状态取自主进程的 `config.aiEnabled`，**不在渲染层自持一份**——
+   * 否则 UI 显示"已开启"而主进程仍是关闭（或反之），按钮禁用态就成了唯一闸门。
+   */
+  const enabled = config?.aiEnabled === true;
+  const toggleAi = async (next: boolean): Promise<void> => {
+    try {
+      setError(null);
+      setConfig(await api().ai.setEnabled(next));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
   const [drafts, setDrafts] = useState<AiDraftTarget[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>("");
   const [task, setTask] = useState<"draft-first" | "continue">("draft-first");
@@ -733,7 +746,12 @@ export function AiView() {
             AI 副驾开关 <span className="muted">默认关闭</span>
           </h3>
           <label className="checkbox">
-            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+            <input
+              type="checkbox"
+              className="ai-enable-toggle"
+              checked={enabled}
+              onChange={(event) => void toggleAi(event.target.checked)}
+            />
             <span>启用 AI 调用（关闭时本地功能不受影响；生成属于唯一联网步骤）</span>
           </label>
         </section>
