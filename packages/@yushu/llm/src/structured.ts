@@ -1,6 +1,7 @@
 import { chat } from "./chat.js";
+import { accumulateUsage } from "./cost.js";
 import { extractJson, JSON_CONSTRAINT_SUFFIX } from "./downgrade.js";
-import type { ChatMessage, ChatRequest, LlmCallOptions, LlmProviderSpec } from "./types.js";
+import type { ChatMessage, ChatRequest, ChatUsage, LlmCallOptions, LlmProviderSpec } from "./types.js";
 
 /**
  * 结构化输出（T3-10，J06）：JSON Schema 契约 + 抽取-校验-修复闭环。
@@ -42,6 +43,11 @@ export interface StructuredExtractResult<T = unknown> {
   raw: string;
   provider_id: string;
   model: string;
+  /**
+   * 全部轮次的 usage 累加（T3-12）：修复轮同样计费，只记最后一次会低估抽取成本。
+   * provider 未回传 usage 时缺省——调用方按估算口径兜底并如实标注。
+   */
+  usage?: ChatUsage;
 }
 
 /** 生成 schema 约束提示词（追加到每次请求末尾——契约与修复轮同时生效） */
@@ -76,6 +82,8 @@ export async function extractStructured<T = unknown>(
   let raw = "";
   let provider_id = "";
   let model = "";
+  /** 跨轮次累计的 usage（T3-12：修复轮也是真实请求） */
+  let usage: ChatUsage | undefined;
 
   for (let attempt = 1; attempt <= limit; attempt += 1) {
     const request: ChatRequest = {
@@ -86,6 +94,7 @@ export async function extractStructured<T = unknown>(
     raw = result.text;
     provider_id = result.provider_id;
     model = result.model;
+    usage = accumulateUsage(usage, result.usage);
 
     const parsed = extractJson(raw);
     if (!parsed.ok) {
@@ -93,7 +102,16 @@ export async function extractStructured<T = unknown>(
     } else {
       const validation = options.validate ? options.validate(parsed.value) : { valid: true, issues: [] };
       if (validation.valid) {
-        return { ok: true, value: parsed.value as T, issues: [], attempts: attempt, raw, provider_id, model };
+        return {
+          ok: true,
+          value: parsed.value as T,
+          issues: [],
+          attempts: attempt,
+          raw,
+          provider_id,
+          model,
+          ...(usage ? { usage } : {}),
+        };
       }
       issues = validation.issues.length > 0 ? validation.issues : ["输出未通过校验（原因未明）"];
     }
@@ -102,5 +120,13 @@ export async function extractStructured<T = unknown>(
     }
   }
 
-  return { ok: false, issues, attempts: limit, raw, provider_id, model };
+  return {
+    ok: false,
+    issues,
+    attempts: limit,
+    raw,
+    provider_id,
+    model,
+    ...(usage ? { usage } : {}),
+  };
 }

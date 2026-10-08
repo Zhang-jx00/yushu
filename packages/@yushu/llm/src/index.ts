@@ -5,7 +5,7 @@
  *   gemini_generate）+ models（tier / capabilities / limits）；v1 配置自动迁移（幂等）；
  * - providers 数组顺序即 fallback 优先级（主干 → 本地兜底）；
  * - T3-2：任务路由（config/routing.yaml）+ 可靠性（重试 / 冷却 / 并发，见 routing.ts / reliability.ts）；
- * - 能力矩阵驱动的自动降级见 T3-3。
+ * - 能力矩阵驱动的自动降级见 T3-3；Token 与成本、缓存前缀编排核对见 T3-12（cost.ts / cache.ts）。
  */
 
 export * from "./types.js";
@@ -16,5 +16,7 @@ export * from "./presets.js";
 export * from "./downgrade.js";
 export * from "./structured.js";
 export * from "./batch.js";
+export * from "./cost.js";
+export * from "./cache.js";
 export * from "./chat.js";
 export * from "./stream.js";

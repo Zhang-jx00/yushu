@@ -1,7 +1,7 @@
 {
   "name": "@yushu/llm",
   "version": "0.1.0-alpha.0",
-  "description": "御书 LLM 接入：Provider 描述、OpenAI Chat Completions 兼容主干（chat/stream 两动词）",
+  "description": "御书 LLM 接入：Provider 能力矩阵与协议适配（openai_chat / anthropic_messages / gemini_generate）、任务路由与可靠性、自动降级、结构化输出、半价通道规划、Token 与成本核算",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",

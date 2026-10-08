@@ -21,7 +21,8 @@ import {
  * Gemini generateContent 协议适配器（T3-1）。
  * - POST {base_url}/models/{model}:generateContent（流式 :streamGenerateContent?alt=sse）；
  * - 鉴权 x-goog-api-key；system 消息 → systemInstruction；assistant → role: model；
- * - usage 映射 usageMetadata（promptTokenCount / candidatesTokenCount / totalTokenCount）；
+ * - usage 映射 usageMetadata（promptTokenCount / candidatesTokenCount / totalTokenCount；
+ *   `cachedContentTokenCount` 为 prompt 的子集，T3-12 归一时扣出单列）；
  * - promptFeedback.blockReason 视为安全策略拦截，给出明确错误而非空正文。
  */
 
@@ -61,15 +62,29 @@ function buildBody(provider: LlmProviderSpec, request: ChatRequest): Record<stri
   };
 }
 
+/**
+ * usageMetadata → ChatUsage（T3-12 归一）：`cachedContentTokenCount` 是 `promptTokenCount` 的**子集**
+ * （命中部分已含在输入里），必须扣出后单列，否则缓存部分会被按全价重复计一次。
+ * `totalTokenCount` 保留协议原值。
+ */
 function mapUsage(metadata: unknown): ChatUsage | undefined {
   if (metadata === null || typeof metadata !== "object") return undefined;
   const record = metadata as Record<string, unknown>;
+  const numeric = (key: string): number | undefined => {
+    const value = record[key];
+    return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : undefined;
+  };
   const usage: ChatUsage = {};
-  if (typeof record["promptTokenCount"] === "number") usage.prompt_tokens = record["promptTokenCount"];
-  if (typeof record["candidatesTokenCount"] === "number") {
-    usage.completion_tokens = record["candidatesTokenCount"];
+  const prompt = numeric("promptTokenCount");
+  const cached = numeric("cachedContentTokenCount");
+  if (prompt !== undefined) {
+    usage.prompt_tokens = cached === undefined ? prompt : Math.max(0, prompt - cached);
+    if (cached !== undefined) usage.cached_tokens = Math.min(cached, prompt);
   }
-  if (typeof record["totalTokenCount"] === "number") usage.total_tokens = record["totalTokenCount"];
+  const completion = numeric("candidatesTokenCount");
+  if (completion !== undefined) usage.completion_tokens = completion;
+  const total = numeric("totalTokenCount");
+  if (total !== undefined) usage.total_tokens = total;
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 

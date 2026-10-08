@@ -18,7 +18,10 @@ interface MockHandle {
 }
 
 /** 本地 mock：按序返回 contents（不足时重复最后一条）；记录每次请求体 */
-async function startMock(contents: string[]): Promise<MockHandle> {
+async function startMock(
+  contents: string[],
+  options: { omitUsage?: boolean } = {},
+): Promise<MockHandle> {
   const requests: Record<string, unknown>[] = [];
   let call = 0;
   const server = createServer((req, res) => {
@@ -34,7 +37,9 @@ async function startMock(contents: string[]): Promise<MockHandle> {
         JSON.stringify({
           model: body["model"],
           choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
-          usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+          ...(options.omitUsage
+            ? {}
+            : { usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 } }),
         }),
       );
     });
@@ -62,8 +67,11 @@ function providerAt(baseUrl: string): LlmProviderSpec {
   };
 }
 
-async function mockProvider(contents: string[]): Promise<{ provider: LlmProviderSpec; mock: MockHandle }> {
-  const mock = await startMock(contents);
+async function mockProvider(
+  contents: string[],
+  options: { omitUsage?: boolean } = {},
+): Promise<{ provider: LlmProviderSpec; mock: MockHandle }> {
+  const mock = await startMock(contents, options);
   handles.push(mock);
   return { provider: providerAt(mock.baseUrl), mock };
 }
@@ -136,5 +144,43 @@ describe("结构化抽取闭环（T3-10）", () => {
     expect(result.raw).toContain("仍然不是 JSON");
     expect(mock.requests).toHaveLength(3);
     expect(result.value).toBeUndefined();
+  });
+});
+
+/**
+ * T3-12：修复轮同样是真花钱的请求——usage 必须按全部轮次累加，
+ * 否则抽取成本会被系统性低估（一次抽取最多 1+maxRepair 次请求）。
+ */
+describe("结构化抽取的 usage 聚合（T3-12）", () => {
+  it("多轮修复的 token 逐轮累加（不是只记最后一轮）", async () => {
+    const { provider } = await mockProvider(["这不是 JSON", validJson]);
+    const result = await extractStructured([provider], {
+      messages: [{ role: "user", content: "正文" }],
+      schema,
+    });
+    expect(result.attempts).toBe(2);
+    expect(result.usage).toEqual({ prompt_tokens: 10, completion_tokens: 6, total_tokens: 16 });
+  });
+
+  it("上限用尽仍如实返回累计用量（失败也要记账）", async () => {
+    const { provider } = await mockProvider(["仍然不是 JSON"]);
+    const result = await extractStructured([provider], {
+      messages: [{ role: "user", content: "正文" }],
+      schema,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toBe(3);
+    expect(result.usage).toEqual({ prompt_tokens: 15, completion_tokens: 9, total_tokens: 24 });
+  });
+
+  it("provider 不回传 usage → usage 缺省（不伪造 token）", async () => {
+    const { provider } = await mockProvider([validJson], { omitUsage: true });
+    const result = await extractStructured([provider], {
+      messages: [{ role: "user", content: "正文" }],
+      schema,
+      validate: () => ({ valid: true, issues: [] }),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.usage).toBeUndefined();
   });
 });

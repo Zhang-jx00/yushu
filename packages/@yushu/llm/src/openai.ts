@@ -61,15 +61,32 @@ async function postChatCompletions(
   );
 }
 
+/**
+ * usage → ChatUsage（T3-12 归一）：OpenAI 兼容端点的 `prompt_tokens_details.cached_tokens`
+ * 是 `prompt_tokens` 的**子集**（命中部分已含在输入里），扣出后单列，成本折算才不会重复计价。
+ * 无 details 时不伪造缓存字段；`cached > prompt` 的脏数据保守夹到边界（输入不为负）。
+ * 注意本地端点（Ollama 等）可能不回传 usage——缺省即「无实报」，由成本口径按估算兜底并标注。
+ */
 function mapUsage(raw: unknown): ChatUsage | undefined {
   if (raw === null || typeof raw !== "object") return undefined;
   const record = raw as Record<string, unknown>;
+  const numeric = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : undefined;
   const usage: ChatUsage = {};
-  if (typeof record["prompt_tokens"] === "number") usage.prompt_tokens = record["prompt_tokens"];
-  if (typeof record["completion_tokens"] === "number") {
-    usage.completion_tokens = record["completion_tokens"];
+  const prompt = numeric(record["prompt_tokens"]);
+  const details = record["prompt_tokens_details"];
+  const cached =
+    details !== null && typeof details === "object"
+      ? numeric((details as Record<string, unknown>)["cached_tokens"])
+      : undefined;
+  if (prompt !== undefined) {
+    usage.prompt_tokens = cached === undefined ? prompt : Math.max(0, prompt - cached);
+    if (cached !== undefined) usage.cached_tokens = Math.min(cached, prompt);
   }
-  if (typeof record["total_tokens"] === "number") usage.total_tokens = record["total_tokens"];
+  const completion = numeric(record["completion_tokens"]);
+  if (completion !== undefined) usage.completion_tokens = completion;
+  const total = numeric(record["total_tokens"]);
+  if (total !== undefined) usage.total_tokens = total;
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 

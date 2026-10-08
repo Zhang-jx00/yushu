@@ -11,6 +11,7 @@ import {
   type ModelCacheCapability,
   type ModelCapabilities,
   type ModelLimits,
+  type ModelPricing,
   type ModelTier,
   type ProviderKind,
 } from "./types.js";
@@ -53,6 +54,7 @@ const CAPABILITY_BOOLEAN_KEYS = [
   "batch",
 ] as const;
 const LIMIT_KEYS = ["context", "max_output", "rpm", "tpm"] as const;
+const PRICING_KEYS = ["currency", "input", "output", "cache_read", "cache_write"] as const;
 
 /** 本机地址判定：迁移时用于推断 kind（cloud | local） */
 export function isLocalBaseUrl(url: string): boolean {
@@ -190,6 +192,51 @@ function assertLimits(raw: unknown, label: string): ModelLimits | undefined {
   return Object.keys(limits).length > 0 ? limits : undefined;
 }
 
+/**
+ * 定价解析（T3-12）：input / output 必填正数；cache_read / cache_write 允许 0（免费读）但不得为负；
+ * 未知键一律拒绝——避免拼错的单价字段被静默忽略而算出错误金额（缺省不猜价的前提是键名严格）。
+ */
+function assertPricing(raw: unknown, label: string): ModelPricing | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    fail(`${label} 应为映射（currency / input / output / cache_read / cache_write）`);
+  }
+  const record = raw as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!(PRICING_KEYS as readonly string[]).includes(key)) {
+      fail(`${label}.${key} 未知（pricing 仅支持 ${PRICING_KEYS.join(" / ")}）`);
+    }
+  }
+  const readUnitPrice = (key: "input" | "output"): number => {
+    const value = record[key];
+    // 允许 0：本地端点是零成本路径（J09 实践 8），面板显示 ¥0 而不是「未配置价格」
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      fail(`${label}.${key} 应为非负数字（每 1M tokens 单价；本地端点填 0 表示零成本）`);
+    }
+    return value;
+  };
+  const pricing: ModelPricing = {
+    input: readUnitPrice("input"),
+    output: readUnitPrice("output"),
+  };
+  const currency = record["currency"];
+  if (currency !== undefined) {
+    if (typeof currency !== "string" || currency.trim() === "") {
+      fail(`${label}.currency 应为非空字符串（ISO 币种码，如 CNY / USD）`);
+    }
+    pricing.currency = currency.trim().toUpperCase();
+  }
+  for (const key of ["cache_read", "cache_write"] as const) {
+    const value = record[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      fail(`${label}.${key} 应为非负数字（每 1M tokens 单价）`);
+    }
+    pricing[key] = value;
+  }
+  return pricing;
+}
+
 function assertModel(raw: unknown, providerIndex: number, modelIndex: number): LlmModelSpec {
   const label = `providers[${providerIndex}].models[${modelIndex}]`;
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) fail(`${label} 应为映射`);
@@ -205,11 +252,13 @@ function assertModel(raw: unknown, providerIndex: number, modelIndex: number): L
       ? undefined
       : assertCapabilities(record["capabilities"], `${label}.capabilities`);
   const limits = assertLimits(record["limits"], `${label}.limits`);
+  const pricing = assertPricing(record["pricing"], `${label}.pricing`);
   return {
     name,
     tier: tierRaw as ModelTier,
     ...(capabilities && Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     ...(limits ? { limits } : {}),
+    ...(pricing ? { pricing } : {}),
   };
 }
 
@@ -393,6 +442,7 @@ export interface LlmConfigWarning {
 export function lintLlmConfig(config: LlmConfig): LlmConfigWarning[] {
   const warnings: LlmConfigWarning[] = [];
   for (const provider of config.providers) {
+    const unpriced: string[] = [];
     if (provider.kind === "cloud" && isLocalBaseUrl(provider.base_url)) {
       warnings.push({
         provider_id: provider.id,
@@ -427,6 +477,14 @@ export function lintLlmConfig(config: LlmConfig): LlmConfigWarning[] {
           message: "tier 为 reasoning 但未声明 reasoning 能力：任务路由可能选不中（T3-2）",
         });
       }
+      // T3-12（J09）：缺省不猜价。按 provider 聚合成一条，避免逐模型刷屏「标注」区
+      if (model.pricing === undefined) unpriced.push(model.name);
+    }
+    if (unpriced.length > 0) {
+      warnings.push({
+        provider_id: provider.id,
+        message: `未配置价格（pricing）的模型：${unpriced.join("、")}——成本面板只报 token 不折算金额（按官方价格页补 input / output 单价）`,
+      });
     }
   }
   return warnings;

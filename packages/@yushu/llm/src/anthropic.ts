@@ -65,16 +65,55 @@ function buildBody(
   };
 }
 
-function mapUsage(
-  inputTokens: unknown,
-  outputTokens: unknown,
-): ChatUsage | undefined {
-  const usage: ChatUsage = {};
-  if (typeof inputTokens === "number") usage.prompt_tokens = inputTokens;
-  if (typeof outputTokens === "number") usage.completion_tokens = outputTokens;
-  if (usage.prompt_tokens !== undefined && usage.completion_tokens !== undefined) {
-    usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+/**
+ * 流式 usage 合并（T3-12）：`message_start` 给输入与缓存读写，`message_delta` 给输出。
+ * 部分网关会把整张 usage 回填、未变化的输入侧带 0——直接 Object.assign 会用 0 抹掉已知真值，
+ * 因此输入类字段只在「尚未取得」时写入，输出字段以最后一条为准；非有限数一律不采。
+ */
+function mergeStreamUsage(
+  target: Record<string, unknown>,
+  incoming: Record<string, unknown> | undefined,
+): void {
+  if (!incoming) return;
+  const overwriteKeys = ["output_tokens"] as const;
+  const keepFirstKeys = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"] as const;
+  for (const key of overwriteKeys) {
+    const value = incoming[key];
+    if (typeof value === "number" && Number.isFinite(value)) target[key] = value;
   }
+  for (const key of keepFirstKeys) {
+    const value = incoming[key];
+    if (target[key] !== undefined) continue;
+    if (typeof value === "number" && Number.isFinite(value)) target[key] = value;
+  }
+}
+
+/**
+ * usage 归一（T3-12）：Anthropic 的 `input_tokens` 与 `cache_read_input_tokens` /
+ * `cache_creation_input_tokens` **互斥**（缓存部分本就单列），因此直接映射即可；
+ * total 取四段之和。缺字段不伪造。
+ */
+function mapUsage(record: Record<string, unknown>): ChatUsage | undefined {
+  const numeric = (key: string): number | undefined => {
+    const value = record[key];
+    return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : undefined;
+  };
+  const usage: ChatUsage = {};
+  const input = numeric("input_tokens");
+  const cached = numeric("cache_read_input_tokens");
+  const cacheWrite = numeric("cache_creation_input_tokens");
+  const output = numeric("output_tokens");
+  if (input !== undefined) usage.prompt_tokens = input;
+  if (cached !== undefined) usage.cached_tokens = cached;
+  if (cacheWrite !== undefined) usage.cache_write_tokens = cacheWrite;
+  if (output !== undefined) usage.completion_tokens = output;
+  const parts = [
+    usage.prompt_tokens,
+    usage.cached_tokens,
+    usage.cache_write_tokens,
+    usage.completion_tokens,
+  ].filter((value): value is number => value !== undefined);
+  if (parts.length > 0) usage.total_tokens = parts.reduce((sum, value) => sum + value, 0);
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
@@ -114,7 +153,7 @@ export async function callAnthropicMessages(
     .map((block) => (typeof block["text"] === "string" ? block["text"] : ""))
     .join("");
   const usageRaw = (record["usage"] ?? {}) as Record<string, unknown>;
-  const usage = mapUsage(usageRaw["input_tokens"], usageRaw["output_tokens"]);
+  const usage = mapUsage(usageRaw);
   return {
     text,
     provider_id: provider.id,
@@ -147,8 +186,8 @@ export async function callAnthropicMessagesStream(
 
   let text = "";
   let index = 0;
-  let promptTokens: number | undefined;
-  let completionTokens: number | undefined;
+  /** 跨事件累积的 usage 字段（message_start 给输入与缓存，message_delta 给输出，T3-12） */
+  const usageFields: Record<string, unknown> = {};
   let finishReason: string | undefined;
   try {
     await readSseStream(response, (data) => {
@@ -162,8 +201,8 @@ export async function callAnthropicMessagesStream(
       const type = record["type"];
       if (type === "message_start") {
         const message = record["message"] as Record<string, unknown> | undefined;
-        const usage = (message?.["usage"] ?? {}) as Record<string, unknown>;
-        if (typeof usage["input_tokens"] === "number") promptTokens = usage["input_tokens"];
+        const usage = message?.["usage"] as Record<string, unknown> | undefined;
+        mergeStreamUsage(usageFields, usage);
         return;
       }
       if (type === "content_block_delta") {
@@ -183,7 +222,7 @@ export async function callAnthropicMessagesStream(
         const delta = record["delta"] as Record<string, unknown> | undefined;
         if (typeof delta?.["stop_reason"] === "string") finishReason = delta["stop_reason"] as string;
         const usage = record["usage"] as Record<string, unknown> | undefined;
-        if (typeof usage?.["output_tokens"] === "number") completionTokens = usage["output_tokens"];
+        mergeStreamUsage(usageFields, usage);
         return;
       }
       if (type === "error") {
@@ -203,7 +242,7 @@ export async function callAnthropicMessagesStream(
     });
   }
 
-  const usage = mapUsage(promptTokens, completionTokens);
+  const usage = mapUsage(usageFields);
   return {
     text,
     provider_id: provider.id,

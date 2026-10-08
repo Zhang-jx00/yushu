@@ -67,12 +67,28 @@ export interface ModelLimits {
   tpm?: number;
 }
 
+/**
+ * 模型定价（T3-12，J09 §5）：**单价按每 1M tokens 计**（对齐各官方价格页的 per_mtok 口径）。
+ * - 缺省即「未配置价格」——成本一律返回 null，UI 如实标注，**绝不按市场价猜**；
+ * - `cache_read` / `cache_write` 缺省时与 `input` 同价（即声明了价格但未声明缓存折扣 → 不打折）；
+ * - `currency` 缺省 CNY；多币种记录禁止强行合计（见 summarizeCosts）。
+ */
+export interface ModelPricing {
+  currency?: string;
+  input: number;
+  output: number;
+  cache_read?: number;
+  cache_write?: number;
+}
+
 export interface LlmModelSpec {
   name: string;
   tier: ModelTier;
   /** 部分声明；读取时经 resolveCapabilities 合并保守默认 */
   capabilities?: Partial<ModelCapabilities>;
   limits?: ModelLimits;
+  /** 成本面板的计价来源（T3-12）；未配置 = 不核算金额 */
+  pricing?: ModelPricing;
 }
 
 /** Provider 描述（config/llm.yaml；providers 顺序即 fallback 优先级） */
@@ -118,10 +134,25 @@ export interface ChatRequest {
   signal?: AbortSignal;
 }
 
+/**
+ * 用量回报（计费核对的唯一实报来源，T3-12）。
+ *
+ * **跨协议归一口径**（各协议的缓存语义不一致，适配器负责收敛，见 openai/anthropic/gemini.ts）：
+ * - `prompt_tokens` = **未命中缓存的常规输入**（OpenAI / Gemini 的命中数是 prompt 的子集，已扣出；
+ *   Anthropic 的 input_tokens 本就与缓存读写互斥）；
+ * - `cached_tokens` / `cache_write_tokens` 单列，三者互不重叠；
+ * - `total_tokens` = 上述四项之和（协议给了原值时以原值为准）。
+ * 归一的目的：成本折算 `prompt×input + cached×cache_read + cache_write×cache_write价 + completion×output`
+ * 不重复计价——这是 A3「预估 vs 实付偏差可核对」的前提。
+ */
 export interface ChatUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  /** 命中 prompt caching 的输入 token（单列，不含在 prompt_tokens 内） */
+  cached_tokens?: number;
+  /** 写入缓存的输入 token（Anthropic cache_creation；无此概念的协议不填） */
+  cache_write_tokens?: number;
 }
 
 export interface LlmFallbackInfo {
