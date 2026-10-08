@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { findMentions, type EntityIndexEntry } from "../renderer/src/entity-mentions";
-import { detectMentionQuery, filterMentionCandidates } from "../renderer/src/mention-suggest";
+import { detectMentionQuery, filterMentionCandidates, nextMentionActive } from "../renderer/src/mention-suggest";
 
 const linyuan: EntityIndexEntry = {
   id: "char-linyuan",
@@ -98,5 +98,27 @@ describe("富文本 @ 候选过滤（T2-2 富文本尾巴）", () => {
     const matches = findMentions(text, entities);
     expect(matches).toHaveLength(1);
     expect(matches[0]!.entity.id).toBe("char-linyuan");
+  });
+});
+
+/**
+ * 菜单高亮的继承规则（R40 修正）：预演 step21 抓到「重新敲 @ 时菜单直接预选第 3 项」——
+ * 原实现不分「同一次 @ 会话内过滤」与「新会话」，一律继承 prev.active，
+ * 用户敲回车就会插错卡。这里把规则钉死。
+ */
+describe("nextMentionActive（@ 菜单高亮继承）", () => {
+  it("同一次 @ 会话内继续输入 → 保留上次高亮，列表变短时夹到最后一项", () => {
+    expect(nextMentionActive({ from: 12, active: 2 }, 12, 5)).toBe(2);
+    expect(nextMentionActive({ from: 12, active: 4 }, 12, 3)).toBe(2);
+  });
+
+  it("新的 @ 会话（起点不同）或无前置状态 → 从第一项开始", () => {
+    expect(nextMentionActive({ from: 12, active: 2 }, 30, 5)).toBe(0);
+    expect(nextMentionActive(null, 30, 5)).toBe(0);
+  });
+
+  it("无候选 / 脏下标 → 0（不返回越界位置）", () => {
+    expect(nextMentionActive({ from: 12, active: 3 }, 12, 0)).toBe(0);
+    expect(nextMentionActive({ from: 12, active: -5 }, 12, 5)).toBe(0);
   });
 });

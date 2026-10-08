@@ -11,7 +11,7 @@ import { findUnsupportedSyntax, htmlToMd, mdToHtml } from "../markdown-bridge";
 import { merge3 } from "../chapter-merge";
 import { collectMentionedEntities, type EntityIndexEntry, LARGE_DOC_MENTION_CHARS } from "../entity-mentions";
 import { createMentionThrottle, type MentionThrottle } from "../mention-throttle";
-import { detectMentionQuery, filterMentionCandidates } from "../mention-suggest";
+import { detectMentionQuery, filterMentionCandidates, nextMentionActive } from "../mention-suggest";
 import { entityMentionPlugin } from "../entity-mention-plugin";
 import { createAutosaveScheduler, type AutosaveScheduler, type AutosaveState } from "../autosave";
 import { registerEditorFlusher } from "../editor-flush";
@@ -501,7 +501,11 @@ export function ChapterEditorView({
         from: atDoc,
         query: trigger.query,
         items,
-        active: items.length === 0 ? 0 : Math.min(prev?.active ?? 0, items.length - 1),
+        active: nextMentionActive(
+          prev ? { from: prev.from, active: prev.active } : null,
+          atDoc,
+          items.length,
+        ),
         top,
         left,
         above,

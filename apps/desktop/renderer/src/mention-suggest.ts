@@ -55,6 +55,30 @@ function scoreOf(entity: EntityIndexEntry, query: string): number {
   return best;
 }
 
+/** 上一次 @ 菜单会话的高亮事实（调用方从组件状态投影） */
+export interface MentionActivePrev {
+  /** 该次 @ 的起点（文档位置）——用于判定是否同一次会话 */
+  from: number;
+  /** 上次的高亮下标 */
+  active: number;
+}
+
+/**
+ * 菜单高亮的继承规则（R40 修正预演 step21 抓到的缺陷）：
+ * 只有「同一次 @ 会话内继续输入」（@ 起点不变）才保留上次高亮——边打字边过滤时不该跳回首项；
+ * **新的 @ 会话或无前置状态一律从第 1 项开始**。原实现无条件继承 `prev.active`，
+ * 于是上一回留下的第 N 项会变成新菜单的默认选中项，用户直接回车就插错卡。
+ */
+export function nextMentionActive(
+  prev: MentionActivePrev | null,
+  atDoc: number,
+  itemCount: number,
+): number {
+  if (itemCount <= 0) return 0;
+  if (prev === null || prev.from !== atDoc) return 0;
+  return Math.min(Math.max(0, prev.active), itemCount - 1);
+}
+
 /** 过滤候选：分高者先（前缀 > 包含），同分短名先（更贴近"打一半就想要"的直觉），再按中文排序稳定输出 */
 export function filterMentionCandidates(
   entities: EntityIndexEntry[],
