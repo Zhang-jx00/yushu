@@ -77,6 +77,11 @@ contextBridge.exposeInMainWorld("yushu", {
       return () => ipcRenderer.removeListener("ai:event", listener);
     },
   },
+  /** 中文自查（T3-13，J14）：只读检测 + 只回改后正文（写盘仍走 chapter:write） */
+  text: {
+    proofread: (payload) => invoke("text:proofread", payload),
+    fixBody: (payload) => invoke("text:fixBody", payload),
+  },
   export: {
     preview: () => invoke("export:preview"),
     run: (payload) => invoke("export:run", payload),

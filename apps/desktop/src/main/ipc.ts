@@ -16,6 +16,10 @@ import {
   type AiUsageState,
   type AiCostPanelPayload,
   type AiCostPayload,
+  type TextFixBodyPayload,
+  type TextFixBodyResultPayload,
+  type TextProofreadPanelPayload,
+  type TextProofreadPayload,
   type AiRejectPayload,
   type AiFeedbackState,
   type AppFlushDonePayload,
@@ -107,6 +111,7 @@ import { appendAiFeedback, readAiFeedbackState } from "./ai-feedback.js";
 import { createSafeStorageCipher } from "./secrets-ops.js";
 import { installKeyCipher } from "./ai-ops.js";
 import { readCostPanel } from "./cost-ops.js";
+import { buildFixedBody, readProofreadPanel } from "./text-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
 import { IndexRefreshScheduler } from "./index-scheduler.js";
@@ -450,6 +455,15 @@ export function registerIpcHandlers(): void {
   // 稳定前缀与缓存断点编排核对（只读——派生日志与配置，不改真源）
   ipcMain.handle(CHANNELS.aiCost, (_event, payload?: AiCostPayload) =>
     wrap<AiCostPanelPayload>(() => readCostPanel(requireGateway(), payload ?? {})),
+  );
+
+  // 中文自查（T3-13，J14）：两个通道都是**只读**——检测不改稿，"采纳"也只回改后正文，
+  // 落盘仍由编辑器既有的 chapter:write（baseHash 冲突检测 + 编辑日志 + 字数增量 + 索引刷新）负责。
+  ipcMain.handle(CHANNELS.textProofread, (_event, payload: TextProofreadPayload) =>
+    wrap<TextProofreadPanelPayload>(() => readProofreadPanel(requireGateway(), payload)),
+  );
+  ipcMain.handle(CHANNELS.textFixBody, (_event, payload: TextFixBodyPayload) =>
+    wrap<TextFixBodyResultPayload>(() => buildFixedBody(requireGateway(), payload)),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

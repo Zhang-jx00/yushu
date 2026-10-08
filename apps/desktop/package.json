@@ -25,6 +25,7 @@
     "@yushu/llm": "workspace:*",
     "@yushu/memory": "workspace:*",
     "@yushu/search": "workspace:*",
+    "@yushu/text": "workspace:*",
     "@yushu/world-engine": "workspace:*",
     "isomorphic-git": "^1.43.0"
   },

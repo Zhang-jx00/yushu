@@ -43,6 +43,10 @@ export const CHANNELS = {
   aiUsage: "ai:usage",
   /** Token 与成本面板（T3-12，J09）：双口径聚合 + 稳定前缀编排核对（只读） */
   aiCost: "ai:cost",
+  /** 中文自查（T3-13，J14）：只读检测（不改稿） */
+  textProofread: "text:proofread",
+  /** 中文自查（T3-13）：按用户已确认的条目返回**改后正文**（写盘仍走编辑器既有保存路径） */
+  textFixBody: "text:fixBody",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -803,6 +807,80 @@ export interface AiCostPanelPayload {
   cache: CostCacheAuditPayload | null;
   /** 口径说明（面板如实展示，避免把估算当账单） */
   notes: string[];
+}
+
+/* ---------- 中文自查（T3-13，J14；结构与 @yushu/text 同形——本文件保持零依赖，故用结构类型镜像） ---------- */
+
+/** J14 三级严重度（注意是 `warn` 而非 `warning`） */
+export type ProofreadSeverityPayload = "error" | "warn" | "info";
+
+/** T3-13 初版规则 id（`proofread-address-drift` 需联动 E07，留 M4） */
+export type ProofreadRuleIdPayload =
+  | "proofread-typo"
+  | "proofread-conversion-ambiguous"
+  | "proofread-punctuation-gb"
+  | "proofread-repetition-high"
+  | "proofread-demiscue"
+  | "proofread-long-sentence"
+  | "proofread-autofix-unconfirmed";
+
+/** 单条检测结果（span 为章内正文字符下标，**UTF-16 口径**，与导出敏感词命中同轴） */
+export interface ProofreadFindingPayload {
+  rule: ProofreadRuleIdPayload;
+  severity: ProofreadSeverityPayload;
+  span: { chapter?: string; start: number; end: number; text: string };
+  suggestion?: string;
+  /** 该条目登记的候选文本（如繁简歧义）；作者只能从中选一个，任意文本会被主进程拒绝 */
+  candidates?: string[];
+  /** 为什么命中（面板原样展示，不做黑箱结论） */
+  evidence: string;
+  /** 可否自动修：false 的规则必须由作者显式选定候选 */
+  autofix: boolean;
+  source: { engine: string; conf?: number };
+}
+
+export interface TextProofreadPayload {
+  /** 章节文件相对路径（chapters/…／.md） */
+  path: string;
+}
+
+export interface TextProofreadPanelPayload {
+  path: string;
+  chapterId: string;
+  /** 被检正文长度（与 span 同口径） */
+  chars: number;
+  findings: ProofreadFindingPayload[];
+  counts: Record<ProofreadSeverityPayload, number>;
+  checkedRules: ProofreadRuleIdPayload[];
+  /** 被关掉的规则如实回传——面板不得把"没跑"显示成"没问题" */
+  skippedRules: ProofreadRuleIdPayload[];
+}
+
+/** 一条采纳请求：按「起始下标 + 规则」在主进程重新匹配检测条目（渲染层无权指定改法之外的字段） */
+export interface TextFixEditPayload {
+  start: number;
+  rule: ProofreadRuleIdPayload;
+  /** 作者显式选定的候选文本（繁简歧义等 `autofix:false` 的条目必须给） */
+  replacement?: string;
+}
+
+export interface TextFixBodyPayload {
+  path: string;
+  edits: TextFixEditPayload[];
+  /** **用户是否已确认**——false 时主进程原样返回正文，一个字符都不改（J14 安全底线） */
+  confirmed: boolean;
+}
+
+export interface TextFixBodyResultPayload {
+  path: string;
+  /** 改后正文（**未写盘**：写仍由编辑器的保存路径负责，保持单一写入口与冲突检测） */
+  body: string;
+  /** 改前正文：渲染层据此判断"期间作者又改过稿"→ 放弃替换而不是覆盖 */
+  beforeBody: string;
+  applied: Array<{ start: number; from: string; to: string }>;
+  rejected: Array<{ start: number; reason: string }>;
+  /** 被闸门拦下的条数（未确认的批量请求） */
+  blocked: number;
 }
 
 /* ---------- 导出与敏感词自查（S6；T1-18/19/20；结构与 @yushu/export 兼容） ---------- */

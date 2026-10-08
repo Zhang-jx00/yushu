@@ -18,6 +18,7 @@ import { registerEditorFlusher } from "../editor-flush";
 import { createRecoveryJournalScheduler, type RecoveryJournalScheduler } from "../recovery-journal";
 import { createActivityPing, type ActivityPing } from "../activity-ping";
 import { takePendingRecovery } from "../recovery-inbox";
+import { ProofreadPanel } from "./ProofreadPanel";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 
 /**
@@ -772,6 +773,9 @@ export function ChapterEditorView({
     }
     editor.commands.setContent(mdToHtml(mdText));
     setMode("rich");
+    // 复核修复（第 45 轮）：切到富文本同样要关闭 @ 候选菜单——菜单会话属于某一个文档实例，
+    // 只清「切回源码」那一侧会让源码形态遗留的高亮被富文本形态在相同偏移上继承（预演 step21 复现）
+    applyMenu(null);
     setStatus("已切换到富文本形态（保存仍写回 Markdown 真源）");
   };
 
@@ -1115,6 +1119,17 @@ export function ChapterEditorView({
             </button>
           ))}
         </div>
+        {/* 中文自查（T3-13，J14）：只读检测；采纳只替换编辑器内容，落盘仍走既有自动保存路径 */}
+        <ProofreadPanel
+          path={selectedPath}
+          dirty={dirty}
+          onReplace={(next) => {
+            const view = viewRef.current;
+            if (view) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } });
+            if (editor && !editor.isDestroyed) editor.commands.setContent(mdToHtml(next));
+            updateDerived(next);
+          }}
+        />
         <div className="editor-foot">
           <button
             type="button"

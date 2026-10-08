@@ -8,6 +8,10 @@ import type {
   AiGeneratePayload,
   AiSaveConfigPayload,
   AiCostPanelPayload,
+  TextFixBodyPayload,
+  TextFixBodyResultPayload,
+  TextProofreadPanelPayload,
+  TextProofreadPayload,
   AiCostPayload,
   AiStartResult,
   AiStreamEvent,
@@ -139,6 +143,11 @@ export interface YushuApi {
     feedback: () => Promise<AiFeedbackState>;
     /** 订阅流式事件（ai:event 单向推送）；返回取消订阅函数 */
     onEvent: (handler: (event: AiStreamEvent) => void) => () => void;
+  };
+  /** 中文自查（T3-13，J14）：两个方法都只读——fixBody 只回改后正文，不写盘 */
+  text: {
+    proofread: (payload: TextProofreadPayload) => Promise<TextProofreadPanelPayload>;
+    fixBody: (payload: TextFixBodyPayload) => Promise<TextFixBodyResultPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;
