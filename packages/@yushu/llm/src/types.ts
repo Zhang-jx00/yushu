@@ -106,6 +106,11 @@ export interface LlmProviderSpec {
    * safeStorage 加密引用（key_ref）见 T3-14。
    */
   api_key_env?: string;
+  /**
+   * 凭据库引用（T3-14，K12）：指向 `.yushu/secrets.json` 里的一条密文条目（key_ref 命名空间）。
+   * 真源里**不得**出现密钥字面值——`api_key` 一类字段会被 `key-plaintext-detected` 判 error 阻断。
+   */
+  key_ref?: string;
   temperature?: number;
   max_tokens?: number;
 }
@@ -180,8 +185,10 @@ export interface StreamCallbacks {
 }
 
 export interface LlmCallOptions {
-  /** provider.id → 会话内存 key（优先级高于环境变量；不落盘） */
+  /** provider.id → 会话内存 key（优先级最高；不落盘、不回传渲染层） */
   sessionKeys?: Record<string, string | undefined>;
+  /** key_ref → 已解密的凭据（T3-14：主进程 safeStorage 解密后注入，本包不接触密文与磁盘） */
+  storedKeys?: Record<string, string | undefined>;
   /** 环境变量来源（默认 process.env；测试可注入） */
   env?: Record<string, string | undefined>;
   /** fetch 实现（默认全局 fetch；测试注入或本地 mock） */

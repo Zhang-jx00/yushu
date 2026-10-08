@@ -9,6 +9,7 @@
  */
 
 export * from "./types.js";
+export * from "./secrets.js";
 export * from "./config.js";
 export * from "./routing.js";
 export * from "./reliability.js";

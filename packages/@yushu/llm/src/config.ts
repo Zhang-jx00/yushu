@@ -1,5 +1,6 @@
 import { YushuError } from "@yushu/core";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { detectPlaintextSecrets } from "./secrets.js";
 import {
   LLM_API_VERSION,
   LLM_FORMAT_VERSION,
@@ -288,6 +289,7 @@ function assertProviderV2(raw: unknown, index: number): LlmProviderSpec {
   const names = new Set(models.map((model) => model.name));
   if (names.size !== models.length) fail(`${label}.models[].name 重复`);
   const apiKeyEnv = readOptionalString(record, "api_key_env", `${label}.api_key_env`);
+  const keyRef = readOptionalString(record, "key_ref", `${label}.key_ref`);
   const temperature = readOptionalNumber(record, "temperature", `${label}.temperature`);
   const maxTokens = readOptionalNumber(record, "max_tokens", `${label}.max_tokens`);
   return {
@@ -297,6 +299,7 @@ function assertProviderV2(raw: unknown, index: number): LlmProviderSpec {
     base_url: baseUrl.replace(/\/+$/, ""),
     models,
     ...(apiKeyEnv && apiKeyEnv !== "" ? { api_key_env: apiKeyEnv } : {}),
+    ...(keyRef && keyRef !== "" ? { key_ref: keyRef } : {}),
     ...(temperature !== undefined ? { temperature } : {}),
     ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
   };
@@ -407,6 +410,18 @@ export function parseLlmConfig(text: string): LlmConfig {
   if (data === null || typeof data !== "object" || Array.isArray(data)) {
     throw new LlmError("E_LLM_CONFIG", "config/llm.yaml 内容非法（应为 YAML 映射）");
   }
+  // T3-14（K12 `key-plaintext-detected`，error 级红线）：真源里出现明文密钥直接阻断，
+  // 且错误信息只带去标识化证据——日志与 UI 都不可能因此泄漏密钥本体
+  const secrets = detectPlaintextSecrets(text);
+  if (secrets.length > 0) {
+    const detail = secrets
+      .map((item) => `${item.provider_id ? `provider「${item.provider_id}」` : ""}字段 ${item.field}=${item.evidence}`)
+      .join("；");
+    throw new LlmError(
+      "E_LLM_CONFIG",
+      `config/llm.yaml 疑似含明文密钥（key-plaintext-detected）：${detail}。请删除字面值，改用 api_key_env（环境变量名）或 key_ref（凭据库引用——主进程 safeStorage 加密存 .yushu/secrets.json）`,
+    );
+  }
   let record = data as Record<string, unknown>;
   if (record["apiVersion"] !== LLM_API_VERSION) {
     throw new LlmError(
@@ -490,13 +505,25 @@ export function lintLlmConfig(config: LlmConfig): LlmConfigWarning[] {
   return warnings;
 }
 
-/** 解析某 provider 的可用 key：会话内存 > 环境变量；均无则 undefined */
+/**
+ * 解析某 provider 的可用 key（T3-14 取值顺序）：
+ * 本次会话内存 key > 凭据库解密值（按 `key_ref` 查，未声明 key_ref 即不查） > 环境变量；
+ * 全都没有则 undefined（本地端点常见 = 无鉴权）。空串 / 纯空白不算有效值。
+ */
 export function resolveApiKey(
   provider: LlmProviderSpec,
-  options: { sessionKeys?: Record<string, string | undefined>; env?: Record<string, string | undefined> },
+  options: {
+    sessionKeys?: Record<string, string | undefined>;
+    storedKeys?: Record<string, string | undefined>;
+    env?: Record<string, string | undefined>;
+  },
 ): string | undefined {
   const sessionKey = options.sessionKeys?.[provider.id];
   if (sessionKey && sessionKey.trim() !== "") return sessionKey.trim();
+  if (provider.key_ref) {
+    const stored = options.storedKeys?.[provider.key_ref];
+    if (stored && stored.trim() !== "") return stored.trim();
+  }
   if (provider.api_key_env) {
     const env = options.env ?? (globalThis.process?.env as Record<string, string | undefined> | undefined);
     const value = env?.[provider.api_key_env];
