@@ -121,6 +121,10 @@ export interface YushuApi {
     config: () => Promise<AiConfigState>;
     saveConfig: (payload: AiSaveConfigPayload) => Promise<AiConfigState>;
     setKey: (providerId: string, apiKey: string) => Promise<boolean>;
+    /** 加密保存 provider Key（T3-14）：密文入 .yushu/secrets.json，真源只写 key_ref；返回值不含密钥本体 */
+    saveKey: (providerId: string, apiKey: string) => Promise<AiConfigState>;
+    /** 清除凭据（T3-14）：删密文条目 + 去掉真源 key_ref */
+    clearKey: (providerId: string) => Promise<AiConfigState>;
     drafts: () => Promise<AiDraftTarget[]>;
     context: (payload?: { volumeId?: string; chapterId?: string }) => Promise<ContextPreviewPayload>;
     start: (payload: AiGeneratePayload) => Promise<AiStartResult>;

@@ -4,6 +4,7 @@ import type {
   AiConfigState,
   AiDraftTarget,
   AiModelPayload,
+  AiProviderKeyState,
   AiProviderPayload,
   AiRoutingState,
   AiStreamEvent,
@@ -21,6 +22,8 @@ import { REJECT_REASON_PRESETS, type AiFeedbackState } from "../../../src/shared
 /**
  * AI 副驾（S4/S5；T1-15 ~ T1-17；M3/T3-11 写作 UX）：
  * - AI 调用默认关闭（本地功能不受影响）；开启后展示 provider / key 就绪态；
+ * - **Provider 密钥（T3-14，K12）**：三态展示（已加密保存 / 仅本次会话 / 环境变量 / 无需鉴权 / 未配置）+
+ *   加密保存与清除凭据；加密后端不可用时禁用保存（宁可禁用也不降级存明文）；
  * - 上下文预览器：槽位 / 来源 / 字符数 / 稳定前缀断点（真实发给模型的内容可审计）；
  * - 流式生成 + 停止（AbortController）；**chunk 缓冲 + rAF 打字机**（匀速 / 瞬时两档）渲染候选；
  * - **多候选对比（J15）**：N 个候选独立生成（「不得互相参照」标记）→ 句级 diff 对照草稿 →
@@ -86,6 +89,24 @@ function routingSummary(routing: AiRoutingState): string {
 function costReceiptLine(totals: CostRowPayload): string {
   return `成本面板：合计 ${totals.costText}｜输入 ${totals.promptTokens} tok｜偏差 ${totals.deviationText}`;
 }
+
+/**
+ * 密钥三态措辞（T3-14）：按取值优先级取一条显示——
+ * 凭据库密文 > 会话内存 > 环境变量；三者皆无且该 provider 本就无需鉴权则显示「无需鉴权」。
+ * 判定依据全部来自 keyStates（主进程下发），渲染层不猜。
+ */
+function keyStateText(state: AiProviderKeyState | undefined): string {
+  if (!state) return "未配置";
+  if (state.has_stored_key) return "已加密保存";
+  if (state.has_session_key) return "仅本次会话";
+  if (state.has_env_key) return `环境变量 ${state.api_key_env ?? ""}`.trim();
+  if (!state.api_key_env && !state.key_ref) return "无需鉴权";
+  return "未配置";
+}
+
+/** 后端不可用时的说明（宁可禁用也不降级存明文）：文案含 safeStorage 与「不会写明文」 */
+const KEY_BACKEND_UNAVAILABLE_NOTE =
+  "加密后端不可用：本机 safeStorage 未就绪，无法加密保存，也不会写明文到磁盘。请改用「会话 Key」或 api_key_env 环境变量";
 
 /** 成本分解表（按任务 / 按模型同构，共用一份列定义——避免两处口径漂移） */
 function CostBreakdownTable({ rows, keyLabel }: { rows: CostRowPayload[]; keyLabel: string }) {
@@ -222,6 +243,8 @@ export function AiView() {
   const [presetId, setPresetId] = useState("ollama");
   const [sessionKey, setSessionKey] = useState("");
   const [keyProvider, setKeyProvider] = useState("");
+  /** 待加密保存的 Key 草稿（provider.id → 输入值；只在内存，成功即清空，绝不回传主进程以外处） */
+  const [keyDraft, setKeyDraft] = useState<Record<string, string>>({});
 
   const selected = drafts.find((draft) => `${draft.volumeId}:${draft.chapterId}` === selectedKey) ?? null;
   const providers = providersDraft ?? config?.config.providers ?? [];
@@ -668,6 +691,40 @@ export function AiView() {
     }
   };
 
+  /** 加密保存 provider Key（T3-14）：密文进凭据库，真源只多一个 key_ref；返回值不含密钥本体 */
+  const saveStoredKey = async (providerId: string) => {
+    const value = (keyDraft[providerId] ?? "").trim();
+    if (value === "") {
+      setError("API Key 为空：加密保存需要非空密钥；如需移除请点「清除凭据」");
+      return;
+    }
+    try {
+      setError(null);
+      const state = await api().ai.saveKey(providerId, value);
+      setConfig(state);
+      setProvidersDraft(state.config.providers);
+      setKeyDraft((prev) => ({ ...prev, [providerId]: "" }));
+      setNotice(
+        `密钥已加密保存（safeStorage 密文 → .yushu/secrets.json，不入 Git/索引/快照）；config/llm.yaml 只记录 key_ref「${providerId}」，真源不含密钥字面值`,
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  /** 清除凭据（T3-14）：删密文条目并去掉真源 key_ref（会话内存 Key 不动） */
+  const clearStoredKey = async (providerId: string) => {
+    try {
+      setError(null);
+      const state = await api().ai.clearKey(providerId);
+      setConfig(state);
+      setProvidersDraft(state.config.providers);
+      setNotice(`已清除凭据：provider「${providerId}」的密文条目与 config/llm.yaml 的 key_ref 均已移除`);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   return (
     <div className="ai">
       <aside>
@@ -696,6 +753,9 @@ export function AiView() {
                   <span className="badge">{provider.protocol}</span>
                   <span className={keyState?.ready ? "badge good" : "badge bad"}>
                     {keyState?.ready ? "可用" : "缺少 Key"}
+                  </span>
+                  <span className={keyState?.has_stored_key ? "badge good" : "badge"}>
+                    密钥：{keyStateText(keyState)}
                   </span>
                   {providers.length > 1 && (
                     <button type="button" className="link" onClick={() => removeProvider(index)}>
@@ -741,9 +801,51 @@ export function AiView() {
                     />
                   </label>
                 </div>
+                {/* T3-14：密钥加密保存（密文进凭据库，真源只落 key_ref）；后端不可用时禁用而非降级存明文 */}
+                <div className="config-form">
+                  <div className="master-grid">
+                    <label className="field grow">
+                      <span>API Key（加密保存：本机 safeStorage 密文，真源只记 key_ref）</span>
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        className="ai-key-input"
+                        value={keyDraft[provider.id] ?? ""}
+                        placeholder="sk-..."
+                        disabled={config ? !config.keyBackendAvailable : true}
+                        onChange={(event) =>
+                          setKeyDraft((prev) => ({ ...prev, [provider.id]: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="primary ai-key-save"
+                      disabled={
+                        config ? !config.keyBackendAvailable || (keyDraft[provider.id] ?? "").trim() === "" : true
+                      }
+                      title={config?.keyBackendAvailable ? "" : "加密后端不可用：不会写明文，故禁用"}
+                      onClick={() => void saveStoredKey(provider.id)}
+                    >
+                      加密保存
+                    </button>
+                    {keyState?.has_stored_key && (
+                      <button
+                        type="button"
+                        className="link ai-key-clear"
+                        onClick={() => void clearStoredKey(provider.id)}
+                      >
+                        清除凭据
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             );
           })}
+          {config && !config.keyBackendAvailable && (
+            <div className="warn ai-key-backend-note">{KEY_BACKEND_UNAVAILABLE_NOTE}</div>
+          )}
           <div className="config-form">
             <div className="master-grid">
               <label className="field">

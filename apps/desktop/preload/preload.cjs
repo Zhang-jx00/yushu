@@ -51,6 +51,10 @@ contextBridge.exposeInMainWorld("yushu", {
     config: () => invoke("ai:config"),
     saveConfig: (payload) => invoke("ai:saveConfig", payload),
     setKey: (providerId, apiKey) => invoke("ai:setKey", { providerId, apiKey }),
+    /** 加密保存 provider Key（T3-14）：apiKey 单向传给主进程，返回值只含 key_ref 与三态布尔 */
+    saveKey: (providerId, apiKey) => invoke("ai:saveKey", { providerId, apiKey }),
+    /** 清除凭据（T3-14）：删凭据库密文条目并去掉真源 key_ref */
+    clearKey: (providerId) => invoke("ai:clearKey", { providerId }),
     drafts: () => invoke("ai:drafts"),
     context: (payload) => invoke("ai:context", payload),
     start: (payload) => invoke("ai:start", payload),

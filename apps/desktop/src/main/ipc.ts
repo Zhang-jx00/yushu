@@ -6,10 +6,12 @@ import {
   CHANNELS,
   type AiAdoptPayload,
   type AiAdoptResult,
+  type AiClearKeyPayload,
   type AiConfigState,
   type AiDraftTarget,
   type AiGeneratePayload,
   type AiSaveConfigPayload,
+  type AiSaveKeyPayload,
   type AiStartResult,
   type AiUsageState,
   type AiCostPanelPayload,
@@ -91,12 +93,14 @@ import {
 import { PathSafetyError, ProjectGateway } from "./file-gateway.js";
 import {
   adoptDraft,
+  clearProviderKey,
   listDraftTargets,
   readAiConfig,
   readAiContext,
   readAiUsageState,
   runAiGenerate,
   saveAiConfig,
+  saveProviderKey,
   setSessionKey,
 } from "./ai-ops.js";
 import { appendAiFeedback, readAiFeedbackState } from "./ai-feedback.js";
@@ -378,6 +382,17 @@ export function registerIpcHandlers(): void {
       setSessionKey(payload.providerId, payload.apiKey);
       return true;
     }),
+  );
+
+  // T3-14：写 `.yushu/secrets.json` 本身是派生物，但会连带改真源 config/llm.yaml → 走 wrapWrite 调度索引刷新
+  ipcMain.handle(CHANNELS.aiSaveKey, (_event, payload: AiSaveKeyPayload) =>
+    wrapWrite<AiConfigState>(() =>
+      saveProviderKey(requireGateway(), payload.providerId, payload.apiKey),
+    ),
+  );
+
+  ipcMain.handle(CHANNELS.aiClearKey, (_event, payload: AiClearKeyPayload) =>
+    wrapWrite<AiConfigState>(() => clearProviderKey(requireGateway(), payload.providerId)),
   );
 
   ipcMain.handle(CHANNELS.aiDrafts, () =>

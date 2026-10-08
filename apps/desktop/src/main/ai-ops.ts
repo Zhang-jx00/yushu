@@ -53,7 +53,7 @@ import type {
 } from "../shared/ipc.js";
 import { appendAiUsage, newUsageId, readAiUsage } from "./ai-usage.js";
 import { ProjectGateway } from "./file-gateway.js";
-import { SecretsRepository, type KeyCipher } from "./secrets-ops.js";
+import { SecretsRepository, defaultKeyRefFor, type KeyCipher } from "./secrets-ops.js";
 import { analyzeDraft, assembleMessages, buildContextPreview, type DraftTask } from "./prompt-ops.js";
 import { takePreDestructiveSnapshot } from "./snapshot-ops.js";
 import { countEffectiveChars, recordChapterDelta } from "./stats-ops.js";
@@ -61,6 +61,7 @@ import { countEffectiveChars, recordChapterDelta } from "./stats-ops.js";
 /**
  * AI 副驾主进程编排（S4/S5；T1-13 ~ T1-17；T3-1 Provider 能力矩阵）：
  * - 配置：config/llm.yaml（v2 能力矩阵；明文 key 禁落盘；会话 key 仅存内存）；
+ * - 密钥：加密保存 / 清除凭据（T3-14：密文进 `.yushu/secrets.json`，真源只落 key_ref）；
  * - 生成：上下文组装 → stream（协议分发 + fallback + AbortController）→ 事件流 → 使用记录；
  * - 采纳：仅用户显式操作才写入章节正文（先读 hash 再原子写，拒绝盲覆盖）。
  */
@@ -80,6 +81,11 @@ let keyCipher: KeyCipher | null = null;
 
 export function installKeyCipher(cipher: KeyCipher): void {
   keyCipher = cipher;
+}
+
+/** 加密后端是否可用（T3-14）：未注入后端或 safeStorage 未就绪都算不可用——UI 据此禁用「加密保存」，绝不降级存明文 */
+export function keyBackendAvailable(): boolean {
+  return keyCipher !== null && keyCipher.available;
 }
 
 /** 当前项目的凭据库仓储（未注入后端时抛 E_SECRETS_BACKEND，不静默降级） */
@@ -245,6 +251,8 @@ export async function readAiConfig(gateway: ProjectGateway): Promise<AiConfigSta
       provider: toProviderPayload(createLocalProvider(preset.id)),
     })),
     keyStates,
+    // T3-14：加密后端可用性随配置一并下发（渲染层据此禁用「加密保存」并如实提示，不猜）
+    keyBackendAvailable: keyBackendAvailable(),
     canGenerate: keyStates.some((state) => state.ready),
     // T3-11（J08/J09）：批量任务半价通道规划（batch_eligible：outline / summarize / extract）
     channels: planChannels(config.providers).map((plan) => ({
@@ -279,6 +287,82 @@ export async function saveAiConfig(
   const validated = parseLlmConfig(serializeLlmConfig(candidate));
   await gateway.writeDoc(LLM_CONFIG_PATH, serializeLlmConfig(validated), payload.baseHash);
   return readAiConfig(gateway);
+}
+
+/**
+ * providers 单点改写并回写真源：saveAiConfig 是「providers 全量替换」，
+ * 所以必须先拿 readAiConfig 的当前列表（含定价 / 能力矩阵）再改目标那一条，并带上读时 hash 做并发检测。
+ */
+async function patchProvider(
+  gateway: ProjectGateway,
+  state: AiConfigState,
+  providerId: string,
+  patch: (provider: AiProviderPayload) => AiProviderPayload,
+): Promise<AiConfigState> {
+  return saveAiConfig(gateway, {
+    providers: state.config.providers.map((provider) =>
+      provider.id === providerId ? patch(provider) : provider,
+    ),
+    ...(state.hash ? { baseHash: state.hash } : {}),
+  });
+}
+
+/** provider 必须已在真源里（key_ref 只有写在已存在的 provider 上才有意义） */
+function requireProvider(state: AiConfigState, providerId: string): void {
+  if (!state.config.providers.some((provider) => provider.id === providerId)) {
+    throw new YushuError(
+      "E_INVALID_INPUT",
+      `config/llm.yaml 里没有 provider「${providerId}」：请先点「保存 Provider 配置」，再为其加密保存 Key`,
+    );
+  }
+}
+
+/**
+ * 加密保存 provider 的 API Key（T3-14 桌面端接线），两步缺一不可：
+ * ① 密文入凭据库 `.yushu/secrets.json`（派生物；后端不可用时 put 抛 E_SECRETS_BACKEND，绝不降级写明文）；
+ * ② 真源 `config/llm.yaml` 只补 `key_ref` 引用——走 readAiConfig → saveAiConfig，不绕开校验与并发检测自己写文件。
+ * `api_key_env` 保留用户已填值：两种凭据来源可共存，取值顺序（会话 > 凭据库 > 环境变量）已决定优先级。
+ * 空串按**拒绝**处理而不是「清除」：清除是独立动作（clearProviderKey），输入框误触不该把已有凭据删掉。
+ */
+export async function saveProviderKey(
+  gateway: ProjectGateway,
+  providerId: string,
+  apiKey: string,
+): Promise<AiConfigState> {
+  const id = providerId.trim();
+  if (id === "") throw new YushuError("E_INVALID_INPUT", "providerId 不能为空");
+  const plain = apiKey.trim();
+  if (plain === "") {
+    throw new YushuError("E_INVALID_INPUT", "API Key 为空：加密保存需要非空密钥；如需移除请点「清除凭据」");
+  }
+  const current = await readAiConfig(gateway);
+  requireProvider(current, id);
+  const keyRef = defaultKeyRefFor(id);
+  await secretsOf(gateway).put(keyRef, plain, id);
+  // 会话内存 Key 的优先级高于凭据库：旧会话 Key 留着会盖住刚存的密文（用户以为新 Key 已生效），故显式失效
+  setSessionKey(id, "");
+  return patchProvider(gateway, current, id, (provider) => ({ ...provider, key_ref: keyRef }));
+}
+
+/**
+ * 清除 provider 凭据（T3-14）：删凭据库条目 + 去掉真源的 `key_ref`（会话内存 Key 不动，它本就不落盘）。
+ * 先删密文再改真源：反序一旦删除失败就留下「yaml 指向已不存在条目」的悬空引用——面板显示「未配置」而磁盘仍有密文，最难查。
+ */
+export async function clearProviderKey(
+  gateway: ProjectGateway,
+  providerId: string,
+): Promise<AiConfigState> {
+  const id = providerId.trim();
+  if (id === "") throw new YushuError("E_INVALID_INPUT", "providerId 不能为空");
+  // remove 幂等（条目本就不存在返回 false），此时仍要继续清掉真源的 key_ref
+  await secretsOf(gateway).remove(defaultKeyRefFor(id));
+  const current = await readAiConfig(gateway);
+  if (!current.config.providers.some((provider) => provider.id === id)) return current;
+  return patchProvider(gateway, current, id, (provider) => {
+    const next = { ...provider };
+    delete next.key_ref;
+    return next;
+  });
 }
 
 /** 可生成目标：已创建草稿章节（chapter_id 已回填且文件存在）的章纲列表 */

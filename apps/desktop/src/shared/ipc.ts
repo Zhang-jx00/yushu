@@ -28,6 +28,10 @@ export const CHANNELS = {
   aiConfig: "ai:config",
   aiSaveConfig: "ai:saveConfig",
   aiSetKey: "ai:setKey",
+  /** 加密保存 provider Key（T3-14）：密文落 .yushu/secrets.json，真源只写 key_ref */
+  aiSaveKey: "ai:saveKey",
+  /** 清除 provider 凭据（T3-14）：删密文条目并去掉真源 key_ref */
+  aiClearKey: "ai:clearKey",
   aiDrafts: "ai:drafts",
   aiContext: "ai:context",
   aiStart: "ai:start",
@@ -542,6 +546,11 @@ export interface AiConfigState {
   /** 本地模型预设（T3-4；由主进程下发，UI 一键添加） */
   localPresets: AiLocalPreset[];
   keyStates: AiProviderKeyState[];
+  /**
+   * 加密后端（Electron safeStorage）当前是否可用（T3-14）：
+   * false 时 UI 禁用「加密保存」并如实说明原因——宁可禁用也不降级把明文写进文件。
+   */
+  keyBackendAvailable: boolean;
   /** 至少一个 provider 可用；false 时生成按钮禁用（离线时本地功能不受影响） */
   canGenerate: boolean;
   /** 批量任务的半价通道规划（T3-11，J08/J09）：batch_eligible 任务 → batch / sync（含原因） */
@@ -552,6 +561,21 @@ export interface AiSaveConfigPayload {
   providers: AiProviderPayload[];
   /** 配置已存在时必须携带（覆盖前经确认） */
   baseHash?: string;
+}
+
+/**
+ * 加密保存 API Key（T3-14，ai:saveKey）。
+ * `apiKey` 是**单向** renderer→main 载荷：任何返回值（AiConfigState）只含 key_ref 与三态布尔，
+ * 密钥本体绝不回流渲染层。
+ */
+export interface AiSaveKeyPayload {
+  providerId: string;
+  apiKey: string;
+}
+
+/** 清除凭据（T3-14，ai:clearKey）：删凭据库密文条目 + 去掉真源的 key_ref */
+export interface AiClearKeyPayload {
+  providerId: string;
 }
 
 /** 可生成目标：已创建草稿章节的章纲 */
