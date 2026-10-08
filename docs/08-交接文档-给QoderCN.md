@@ -11,16 +11,16 @@
 
 **御书**：本地优先的开源网文创作工具（Electron + React + TypeScript monorepo）。核心理念：Markdown/YAML 为唯一真源、SQLite 仅作索引、AI 结果一律候选化（采纳是用户显式动作）、离线能力完整（AI 可整体关闭）。
 
-当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）的 14 个功能任务全部完成并勾选（T3-1～T3-14，R30–R45，其中 T3-12 于 R48–R49 补齐遗留后勾选）**。M3 剩余：§6.5 的 **A3（成本偏差需真实 provider）** 一条——A1 / A2 / A4 / A5 / A6 已达成并有机器证据（A2 于 R46 离线取证勾选，A4 于 R47，A5/A6 于 R41）。收口动作：A1–A6 全绿 → `v0.4.0` 打 tag（docs/04 §6.7）；**A3 必须等真实端点，不要在 mock 上声称达成**。
+当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）的 14 个功能任务全部完成并勾选（T3-1～T3-14，R30–R45，其中 T3-12 于 R48–R49 补齐遗留后勾选）**。M3 剩余：§6.5 的 **A3（成本偏差需真实 provider）** 一条——A1 / A2 / A4 / A5 / A6 已达成并有机器证据（A2 于 R46 离线取证勾选，A4 于 R47，A5/A6 于 R41）。收口动作：A1–A6 全绿 → `v0.4.0` 打 tag（docs/04 §6.7）；**A3 必须等真实端点，不要在 mock 上声称达成**。**R50–R51 已进入 M4**（docs/04 §7）：T4-1 规则 DSL 求值层含桌面接入均已勾选，R52 起做 T4-2 真数据比对。
 
 | 项目 | 状态 |
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **678/678 全绿**（73 个测试文件）——`pnpm test`（第 50 轮 R50 / M4 规则 DSL 求值层后） |
+| 单测 | **702/702 全绿**（75 个测试文件）——`pnpm test`（第 51 轮 R51 / 规则页与沙箱试算后） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
-| UI 预演 | **39/39 全绿**（最近一次新目录 **v110**，44.2s，`screenshotFailures:[]`、证据缺失=0）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
+| UI 预演 | **40/40 全绿**（最近一次新目录 **v114**，45.1s，`screenshotFailures:[]`、证据缺失=0）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
 | 性能实测 | 10/10 达标（最近一次 R36 报告 `docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json`）；R40 未触热路径，本轮不适用 |
 | 版本 | `v0.2.0` tag **已在远端**（本文上一版记为"远端未推"，已过期更正） |
 
@@ -123,6 +123,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 | R50 | M4/T4-1 规则 DSL 求值沙箱（引擎侧） | 新建 `@yushu/genre-engine/src/rule-dsl.ts`（放这包是因 docs/04 §7.4 指定它承载「规则 DSL 求值沙箱」），形状原样承接 docs/03 §8.2 + G06 草案（`id/severity/scope/when/message/priority`，severity 仍 `error\|warn\|info`）。**四道闸门**：操作符白名单（未知操作符抛 `E_RULE_OPERATOR` **不静默当假**；`reduce/map/filter/merge/some/every/cat/regex/fetch/fs/env/now/date` 逐个点名拒绝理由）、禁循环（无迭代原语，唯一遍历是 `in` 且候选长度计入预算）、**深度 16 在加载期就拒**（求值期再设同闸兜住手造规则）、**求值预算用节点计数不用墙钟**（`Date.now()` 超时破坏确定性——本轮最重要口径）。取数：`var` 点分路径纯读、拒 `__proto__/constructor/prototype` 与函数（永不调用），`readPath` 导出供 T4-2 复用；比较：只接受有限数字（**不比中文字典序**）、等值严格、除零报错；结论：`evidence` 只登记真正读到的 var（短路分支不进），`{a.chapter}` 取不到留「（缺 路径）」不整条失败。**自抓两处实现错**：`*` 与 `+` 共用 reduce 初值 0 致乘法恒 0；`in` 候选侧把字面量清单当表达式拒绝（最常见写法被自家沙箱拦在门外）→ 改「数组=字面量、对象=求值」。单测 +34 → **673/673（72 文件）**，typecheck 11 包全 Done；**6 次变异全能红**（白名单→3 红、双节点预算→1 红、加载期深度→1 红、求值期深度→1 红、原型链→1 红、隐式转换→1 红）。**随后被真实包数据打脸一次（重要教训）**：`packs/xuanhuan-xitong/rules/` 里本来就有两份规则件、`loadPack` 也早已解析它们，而我的解析器只认自己测试里假想的裸 `rules:` 形状——真件是 `apiVersion + id + title + source + rules:` **信封**，且六条里有两条 `when` 一个对象塞两个键。改：双形状解析、**裸列表必须有版本**、信封 `title/source` 逐条盖到 `origin` **不静默丢弃**（读了字段不带出去＝抹掉可追溯性，与 R40「saveConfig 抹 pricing」同类）、包内两条规则改写 `and + ==`；新增 `pack-rules.test.ts`（5 例，直接读真件）长期钉住 → **678/678（73 文件）**，变异增至 **8 次**（+静默丢 origin→1 红、+信封未知键放行→1 红）。**纯引擎轮：未碰桌面端，故不跑 e2e / 预演，也不声称跑过**。版本合并与 priority 排序**未实现**（等多包真规则再说，不凭空发明）。 |
 
+| R51 | 规则 DSL 桌面端接入（T4-1 收口） | 补第 50 轮缺的**内容层**：`genre-engine/rules.ts` 的 `loadPackRuleSets` 真读包内 `rules/*.yaml` 交给 `parseRuleDocument`，每件带 `{file,packId,rules,error,expressionIssues}`。与 `loadPackTaboos` 的"失败静默跳过"**刻意相反**——悄悄消失的规则让作者看到"没发现问题"，真相却是"这条没跑"，**沉默的校验器比没有校验器更坏**。`rule-dsl.ts` 补静态侧 `collectExpressionIssues`（不求值就指出"一个对象两个键，请用 and/or""未知操作符 regex：禁正则"）；`lintPack` 新增 `rule-unparsable` / `rule-expression` / `rule-duplicate-id`（同包撞 id 拒绝按加载顺序取后者）。IPC 两个**只读**通道 `rule:catalog` / `rule:dryRun`（`wrap` 不用 `wrapWrite`；试算只吃夹具、不读正文不写盘）+ 第 11 个标签页「规则」（目录汇总 / 逐件表格 / 沙箱试算 / 依据表），空目录明写「不等于这些包没有规则」，试算**命中·未命中·被沙箱拒绝**三态分开并给原始 `E_RULE_*`。**第二次被真实数据纠正**：包内规则件是 `apiVersion+id+title+source+rules` **信封**，R50 只认假想的裸 `rules:` → 补齐并把 `title/source` 逐条盖到 `origin`（读了字段不带出去＝抹掉可追溯性，同 R40 saveConfig 抹 pricing）。单测 +24 → **702/702（75 文件）**，typecheck 11 包全 Done，e2e ✅（`total:6 / hit:true / evidenceCount:4 / missMatched:false / rejectCode:"[E_RULE_UNORDERABLE]…" / diskUnchanged:true`），预演新增 **step40** → **40/40**（终版 v114 45.1s）。**step40 两次真实红跑**：v111（我的选择器 `.rules-table tbody td.error` 写宽了，严重度单元格也带 error 类）＝预演抓到**我自己的断言**而非产品缺陷；v113（故意把命中行类名换成未命中行）证明回执断言能红。`scene` → 步骤 10-40。**未实现**：同 id 版本合并、`priority` 参与排序、规则编辑 UI（派系包是外部制品） |
+
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
 1. **真源与派生分离**：Markdown/YAML 是唯一真源；SQLite（`.yushu/index.db`）与 `.yushu/context-log/`、`.yushu/ai-usage.jsonl`、`.yushu/ai-feedback.jsonl`、`.yushu/recovery/`、`.yushu/snapshots/`、`exports/` 都是派生物——可删可重建，绝不作为真源，不入 Git。
@@ -189,7 +191,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 ### 5.3 工程债（低优先，随手做）
 
 - `docs/00-交接文档-给Trae.md` 是 M1 时代的；新内容一律写进 `docs/04/06` 与本文，避免多源。
-- ~~walkthrough 报告 `scene` 字段仍写「步骤 10-25」，可顺手更新为当前范围。~~ **已更新**（R40「步骤 10-36」→ R43 10-37 → R45 10-38 → R47 10-39；**新增步骤时记得同步这里**，`grep "步骤 10-" apps/desktop/src/main/walkthrough.ts` 一眼可验）
+- ~~walkthrough 报告 `scene` 字段仍写「步骤 10-25」，可顺手更新为当前范围。~~ **已更新**（R40「步骤 10-36」→ R43 10-37 → R45 10-38 → R47 10-39 → R51 10-40；**新增步骤时记得同步这里**，`grep "步骤 10-" apps/desktop/src/main/walkthrough.ts` 一眼可验）
 - e2e 探针串行较长（~40s），暂无拆分必要；新增探针请保持「先落盘再断言、口径可打印」风格。
 
 ---
@@ -312,12 +314,15 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 
 **R50（M4/T4-1 求值层）已完成**：`@yushu/genre-engine/src/rule-dsl.ts` 落地四道沙箱闸门（操作符白名单 / 禁循环 / 加载期+求值期双深度闸 / **节点计数预算代替墙钟超时**），单测 +34 → 673/673（72 文件），6 次变异全能红；**纯引擎轮未碰桌面端，故没跑 e2e 与预演**（详见 docs/04 §7.3 T4-1 注记与 docs/06 §八 第 50 轮）。**两条与本文上一版建议不同的实现事实，以代码为准**：① `cat` 与 `then/action` **没有实现**——docs/03 §8.2 与 G06 的规则草案本身就没有动作字段，结论文案走 `message` 的 `{占位}`；② `in` 的候选侧支持**字面量清单**（`["爽文","黑深残"]`），这是规则里最常见的写法。
 
-**下一轮（R51）——规则 DSL 桌面端接入（求值器可用化，仍不碰 T4-2 的真数据）**：
-1. **包里的规则件已经存在，别再造第二份**：`packs/xuanhuan-xitong/pack.yaml` 的 11 件套已声明 `rules: [rules/power-consistency.yaml, rules/realm-progress.yaml]`，`loadPack` 也已把它们解析进 `resolvedFiles.rules`（R50 的 `pack-rules.test.ts` 就在读这两个文件）。**缺的是"内容层"**：没有任何地方调用 `parseRuleDocument` 校验这两份文件，也没有 lint。本轮补：`loadPack` 之后对每个 rules 文件跑 `parseRuleDocument`，**解析失败必须让 `lintPack` 报 error，不得跳过该文件**。
-2. `lintPack` 增加规则件检查：可解析、id 唯一、`severity/scope` 合法、深度不超限（复用 R50 的加载期闸），并按既有 `LintIssue{rule,severity,message}` 形状出报告。
-3. 桌面端只读通道 **`rule:list`**（IPC 四处同步：`shared/ipc.ts` → `main/ipc.ts` 用 `wrap` **不是 `wrapWrite`** → `preload.cjs` 白名单 → `renderer/src/api.ts`）：返回当前项目已融合包的全部规则（含来源包与件路径）+ 每件解析结果。UI 放「派系包」或新 tab：列出 id / severity / scope / message，解析失败行显式标红并给出原因。
-4. **沙箱试算器**（求值层可用化的关键，也是 R52 接真数据前的唯一安全入口）：面板给一个 JSON 输入框（形如 `{"a":{...},"b":{...}}`）+ 所选规则 → 调 `rule:dryRun` 返回 `{matched, message, evidence}`；**输入非法 JSON 直接拒**，求值抛错要把 `E_RULE_*` 原样显示（这正是沙箱的价值：作者能看见"这条规则写崩了"而不是拿到一个 false）。
-5. 取证：单测覆盖 `loadPack` 收集 rules 件与 lint 报错；e2e 探针跑「解析包规则 → 试算命中 / 不命中 / 沙箱拒绝」三条路径并断言 `diskUnchanged`（两个通道都不写盘）；预演新增 **step40**，**跑全新目录（v111…）**，`scene` 同步改为「步骤 10-40」。
+**R51（规则 DSL 桌面端接入）已完成，T4-1 勾选**：内容层加载（`rules.ts`）+ `lintPack` 三条规则检查 + 两个只读通道 `rule:catalog` / `rule:dryRun` + 第 11 个标签页「规则」+ 预演 step40（终版 v114 40/40、e2e 规则探针 `diskUnchanged:true`）。详见 docs/04 §7.3 T4-1 两轮注记与 docs/06 §八 第 50–51 轮。
+
+**下一轮（R52）——M4 / T4-2 结构完整性规则落地（引擎侧，先把"能从真源独立算出"的那批做扎实）**：
+1. **范围只取结构类三条**：`ref-dangling`（引用指向不存在的实体）、`ref-cycle`（引用成环）、`layer-order-violation`（层级倒置）。语义类（战力崩塌、称呼漂移、伏笔悬空）依赖事实与声线卡比对，**留到后续轮次**，不要一次铺开十条。
+2. **先取证再动手**：`refs(referrer, relation, target)` 落在 `@yushu/search/index-db.ts`，但**索引是派生物、可以整库删除**（红线 1 / M4 §7.5 A5）。结构校验必须能**从真源独立算出**：优先复用 `collectIndexInput` / `diffIndexSources`（`@yushu/world-engine`）从 Markdown/YAML 直接得到实体与引用边，**不要把校验建在 SQL 查询结果上**——删库后结果不变才是验收口径。动手前先把这两条链路的真实输出打出来看一遍。
+3. **判定要可解释**：每条发现输出 `{rule, severity, span 或 subject, evidence（谁在哪个文件哪一行引用了谁）, fix?}`，与 T3-13 / T4-1 的 finding 同形；`layer-order` 用码点稳定排序，**不碰 localeCompare**。
+4. **环检测必须自终止**：图遍历用 visited 集合 + 路径栈，且对**单文件自引用**、A→B→A、超长链都有用例；遍历上限要有显式常量（对齐 R50 的"节点预算代替墙钟"），不要靠异常兜底。
+5. **不该命中侧同样要有**：每条规则至少一例合法结构（无悬空 / 无环 / 层级正确）断言零发现——结构类误报会直接把作者推进"忽略所有警告"的状态。**新断言一律先做红/绿配对**。
+6. 桌面端与 e2e/预演留 R53（报告格式 + 面板），本轮纯引擎；docs 计数与预演步数（现 40 步）按改动面同步。
 
 > 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。**M3 功能任务（T3-1～T3-14）已全部勾选，R50 起在 M4**（docs/04 §7）。
 
