@@ -16,5 +16,8 @@ rules:
   - id: realm-breakthrough-uncelebrated
     severity: info
     scope: chapter
-    when: {"==": [{var: "chapter.has_breakthrough"}, true], "chapter.has_breakthrough_beat": false}
+    when:
+      and:
+        - {"==": [{var: "chapter.has_breakthrough"}, true]}
+        - {"==": [{var: "chapter.has_breakthrough_beat"}, false]}
     message: "本章发生突破但缺少爆点节拍（升级→验证→反馈），建议参考 beats/upgrade-cycle"

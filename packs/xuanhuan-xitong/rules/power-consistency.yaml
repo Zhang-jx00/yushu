@@ -19,5 +19,8 @@ rules:
   - id: power-no-cost
     severity: info
     scope: chapter
-    when: {"==": [{var: "scene.power_used"}, true], "cost_recorded": false}
+    when:
+      and:
+        - {"==": [{var: "scene.power_used"}, true]}
+        - {"==": [{var: "scene.cost_recorded"}, false]}
     message: "动用了超凡力量但未记录代价，建议补一句消耗/反噬描写"
