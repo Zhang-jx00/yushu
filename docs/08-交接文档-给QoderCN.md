@@ -11,7 +11,7 @@
 
 **御书**：本地优先的开源网文创作工具（Electron + React + TypeScript monorepo）。核心理念：Markdown/YAML 为唯一真源、SQLite 仅作索引、AI 结果一律候选化（采纳是用户显式动作）、离线能力完整（AI 可整体关闭）。
 
-当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）的 14 个功能任务全部完成（T3-1～T3-14，R30–R45）**。M3 剩余：§6.5 的 **A2 / A3 / A4 三条验收取证**（均需真实 provider 或真人试跑才能量化，离线轮次不得声称达成）；A1/A5/A6 已达成并有机器证据（A5/A6 于 R41 复核勾选）。收口动作：A1–A6 全绿 → `v0.4.0` 打 tag（docs/04 §6.7）。
+当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）的 14 个功能任务全部完成（T3-1～T3-14，R30–R45）**。M3 剩余：§6.5 的 **A3（成本偏差需真实 provider）与 A4（AI 关闭后本地能力无退化，可用离线网络审计取证）** 两条——A1 / A2 / A5 / A6 已达成并有机器证据（A2 于 R46 离线取证勾选，A5/A6 于 R41）。收口动作：A1–A6 全绿 → `v0.4.0` 打 tag（docs/04 §6.7）。
 
 | 项目 | 状态 |
 |---|---|
@@ -113,6 +113,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 | R45 | T3-13 中文处理（桌面端 + 取证收口） | IPC 四处同步 `text:proofread` / `text:fixBody`（**都是只读**，用 `wrap` 不用 `wrapWrite`）；`text-ops.ts` 读章节正文跑 `proofreadText`；编辑器新增「中文自查」面板（未勾选确认时所有采纳按钮禁用 / 采纳全部可自动修 + 逐条采纳 / 繁简歧义须从候选下拉选定 / evidence 与 skippedRules 原样展示）。**不开第二条写通道**：`fixBody` 只回「改后正文 + 改前正文」，渲染层比对内容仍一致才替换文档，落盘继续由 `chapter:write`（baseHash + 编辑日志 + 字数增量 + 索引刷新）负责；采纳请求只带 `{start, rule}`，改法由主进程重新检测的条目决定，`replacement` 必须属于该条目候选（引擎为此加 `candidates` 字段）。**修掉三处缺陷**：采纳回执被紧随的重扫冲掉（拆两行）、预演 `waitFor` 未 await 异步谓词（Promise 恒真 → 读盘类断言会假绿）、step38 候选回执读到上一轮旧文本（改为等回执变化并断言「已采纳 1 处」）。**另根治 e2e 竞态**：`.gitignore` 之后仍偶发 `ENOENT ... lstat .yushu/index.db-shm` → 新增 `isTransientScanError` + `withTransientRetry`（只认 ENOENT+lstat/stat/readdir，业务错误码立即上抛，耗尽给 `E_GIT_SCAN`）。单测 +15 → 607/607（69 文件）、预演 **38/38**（v103）、e2e 中文自查探针 `blocked:3 / applied:3 / diskUnchanged:true / spansOk:true / candidateGuard:rejected…`；变异「直接落盘 + 无视 confirmed」→ 3 红 |
 
+| R46 | A2 任务路由取证（无产品改动） | e2e 新建**两个独立 mock 端点**（旗舰全程 503 / 小模型正常）+ 专用 routing.yaml（`drafting.prefer=[flagship]`、`fallback.drafting=[flagship-bad, small-good]`、`InternalServerError.max_retries=2`、`cooldown.allowed_fails=1`）。实测 `{badHits:3, badFailures:3, goodHits:3, goodFailures:0}`、原因「HTTP 503」→「冷却中（剩余 60s）」、`recordsDelta:3 / promptTokensDelta:30 (=12+12+6) / summarizeOk:true`，A2 四口径逐条对上并勾选。**两次期望落空把机制校正**：一次动作只向闸门记 1 次失败（`allowed_fails:2` 不触发冷却）；cloud provider 无 Key 会**在发请求前跳过**（必须补会话 Key 才是真正的失败回落）。命名任务不经 LLM，故以摘要任务作「走小模型」等价证据；真实端点配额/限流不在口径内 | 
+
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
 1. **真源与派生分离**：Markdown/YAML 是唯一真源；SQLite（`.yushu/index.db`）与 `.yushu/context-log/`、`.yushu/ai-usage.jsonl`、`.yushu/ai-feedback.jsonl`、`.yushu/recovery/`、`.yushu/snapshots/`、`exports/` 都是派生物——可删可重建，绝不作为真源，不入 Git。
@@ -136,7 +138,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 ### 4.2 M3 验收未核项（docs/04 §6.5）
 
 - `- [x] A1` 可复现快照与截断标记（R37 已达成，有机器证据）。
-- `- [ ] A2 任务路由生效`：命名/润色走小模型、正文走旗舰、失败按 fallback 降级——机制（T3-2）与 e2e 重试探针已具备，但**尚缺一次针对 A2 的端到端演示/取证**（建议：e2e 增加「模拟主 provider 失败 → fallback 小模型完成命名任务」的探针，并在 docs/04 A2 处附机器证据）。
+- `- [x] A2 任务路由生效`：**R46 已离线取证并勾选**——e2e 新建两个独立 mock 端点（旗舰全程 503 / 小模型正常），实测端点计数 `{badHits:3, badFailures:3, goodHits:3, goodFailures:0}`、回落原因「返回 HTTP 503…」→「冷却中（剩余 60s）…」，证明「正文优先旗舰 → 失败按 fallback 降级不断流 → 冷却内不再试坏端点 → 小档任务只打 small」；三条动作 = 三条 usage 记录、`promptTokensDelta 30 = 12+12+6`（失败尝试不计费）。**边界**：命名任务是本地确定性生成器（不经 LLM），以摘要任务作「走小模型」等价证据；真实 provider 配额/限流不在此口径（A3 同）。
 - `- [ ] A3 成本面板`：R40（T3-12）已落地并取证——**可分解 / 双口径 / 不猜价已被机器断言**，但「偏差在可接受范围内」**无法用 mock 证明**（mock 对任意请求固定回传 `prompt_tokens:12`，实测偏差 +4404%）。保持未勾选，接真 provider 后与 A2/A4 同轮量化复核（证据与口径详见 docs/04 §6.5 A3 与 §6.3 T3-12 注记）。
 - `- [ ] A4 AI 整体关闭后本地能力无退化`：M1 有「renderer 外网请求 0」的 trial 证据（旧口径），建议以当前代码重跑一次 trial/网络审计并在 A4 附证据。
 - `- [x] A5 记忆不跨项目泄漏`：**R41 已复核并勾选**——e2e 探针原文 `{"rejectedIds":["fact-foreign"],"errorCodes":["memory-cross-project-leak"]}`（异项目记录被拒、本项目 6 条事实台账不受影响）；证据文字已写入 docs/04 §6.5。
@@ -166,7 +168,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 ### 5.1 立即（M3 收口，建议 3-4 轮）
 
-1. ~~**T3-12 成本与缓存**（含 A3 取证）~~ **已完成（R40）** → 2. **A5 / A6 复核勾选** **已完成（R41）** → 3. ~~**T3-14 安全（Key 加密）**~~ **已完成（R42 引擎与主进程 + R43 桌面端与取证）** → 4. ~~**T3-13 中文处理**~~ **已完成（R44 引擎侧 + R45 桌面端与取证）** → 5. **A2 / A4 取证轮（下一轮 R46–R47）**（补 e2e/网络审计探针与 docs 证据；A3 的偏差量化需真实 provider）。收口后按 docs/04 §6.7：A1–A6 全绿 → `v0.4.0` 打 tag。
+1. ~~**T3-12 成本与缓存**（含 A3 取证）~~ **已完成（R40）** → 2. **A5 / A6 复核勾选** **已完成（R41）** → 3. ~~**T3-14 安全（Key 加密）**~~ **已完成（R42 引擎与主进程 + R43 桌面端与取证）** → 4. ~~**T3-13 中文处理**~~ **已完成（R44 引擎侧 + R45 桌面端与取证）** → 5. **A2 取证 已完成（R46）** → 6. **A4 取证（下一轮 R47，可离线做）** → 7. **A3 待用户侧真实端点**（补 e2e/网络审计探针与 docs 证据；A3 的偏差量化需真实 provider）。收口后按 docs/04 §6.7：A1–A6 全绿 → `v0.4.0` 打 tag。
 
 ### 5.2 之后（以 docs/04 为准，勿偏离）
 
@@ -301,7 +303,7 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 3. **诚实边界**：A2 里「路由与真实配额 / 延迟是否匹配」这类需要真实 provider 的部分**不在离线轮次勾选**；取证文字要写明 mock 只能证明链路与计数正确，不能证明真实端点行为。
 4. 顺带把 docs/06 §五 计数、§一 指针、本文 §1 快照与预演步数（当前 38）同步到本轮实测值；若改渲染层再重跑预演到新目录（v97…）。
 
-> 提醒：A2 / A3 / A4 三条验收都卡在「需要真实 provider 或真实网络审计」，纯离线轮次无法达成——安排取证轮时需要先确认用户侧可用端点，不要在 mock 上声称达成。
+> 提醒：**A3（真实用量偏差）需要用户侧可用端点**，纯离线轮次无法达成，不要在 mock 上声称达成；**A2 已于 R46 用双 mock 端点离线取证完成**，A4（AI 关闭后本地能力）可用 `--ui-trial` 的外网请求审计离线取证。
 
 祝顺利。有任何与本文冲突的地方，以 `docs/04`/`docs/03` 与仓库实际代码为准，并把修正回写进相应文档。
 
