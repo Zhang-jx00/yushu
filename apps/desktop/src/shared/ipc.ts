@@ -49,6 +49,10 @@ export const CHANNELS = {
   textProofread: "text:proofread",
   /** 中文自查（T3-13）：按用户已确认的条目返回**改后正文**（写盘仍走编辑器既有保存路径） */
   textFixBody: "text:fixBody",
+  /** 规则目录（M4/T4-1，R51）：项目所选派系包携带的全部规则；**只读** */
+  ruleCatalog: "rule:catalog",
+  /** 规则沙箱试算：**只读**，只吃调用方给的 JSON 夹具，不读正文、不写盘 */
+  ruleDryRun: "rule:dryRun",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -856,6 +860,66 @@ export interface AiCostPanelPayload {
   budget: BudgetStatePayload;
   /** 口径说明（面板如实展示，避免把估算当账单） */
   notes: string[];
+}
+
+/* ---------- 规则 DSL（M4 / T4-1，R51；结构与 @yushu/genre-engine 的 rule-dsl 同形——本文件零依赖） ---------- */
+
+export interface RuleRowPayload {
+  id: string;
+  /** 三级严重度（与 T3-13 / lint 同为 error | warn | info，不是 warning） */
+  severity: "error" | "warn" | "info";
+  /** scene | chapter | cross_chapter | project */
+  scope: string;
+  message: string;
+  priority?: number;
+  /** 出处（规则件信封的集 id / 标题 / 调研来源） */
+  origin_set?: string;
+  origin_title?: string;
+  origin_source?: string;
+  /** 表达式静态问题（空数组＝结构没问题，不代表一定会命中） */
+  issues: string[];
+}
+
+export interface RuleFilePayload {
+  packId: string;
+  /** 包内相对路径 */
+  file: string;
+  /** 解析失败原因；非空即「这个文件一条规则都没跑成」 */
+  error: string | null;
+  rules: RuleRowPayload[];
+}
+
+export interface RuleCatalogPayload {
+  /** 项目所选派系包 id（来自 project.yaml 的 genre.packs） */
+  packIds: string[];
+  files: RuleFilePayload[];
+  total: number;
+  /** 解析失败的文件数 */
+  brokenFiles: number;
+  /** 有静态问题的规则条数 */
+  problemRules: number;
+  /** 同包跨文件撞 id（要带文件名才能说清算的是哪一条） */
+  duplicateIds: Array<{ id: string; files: string[] }>;
+  /** 包本身加载失败的原因（非空时目录为空也不等于"这些包没有规则"） */
+  loadError: string | null;
+}
+
+export interface RuleDryRunPayload {
+  ruleId: string;
+  /** 同名规则跨文件存在时用于消歧 */
+  file?: string;
+  /** JSON 文本形式的比对夹具 */
+  data: string;
+}
+
+export interface RuleDryRunResult {
+  ok: boolean;
+  ruleId: string;
+  matched: boolean;
+  message: string;
+  evidence: Record<string, string>;
+  /** 失败原因（包/规则找不到、夹具非法 JSON、被沙箱拒绝）；ok=false 时非空 */
+  error: string;
 }
 
 /* ---------- 中文自查（T3-13，J14；结构与 @yushu/text 同形——本文件保持零依赖，故用结构类型镜像） ---------- */

@@ -1210,6 +1210,78 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     }
     console.log("[e2e] 中文自查:", JSON.stringify(proofreadProbe));
 
+    // R51 规则 DSL 桌面接入探针（M4/T4-1）：目录只读、试算三态（命中 / 未命中 / 被沙箱拒绝）、
+    // 以及**两个通道都不写盘**（真数据比对属 T4-2，本轮不得有任何写副作用）。
+    let ruleProbe = {
+      ok: false,
+      packIds: "",
+      files: 0,
+      total: 0,
+      brokenFiles: 0,
+      problemRules: 0,
+      duplicateIds: 0,
+      loadError: "",
+      hit: false,
+      hitMessage: "",
+      evidenceCount: 0,
+      missOk: false,
+      missMatched: true,
+      rejectCode: "",
+      badJsonRejected: "",
+      diskUnchanged: false,
+      error: "",
+    };
+    try {
+      const rulesBefore = await api.chapter.read(draft.chapterPath);
+      const catalog = await api.rule.catalog();
+      const hit = await api.rule.dryRun({
+        ruleId: "power-no-regress",
+        file: "rules/power-consistency.yaml",
+        data: JSON.stringify({
+          a: { chapter: "第 3 章", realm: { tier: 3 }, combat_power: 100 },
+          b: { chapter: "第 4 章", realm: { tier: 4 }, combat_power: 80 },
+        }),
+      });
+      const miss = await api.rule.dryRun({
+        ruleId: "power-no-regress",
+        file: "rules/power-consistency.yaml",
+        data: JSON.stringify({
+          a: { chapter: "第 3 章", realm: { tier: 3 }, combat_power: 100 },
+          b: { chapter: "第 4 章", realm: { tier: 4 }, combat_power: 200 },
+        }),
+      });
+      // 夹具缺 combat_power：大小比较拿不到数字 → 沙箱必须拒绝，而不是回一句"未命中"
+      const rejected = await api.rule.dryRun({
+        ruleId: "power-no-regress",
+        file: "rules/power-consistency.yaml",
+        data: JSON.stringify({ a: { realm: { tier: 3 } }, b: { realm: { tier: 4 } } }),
+      });
+      const badJson = await api.rule.dryRun({ ruleId: "power-no-regress", data: "{不是 JSON" });
+      const rulesAfter = await api.chapter.read(draft.chapterPath);
+      ruleProbe = {
+        ok: true,
+        packIds: catalog.packIds.join(","),
+        files: catalog.files.length,
+        total: catalog.total,
+        brokenFiles: catalog.brokenFiles,
+        problemRules: catalog.problemRules,
+        duplicateIds: catalog.duplicateIds.length,
+        loadError: catalog.loadError || "",
+        hit: hit.ok && hit.matched,
+        hitMessage: hit.message.slice(0, 60),
+        evidenceCount: Object.keys(hit.evidence).length,
+        missOk: miss.ok,
+        missMatched: miss.matched,
+        rejectCode: rejected.ok ? "(竟然通过了)" : rejected.error.slice(0, 60),
+        badJsonRejected: badJson.ok ? "(竟然通过了)" : badJson.error.slice(0, 40),
+        diskUnchanged: rulesBefore.hash === rulesAfter.hash,
+        error: "",
+      };
+    } catch (err) {
+      ruleProbe = { ...ruleProbe, error: String((err && err.message) || err).slice(0, 160) };
+    }
+    console.log("[e2e] 规则目录与试算:", JSON.stringify(ruleProbe));
+
     // A2 任务路由取证（docs/04 §6.5，离线可做的那一半）：
     //  ① 旗舰端点全程 503 → 一次动作内先重试、再按 fallback 链回落到小模型端点并成功出文；
     //  ② 失败达阈进入冷却 → **第二次动作不再尝试坏端点**（冷却跳过事件带原因）；
@@ -1512,6 +1584,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       cost: costProbe,
       security: securityProbe,
       proofread: proofreadProbe,
+      rules: ruleProbe,
       routingA2: routingA2,
       aiOff: aiOffProbe,
     };
@@ -1846,6 +1919,25 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         diskUnchanged: boolean;
         spansOk: boolean;
         candidateGuard: string;
+        error: string;
+      };
+      rules: {
+        ok: boolean;
+        packIds: string;
+        files: number;
+        total: number;
+        brokenFiles: number;
+        problemRules: number;
+        duplicateIds: number;
+        loadError: string;
+        hit: boolean;
+        hitMessage: string;
+        evidenceCount: number;
+        missOk: boolean;
+        missMatched: boolean;
+        rejectCode: string;
+        badJsonRejected: string;
+        diskUnchanged: boolean;
         error: string;
       };
       aiOff: {
@@ -2747,6 +2839,24 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.proofread.diskUnchanged &&
       result.proofread.spansOk &&
       result.proofread.error === "" &&
+      // R51 规则 DSL 桌面接入：目录只读、试算三态（命中 / 未命中 / 被沙箱拒绝）、坏夹具拒收、不写盘
+      result.rules.ok &&
+      result.rules.error === "" &&
+      result.rules.packIds === "xuanhuan-xitong" &&
+      result.rules.files === 2 &&
+      result.rules.total === 6 &&
+      result.rules.brokenFiles === 0 &&
+      result.rules.problemRules === 0 &&
+      result.rules.duplicateIds === 0 &&
+      result.rules.loadError === "" &&
+      result.rules.hit &&
+      result.rules.hitMessage.includes("疑似战力崩塌") &&
+      result.rules.evidenceCount === 4 &&
+      result.rules.missOk &&
+      !result.rules.missMatched &&
+      result.rules.rejectCode.includes("E_RULE_UNORDERABLE") &&
+      result.rules.badJsonRejected.includes("合法 JSON") &&
+      result.rules.diskUnchanged &&
       // A2 任务路由（离线那一半）：旗舰端点失败 → 回落小模型端点出文；冷却跳过坏端点；一次动作一条记录
       result.routingA2.ok &&
       result.routingA2.firstProvider === "small-good" &&

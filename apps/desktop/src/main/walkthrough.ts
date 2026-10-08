@@ -2009,6 +2009,66 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 40,
+    title: "规则页：派系包规则目录与沙箱试算（M4/T4-1，R51）",
+    file: "step40-rules.png",
+    body: String.raw`
+      await tab('规则');
+      const view = await waitFor(() => document.querySelector('.rules-view'), 12000);
+      if (!view) return { ok: false, note: '未进入规则页：' + pageText() };
+      const panel = await waitFor(() => {
+        const hit = [...document.querySelectorAll('.panel h3')].find((x) => x.textContent.includes('规则目录'));
+        return hit ? hit.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到规则目录面板：' + pageText() };
+      panel.scrollIntoView({ block: 'start' });
+      const summary = () => {
+        const el = document.querySelector('.rules-summary');
+        return el ? String(el.textContent).replace(/\s+/g, ' ') : '';
+      };
+      const summaryText = await waitFor(() => (summary().includes('规则 6 条') ? summary() : null), 12000);
+      const rows = [...document.querySelectorAll('.rules-table tbody tr')].length;
+      const fileHeads = [...document.querySelectorAll('.rules-file-head')].map((x) => String(x.textContent).trim());
+      const broken = [...document.querySelectorAll('.rules-file-error')].length;
+      const badExpr = [...document.querySelectorAll('.rules-problems.error')].length;
+      // 沙箱试算：默认选中的是第一条规则（power-no-regress），夹具预置为「境界升而战力降」
+      const runBtn = document.querySelector('.rules-dryrun-run');
+      if (!runBtn) return { ok: false, note: '找不到「试算」按钮：' + pageText() };
+      runBtn.click();
+      const hitLine = await waitFor(() => {
+        const el = document.querySelector('.rules-dryrun-hit');
+        return el && String(el.textContent).includes('疑似战力崩塌') ? String(el.textContent).replace(/\s+/g, ' ') : null;
+      }, 12000);
+      const evidenceRows = [...document.querySelectorAll('.rules-evidence-table tbody tr')].length;
+      // 坏夹具必须被拒并给出原因，**不得回显成「未命中」**
+      const box = document.querySelector('.rules-fixture');
+      if (!box) return { ok: false, note: '找不到夹具输入框：' + pageText() };
+      const proto = Object.getPrototypeOf(box);
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+      setter.call(box, '{不是合法 JSON');
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(150);
+      document.querySelector('.rules-dryrun-run').click();
+      const rejectedLine = await waitFor(() => {
+        const el = document.querySelector('.rules-dryrun-rejected');
+        return el && String(el.textContent).includes('合法 JSON') ? String(el.textContent).replace(/\s+/g, ' ') : null;
+      }, 12000);
+      // 恢复默认夹具，别把坏状态漏给后续步骤
+      setter.call(box, JSON.stringify({ a: { chapter: 'A', realm: { tier: 3 }, combat_power: 100 }, b: { chapter: 'B', realm: { tier: 4 }, combat_power: 80 } }, null, 2));
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(200);
+      const missLine = document.querySelector('.rules-dryrun-miss');
+      return {
+        ok: summaryText !== null && rows === 6 && fileHeads.length === 2 && broken === 0 && badExpr === 0 &&
+          hitLine !== null && evidenceRows === 4 && rejectedLine !== null && missLine === null,
+        note: '汇总="' + summaryText + '"；规则行=' + rows + '；件=' + fileHeads.join(',') +
+          '；解析失败件=' + broken + '；表达式问题格=' + badExpr +
+          '；命中回执="' + (hitLine || '').slice(0, 60) + '"；依据行=' + evidenceRows +
+          '；拒绝回执="' + (rejectedLine || '').slice(0, 70) + '"',
+      };
+    `,
+  },
 ];
 
 /**
@@ -2115,7 +2175,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-39）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-40）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

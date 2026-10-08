@@ -11,9 +11,10 @@ import { LibraryView } from "./LibraryView";
 import { MemoryView } from "./MemoryView";
 import { OutlineView } from "./OutlineView";
 import { ProjectView } from "./ProjectView";
+import { RulesView } from "./RulesView";
 import { StatsView } from "./StatsView";
 
-type Tab = "workbench" | "outline" | "editor" | "library" | "ai" | "memory" | "export" | "archive" | "files" | "stats";
+type Tab = "workbench" | "outline" | "editor" | "library" | "ai" | "memory" | "rules" | "export" | "archive" | "files" | "stats";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "workbench", label: "起源工作台" },
@@ -22,6 +23,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "library", label: "稿件总览" },
   { key: "ai", label: "AI 副驾" },
   { key: "memory", label: "记忆" },
+  { key: "rules", label: "规则" },
   { key: "export", label: "导出与自查" },
   { key: "archive", label: "世界观档案" },
   { key: "stats", label: "码字统计" },
@@ -179,6 +181,7 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
         )}
         {tab === "ai" && <AiView />}
         {tab === "memory" && <MemoryView />}
+        {tab === "rules" && <RulesView />}
         {tab === "export" && <ExportView />}
         {tab === "archive" && <ArchiveView focusCardPath={archiveFocus} />}
         {tab === "stats" && <StatsView />}

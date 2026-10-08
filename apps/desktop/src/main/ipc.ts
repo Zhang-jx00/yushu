@@ -20,6 +20,9 @@ import {
   type TextFixBodyPayload,
   type TextFixBodyResultPayload,
   type TextProofreadPanelPayload,
+  type RuleCatalogPayload,
+  type RuleDryRunPayload,
+  type RuleDryRunResult,
   type TextProofreadPayload,
   type AiRejectPayload,
   type AiFeedbackState,
@@ -114,6 +117,7 @@ import { appendAiFeedback, readAiFeedbackState } from "./ai-feedback.js";
 import { createSafeStorageCipher } from "./secrets-ops.js";
 import { installKeyCipher } from "./ai-ops.js";
 import { readCostPanel } from "./cost-ops.js";
+import { dryRunRule, readRuleCatalog } from "./rule-ops.js";
 import { buildFixedBody, readProofreadPanel } from "./text-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
@@ -477,6 +481,13 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(CHANNELS.textFixBody, (_event, payload: TextFixBodyPayload) =>
     wrap<TextFixBodyResultPayload>(() => buildFixedBody(requireGateway(), payload)),
+  );
+
+  // 规则 DSL（M4/T4-1，R51）：目录与试算都是**只读**——规则本体来自内置派系包目录，御书不改派系包，
+  // 试算只吃调用方给的 JSON 夹具（不读正文、不写盘）。真数据比对属 T4-2。
+  ipcMain.handle(CHANNELS.ruleCatalog, () => wrap<RuleCatalogPayload>(() => readRuleCatalog(requireGateway())));
+  ipcMain.handle(CHANNELS.ruleDryRun, (_event, payload: RuleDryRunPayload) =>
+    wrap<RuleDryRunResult>(() => dryRunRule(requireGateway(), payload)),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

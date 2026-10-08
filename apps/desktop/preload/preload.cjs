@@ -84,6 +84,10 @@ contextBridge.exposeInMainWorld("yushu", {
     proofread: (payload) => invoke("text:proofread", payload),
     fixBody: (payload) => invoke("text:fixBody", payload),
   },
+  rule: {
+    catalog: () => invoke("rule:catalog"),
+    dryRun: (payload) => invoke("rule:dryRun", payload),
+  },
   export: {
     preview: () => invoke("export:preview"),
     run: (payload) => invoke("export:run", payload),

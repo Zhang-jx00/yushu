@@ -12,6 +12,9 @@ import type {
   TextFixBodyResultPayload,
   TextProofreadPanelPayload,
   TextProofreadPayload,
+  RuleCatalogPayload,
+  RuleDryRunPayload,
+  RuleDryRunResult,
   AiCostPayload,
   AiStartResult,
   AiStreamEvent,
@@ -150,6 +153,11 @@ export interface YushuApi {
   text: {
     proofread: (payload: TextProofreadPayload) => Promise<TextProofreadPanelPayload>;
     fixBody: (payload: TextFixBodyPayload) => Promise<TextFixBodyResultPayload>;
+  };
+  /** 规则 DSL 目录与沙箱试算（M4/T4-1，R51）：两个方法都是只读 */
+  rule: {
+    catalog: () => Promise<RuleCatalogPayload>;
+    dryRun: (payload: RuleDryRunPayload) => Promise<RuleDryRunResult>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;
