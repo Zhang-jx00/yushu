@@ -1,6 +1,7 @@
 # 御书 · 交接文档（给 QoderCN）
 
 > 交接时间：2026-10-07 ｜ 交接时远端 main：`2d3115a4`（R30–R39 十轮全部已推送）
+> **R40 续跑更新（2026-10-07，QoderCN）**：T3-12 已完成，远端 main 随后同步；本文 §1 快照与 §4 未完成清单已按 R40 实况更正（上一版误记 tag 未推、远端停在 `2d3115a4`，实际 `git ls-remote` 显示 main 已含交接文档提交、`v0.2.0` tag 已在远端）。
 > 本文写给接手的 AI 编码助手（QoderCN）：读完这一份 + `docs/04-开发计划.md`（唯一任务清单）+ `docs/06-M1验收与自查清单.md` §八（逐轮记录），即可无缝续跑。
 > 阅读顺序建议：本文 §1 状态快照 → §7 每轮工作流（照做）→ §4 未完成清单（领任务）→ 其余按需查阅。
 
@@ -10,18 +11,18 @@
 
 **御书**：本地优先的开源网文创作工具（Electron + React + TypeScript monorepo）。核心理念：Markdown/YAML 为唯一真源、SQLite 仅作索引、AI 结果一律候选化（采纳是用户显式动作）、离线能力完整（AI 可整体关闭）。
 
-当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）已完成 T3-1～T3-11（共 11 个任务、R30–R39 十轮）**。M3 只剩 T3-12 / T3-13 / T3-14 三个任务 + §6.5 三条验收（A2/A3/A4）待核。
+当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）已完成 T3-1～T3-12（共 12 个任务、R30–R40 十一轮）**。M3 只剩 T3-13 / T3-14 两个任务 + §6.5 四条验收（A2/A3/A4/A5-A6 复核）待核。
 
 | 项目 | 状态 |
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
-| 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；本地 main 与远端同步于 `2d3115a4`） |
-| 单测 | **425/425 全绿**（56 个测试文件）——`pnpm test` |
+| 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
+| 单测 | **483/483 全绿**（59 个测试文件）——`pnpm test`（第 40 轮 R40 / T3-12 后） |
 | 类型检查 | **10 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e` |
-| UI 预演 | **35/35 全绿**（最近一次新目录 v78）——见 §6.3 |
-| 性能实测 | 10/10 达标（最近一次 R36 报告 `docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json`） |
-| 版本 | `v0.2.0` 已打本地 tag（远端未推 tag，见 §5.6） |
+| UI 预演 | **36/36 全绿**（最近一次新目录 v84）——见 §6.3 |
+| 性能实测 | 10/10 达标（最近一次 R36 报告 `docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json`）；R40 未触热路径，本轮不适用 |
+| 版本 | `v0.2.0` tag **已在远端**（本文上一版记为"远端未推"，已过期更正） |
 
 ---
 
@@ -99,6 +100,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 | R37 | T3-9 上下文预览器 | 组装条目补 matched_keys；`snapshot.ts`（`yushu.context-snapshot/v1` + fingerprint=sha256(决策内容，除 generated_at)——同输入两次一致）；`memory:contextSnapshot`（写 `.yushu/context-log/`）；预览器五列表 + 导出按钮；**docs/04 §6.5 A1 标记达成** |
 | R38 | T3-10 结构化输出与设定抽取 | `structured.ts`（schema 契约注入 + extractJson + 后校验 + 错误回喂修复 ≤2 + 如实失败）；`world-engine/extract.ts`（`EXTRACT_OUTPUT_SCHEMA`（quote 必填）、三分类 new/augment/conflict、candidate_id/status 服务端强制、卡草案+出处凭据）；`extract` 路由（T3-3 挂点落地）；记忆页「设定抽取」面板（仅 new 可采纳；服务端复核拒 augment/conflict） |
 | R39 | T3-11 写作 UX | `typewriter-buffer.ts`（token 缓冲 + rAF 每帧 flush；匀速/瞬时两档）；`candidate-diff.ts`（中文句级切分/diff/局部采纳合并）；AI 副驾多候选生成（2-3 串行 + 独立标记）+ 候选卡片（句级差异/替换/追加/按句勾选局部采纳）+ 拒绝原因记录（`.yushu/ai-feedback.jsonl` + 统计）；`batch.ts` 半价通道规划（batch_eligible + planChannel）+ 通道展示 + usage 记 channel |
+| R40 | T3-12 Token 与成本 | `cost.ts`（每 1M tokens 单价、实报+估算双口径、未配置价格返回 null、按任务/模型/合计聚合、多币种不强行合计、偏差中位数、`accumulateUsage` 跨轮累加）；`cache.ts`（`checkCacheOrchestration`：稳定前缀置头 / 断点下标 / 击穿点名 / 门槛 / 节省投影仅在已声明读价时给出）；三协议 usage 缓存字段归一（子集扣出 vs 互斥直映）；`structured.ts` 逐轮累加 usage；`llm.yaml` 模型 `pricing` + **修复 saveConfig 全量替换抹掉手写价格的隐患**；ai-usage 记 `tokens`+`estimate`；`cost-ops.ts` + `ai:cost`；AI 副驾成本面板；偏差 >50% 告警。单测 483/483、预演 36/36（v84）。**另修掉一处 M2 遗留**：富文本 `@` 菜单重开时继承上次高亮（会预选第 3 项、回车插错卡）→ 抽 `nextMentionActive` 只在同一次 `@` 会话内继承 |
 
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
@@ -115,9 +117,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 ## 4. 未完成清单（按优先级）
 
-### 4.1 M3 剩余任务（docs/04 §6.3 的三个未做项）
+### 4.1 M3 剩余任务（docs/04 §6.3 的两个未做项）
 
-- **T3-12 Token 与成本**：本地估算（已有 `estimateTokens` 口径：CJK≈1/字、ASCII≈1/4）+ `usage` 实报（各协议 usage 已回传）→ **成本面板**（按项目/任务/模型归因，价格表可配置）+ **prompt caching 稳定前缀编排**（世界设定总纲 + 风格卡置头；M1 已有 `cache.breakpoint_after` 粗预算，需与 T3-7 的 `stableTokens` 对齐）。对接 docs/04 §6.5 **A3 验收（成本偏差与可分解）**。
 - **T3-13 中文处理初版**：OpenCC 繁简转换、中文标点规范化、错别字与重复表达检测（J14）。可先做纯逻辑包（不依赖外网词典），检测结果候选化。
 - **T3-14 安全**：API Key 走 `safeStorage.encryptStringAsync`（只存 ciphertext + key_ref）；导入/导出项目自动剔除密钥（K12）。当前是「环境变量/会话内存 Key」过渡态（明文禁止落盘已有 lint 保障）。
 
@@ -125,10 +126,10 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 - `- [x] A1` 可复现快照与截断标记（R37 已达成，有机器证据）。
 - `- [ ] A2 任务路由生效`：命名/润色走小模型、正文走旗舰、失败按 fallback 降级——机制（T3-2）与 e2e 重试探针已具备，但**尚缺一次针对 A2 的端到端演示/取证**（建议：e2e 增加「模拟主 provider 失败 → fallback 小模型完成命名任务」的探针，并在 docs/04 A2 处附机器证据）。
-- `- [ ] A3 成本面板`：随 T3-12 落地后取证。
+- `- [ ] A3 成本面板`：R40（T3-12）已落地并取证——**可分解 / 双口径 / 不猜价已被机器断言**，但「偏差在可接受范围内」**无法用 mock 证明**（mock 对任意请求固定回传 `prompt_tokens:12`，实测偏差 +4404%）。保持未勾选，接真 provider 后与 A2/A4 同轮量化复核（证据与口径详见 docs/04 §6.5 A3 与 §6.3 T3-12 注记）。
 - `- [ ] A4 AI 整体关闭后本地能力无退化`：M1 有「renderer 外网请求 0」的 trial 证据（旧口径），建议以当前代码重跑一次 trial/网络审计并在 A4 附证据。
-- `- [ ] A5 记忆不跨项目泄漏`：机制与测试均已具备（R33 单测 + e2e 探针 `crossProject`：异项目记录 rejected 且 `memory-cross-project-leak` 为 error 级；R36 起 A5 相关红线在两处探针持续断言）——**建议复核后标记 [x] 并补一段机器证据**（勿直接改，先跑一遍 e2e 确认探针输出）。
-- `- [ ] A6 上下文预算超限正确裁剪`：R35 已覆盖（小预算逐出顺序 + system_prompt 只截断 + 合计不超预算 + 快照截断标记；e2e/预演均有断言）——**建议复核后标记 [x] 并补证据**（同上流程）。
+- `- [ ] A5 记忆不跨项目泄漏`：机制与测试均已具备（R33 单测 + e2e 探针 `crossProject`：异项目记录 rejected 且 `memory-cross-project-leak` 为 error 级；R36 起两处探针持续断言）。**R40 的 e2e 全链路复跑已再次确认该探针通过**（`E2E_EXIT=0`）——下一轮可直接据此标记 `[x]` 并附本次探针输出，无需再改代码。
+- `- [ ] A6 上下文预算超限正确裁剪`：R35 已覆盖（小预算逐出顺序 + system_prompt 只截断 + 合计不超预算 + 快照截断标记；e2e/预演均有断言）。**同 A5：R40 e2e 复跑已再次确认**（`assembly.smallEvicted/smallWithin/smallKeepsSystem` 与 `snapshot.smallTruncated` 均为真），下一轮补证据后可标记 `[x]`。
 
 ### 4.3 各轮「边界如实标注」的遗留（已在 docs/04 各注记写明，勿重复实现，按需推进）
 
@@ -276,13 +277,17 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 
 ## 11. 交接后第一条建议任务（可直接开工）
 
-**T3-12 Token 与成本**（唯一空缺里依赖最少、A3 同轮可取证）：
-1. `config/llm.yaml` 的 model 增加可选 `pricing: {input, output, cache_read?, cache_write?}`（缺省不猜价，UI 标注"未配置价格"）。
-2. 主进程统计：基于 `.yushu/ai-usage.jsonl`（已有 task/provider/model/chars，R38 起含 channel）扩展记录 `tokens: {prompt, completion}`（各协议 usage 已回传，落盘即可）+ 按项目/任务/模型聚合接口。
-3. `@yushu/memory` 或 `@yushu/core` 增加纯逻辑成本计算（估算 + 实报双口径，缺 usage 时用 `estimateTokens` 兜底并标注）。
-4. AI 副驾新增「成本面板」：按任务/模型分解、缓存命中节省估算（对接 `stableTokens` 稳定前缀与 `cache` 能力声明）。
-5. prompt caching 编排核对：确保组装后的稳定前缀（system_prompt + world_core + 摘要）确实置头且断点与 `context.cache.breakpoint_after` 对齐（只读核对 + 面板展示断点）。
-6. e2e 探针（usage 含 tokens / 成本聚合正确 / 断点位置）；docs 三处 + 3 提交 + 推送。
+**T3-12 Token 与成本已于 R40 完成**（2026-10-07：成本数学 / 跨协议 usage 归一 / 定价透传 / `ai:cost` 通道 / 成本面板 / 编排核对；单测 483/483、e2e 与预演 36/36 全绿（v84），详见 docs/04 §6.3 T3-12 注记与 docs/06 §八 第 40 轮）。下一轮按 §5.1 顺序建议：
+
+**T3-14 安全（API Key 加密落盘）**：
+1. `ai-ops.ts` 的会话内存 Key（`sessionKeys`）之外，新增持久态：`safeStorage.encryptStringSync` 产 ciphertext，只写 `.yushu/secrets.json`（派生物、不入 Git）+ `key_ref`；解密只在主进程内存态，**密文与明文都不经 IPC 回传渲染层**。
+2. `config/llm.yaml` 保持只存 `api_key_env`（或 `key_ref` 标识）；`lintLlmConfig` 增加 `key-plaintext-detected` 的 error 级判定路径（现为规则名，需要落到实际校验）。
+3. 导入/导出项目（`export:*` 与项目迁移路径）自动剔除密钥文件与 frontmatter 中的密钥字段。
+4. Provider 面板增加「已加密保存 / 仅本次会话 / 环境变量」三态显示（不显示 Key 本体，哪怕是掩码）。
+5. 单测覆盖：密文可回解、明文绝不落盘（写盘路径拦截断言）、导出包剔除密钥；e2e 探针 + 预演新 step。
+6. 顺带把 §4.2 的 **A5 / A6 标记 `[x]`**（R40 的 e2e 已复跑确认探针，只差补证据文字），并把 docs/06 §五 的 walkthrough 计数更新（`scene` 字段本轮已更新为「步骤 10-36」）。
+
+> 提醒：A2 / A3 / A4 三条验收都卡在「需要真实 provider 或真实网络审计」，纯离线轮次无法达成——安排取证轮时需要先确认用户侧可用端点，不要在 mock 上声称达成。
 
 祝顺利。有任何与本文冲突的地方，以 `docs/04`/`docs/03` 与仓库实际代码为准，并把修正回写进相应文档。
 
