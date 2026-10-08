@@ -11,16 +11,16 @@
 
 **御书**：本地优先的开源网文创作工具（Electron + React + TypeScript monorepo）。核心理念：Markdown/YAML 为唯一真源、SQLite 仅作索引、AI 结果一律候选化（采纳是用户显式动作）、离线能力完整（AI 可整体关闭）。
 
-当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）的 14 个功能任务全部完成（T3-1～T3-14，R30–R45），第 46–48 轮为验收取证与遗留补齐**。M3 剩余：§6.5 的 **A3（成本偏差需真实 provider）** 一条——A1 / A2 / A4 / A5 / A6 已达成并有机器证据（A2 于 R46 离线取证勾选，A4 于 R47，A5/A6 于 R41）。收口动作：A1–A6 全绿 → `v0.4.0` 打 tag（docs/04 §6.7）；**A3 必须等真实端点，不要在 mock 上声称达成**。
+当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）的 14 个功能任务全部完成并勾选（T3-1～T3-14，R30–R45，其中 T3-12 于 R48–R49 补齐遗留后勾选）**。M3 剩余：§6.5 的 **A3（成本偏差需真实 provider）** 一条——A1 / A2 / A4 / A5 / A6 已达成并有机器证据（A2 于 R46 离线取证勾选，A4 于 R47，A5/A6 于 R41）。收口动作：A1–A6 全绿 → `v0.4.0` 打 tag（docs/04 §6.7）；**A3 必须等真实端点，不要在 mock 上声称达成**。
 
 | 项目 | 状态 |
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **627/627 全绿**（71 个测试文件）——`pnpm test`（第 48 轮 R48 / 成本章节维度与预算体检引擎后） |
+| 单测 | **639/639 全绿**（71 个测试文件）——`pnpm test`（第 49 轮 R49 / T3-12 收口后） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
-| UI 预演 | **39/39 全绿**（最近一次新目录 **v107**，44.5s，`screenshotFailures:[]`、证据缺失=0）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
+| UI 预演 | **39/39 全绿**（最近一次新目录 **v110**，44.2s，`screenshotFailures:[]`、证据缺失=0）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
 | 性能实测 | 10/10 达标（最近一次 R36 报告 `docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json`）；R40 未触热路径，本轮不适用 |
 | 版本 | `v0.2.0` tag **已在远端**（本文上一版记为"远端未推"，已过期更正） |
 
@@ -119,6 +119,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 | R48 | 成本章节维度贯通 + 预算护栏与成本体检引擎 | 补第 40 轮自己写下的 J09 遗留：① `CostEntry` 加 `chapter_id`/`time`、`summarizeCosts.byChapter`（**未标注章节归入「（未标注章节）」一行，不静默丢条目**）→ `AiCostPanelPayload.byChapter` → 面板复用 `CostBreakdownTable`；写侧核实 `chapter_id` 自 R40 起就在 `.yushu/ai-usage.jsonl` 里，本轮补的是**读侧贯通**（别把"读到"写成"写到"）。② 新增 `llm/budget.ts`：`config/budget.yaml` 严格解析（`apiVersion` 必填 + **未知键一律拒绝**——拼错的键被静默忽略会让护栏以为"未配置"）、确定性序列化、缺省不设月度上限。③ `lintCost` 四条规则：`cost-usage-missing`（warn，**adopt 不发请求整类排除**）、`budget-context-overflow`（error，`inputTokens > context − max_output`）、`budget-monthly-cap`（warn/error，缺省 0.8）、`cost-per-chapter-anomaly`（warn，> 均值 3×；**样本 < 3 章整条沉默**——两章时高的那章必然超倍数，属误报源）；未定价与跨币种不参与异常判定；`chapterCostsOf` 引擎与面板共用。**只报不改**（降级/拦截属策略变更，需用户在场）；错误用 `YushuError` + `E_LLM_BUDGET`（不引 `LlmError`，shared 侧循环导入）。自查抓到面板章节表**漏表头 + 缩进错位**、`spec.capabilities` 可选需可选链。单测 +13 → **627/627（71 文件）**，typecheck 11 包全 Done，e2e ✅，预演 **39/39**（改动前 v106；补表头后按 §6.3 重跑 **v107** 仍 39/39、证据缺失=0）。**遗留**：预算与体检并入面板 notes 的接线未做（`spentThisMonth` 按 `time` 归月、`assembly` 取组装实测）；`per_call_confirm_over` 只有字段与解析、**尚无拦截点** |
 
+| R49 | 预算护栏与成本体检接入面板（T3-12 收口） | 补第 48 轮留下的断头路（引擎有规则、面板看不到结果）：主进程按 `CostEntry.time` 归自然月算 `spentThisMonth`（**实报优先、缺实报用本地估算补**，两口径 `bySource` 分列）、章节金额复用 `chapterCostsOf`、组装实测 token **与编排核对共用同一次 context preview**（两处各读一次盘会取到不同正文，同一面板自相矛盾）。`config/budget.yaml` 落地为**可选文件**（world-engine 加 `BUDGET_CONFIG_PATH`），**解析失败不静默回落成"没配置"**：错误原文外显 + 追加 error 级 `budget-config-invalid` 排在最前。**缺输入的规则整条列入 `skipped` 并逐条点名**（未配上限 / 未选章纲 / 模型未声明 `limits.context` / 可折算章节 <3 / 无 provider 声明 usage）——延续 R45 `skippedRules` 那条线：**不把"没跑"显示成"没问题"**。面板新增「预算护栏与成本体检」区（本月已用含"N 条未定价不计金额"、生效上限与阈值、findings 着色、skipped 说明）。**自己埋的坑自己抓到**：`resolvePricing` 原把 `fallbackEntries` 计数塞在查价闭包里，三处聚合共用后同一条记录被计 2 次（单测当场红）→ 查价改无副作用、计数单独走一遍，token 判据抽成 `hasUsageTokens` 两侧共用。单测 +12 → **639/639（71 文件）**，typecheck 11 包全 Done，e2e ✅（探针新增 `budgetInvalidCode:"budget-config-invalid" / capSeverity:"error" / capSpent:"¥0.0003" / capMonthKey:"2026-10" / noTargetSkipsOverflow:true`，坏 yaml 读完复原不污染后续探针），预演 step36 扩断言 **39/39**（v108；删「未跑：」前缀 → v109 step36 FAIL 退出码 1；复原 → v110 终版）。变异 7 次全能红（引擎 3 + 接线 3 + 预演断言 1）。**未勾 A3 的唯一原因仍是偏差数值需真实 provider，与分解维度无关**（四维已齐，已更正 docs/04 §6.5）。`per_call_confirm_over` **仍无拦截点** |
+
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
 1. **真源与派生分离**：Markdown/YAML 是唯一真源；SQLite（`.yushu/index.db`）与 `.yushu/context-log/`、`.yushu/ai-usage.jsonl`、`.yushu/ai-feedback.jsonl`、`.yushu/recovery/`、`.yushu/snapshots/`、`exports/` 都是派生物——可删可重建，绝不作为真源，不入 Git。
@@ -153,7 +155,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 - R36：sqlite-vec 扩展**加载路径代码就绪但本机无扩展未实测**（实测走本地余弦兜底，注记与回执均如实标注）；云端语义嵌入（bge-m3）与 bge-reranker 是 `VectorStore`/`rerankHits` 的**替换点**，接 provider 后替换即可。
 - R38：provider 支持 `json_schema`/tools 时可把「提示词约束 + 后校验」升级为**原生强约束**（structured.ts 已是同一契约的另一端）；augment 的字段级合并 UI 与抽取失败池面板留 T4。
 - R39：真 Batch 为异步批处理（24h），交互链路不排队——现行半价通道是「归属提示 + usage 记账」；多候选限 1-3；拒绝原因看板（分布视图/回流提示）与批量队列视图留 T4。
-- R48：预算护栏与 `lintCost` **引擎已完成并测透，但尚未接入面板**——需要主进程把 usage 记录按 `time` 归月得到 `spentThisMonth`、从上下文组装取实测 `assembly.inputTokens` 与所选模型的 `context / max_output`，再把 findings 并入 `AiCostPanelPayload.notes`；`per_call_confirm_over` 只有配置字段与解析，**拦截点未做**（发请求前超价须用户确认）。`budget-monthly-cap` 的"改用本地/小档"是 message 文本，不是自动切换。
+- ~~R48：预算护栏与 `lintCost` 引擎已完成并测透，但尚未接入面板~~ **接线已于 R49 完成**（归月已用金额 / 组装实测输入 / findings 与 skipped 全部渲染）。R49 之后成本线剩余：① `per_call_confirm_over`（单次超价须确认）**只有配置字段与解析，没有拦截点**——拦截会打断生成流程，属交互决策，需先与作者确认口径；② Batch 真实提交（异步 24h 队列）；③ 缓存命中率曲线与「前缀被击穿」历史趋势（J09 实践 4）；④ `budget-monthly-cap` 的"改用本地/小档"仍是 message 文本，**不自动切换模型**（J09「只报不改」）。
 - 历史遗留（M2）：CI runner（ci-low-spec / ci-mid-spec）未接入；`real-sample-300k` 真实样本夹具待外部样本；`docs/06 §七` 记录了推送网络问题的历史处置。
 
 ### 4.4 架构级「替换点」清单（设计时就留好的口子）
@@ -173,7 +175,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 ### 5.1 立即（M3 收口，建议 3-4 轮）
 
-1. ~~**T3-12 成本与缓存**（含 A3 取证）~~ **已完成（R40；遗留的章节维度与预算护栏引擎补于 R48）** → 2. **A5 / A6 复核勾选** **已完成（R41）** → 3. ~~**T3-14 安全（Key 加密）**~~ **已完成（R42 引擎与主进程 + R43 桌面端与取证）** → 4. ~~**T3-13 中文处理**~~ **已完成（R44 引擎侧 + R45 桌面端与取证）** → 5. **A2 取证 已完成（R46）** → 6. **A4 取证 已完成（R47）** → 7. **A3 待用户侧真实端点**（唯一未勾项：偏差量化需真实 provider 回传 usage；**不要在 mock 上声称达成**）。M3 功能面已收口，下一批轮次进入 **M4**（docs/04 §7 / T4-1 起）；A3 取证与 `v0.4.0` 打 tag 等真实端点可用时一并执行（§6.7：A1–A6 全绿才打 tag）。
+1. ~~**T3-12 成本与缓存**（含 A3 取证）~~ **已完成（R40；遗留的章节维度与预算护栏引擎补于 R48）** → 2. **A5 / A6 复核勾选** **已完成（R41）** → 3. ~~**T3-14 安全（Key 加密）**~~ **已完成（R42 引擎与主进程 + R43 桌面端与取证）** → 4. ~~**T3-13 中文处理**~~ **已完成（R44 引擎侧 + R45 桌面端与取证）** → 5. **A2 取证 已完成（R46）** → 6. **A4 取证 已完成（R47）** → 7. **T3-12 遗留补齐 已完成（R48 章节维度 + R49 预算护栏与体检接入面板，T3-12 勾选）** → 8. **A3 待用户侧真实端点**（唯一未勾项：偏差量化需真实 provider 回传 usage；**不要在 mock 上声称达成**）。M3 功能面已全部勾选，下一批轮次进入 **M4**（docs/04 §7，T4-1 起）；A3 取证与 `v0.4.0` 打 tag 等真实端点可用时一并执行（§6.7：A1–A6 全绿才打 tag）。
 
 ### 5.2 之后（以 docs/04 为准，勿偏离）
 
@@ -304,15 +306,16 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 
 **A2 / A4 取证已完成（R46 / R47）**：A2 用两个独立 mock 端点（旗舰全程 503 / 小模型正常）实测 `{badHits:3, badFailures:3, goodHits:3, goodFailures:0}`；A4 先把「关闭 AI」从渲染层按钮禁用**升级为进程侧闸门**（`E_AI_DISABLED`，三入口前置断言）再取证（`{blockedAll:true, localFailed:[], localCount:11}` + step39）。证据原文见 docs/04 §6.5 与 docs/06 §八 第 46–47 轮。
 
-**R48 补完 J09 遗留（章节维度 + 预算体检引擎）**：`byChapter` 已贯通到面板；`llm/budget.ts` 的 `parseBudgetConfig` / `lintCost` 四条规则已落地并有 12 例单测（每条规则含"不该命中"一侧）。
+**R48 + R49 补完 J09 成本线遗留（T3-12 至此勾选）**：R48 把 `byChapter` 贯通到面板并落地 `llm/budget.ts`（`parseBudgetConfig` / `lintCost` 四条规则，12 例单测）；R49 把体检真正接进面板——归自然月的「本月已用」（实报优先、缺实报用估算补，两口径分列）、组装实测输入 token **与编排核对共用同一次 preview**、`config/budget.yaml` 解析失败**外显而不静默回落**（追加 error 级 `budget-config-invalid`）、缺输入的规则整条列入 `skipped` 逐条点名。单测 639/639（71 文件）、e2e ✅、预演 **39/39**（终版 v110）。详见 docs/04 §6.3 T3-12 三轮注记与 docs/06 §八 第 48–49 轮。
 
-**下一轮（R49）——把预算护栏与成本体检接入面板（收尾 M3 成本线，勿开新功能）**：
-1. 主进程 `cost-ops.ts`：按 `CostEntry.time` 归**自然月**聚合出 `spentThisMonth: Record<currency, number>`（未定价记录不进金额，也别用 0 冒充）；从上下文组装取 `assembly.inputTokens` 与所选模型的 `context / max_output`（`@yushu/memory` 组装结果与 `llm.yaml` 的 `limits` 都已有字段，不要新造口径）。
-2. 读 `config/budget.yaml`（**可选文件**，不存在就用 `defaultBudgetConfig()`；解析失败要让面板显示错误而不是静默回落到缺省），调 `lintCost({entries, providers, budget, spentThisMonth, assembly, chapterCosts})`，findings 并入 `AiCostPanelPayload.notes`（error 与 warn 分色，沿用面板既有 `notes` 渲染，**不新增通道**）。
-3. 取证：单测覆盖「未设上限不报 / 临近 warn / 超支 error」三态与「跨月不归错月」；e2e 探针扩到既有成本探针（断言 findings 码集合）；预演 step36 加"体检行可见"断言，**跑全新目录（v108…）**。
-4. 顺带同步 docs/06 §五 计数、本文 §1 快照与 §4.3 的 R48 遗留条（做完就把它划掉）。
+**下一轮（R50）——M4 / T4-1 规则 DSL 求值层（引擎侧，先不碰桌面端）**：
+1. 落在 **`@yushu/genre-engine`**（docs/04 §7.4 已指定该包承载「规则 DSL 求值沙箱 + 规则加载与版本合并」；它已有 `loadPack / lintPack / fuse`，规则即数据的口径与派系包同源）。研究依据 `docs/research/G-流派总论/G06-派系包建模.md`：§2 第 4 条「规则 DSL 沙箱 → 表达式禁循环禁 IO，求值超时与递归深度上限」，§5 第 86 行起有「条件=JSONLogic 子集 + 产出=结构化动作」的 YAML 示例草案。
+2. **必须实现的四道沙箱闸门**：① 操作符白名单（`var / > / < / == / and / or / in / cat` 一类的纯函数子集，**未知操作符直接报错不降级**）；② **禁循环**——不实现任何迭代原语（`reduce`/`map` 类一律拒绝），只允许有限深度嵌套；③ **递归深度上限**（建议 16，超限报 `E_RULE_DEPTH`）；④ **求值超时**（同步求值无法真中断，用「节点计数上限」代替墙钟时间，**别拿 `Date.now()` 假装超时**——那会让同输入同输出被破坏）。
+3. 规则形状按 T4-1 验收口径：`{id, severity: error|warn|info, scope: scene|chapter|cross_chapter|project, when: <JSONLogic 子集>, then: <结构化动作>, source: {pack, version}}`；**`severity` 与 T3-13 一样只有三档**，`scope` 决定 R53 报告聚合粒度。**求值输出** `{rule_id, severity, span?, evidence, fix?}`——与 `@yushu/text` 的 finding 同形，别让 M4 长出第二套结果结构。
+4. 单测要求（沿用本项目口径）：每条闸门一例命中 + 一例**不该命中**；新断言先做**红/绿配对**（改判定看它能不能红）；确定性断言（同输入同输出、排序有码点兜底键）。
+5. 桌面端接入留 R51（规则管理面板 + `rule:*` 通道四处同步）；本轮纯引擎，**不要提前写 IPC**。
 
-> 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。R50 起进入 M4（docs/04 §7，T4-1 规则 DSL 沙箱求值：禁循环禁 IO + 超时 + 深度上限）。
+> 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。**M3 功能任务（T3-1～T3-14）已全部勾选**，R50 起进入 M4（docs/04 §7）。
 
 祝顺利。有任何与本文冲突的地方，以 `docs/04`/`docs/03` 与仓库实际代码为准，并把修正回写进相应文档。
 
