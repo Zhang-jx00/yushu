@@ -256,3 +256,68 @@ export function chapterCostsOf(
     .map(([chapterId, value]) => ({ chapterId, cost: value.cost, currency: value.currency }))
     .sort((a, b) => (a.chapterId < b.chapterId ? -1 : a.chapterId > b.chapterId ? 1 : 0));
 }
+
+/** 记录时间 → 归月键（`YYYY-MM`）；与写入侧 `new Date().toISOString()` 同为 UTC 口径 */
+export function monthKeyOf(time: string | undefined): string | null {
+  if (!time) return null;
+  const match = /^(\d{4})-(\d{2})/.exec(time);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+/** 当前归月（now 由调用方注入以便测；UTC 与记录写入同口径，跨月边界至多差一天并在面板写明） */
+export function currentMonthKey(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 7);
+}
+
+/** 月度已用（按币种与来源口径分列） */
+export interface MonthSpend {
+  /** 合计金额（实报 + 仅估算两口径相加；来源见 bySource） */
+  byCurrency: Record<string, number>;
+  bySource: { usage: Record<string, number>; estimate: Record<string, number> };
+  /** 本月内「有 token 口径但没配价格」→ 无法折算金额 */
+  unpriced: number;
+  /** 本月内「usage 与估算都缺」→ 连 token 数都无法确定 */
+  uncounted: number;
+  /** 归入本月的记录总数（含上面两类无法计入的） */
+  records: number;
+}
+
+/**
+ * 本自然月已用金额。
+ *
+ * 口径：优先 usage 实报；实报缺失但存在本地估算的记录**也计入合计**（护栏要回答"这个月花了多少"，
+ * 只算实报会系统性少报），但两个来源分列可见，不混为一谈。
+ * 未定价、两口径皆缺、`time` 缺失或不可解析的记录一律不进分子——**用 0 冒充会让护栏看起来在工作**。
+ */
+export function spentInMonth(
+  entries: CostEntry[],
+  resolvePricing: (providerId: string | undefined, model: string | undefined) => ModelPricing | undefined,
+  monthKey: string,
+): MonthSpend {
+  const usage: Record<string, number> = {};
+  const estimate: Record<string, number> = {};
+  const total: Record<string, number> = {};
+  const add = (bucket: Record<string, number>, cost: { total: number; currency: string }) => {
+    bucket[cost.currency] = (bucket[cost.currency] ?? 0) + cost.total;
+    total[cost.currency] = (total[cost.currency] ?? 0) + cost.total;
+  };
+  let unpriced = 0;
+  let uncounted = 0;
+  let records = 0;
+  for (const entry of entries) {
+    if (monthKeyOf(entry.time) !== monthKey) continue;
+    records += 1;
+    const tokens = entry.tokens ?? entry.estimate;
+    if (!tokens) {
+      uncounted += 1;
+      continue;
+    }
+    const cost = computeCost(tokens, resolvePricing(entry.provider_id, entry.model));
+    if (cost === null) {
+      unpriced += 1;
+      continue;
+    }
+    add(entry.tokens ? usage : estimate, cost);
+  }
+  return { byCurrency: total, bySource: { usage, estimate }, unpriced, uncounted, records };
+}

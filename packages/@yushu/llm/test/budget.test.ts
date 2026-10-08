@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   chapterCostsOf,
+  currentMonthKey,
   defaultBudgetConfig,
   lintCost,
+  monthKeyOf,
   parseBudgetConfig,
   serializeBudgetConfig,
+  spentInMonth,
   summarizeCosts,
   type CostEntry,
   type LlmProviderSpec,
@@ -216,5 +219,76 @@ describe("章节维度聚合（J09 四维的最后一维）", () => {
     );
     expect(rows.map((row) => row.chapterId)).toEqual(["ch-a"]);
     expect(rows[0]!.cost).toBeCloseTo(0.06, 5); // ch-a 两条记录各 0.03，按章节累加
+  });
+});
+
+describe("月度归月与已用金额（budget-monthly-cap 的分子来源）", () => {
+  it("monthKeyOf：ISO 取前 7 位，缺值与非法值不给假月份", () => {
+    expect(monthKeyOf("2026-10-08T10:44:59.818Z")).toBe("2026-10");
+    expect(monthKeyOf("2026-10-31")).toBe("2026-10");
+    expect(monthKeyOf(undefined)).toBeNull();
+    expect(monthKeyOf("")).toBeNull();
+    expect(monthKeyOf("上周写的")).toBeNull();
+    // 单位数月不认、也不猜成 1 月——归错月比不归月更危险
+    expect(monthKeyOf("2026-1-08")).toBeNull();
+  });
+
+  it("currentMonthKey 用 UTC，与记录写入侧 toISOString 同口径", () => {
+    expect(currentMonthKey(new Date("2026-10-08T23:59:00.000Z"))).toBe("2026-10");
+    expect(currentMonthKey(new Date("2026-11-01T00:00:00.000Z"))).toBe("2026-11");
+  });
+
+  it("usage 实报优先；缺实报但有估算时也计入合计，但两个口径分列不混谈", () => {
+    const spend = spentInMonth(
+      [
+        entry({ time: "2026-10-08T01:00:00.000Z", tokens: { prompt: 1000 } }),
+        entry({ time: "2026-10-08T02:00:00.000Z", tokens: undefined, estimate: { prompt: 500 } }),
+      ],
+      priced,
+      "2026-10",
+    );
+    expect(spend.byCurrency["CNY"]).toBeCloseTo(0.018, 10); // 0.012 + 0.006
+    expect(spend.bySource.usage["CNY"]).toBeCloseTo(0.012, 10);
+    expect(spend.bySource.estimate["CNY"]).toBeCloseTo(0.006, 10);
+    expect(spend.records).toBe(2);
+    expect(spend.unpriced).toBe(0);
+    expect(spend.uncounted).toBe(0);
+  });
+
+  it("跨月 / 未定价 / 两口径皆缺 / 无时间：都不进分子，且分别计数", () => {
+    const spend = spentInMonth(
+      [
+        entry({ time: "2026-09-30T23:59:59.000Z" }), // 上月
+        entry({ provider_id: "local", model: "small", time: "2026-10-08T01:00:00.000Z" }), // 本月但未定价
+        entry({ tokens: undefined, time: "2026-10-08T03:00:00.000Z" }), // 本月但无 token
+        entry({ time: undefined }), // 无时间：不属于任何月
+      ],
+      priced,
+      "2026-10",
+    );
+    expect(Object.keys(spend.byCurrency)).toHaveLength(0); // 绝不用 0 冒充"本月没花钱"
+    expect(spend.records).toBe(2);
+    expect(spend.unpriced).toBe(1);
+    expect(spend.uncounted).toBe(1);
+  });
+
+  it("多币种分列，不强合计", () => {
+    const usdPriced = (providerId?: string, model?: string) =>
+      providerId === "cloud" && model === "big" ? { input: 12, output: 36, currency: "USD" } : priced(providerId, model);
+    const spend = spentInMonth(
+      [entry({ time: "2026-10-08T01:00:00.000Z" }), entry({ provider_id: "local", model: "small", time: "2026-10-08T02:00:00.000Z" })],
+      (providerId, model) => (providerId === "local" ? { input: 1, output: 2, currency: "CNY" } : usdPriced(providerId, model)),
+      "2026-10",
+    );
+    expect(spend.byCurrency["USD"]).toBeCloseTo(0.03, 10); // 1000×12/1M + 500×36/1M
+    expect(spend.byCurrency["CNY"]).toBeCloseTo(0.002, 10); // 1000×1/1M + 500×2/1M
+  });
+
+  it("不该命中：本月没有任何记录时三个桶全空、计数全零", () => {
+    const spend = spentInMonth([entry({ time: "2026-05-01T00:00:00.000Z" })], priced, "2026-10");
+    expect(spend.records).toBe(0);
+    expect(spend.unpriced).toBe(0);
+    expect(spend.uncounted).toBe(0);
+    expect(spend.byCurrency).toEqual({});
   });
 });
