@@ -17,10 +17,10 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **607/607 全绿**（69 个测试文件）——`pnpm test`（第 45 轮 R45 / T3-13 收口后） |
+| 单测 | **614/614 全绿**（70 个测试文件）——`pnpm test`（第 47 轮 R47 / A4 收口后） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
-| UI 预演 | **38/38 全绿**（最近一次新目录 **v103**，43s，`screenshotFailures:[]`）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
+| UI 预演 | **39/39 全绿**（最近一次新目录 **v105**，`screenshotFailures:[]`）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
 | 性能实测 | 10/10 达标（最近一次 R36 报告 `docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json`）；R40 未触热路径，本轮不适用 |
 | 版本 | `v0.2.0` tag **已在远端**（本文上一版记为"远端未推"，已过期更正） |
 
@@ -115,6 +115,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 | R46 | A2 任务路由取证（无产品改动） | e2e 新建**两个独立 mock 端点**（旗舰全程 503 / 小模型正常）+ 专用 routing.yaml（`drafting.prefer=[flagship]`、`fallback.drafting=[flagship-bad, small-good]`、`InternalServerError.max_retries=2`、`cooldown.allowed_fails=1`）。实测 `{badHits:3, badFailures:3, goodHits:3, goodFailures:0}`、原因「HTTP 503」→「冷却中（剩余 60s）」、`recordsDelta:3 / promptTokensDelta:30 (=12+12+6) / summarizeOk:true`，A2 四口径逐条对上并勾选。**两次期望落空把机制校正**：一次动作只向闸门记 1 次失败（`allowed_fails:2` 不触发冷却）；cloud provider 无 Key 会**在发请求前跳过**（必须补会话 Key 才是真正的失败回落）。命名任务不经 LLM，故以摘要任务作「走小模型」等价证据；真实端点配额/限流不在口径内 | 
 
+| R47 | A4 取证 + AI 总开关进程化 | 发现「关闭 AI」原先只是渲染层按钮禁用，三个联网入口（ai:start / memory:summarize / extract:preview）无闸门 → 新增主进程开关（默认 false、`E_AI_DISABLED`、三入口前置断言、fire-and-forget 处双拦）+ `ai:setEnabled` 四处同步 + `AiConfigState.aiEnabled` 供 UI 派生。取证：`ai-gate.test.ts` 7 例（含「关闭态不产生使用记录」「非 true 值不当开启」）、e2e A4 探针 `{blockedAll:true, localFailed:[], localCount:11}` 且端点计数仍为 3/3（零请求）、预演 step39（39/39，v105）；变异「assertAiEnabled 永不误抛」→ 4 红。`ai.test.ts` 两用例被拦是测试未跟上契约，改为显式开启而非放宽闸门。口径：trial 外网审计仅覆盖 renderer 会话，不冒充全进程零外网 | 
+
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
 1. **真源与派生分离**：Markdown/YAML 是唯一真源；SQLite（`.yushu/index.db`）与 `.yushu/context-log/`、`.yushu/ai-usage.jsonl`、`.yushu/ai-feedback.jsonl`、`.yushu/recovery/`、`.yushu/snapshots/`、`exports/` 都是派生物——可删可重建，绝不作为真源，不入 Git。
@@ -140,7 +142,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 - `- [x] A1` 可复现快照与截断标记（R37 已达成，有机器证据）。
 - `- [x] A2 任务路由生效`：**R46 已离线取证并勾选**——e2e 新建两个独立 mock 端点（旗舰全程 503 / 小模型正常），实测端点计数 `{badHits:3, badFailures:3, goodHits:3, goodFailures:0}`、回落原因「返回 HTTP 503…」→「冷却中（剩余 60s）…」，证明「正文优先旗舰 → 失败按 fallback 降级不断流 → 冷却内不再试坏端点 → 小档任务只打 small」；三条动作 = 三条 usage 记录、`promptTokensDelta 30 = 12+12+6`（失败尝试不计费）。**边界**：命名任务是本地确定性生成器（不经 LLM），以摘要任务作「走小模型」等价证据；真实 provider 配额/限流不在此口径（A3 同）。
 - `- [ ] A3 成本面板`：R40（T3-12）已落地并取证——**可分解 / 双口径 / 不猜价已被机器断言**，但「偏差在可接受范围内」**无法用 mock 证明**（mock 对任意请求固定回传 `prompt_tokens:12`，实测偏差 +4404%）。保持未勾选，接真 provider 后与 A2/A4 同轮量化复核（证据与口径详见 docs/04 §6.5 A3 与 §6.3 T3-12 注记）。
-- `- [ ] A4 AI 整体关闭后本地能力无退化`：M1 有「renderer 外网请求 0」的 trial 证据（旧口径），建议以当前代码重跑一次 trial/网络审计并在 A4 附证据。
+- `- [x] A4 AI 整体关闭后本地能力无退化`：**R47 已达成并勾选**。取证前先修真实缺口——原先「关闭 AI」只是渲染层一个按钮禁用，主进程三个联网入口（`ai:start` / `memory:summarize` / `extract:preview`）无闸门；现改为主进程总开关（默认 false、`E_AI_DISABLED`、四处同步 `ai:setEnabled`、UI 由 `AiConfigState.aiEnabled` 派生）。证据：`ai-gate.test.ts` 7 例 + e2e A4 探针 `{blockedAll:true, localFailed:[], localCount:11}` 且 mock 端点计数零增长 + 预演 step39（39/39，v105）；变异「assertAiEnabled 永不误抛」→ 4 例转红。**口径**：`trial` 的 webRequest 审计只覆盖 renderer 会话（AI 走主进程 fetch），不得当作全进程零外网证据。
 - `- [x] A5 记忆不跨项目泄漏`：**R41 已复核并勾选**——e2e 探针原文 `{"rejectedIds":["fact-foreign"],"errorCodes":["memory-cross-project-leak"]}`（异项目记录被拒、本项目 6 条事实台账不受影响）；证据文字已写入 docs/04 §6.5。
 - `- [x] A6 上下文预算超限正确裁剪`：**R41 已复核并勾选**——小预算 40 token 探针 `smallEvicted/smallWithin/smallKeepsSystem` 全真 + 快照 `smallTruncated:1`；逐出顺序与「system_prompt 只截断不丢弃」按 docs/03 §10.2 断言，无中段丢失关键设定案例。
 
@@ -303,7 +305,7 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 3. **诚实边界**：A2 里「路由与真实配额 / 延迟是否匹配」这类需要真实 provider 的部分**不在离线轮次勾选**；取证文字要写明 mock 只能证明链路与计数正确，不能证明真实端点行为。
 4. 顺带把 docs/06 §五 计数、§一 指针、本文 §1 快照与预演步数（当前 38）同步到本轮实测值；若改渲染层再重跑预演到新目录（v97…）。
 
-> 提醒：**A3（真实用量偏差）需要用户侧可用端点**，纯离线轮次无法达成，不要在 mock 上声称达成；**A2 已于 R46 用双 mock 端点离线取证完成**，A4（AI 关闭后本地能力）可用 `--ui-trial` 的外网请求审计离线取证。
+> 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。
 
 祝顺利。有任何与本文冲突的地方，以 `docs/04`/`docs/03` 与仓库实际代码为准，并把修正回写进相应文档。
 

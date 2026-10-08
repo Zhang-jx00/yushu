@@ -34,6 +34,8 @@
 
 - **验收取证（A2 任务路由，第 46 轮，无产品行为改动）**：e2e 新建**两个独立 mock 端点**（旗舰全程 503 / 小模型正常）+ 专用 `config/routing.yaml`，实测端点计数 `{badHits:3, badFailures:3, goodHits:3, goodFailures:0}` 与回落原因「返回 HTTP 503…」→「冷却中（剩余 60s）…」，逐条证明：**正文优先走旗舰 → 失败按 fallback 链降级且不断流 → 冷却窗口内不再尝试坏端点 → `summarize` 等小档任务只打 small 端点**；同时实测「三条动作 = 三条 usage 记录、promptTokens 30 = 12+12+6」，即失败尝试不计费、跨请求累加只发生在结构化修复轮。docs/04 §6.5 **A2 勾选**，并写明边界：命名任务是本地确定性生成器（不经 LLM），故以摘要任务作「走小模型」的等价证据；真实 provider 配额/限流不在本轮口径。
 
+- **A4 收口：AI 总开关落进主进程（第 47 轮）**：此前「关闭 AI」只是 `AiView` 一个按钮禁用，三个真会发 HTTP 的入口（`ai:start` / `memory:summarize` / `extract:preview`）没有任何闸门——程序化调用或将来新增入口就能在用户以为关闭时联网。新增主进程总开关（默认 `false`，`E_AI_DISABLED`，三入口统一前置断言；`runAiGenerate` 因 fire-and-forget 在处理器与函数内各拦一次）+ `ai:setEnabled` 通道（IPC 四处同步）+ `AiConfigState.aiEnabled`，UI 由主进程状态派生而非自持一份。**取证**：单测 `ai-gate.test.ts` 7 例（含关闭态不产生使用记录、非 true 值不当开启）；e2e A4 探针 `{blockedAll:true, localFailed:[], localCount:11}` 且 mock 端点计数最终仍为 A2 的 3/3（关闸后零请求）；预演新增 **step39**（**39/39**，v105）。**红/绿配对**：`assertAiEnabled` 永不误抛 → 4 例转红。单测 +7 → **614/614（70 文件）**；typecheck 11 包全绿。**口径澄清**：trial 外网审计只覆盖 renderer 会话（AI 走主进程 fetch），不以 `rendererExternal:0` 冒充全进程零外网。
+
 ## [0.2.0] - 2026-10-06
 
 M2 收口：A1–A5 验收机器验证全绿（证据见 `docs/04-开发计划.md` §5.5 与 `docs/06-M1验收与自查清单.md` §八 第 29 轮）；`v0.2.0` 为本地 tag（远端推送推迟到项目完成后一并执行，见 `docs/06` §七）。
