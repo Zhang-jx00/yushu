@@ -31,6 +31,43 @@ import { isSnapshotSource, takeSnapshot } from "./snapshot-ops.js";
 /** 不入 Git 的路径前缀（与索引 / 快照口径一致；`.yushu/` 是作者操作数据） */
 export const GIT_EXCLUDES = [".yushu/", ".git/", "node_modules/", "exports/"];
 
+/**
+ * 写进项目根 `.gitignore` 的行（`.git/` 由 git 自身处理，无需列）。
+ * 与 GIT_EXCLUDES 同源但**不含** `.git/`——那是 git 的内部目录，写进 ignore 文件反而误导。
+ */
+export const PROJECT_GITIGNORE_LINES = [".yushu/", "exports/", "node_modules/"];
+
+/**
+ * 补齐项目根 `.gitignore`：保留用户既有内容与注释，只追加缺失行；幂等（重复调用不改字节）。
+ *
+ * 为什么要落成文件，而不是只在结果侧用 `isGitPath` 过滤：
+ * ① **遍历成本与竞态**——isomorphic-git 的 `statusMatrix` 先走完整棵树再由 map 判定，命中 ignore 的目录
+ *    会被**整棵剪掉**（不再 stat 其中文件）；单靠结果过滤则仍会 stat `.yushu/` 里的 SQLite `-wal` / `-shm`
+ *    侧车，这类文件在扫描中途消失就抛 `ENOENT ... lstat`（e2e 实测撞到过一次）。
+ * ② **安全口径要能被外部 git 复用**——应用内的过滤只在御书自己提交时生效；用户用命令行 / 其它客户端
+ *    `git add .` 时，`.yushu/secrets.json`（凭据库密文）与索引库会被一起提交。写进 `.gitignore`
+ *    后，"派生物与凭据不入 Git" 成为仓库自身的事实（K12 / T3-14）。
+ */
+async function ensureGitignore(dir: string): Promise<void> {
+  const path = join(dir, ".gitignore");
+  let text = "";
+  try {
+    text = await fs.promises.readFile(path, "utf8");
+  } catch {
+    text = ""; // 尚不存在：按空文件处理
+  }
+  const present = new Set(
+    text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !line.startsWith("#")),
+  );
+  const missing = PROJECT_GITIGNORE_LINES.filter((line) => !present.has(line));
+  if (missing.length === 0) return;
+  const base = text === "" || text.endsWith("\n") ? text : `${text}\n`;
+  await fs.promises.writeFile(path, `${base}${missing.join("\n")}\n`, "utf8");
+}
+
 /** 内置默认作者（用户未配置 git 身份时的降级；仅写入仓库级配置，不碰全局） */
 export const GIT_DEFAULT_AUTHOR = { name: "御书作者", email: "yushu@local" } as const;
 
@@ -144,7 +181,7 @@ export function gitState(gateway: ProjectGateway): Promise<GitStatePayload> {
   return withGitLock(async () => gitStateLocked(await loadGit(), gateway));
 }
 
-/** 初始化仓库（`main` 分支；幂等——已存在时仅返回状态） */
+/** 初始化仓库（`main` 分支；幂等——已存在时不重建，但仍补齐 `.gitignore`（老项目可能缺）） */
 export function gitInit(gateway: ProjectGateway): Promise<GitStatePayload> {
   return withGitLock(async () => {
     const git = await loadGit();
@@ -153,6 +190,7 @@ export function gitInit(gateway: ProjectGateway): Promise<GitStatePayload> {
       await git.init({ fs, dir, defaultBranch: "main" });
       await ensureAuthorConfig(git, dir);
     }
+    await ensureGitignore(dir);
     return gitStateLocked(git, gateway);
   });
 }

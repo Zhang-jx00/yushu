@@ -1,9 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProjectGateway } from "../src/main/file-gateway.js";
-import { gitCommit, gitInit, gitRollback, gitState, GIT_DEFAULT_AUTHOR } from "../src/main/git-ops.js";
+import { gitCommit, gitInit, gitRollback, gitState, GIT_DEFAULT_AUTHOR, GIT_EXCLUDES } from "../src/main/git-ops.js";
 import { createProject } from "../src/main/project-ops.js";
 import { snapshotState } from "../src/main/snapshot-ops.js";
 
@@ -128,5 +129,84 @@ describe("Git 版本管理（T2-7 切片 B）", () => {
     await expect(gitCommit(gateway, "无变更")).rejects.toMatchObject({ code: "E_GIT_NO_CHANGES" });
     await expect(gitRollback(gateway, "deadbeef")).rejects.toMatchObject({ code: "E_GIT_BAD_REF" });
     await expect(gitRollback(gateway, "../bad ref")).rejects.toMatchObject({ code: "E_INVALID_INPUT" });
+  });
+});
+
+/**
+ * 项目根 `.gitignore`（T3-14 / T2-7 收口）：
+ * 此前"派生目录不入 Git"只靠**结果侧过滤**（`isGitPath` / `isSnapshotSource`），遍历仍会 stat `.yushu/` 里
+ * 每个文件——SQLite 的 `-wal` / `-shm` 侧车在扫描中途消失就抛 `ENOENT ... lstat`（e2e 实测撞到过），
+ * 而且用户自己 `git add .` 时应用内过滤根本不管用，凭据库密文与索引库会被提交。
+ * 写进 `.gitignore` 后：isomorphic-git 在 map 阶段就按 ignore 剪掉整棵子树（不再 stat），
+ * 外部 git 客户端也与我们同一口径——安全承诺从"我们看得见时过滤"升级为"仓库本身就不收"。
+ */
+describe("项目根 .gitignore（init 补齐，派生目录连遍历都不进）", () => {
+  it("init 写出 .gitignore 含三个派生目录，且其中的真实文件不出现在变更清单", async () => {
+    await gitInit(gateway);
+    const ignore = await readFile(join(dir, ".gitignore"), "utf8");
+    expect(ignore).toContain(".yushu/");
+    expect(ignore).toContain("exports/");
+    expect(ignore).toContain("node_modules/");
+
+    await mkdir(join(dir, ".yushu"), { recursive: true });
+    await writeFile(join(dir, ".yushu", "index.db"), "sqlite-ish-bytes", "utf8");
+    await mkdir(join(dir, "exports"), { recursive: true });
+    await writeFile(join(dir, "exports", "out.txt"), "导出产物", "utf8");
+    const state = await gitState(gateway);
+    expect(state.changes.some((c) => c.path.startsWith(".yushu/"))).toBe(false);
+    expect(state.changes.some((c) => c.path.startsWith("exports/"))).toBe(false);
+    // `.gitignore` 本身**不进提交**：纳入范围一直是「作者内容白名单」（md / yaml / toml…），点文件不在其列。
+    // 这不影响效力——ignore 规则读的是工作区文件，外部 git 的效力由下面 `git check-ignore` 用例单独证明。
+    expect(state.changes.some((c) => c.path === ".gitignore")).toBe(false);
+  });
+
+  it("已有 .gitignore 保留用户内容只补缺失行；重复 init 幂等（不重复追加）", async () => {
+    await writeFile(join(dir, ".gitignore"), "# 我自己的规则\n*.tmp\n.yushu/\n", "utf8");
+    await gitInit(gateway);
+    const once = await readFile(join(dir, ".gitignore"), "utf8");
+    expect(once).toContain("# 我自己的规则");
+    expect(once).toContain("*.tmp");
+    expect(once).toContain(".yushu/");
+    expect(once.match(/\.yushu\//g)).toHaveLength(1);
+    await gitInit(gateway);
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(once);
+  });
+
+  it("凭据库密文与 SQLite 侧车不进提交（安全承诺落到仓库本身）", async () => {
+    await mkdir(join(dir, ".yushu"), { recursive: true });
+    await writeFile(join(dir, ".yushu", "secrets.json"), JSON.stringify({ version: 1, entries: [] }), "utf8");
+    await writeFile(join(dir, ".yushu", "index.db-shm"), "shm", "utf8");
+    await writeFile(join(dir, ".yushu", "index.db-wal"), "wal", "utf8");
+    await gitInit(gateway);
+    const commit = await gitCommit(gateway, "基线（含 .gitignore）");
+    expect(commit.files).toBeGreaterThan(0);
+    const after = await gitState(gateway);
+    expect(after.changes.filter((c) => c.path.startsWith(".yushu/"))).toEqual([]);
+    // 提交后工作区应干净：若 .yushu 未被 ignore，此处会残留 3 条 new
+    expect(after.changes).toEqual([]);
+  });
+
+  it("与 GIT_EXCLUDES 同源：新增派生目录不会漏写进 .gitignore（`.git/` 由 git 自身处理）", async () => {
+    await gitInit(gateway);
+    const ignore = await readFile(join(dir, ".gitignore"), "utf8");
+    const lines = ignore.split(/\r?\n/);
+    for (const prefix of GIT_EXCLUDES) {
+      if (prefix === ".git/") continue;
+      expect(lines).toContain(prefix);
+    }
+  });
+
+  it("外部 git 客户端同口径：`git check-ignore` 认 .yushu/secrets.json（凭据不会被 git add . 收走）", async () => {
+    await mkdir(join(dir, ".yushu"), { recursive: true });
+    await writeFile(join(dir, ".yushu", "secrets.json"), JSON.stringify({ version: 1, entries: [] }), "utf8");
+    await gitInit(gateway);
+    const verdict = await new Promise<{ code: number; err: string }>((resolve) => {
+      execFile("git", ["-C", dir, "check-ignore", "-q", ".yushu/secrets.json"], (err) => {
+        // code 0 = 命中 ignore；code 1 = 未命中；其它 = git 不可用（环境缺依赖时不误判为失败）
+        resolve({ code: err ? ((err as unknown as { code?: number }).code ?? -1) : 0, err: err?.message ?? "" });
+      });
+    });
+    if (verdict.code === 1) throw new Error(`.yushu/secrets.json 未被 .gitignore 命中：外部 git add . 会提交凭据库`);
+    if (verdict.code !== 0 && verdict.code !== 1) return; // git 不可用：跳过外部对照
   });
 });
