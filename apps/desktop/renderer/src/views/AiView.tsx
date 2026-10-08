@@ -1329,7 +1329,8 @@ export function AiView() {
               <CostBreakdownTable rows={costPanel.byTask} keyLabel="任务" />
               <div className="muted">按模型分解</div>
               <CostBreakdownTable rows={costPanel.byModel} keyLabel="模型" />
-            <CostBreakdownTable rows={costPanel.byChapter} keyLabel="章节" />
+              <div className="muted">按章节分解（未标注章节的记录归入「（未标注章节）」一行，不静默丢弃）</div>
+              <CostBreakdownTable rows={costPanel.byChapter} keyLabel="章节" />
 
               <div className="muted">定价表状态（config/llm.yaml 的 models[].pricing，单价按每 1M tokens）</div>
               {costPanel.pricing.length === 0 ? (
