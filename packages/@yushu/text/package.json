@@ -1,0 +1,22 @@
+{
+  "name": "@yushu/text",
+  "version": "0.1.0-alpha.0",
+  "description": "御书中文文本处理（T3-13 / J14）：繁简转换与歧义点名、GB/T 15834 标点核查、错别字与重复表达检测、的地得与长句轻提示——纯离线、确定性、修复需确认",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

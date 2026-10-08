@@ -14,6 +14,7 @@ export default defineConfig({
       "@yushu/memory": resolve("./packages/@yushu/memory/src/index.ts"),
       "@yushu/export": resolve("./packages/@yushu/export/src/index.ts"),
       "@yushu/search": resolve("./packages/@yushu/search/src/index.ts"),
+      "@yushu/text": resolve("./packages/@yushu/text/src/index.ts"),
     },
   },
   test: {
