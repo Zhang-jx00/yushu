@@ -10,6 +10,7 @@ import {
   type ExtractionCandidate,
 } from "@yushu/world-engine";
 import {
+  costTokensOf,
   extractStructured,
   orderProvidersByRoute,
   planChannel,
@@ -17,6 +18,7 @@ import {
   resolveRoute,
   type ChatMessage,
 } from "@yushu/llm";
+import { estimateTokens } from "@yushu/memory";
 import type {
   ExtractAdoptPayload,
   ExtractAdoptResult,
@@ -120,6 +122,9 @@ async function runExtraction(gateway: ProjectGateway, chapterId: string): Promis
     },
   ];
 
+  // T3-12：发送前估算（仅首轮请求的消息体——修复轮会追加上下文，实报以累加 usage 为准）
+  const promptEstimate = messages.reduce((sum, message) => sum + estimateTokens(message.content), 0);
+
   const result = await extractStructured(providers, {
     messages,
     schema: EXTRACT_OUTPUT_SCHEMA,
@@ -142,6 +147,9 @@ async function runExtraction(gateway: ProjectGateway, chapterId: string): Promis
     chapter_id: chapterId,
     // T3-11（J08/J09）：批量任务通道归属（batch = 半价通道；未声明 batch 时按标准通道计价）
     channel: planChannel(providers, "extract").channel,
+    // T3-12（J09）：抽取的 usage 为全部轮次累加（修复轮同样计费）
+    ...(result.usage ? { tokens: costTokensOf(result.usage) } : {}),
+    estimate: { prompt: promptEstimate },
   });
   if (!result.ok) {
     throw new YushuError(

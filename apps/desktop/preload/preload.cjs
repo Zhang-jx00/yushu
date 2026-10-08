@@ -57,6 +57,8 @@ contextBridge.exposeInMainWorld("yushu", {
     abort: (streamId) => invoke("ai:abort", { streamId }),
     adopt: (payload) => invoke("ai:adopt", payload),
     usage: () => invoke("ai:usage"),
+    /** Token 与成本面板（T3-12，J09）：双口径聚合 + 稳定前缀编排核对（只读；payload 指定核对章节） */
+    cost: (payload) => invoke("ai:cost", payload),
     /** 候选拒绝原因记录（T3-11，J15）：写入 .yushu/ai-feedback.jsonl 并回传统计 */
     reject: (payload) => invoke("ai:reject", payload),
     /** 拒绝原因统计（本机） */

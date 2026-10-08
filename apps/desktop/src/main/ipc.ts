@@ -12,6 +12,8 @@ import {
   type AiSaveConfigPayload,
   type AiStartResult,
   type AiUsageState,
+  type AiCostPanelPayload,
+  type AiCostPayload,
   type AiRejectPayload,
   type AiFeedbackState,
   type AppFlushDonePayload,
@@ -98,6 +100,7 @@ import {
   setSessionKey,
 } from "./ai-ops.js";
 import { appendAiFeedback, readAiFeedbackState } from "./ai-feedback.js";
+import { readCostPanel } from "./cost-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
 import { IndexRefreshScheduler } from "./index-scheduler.js";
@@ -422,6 +425,12 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(CHANNELS.aiUsage, () => wrap<AiUsageState>(() => readAiUsageState(requireGateway())));
+
+  // Token 与成本面板（T3-12，J09）：usage 实报 + 本地估算双口径聚合、按任务/模型分解、
+  // 稳定前缀与缓存断点编排核对（只读——派生日志与配置，不改真源）
+  ipcMain.handle(CHANNELS.aiCost, (_event, payload?: AiCostPayload) =>
+    wrap<AiCostPanelPayload>(() => readCostPanel(requireGateway(), payload ?? {})),
+  );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）
   ipcMain.handle(CHANNELS.aiReject, (_event, payload: AiRejectPayload) =>

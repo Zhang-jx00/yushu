@@ -7,6 +7,8 @@ import type {
   AiDraftTarget,
   AiGeneratePayload,
   AiSaveConfigPayload,
+  AiCostPanelPayload,
+  AiCostPayload,
   AiStartResult,
   AiStreamEvent,
   AiUsageState,
@@ -125,6 +127,8 @@ export interface YushuApi {
     abort: (streamId: string) => Promise<boolean>;
     adopt: (payload: AiAdoptPayload) => Promise<AiAdoptResult>;
     usage: () => Promise<AiUsageState>;
+    /** Token 与成本面板（T3-12，J09）：按任务/模型分解 + 预估vs实付偏差 + 缓存编排核对 */
+    cost: (payload?: AiCostPayload) => Promise<AiCostPanelPayload>;
     /** 候选拒绝原因记录（T3-11，J15）：写入 .yushu/ai-feedback.jsonl 并回传统计 */
     reject: (payload: AiRejectPayload) => Promise<AiFeedbackState>;
     /** 拒绝原因统计（本机） */

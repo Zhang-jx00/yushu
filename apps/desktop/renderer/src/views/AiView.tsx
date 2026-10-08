@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  AiCostPanelPayload,
   AiConfigState,
   AiDraftTarget,
   AiModelPayload,
@@ -8,6 +9,8 @@ import type {
   AiStreamEvent,
   AiUsageEntryPayload,
   ContextPreviewPayload,
+  CostCacheAuditPayload,
+  CostRowPayload,
   DraftHintPayload,
 } from "../../../src/shared/ipc";
 import { api } from "../api";
@@ -23,6 +26,8 @@ import { REJECT_REASON_PRESETS, type AiFeedbackState } from "../../../src/shared
  * - **多候选对比（J15）**：N 个候选独立生成（「不得互相参照」标记）→ 句级 diff 对照草稿 →
  *   整段 / 追加 / **按句局部采纳**；拒绝 → 预置原因标签记录（.yushu/ai-feedback.jsonl，统计展示）；
  * - 批量任务半价通道规划展示（T3-11，J08/J09：outline / summarize / extract）；
+ * - **Token 与成本面板（T3-12，J09）**：usage 实报 + 本地估算双口径聚合（按任务 / 按模型分解、预估 vs 实付偏差、
+ *   定价表状态、稳定前缀缓存编排核对）；金额与偏差文本全部由主进程下发，渲染层不再自造格式化口径；
  * - 结果以候选呈现，显式采纳才写正文；AI 使用记录来自 .yushu/ai-usage.jsonl。
  */
 
@@ -77,6 +82,105 @@ function routingSummary(routing: AiRoutingState): string {
   return `路由（${routing.exists ? routing.path : "内置默认"}）：drafting → ${prefer}${require ? `（require：${require}）` : ""} · 重试 ${rateLimit?.max_retries ?? routing.reliability.num_retries} · 冷却 ${routing.reliability.cooldown.cooldown_s}s · 并发 ${routing.reliability.concurrency.global}`;
 }
 
+/** 成本面板回执行（预演脚本按包含匹配断言）：金额与偏差一律用主进程下发的展示文本 */
+function costReceiptLine(totals: CostRowPayload): string {
+  return `成本面板：合计 ${totals.costText}｜输入 ${totals.promptTokens} tok｜偏差 ${totals.deviationText}`;
+}
+
+/** 成本分解表（按任务 / 按模型同构，共用一份列定义——避免两处口径漂移） */
+function CostBreakdownTable({ rows, keyLabel }: { rows: CostRowPayload[]; keyLabel: string }) {
+  if (rows.length === 0) return <p className="muted">暂无可分解的模型调用记录。</p>;
+  return (
+    <table className="slot-table">
+      <thead>
+        <tr>
+          <th>{keyLabel}</th>
+          <th>条数</th>
+          <th>输入</th>
+          <th>输出</th>
+          <th>命中缓存</th>
+          <th>写缓存</th>
+          <th>金额</th>
+          <th>预估 vs 实付</th>
+          <th>未配置价格</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.key}>
+            <td>{row.key}</td>
+            <td>{row.entries}</td>
+            <td>{row.promptTokens}</td>
+            <td>{row.completionTokens}</td>
+            <td>{row.cachedTokens}</td>
+            <td>{row.cacheWriteTokens}</td>
+            <td>{row.costText}</td>
+            <td>{row.deviationText}</td>
+            <td className={row.unpricedEntries > 0 ? "warn" : "muted"}>
+              {row.unpricedEntries > 0 ? `${row.unpricedEntries} 条` : "—"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** 稳定前缀编排核对区（只读）：断点、错位槽位、缓存声明与节省投影全部来自 cache 载荷 */
+function CostCacheAudit({ cache }: { cache: CostCacheAuditPayload }) {
+  return (
+    <div className="ai-cost-cache">
+      <div className="muted">
+        核对对象 {cache.target}
+        {cache.chapter_id ? ` · 章节 ${cache.chapter_id}` : ""} · 断点置于「{cache.breakpointAfter}」之后（下标{" "}
+        {cache.breakpointIndex}
+        {cache.breakpointIndex === -1 ? "：断点槽位不在组装清单中" : ""}）
+      </div>
+      <div className={cache.ordered ? "muted" : "warn"}>
+        编排：
+        {cache.ordered
+          ? "✓ 稳定在前、易变在后"
+          : `✗ 已击穿——错位槽位：${cache.misplaced.join("、") || "（未给出明细）"}`}
+      </div>
+      <div className="muted">
+        稳定前缀 {cache.stableTokens} tok · 易变 {cache.unstableTokens} tok · 缓存能力
+        {cache.cacheDeclared ? `已声明（模式 ${cache.cacheMode ?? "未标注"}）` : "未声明（不会命中折扣）"} · 节省{" "}
+        {cache.savingText}
+      </div>
+      {cache.belowMinTokens && (
+        <div className="warn">稳定前缀未达 provider 的缓存门槛：按当前编排不会命中</div>
+      )}
+      {cache.warnings.length > 0 && (
+        <ul className="issues">
+          {cache.warnings.map((warning, index) => (
+            <li key={`${warning}-${index}`} className="warn">
+              标注：{warning}
+            </li>
+          ))}
+        </ul>
+      )}
+      <table className="slot-table">
+        <thead>
+          <tr>
+            <th>槽位</th>
+            <th>稳定</th>
+            <th>token（估算）</th>
+          </tr>
+        </thead>
+        <tbody>
+          {cache.slots.map((slot) => (
+            <tr key={slot.slot}>
+              <td>{slot.slot}</td>
+              <td>{slot.stable ? "✓ 前缀" : "易变"}</td>
+              <td>{slot.tokens}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function AiView() {
   const [enabled, setEnabled] = useState(false);
   const [config, setConfig] = useState<AiConfigState | null>(null);
@@ -93,6 +197,8 @@ export function AiView() {
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
   const [downgradeNotes, setDowngradeNotes] = useState<string[]>([]);
   const [usageList, setUsageList] = useState<AiUsageEntryPayload[]>([]);
+  const [costPanel, setCostPanel] = useState<AiCostPanelPayload | null>(null);
+  const [costReceipt, setCostReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const streamIdRef = useRef<string | null>(null);
@@ -179,6 +285,21 @@ export function AiView() {
     setUsageList((await api().ai.usage()).entries);
   }, []);
 
+  /** 成本面板取数（T3-12）：带章纲目标时主进程顺带核对缓存编排，未选择则只聚合（cache 为 null） */
+  const refreshCost = useCallback(
+    async (target?: { volumeId: string; chapterId: string } | null) => {
+      try {
+        setError(null);
+        const panel = await api().ai.cost(target ?? {});
+        setCostPanel(panel);
+        setCostReceipt(costReceiptLine(panel.totals));
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    },
+    [],
+  );
+
   const refreshPreview = useCallback(
     async (target?: { volumeId: string; chapterId: string } | null) => {
       try {
@@ -195,15 +316,17 @@ export function AiView() {
     void (async () => {
       try {
         await refreshConfig();
-        await refreshDrafts();
+        const list = await refreshDrafts();
         await refreshUsage();
         await refreshPreview(null);
+        const first = list[0];
+        await refreshCost(first ? { volumeId: first.volumeId, chapterId: first.chapterId } : null);
         setFeedback(await api().ai.feedback());
       } catch (err) {
         setError((err as Error).message);
       }
     })();
-  }, [refreshConfig, refreshDrafts, refreshUsage, refreshPreview]);
+  }, [refreshConfig, refreshDrafts, refreshUsage, refreshPreview, refreshCost]);
 
   // 流式事件分发（ai:event 单向推送；T3-11：按 streamId 路由到各自 runOne 处理器——支持多候选串行）
   useEffect(() => {
@@ -222,7 +345,10 @@ export function AiView() {
   const selectTarget = async (key: string) => {
     setSelectedKey(key);
     const draft = drafts.find((item) => `${item.volumeId}:${item.chapterId}` === key);
-    if (draft) await refreshPreview({ volumeId: draft.volumeId, chapterId: draft.chapterId });
+    if (draft) {
+      await refreshPreview({ volumeId: draft.volumeId, chapterId: draft.chapterId });
+      await refreshCost({ volumeId: draft.volumeId, chapterId: draft.chapterId });
+    }
   };
 
   /** 拉取当前草稿正文（多候选句级 diff 的对照基线） */
@@ -351,6 +477,7 @@ export function AiView() {
       const outcome = await runOne(1, 1);
       setResult(outcome);
       void refreshUsage();
+      void refreshCost(selected ? { volumeId: selected.volumeId, chapterId: selected.chapterId } : null);
       await ensureDraftBody();
     } catch (err) {
       setError((err as Error).message);
@@ -379,6 +506,7 @@ export function AiView() {
       }
       setNotice(`多候选生成完成：${produced.length} 个候选（句级差异已对照草稿；采纳 / 拒绝均需显式操作）`);
       void refreshUsage();
+      void refreshCost(selected ? { volumeId: selected.volumeId, chapterId: selected.chapterId } : null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -1038,6 +1166,101 @@ export function AiView() {
               </li>
             ))}
           </ul>
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">
+            <h3>
+              Token 与成本{" "}
+              <span className="muted">T3-12（J09）：usage 实报 + 本地估算双口径的只读聚合（不联网，AI 关闭时同样可看历史）</span>
+            </h3>
+            <button
+              type="button"
+              className="link ai-cost-refresh"
+              onClick={() =>
+                void refreshCost(selected ? { volumeId: selected.volumeId, chapterId: selected.chapterId } : null)
+              }
+            >
+              刷新成本面板
+            </button>
+          </div>
+          {!costPanel && <p className="muted">尚未取数：读取 .yushu/ai-usage.jsonl 与 config/llm.yaml 的定价表后展示。</p>}
+          {costPanel && (
+            <>
+              <div className="muted">
+                {costPanel.path} · 读到 {costPanel.entries} 条记录 · 参与聚合的模型调用 {costPanel.totals.entries} 次 · 币种{" "}
+                {costPanel.currencies.join("、") || "（无：暂无已计价条目）"}
+              </div>
+              <div className="muted ai-cost-totals">
+                合计：token 输入 {costPanel.totals.promptTokens} / 输出 {costPanel.totals.completionTokens} / 命中缓存{" "}
+                {costPanel.totals.cachedTokens} / 写缓存 {costPanel.totals.cacheWriteTokens}｜金额{" "}
+                {costPanel.totals.costText}｜预估 vs 实付 {costPanel.totals.deviationText}｜缓存节省{" "}
+                {costPanel.totals.cacheSavedText}
+              </div>
+              {costPanel.entriesWithoutTokens > 0 && (
+                <div className="warn ai-cost-usage-missing">
+                  {costPanel.entriesWithoutTokens} 条记录无 usage 实报（J09 cost-usage-missing：这些条目不进 token
+                  合计，金额与偏差不可对账）
+                </div>
+              )}
+              {costReceipt && <div className="muted ai-cost-receipt">{costReceipt}</div>}
+
+              <div className="muted">按任务分解</div>
+              <CostBreakdownTable rows={costPanel.byTask} keyLabel="任务" />
+              <div className="muted">按模型分解</div>
+              <CostBreakdownTable rows={costPanel.byModel} keyLabel="模型" />
+
+              <div className="muted">定价表状态（config/llm.yaml 的 models[].pricing，单价按每 1M tokens）</div>
+              {costPanel.pricing.length === 0 ? (
+                <p className="muted">provider 配置里没有模型条目：无定价可展示（金额一律标「未配置价格」）。</p>
+              ) : (
+                <table className="slot-table">
+                  <thead>
+                    <tr>
+                      <th>provider · 模型</th>
+                      <th>价格</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {costPanel.pricing.map((row) => (
+                      <tr key={`${row.provider_id}-${row.model}`}>
+                        <td>
+                          {row.provider_id} · {row.model}
+                        </td>
+                        <td className={row.configured ? "" : "warn"}>
+                          {row.configured
+                            ? `已配置｜币种 ${row.currency ?? "未声明（按 CNY 计）"}｜输入 ${row.input}｜输出 ${row.output}${
+                                row.cache_read === undefined ? "" : `｜命中缓存 ${row.cache_read}`
+                              }`
+                            : "未配置价格"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              <div className="muted">缓存编排核对（稳定前缀是否真的置头）</div>
+              {costPanel.cache ? (
+                <CostCacheAudit cache={costPanel.cache} />
+              ) : (
+                <p className="muted">
+                  {selected
+                    ? "该章纲没有可核对的组装结果（尚未创建草稿章节）：不核对缓存编排，避免无中生有"
+                    : "未选择章纲：只做聚合，不核对缓存编排（选择生成目标后再点「刷新成本面板」即一并核对）"}
+                </p>
+              )}
+
+              <div className="muted">口径说明</div>
+              <ul className="issues ai-cost-notes">
+                {costPanel.notes.map((note, index) => (
+                  <li key={`${note}-${index}`} className="muted">
+                    {note}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       </section>
     </div>

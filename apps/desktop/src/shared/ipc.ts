@@ -37,6 +37,8 @@ export const CHANNELS = {
   aiReject: "ai:reject",
   aiFeedback: "ai:feedback",
   aiUsage: "ai:usage",
+  /** Token 与成本面板（T3-12，J09）：双口径聚合 + 稳定前缀编排核对（只读） */
+  aiCost: "ai:cost",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -449,6 +451,18 @@ export interface AiModelPayload {
     cache?: { mode: string; min_tokens?: number; read_mult?: number; write_mult?: number };
   };
   limits?: { context?: number; max_output?: number; rpm?: number; tpm?: number };
+  /**
+   * 定价（T3-12，J09）：**每 1M tokens 单价**；缺省 = 未配置价格，
+   * 成本面板只报 token、金额标注「未配置价格」，绝不按市场价猜。
+   * 载荷原样回传才能保住手工写在 llm.yaml 里的价格（saveConfig 是全量替换 providers）。
+   */
+  pricing?: {
+    currency?: string;
+    input: number;
+    output: number;
+    cache_read?: number;
+    cache_write?: number;
+  };
 }
 
 export interface AiProviderPayload {
@@ -582,7 +596,15 @@ export type AiStreamEvent =
       model: string;
       usageId: string;
       hints: DraftHintPayload;
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        /** 命中缓存的输入（T3-12 归一口径：与 prompt_tokens 不重叠） */
+        cached_tokens?: number;
+        /** 写入缓存的输入（Anthropic cache_creation） */
+        cache_write_tokens?: number;
+      };
     }
   | { streamId: string; type: "error"; code: string; message: string };
 
@@ -615,6 +637,18 @@ export interface AiUsageEntryPayload {
   usage_id?: string;
   /** 通道归属（T3-11，J08/J09）：batch = 半价通道；sync = 标准通道 */
   channel?: "batch" | "sync";
+  /** usage 实报 token（T3-12；缺省 = provider 未回传 usage → 只有估算口径） */
+  tokens?: CostTokensPayload;
+  /** 本地估算 token（T3-12）：prompt = 发送前按消息体估算；completion = 已生成部分估算 */
+  estimate?: CostTokensPayload;
+}
+
+/** Token 四段（互不重叠；与 @yushu/llm 的 CostTokens 同形） */
+export interface CostTokensPayload {
+  prompt?: number;
+  completion?: number;
+  cached?: number;
+  cache_write?: number;
 }
 
 /* ---------- 候选拒绝原因（T3-11，J15 实践 6） ---------- */
@@ -653,6 +687,92 @@ export interface AiFeedbackState {
 export interface AiUsageState {
   path: string;
   entries: AiUsageEntryPayload[];
+}
+
+/* ---------- Token 与成本面板（T3-12，J09；只读聚合，不改真源） ---------- */
+
+/** 请求体：按哪个章节的组装做缓存编排核对（未提供则只聚合，不核对编排） */
+export interface AiCostPayload {
+  volumeId?: string;
+  chapterId?: string;
+}
+
+/** 聚合行（与 @yushu/llm 的 CostAggregateRow 同形，跨 IPC 传递） */
+export interface CostRowPayload {
+  key: string;
+  entries: number;
+  promptTokens: number;
+  completionTokens: number;
+  cachedTokens: number;
+  cacheWriteTokens: number;
+  /** 单一币种时的金额；全部未配置价格或币种混合时为 null（绝不强行合计） */
+  cost: number | null;
+  currency: string | null;
+  costByCurrency: Record<string, number>;
+  cacheSavedByCurrency: Record<string, number>;
+  unpricedEntries: number;
+  /** (估算 − 实报) / 实报 的中位数（A3 偏差可核对）；无可对账条目时 null */
+  promptDeviationMedian: number | null;
+  /** 展示文本（主进程统一用 @yushu/llm 的 formatCost 生成——渲染层不再自造格式化口径） */
+  costText: string;
+  /** 偏差展示（如「+12.3%」；无可对账记录时为「无可对账记录」） */
+  deviationText: string;
+  /** 缓存节省展示（单一币种；混合币种为「多币种（见分列）」） */
+  cacheSavedText: string;
+}
+
+/** 定价表逐模型状态（面板据此说明「未配置价格」的来源） */
+export interface CostPricingRowPayload {
+  provider_id: string;
+  model: string;
+  configured: boolean;
+  currency?: string;
+  input?: number;
+  output?: number;
+  cache_read?: number;
+  cache_write?: number;
+}
+
+/** 稳定前缀与缓存断点的编排核对（只读） */
+export interface CostCacheAuditPayload {
+  /** 核对目标章节（未选择章纲时为 null） */
+  chapter_id: string | null;
+  breakpointAfter: string;
+  breakpointIndex: number;
+  ordered: boolean;
+  misplaced: string[];
+  stableTokens: number;
+  unstableTokens: number;
+  cacheDeclared: boolean;
+  cacheMode: string | null;
+  belowMinTokens: boolean;
+  /** 单次调用的节省投影（假设稳定前缀命中）；无价格或无折扣声明时 null */
+  saving: { perCall: number; currency: string } | null;
+  /** 节省额展示文本（不提供累计金额——同前缀复用次数无实测来源） */
+  savingText: string;
+  warnings: string[];
+  /** 核对所用的槽位与 token 估算（估算口径：CJK≈1/字、ASCII≈1/4） */
+  slots: { slot: string; stable: boolean; tokens: number }[];
+  /** 实际核对使用的 provider · 模型（drafting 路由首选） */
+  target: string;
+}
+
+export interface AiCostPanelPayload {
+  path: string;
+  /** 读到并参与统计的记录条数（受主进程扫描上限约束，上限值见 notes） */
+  entries: number;
+  byTask: CostRowPayload[];
+  byModel: CostRowPayload[];
+  totals: CostRowPayload;
+  /** 无 token 的记录数（旧记录 / provider 未回传 usage）——J09 的 cost-usage-missing 线索 */
+  entriesWithoutTokens: number;
+  currencies: string[];
+  /** 按 provider 唯一单价回落后折算的记录数（端点回显名 ≠ 配置名；0 = 无回落） */
+  pricingFallback: number;
+  pricing: CostPricingRowPayload[];
+  cache: CostCacheAuditPayload | null;
+  /** 口径说明（面板如实展示，避免把估算当账单） */
+  notes: string[];
 }
 
 /* ---------- 导出与敏感词自查（S6；T1-18/19/20；结构与 @yushu/export 兼容） ---------- */

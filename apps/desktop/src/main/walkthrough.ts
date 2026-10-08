@@ -1051,7 +1051,7 @@ const STEPS: StepDef[] = [
           allCount >= 5 && escClosed === true && cleaned && fiveItems !== null && activeIdx === 1 &&
           keyboardInserted === true && clickInserted === true && cmHasNew && panelSynced && decorated >= 2 && menuShot,
         note:
-          '空查询候选=' + allCount + '；Esc 关闭=' + escClosed + '；键盘路径（↓ 高亮第 ' + activeIdx + ' 项后回车）插入=' + (keyboardInserted === true) +
+          '空查询候选=' + allCount + '；Esc 关闭=' + escClosed + '；键盘路径（↓ 高亮第 ' + (activeIdx + 1) + ' 项后回车）插入=' + (keyboardInserted === true) +
           '；点击「测试设定5」插入=' + (clickInserted === true) + '；切源码后文档含新提及=' + cmHasNew +
           '；提及面板同步=' + panelSynced + '；源码形态装饰数=' + decorated +
           '；截图时菜单开启=' + menuShot,
@@ -1703,6 +1703,52 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 36,
+    title: "AI 副驾：Token 与成本面板 / 稳定前缀编排核对（T3-12，J09）",
+    file: "step36-cost-panel.png",
+    body: String.raw`
+      await tab('AI 副驾');
+      const panel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.panel h3')].find((x) => x.textContent.includes('Token 与成本'));
+        return title ? title.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到 Token 与成本面板：' + pageText() };
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(150);
+      const refresh = panel.querySelector('.ai-cost-refresh');
+      if (!refresh) return { ok: false, note: '找不到「刷新成本面板」按钮：' + pageText() };
+      refresh.click();
+      // 回执行口径固定为「成本面板：合计 …｜输入 N tok｜偏差 …」（金额与偏差文本均由主进程下发）
+      const receipt = await waitFor(() => {
+        const el = document.querySelector('.ai-cost-receipt');
+        return el && String(el.textContent).includes('成本面板：合计') ? String(el.textContent).replace(/\s+/g, ' ') : null;
+      }, 15000);
+      if (!receipt) return { ok: false, note: '成本回执未出现：' + pageText() };
+      const promptTokens = Number((receipt.match(/输入 (\d+) tok/) || [])[1] ?? '-1');
+      const totals = panel.querySelector('.ai-cost-totals');
+      const totalsText = totals ? String(totals.textContent).replace(/\s+/g, ' ') : '';
+      // 预演的 provider 配置未写 pricing → 必须如实标注「未配置价格」，不得凭空折算金额
+      const unpriced = totalsText.includes('未配置价格') || receipt.includes('未配置价格');
+      // 编排核对区：断点须落在 world_constraints（稳定前缀置头），未声明 cache 时不给节省额
+      const audit = panel.querySelector('.ai-cost-cache');
+      const auditText = audit ? String(audit.textContent).replace(/\s+/g, ' ') : '';
+      const breakpointOk = auditText.includes('world_constraints') && auditText.includes('下标 2');
+      const orderedOk = auditText.includes('稳定在前、易变在后');
+      const cacheNote = auditText.includes('未声明') && auditText.includes('不估算');
+      // 口径说明（notes）必须原样外显——本项目「边界如实标注」的一贯要求
+      const notesOk = String(panel.innerText).includes('CJK');
+      const rows = [...panel.querySelectorAll('.slot-table tbody tr')].length;
+      await sleep(200);
+      return {
+        ok: promptTokens > 0 && unpriced && breakpointOk && orderedOk && cacheNote && notesOk && rows >= 5,
+        note: '回执="' + receipt.slice(0, 96) + '"；输入 tok=' + promptTokens +
+          '；未配置价格=' + unpriced + '；断点=' + breakpointOk + '；置头=' + orderedOk +
+          '；缓存注记=' + cacheNote + '；口径说明=' + notesOk + '；表行=' + rows +
+          '；编排="' + auditText.slice(0, 120) + '"',
+      };
+    `,
+  },
 ];
 
 /**
@@ -1784,7 +1830,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引扩展（步骤 10-25）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-36）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

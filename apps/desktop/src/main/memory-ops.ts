@@ -9,6 +9,7 @@ import {
   assembleContext,
   buildContextSnapshot,
   buildFactSource,
+  estimateTokens,
   lintMemory,
   parseChapterSummary,
   parseFact,
@@ -30,7 +31,7 @@ import {
   type MemoryRecord,
   type SummaryRecord,
 } from "@yushu/memory";
-import { chat, orderProvidersByRoute, resolveRoute, type ChatMessage } from "@yushu/llm";
+import { chat, costTokensOf, orderProvidersByRoute, resolveRoute, type ChatMessage } from "@yushu/llm";
 import {
   MEMORY_DIR,
   MEMORY_CHAPTER_SUMMARIES_DIR,
@@ -328,6 +329,8 @@ export async function summarizeMemory(
   // T3-5：摘要走 summarize 任务路由（默认 prefer small——压缩类任务不必烧旗舰）
   const route = resolveRoute("summarize", config.providers, routing);
   const providers = orderProvidersByRoute(config.providers, route);
+  // T3-12：发送前按单一口径估算 prompt token（与 usage 实报对账）
+  const promptEstimate = messages.reduce((sum, message) => sum + estimateTokens(message.content), 0);
   const result = await chat(providers, { messages }, {
     sessionKeys: sessionKeySnapshot(),
     reliability: { config: routing.reliability, gate: reliabilityGate },
@@ -346,6 +349,9 @@ export async function summarizeMemory(
     status: "ok",
     chars,
     ...(chapterId ? { chapter_id: chapterId } : {}),
+    // T3-12（J09）：摘要任务的 usage 实报与 prompt 估算一并落盘
+    ...(result.usage ? { tokens: costTokensOf(result.usage) } : {}),
+    estimate: { prompt: promptEstimate },
   });
   return {
     layer: payload.layer,

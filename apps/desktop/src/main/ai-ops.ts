@@ -6,6 +6,7 @@ import {
   LlmAbortError,
   ReliabilityGate,
   chat,
+  costTokensOf,
   createLocalProvider,
   defaultLlmConfig,
   defaultRoutingConfig,
@@ -27,6 +28,7 @@ import {
   type LlmProviderSpec,
   type RoutingConfig,
 } from "@yushu/llm";
+import { estimateTokens } from "@yushu/memory";
 import {
   LLM_CONFIG_PATH,
   OUTLINE_PATH,
@@ -95,6 +97,8 @@ function toProviderPayload(provider: LlmProviderSpec): AiProviderPayload {
       tier: model.tier,
       capabilities: { ...resolveCapabilities(model) },
       ...(model.limits ? { limits: { ...model.limits } } : {}),
+      // T3-12：定价必须随载荷透出——保存路径是 providers 全量替换，漏传等于抹掉手写价格
+      ...(model.pricing ? { pricing: { ...model.pricing } } : {}),
     })),
     ...(provider.api_key_env ? { api_key_env: provider.api_key_env } : {}),
     ...(provider.temperature !== undefined ? { temperature: provider.temperature } : {}),
@@ -277,6 +281,8 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
   const { streamId, payload, sink, signal } = args;
   const usageId = newUsageId();
   let preview: ContextPreviewPayload | null = null;
+  /** 发送前的 prompt token 估算（T3-12，与 usage 实报对账）；上下文组装失败时保持缺省 */
+  let promptEstimate: number | undefined;
 
   try {
     preview = await buildContextPreview(gateway, {
@@ -312,6 +318,8 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
     if (plan.prompt_suffix) {
       messages.push({ role: "user", content: plan.prompt_suffix });
     }
+    // T3-12：发送前估算（含降级追加的约束段——按实际发出的消息体算）
+    promptEstimate = messages.reduce((sum, message) => sum + estimateTokens(message.content), 0);
 
     let accumulated = "";
     const onDelta = (delta: { text: string }) => {
@@ -360,6 +368,9 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
       status: "ok",
       chars,
       chapter_id: payload.chapterId,
+      // T3-12（J09）：usage 实报落盘（缺 usage 时不写 tokens——面板计入「无 token 记录」）
+      ...(result.usage ? { tokens: costTokensOf(result.usage) } : {}),
+      ...(promptEstimate !== undefined ? { estimate: { prompt: promptEstimate } } : {}),
     });
     sink({
       streamId,
@@ -388,6 +399,10 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
         status: "aborted",
         chars,
         chapter_id: payload.chapterId,
+        // 中止时拿不到 usage（协议层未返回尾块）：completion 用已生成部分的估算值，面板标注为估算口径
+        ...(promptEstimate !== undefined
+          ? { estimate: { prompt: promptEstimate, completion: estimateTokens(partial) } }
+          : {}),
       });
       sink({
         streamId,
@@ -409,6 +424,7 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
       task: payload.task,
       status: "error",
       chapter_id: payload.chapterId,
+      ...(promptEstimate !== undefined ? { estimate: { prompt: promptEstimate } } : {}),
     });
     sink({
       streamId,

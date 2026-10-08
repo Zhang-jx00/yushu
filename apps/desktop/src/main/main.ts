@@ -860,6 +860,58 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     };
     console.log("[e2e] 写作 UX:", JSON.stringify(uxProbe));
 
+    // T3-12 Token 与成本探针：
+    // ① 给 mock 模型补 pricing（同时验证「providers 全量替换」不会抹掉手写价格）；
+    // ② usage 实报与发送前估算确实落盘；
+    // ③ 面板按任务/模型可分解、金额确实折算（非「未配置价格」）、预估vs实报偏差有值；
+    // ④ 稳定前缀编排核对：断点落在 world_constraints 且稳定槽位全部置头。
+    // 注：mock 的 usage 是固定值（12/6 输入），偏差数值只证明「对账链路通」，不代表估算器真实精度。
+    const configForPricing = await api.ai.config();
+    const savedPricing = await api.ai.saveConfig({
+      providers: configForPricing.config.providers.map((provider) => ({
+        ...provider,
+        models: provider.models.map((model, index) =>
+          index === 0
+            ? { ...model, pricing: { currency: "CNY", input: 2, output: 8, cache_read: 0.2 } }
+            : model,
+        ),
+      })),
+      ...(configForPricing.hash ? { baseHash: configForPricing.hash } : {}),
+    });
+    const usageForTokens = await api.ai.usage();
+    const costPanel = await api.ai.cost({ volumeId: volume.id, chapterId: co.id });
+    const costProbe = {
+      pricingKept: (savedPricing.config.providers[0] ? savedPricing.config.providers[0].models : [])
+        .some((m) => !!m.pricing && m.pricing.input === 2),
+      tokensRecorded: usageForTokens.entries.filter(
+        (e) => e.type === "generate" && e.tokens && typeof e.tokens.prompt === "number",
+      ).length,
+      estimateRecorded: usageForTokens.entries.filter(
+        (e) => e.estimate && typeof e.estimate.prompt === "number",
+      ).length,
+      priced: costPanel.totals.cost !== null,
+      costText: costPanel.totals.costText,
+      promptTokens: costPanel.totals.promptTokens,
+      cachedTokens: costPanel.totals.cachedTokens,
+      aggregateEntries: costPanel.totals.entries,
+      tasks: costPanel.byTask.map((r) => r.key).join(","),
+      models: costPanel.byModel.map((r) => r.key).join(","),
+      unpriced: costPanel.totals.unpricedEntries,
+      withoutTokens: costPanel.entriesWithoutTokens,
+      // 端点回显名与配置名一致时应为 0（回落只在「provider 唯一单价」时启用，多价不猜）
+      pricingFallback: costPanel.pricingFallback,
+      deviationText: costPanel.totals.deviationText,
+      cacheOrdered: costPanel.cache ? costPanel.cache.ordered : false,
+      cacheMisplaced: costPanel.cache ? costPanel.cache.misplaced.join(",") : "(no-audit)",
+      cacheBreakpoint: costPanel.cache ? costPanel.cache.breakpointAfter + "#" + costPanel.cache.breakpointIndex : "(no-audit)",
+      cacheStableTokens: costPanel.cache ? costPanel.cache.stableTokens : -1,
+      cacheDeclared: costPanel.cache ? costPanel.cache.cacheDeclared : true,
+      cacheWarn: costPanel.cache ? costPanel.cache.warnings.join("；").slice(0, 140) : "",
+      savingText: costPanel.cache ? costPanel.cache.savingText : "",
+      notes: costPanel.notes.length,
+    };
+    console.log("[e2e] Token 与成本:", JSON.stringify(costProbe));
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -1068,6 +1120,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       snapshot: snapshotProbe,
       extract: extractProbe,
       ux: uxProbe,
+      cost: costProbe,
     };
   })()`;
   try {
@@ -1343,6 +1396,30 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         channels: string;
         channelNote: string;
         extractUsageChannel: string;
+      };
+      cost: {
+        pricingKept: boolean;
+        tokensRecorded: number;
+        estimateRecorded: number;
+        priced: boolean;
+        costText: string;
+        promptTokens: number;
+        cachedTokens: number;
+        aggregateEntries: number;
+        tasks: string;
+        models: string;
+        unpriced: number;
+        withoutTokens: number;
+        pricingFallback: number;
+        deviationText: string;
+        cacheOrdered: boolean;
+        cacheMisplaced: string;
+        cacheBreakpoint: string;
+        cacheStableTokens: number;
+        cacheDeclared: boolean;
+        cacheWarn: string;
+        savingText: string;
+        notes: number;
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
@@ -2172,6 +2249,27 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.ux.channels.includes("extract:sync") &&
       result.ux.channelNote.includes("未声明 batch") &&
       result.ux.extractUsageChannel === "sync" &&
+      // T3-12 Token 与成本（A3 机制取证：落盘 / 折算 / 分解 / 偏差 / 编排核对）
+      result.cost.pricingKept &&
+      result.cost.tokensRecorded >= 1 &&
+      result.cost.estimateRecorded >= 1 &&
+      result.cost.priced &&
+      result.cost.costText.startsWith("¥") &&
+      result.cost.promptTokens > 0 &&
+      result.cost.aggregateEntries >= 2 &&
+      result.cost.tasks.includes("summarize") &&
+      result.cost.tasks.includes("extract") &&
+      result.cost.models.includes("mock-model") &&
+      result.cost.deviationText.includes("%") &&
+      result.cost.cacheOrdered &&
+      result.cost.cacheMisplaced === "" &&
+      result.cost.cacheBreakpoint === "world_constraints#2" &&
+      result.cost.cacheStableTokens > 0 &&
+      result.cost.cacheDeclared === false &&
+      result.cost.cacheWarn.includes("未声明 cache") &&
+      result.cost.savingText.includes("不估算") &&
+      result.cost.notes >= 5 &&
+      result.cost.pricingFallback === 0 &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
@@ -2206,7 +2304,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
