@@ -23,3 +23,6 @@ build/
 
 # 测试覆盖率
 coverage/
+
+# 本地工具产物（额度报告等编辑器/插件输出，非项目内容）
+.qoder-credits/
