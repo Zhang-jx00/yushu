@@ -1740,13 +1740,24 @@ const STEPS: StepDef[] = [
       // 口径说明（notes）必须原样外显——本项目「边界如实标注」的一贯要求
       const notesOk = String(panel.innerText).includes('CJK');
       const rows = [...panel.querySelectorAll('.slot-table tbody tr')].length;
+      // R49 预算护栏与成本体检区：预演目录没有 config/budget.yaml → 必须显示「未配置」而不是猜一个预算；
+      // 未定价记录不得显示成「本月花了 0」；没跑成的规则要逐条点名（不把"没跑"显示成"没问题"）
+      const budget = panel.querySelector('.ai-cost-budget');
+      const budgetText = budget ? String(budget.textContent).replace(/\s+/g, ' ') : '';
+      const budgetCap = budgetText.includes('月度上限 未配置（不设月度上限）');
+      const budgetMonth = /本月（\d{4}-\d{2}/.test(budgetText);
+      const budgetHonestZero = budgetText.includes('无可折算记录') || /条未定价不计金额/.test(budgetText);
+      const budgetSkipped = budgetText.includes('未跑：') && budgetText.includes('budget-monthly-cap');
       await sleep(200);
       return {
-        ok: promptTokens > 0 && unpriced && breakpointOk && orderedOk && cacheNote && notesOk && rows >= 5,
+        ok: promptTokens > 0 && unpriced && breakpointOk && orderedOk && cacheNote && notesOk && rows >= 5 &&
+          budgetCap && budgetMonth && budgetHonestZero && budgetSkipped,
         note: '回执="' + receipt.slice(0, 96) + '"；输入 tok=' + promptTokens +
           '；未配置价格=' + unpriced + '；断点=' + breakpointOk + '；置头=' + orderedOk +
           '；缓存注记=' + cacheNote + '；口径说明=' + notesOk + '；表行=' + rows +
-          '；编排="' + auditText.slice(0, 120) + '"',
+          '；编排="' + auditText.slice(0, 120) + '"' +
+          '；预算区=' + (budgetCap && budgetMonth && budgetHonestZero && budgetSkipped) +
+          '；预算="' + budgetText.slice(0, 150) + '"',
       };
     `,
   },

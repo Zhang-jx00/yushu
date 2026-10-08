@@ -2,6 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { currentMonthKey, monthKeyOf } from "@yushu/llm";
+import { BUDGET_CONFIG_PATH } from "@yushu/world-engine";
 import { appendAiUsage } from "../src/main/ai-usage.js";
 import { readCostPanel } from "../src/main/cost-ops.js";
 import { saveAiConfig } from "../src/main/ai-ops.js";
@@ -60,11 +62,17 @@ async function setupProject() {
   return { gateway, volumeId: volume.id, chapterId: chapter.id, chapterPath: draft.chapterPath };
 }
 
-/** provider 载荷：pricing / cache 能力按需声明（其余按 v2 保守默认） */
+/** provider 载荷：pricing / cache 能力 / limits 按需声明（其余按 v2 保守默认） */
 function providersWith(options: {
   pricing?: { currency?: string; input: number; output: number; cache_read?: number };
   cache?: { mode: string; min_tokens?: number; read_mult?: number };
+  limits?: { context?: number; max_output?: number };
+  usageCapability?: boolean;
 }) {
+  // capabilities 逐字段合并（两个独立开关共用一个键，后写的 spread 会抹掉前一个）
+  const capabilities: Record<string, unknown> = {};
+  if (options.cache) capabilities.cache = options.cache;
+  if (options.usageCapability !== undefined) capabilities.usage = options.usageCapability;
   return [
     {
       id: "mock",
@@ -75,7 +83,8 @@ function providersWith(options: {
         {
           name: "mock-model",
           tier: "flagship",
-          ...(options.cache ? { capabilities: { cache: options.cache } } : {}),
+          ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
+          ...(options.limits ? { limits: options.limits } : {}),
           ...(options.pricing ? { pricing: options.pricing } : {}),
         },
       ],
@@ -480,5 +489,184 @@ describe("稳定前缀编排核对（T3-12 步骤 5）", () => {
     expect(aaa.promptTokens).toBe(1000);
     expect(aaa.cost).not.toBeNull();
     expect(aaa.costText.startsWith("¥")).toBe(true);
+  });
+});
+
+describe("预算护栏与成本体检并入面板（R49，J09 §5）", () => {
+  /** 本月某天的记录时间（与主进程归月同源，避免用例依赖"今天是几号"） */
+  const thisMonth = (day = 5) => `${currentMonthKey()}-${String(day).padStart(2, "0")}T00:00:00.000Z`;
+  const lastMonth = () => monthKeyOf(new Date(Date.UTC(
+    Number(currentMonthKey().slice(0, 4)),
+    Number(currentMonthKey().slice(5, 7)) - 2,
+    15,
+  )).toISOString());
+
+  it("budget.yaml 不存在 → exists:false、上限「未配置」，未跑成的规则进 skipped", async () => {
+    const { gateway } = await setupProject();
+    await saveAiConfig(gateway, {
+      providers: providersWith({ pricing: { currency: "CNY", input: 2, output: 8 } }) as never,
+    });
+    await appendAiUsage(dir, {
+      id: "ai-b-1",
+      type: "generate",
+      task: "drafting",
+      provider_id: "mock",
+      model: "mock-model",
+      status: "ok",
+      time: thisMonth(),
+      tokens: { prompt: 1000, completion: 500 },
+    });
+
+    const panel = await readCostPanel(gateway, {});
+    expect(panel.budget.path).toBe(BUDGET_CONFIG_PATH);
+    expect(panel.budget.exists).toBe(false);
+    expect(panel.budget.error).toBeNull();
+    expect(panel.budget.monthlyCap).toBeNull();
+    expect(panel.budget.monthlyCapText).toBe("未配置（不设月度上限）");
+    expect(panel.budget.monthKey).toBe(currentMonthKey());
+    expect(panel.budget.records).toBe(1);
+    expect(panel.budget.spentRows.map((row) => row.totalText)).toEqual(["¥0.0060"]);
+    expect(panel.budget.spentRows[0]!.usageText).toBe("¥0.0060");
+    expect(panel.budget.spentRows[0]!.estimateText).toBe("¥0"); // 零就是零，不是"未配置价格"
+    expect(panel.budget.lint).toEqual([]); // 没配 cap 就不编造发现
+    expect(panel.budget.skipped.some((line) => line.includes("budget-monthly-cap"))).toBe(true);
+    expect(panel.notes.some((line) => line.includes("归月"))).toBe(true);
+  });
+
+  it("月度临近上限 warn / 超支 error；跨月记录不进分子", async () => {
+    const { gateway } = await setupProject();
+    await saveAiConfig(gateway, {
+      providers: providersWith({ pricing: { currency: "CNY", input: 2, output: 8 } }) as never,
+    });
+    await appendAiUsage(dir, {
+      id: "ai-b-2",
+      type: "generate",
+      task: "drafting",
+      provider_id: "mock",
+      model: "mock-model",
+      status: "ok",
+      time: thisMonth(),
+      tokens: { prompt: 1000, completion: 500 }, // 本月 0.006
+    });
+    await appendAiUsage(dir, {
+      id: "ai-b-3",
+      type: "generate",
+      task: "drafting",
+      provider_id: "mock",
+      model: "mock-model",
+      status: "ok",
+      time: `${lastMonth()}-20T00:00:00.000Z`, // 上月同样金额，不该算进本月
+      tokens: { prompt: 1000, completion: 500 },
+    });
+
+    const firstWrite = await gateway.writeDoc(
+      BUDGET_CONFIG_PATH,
+      ["apiVersion: yushu.budget/v1", "currency: CNY", "monthly_cap: 0.007"].join("\n"),
+    );
+    let panel = await readCostPanel(gateway, {});
+    expect(panel.budget.exists).toBe(true);
+    expect(panel.budget.records).toBe(1);
+    expect(panel.budget.spentRows[0]!.totalText).toBe("¥0.0060");
+    expect(panel.budget.lint.map((finding) => finding.code)).toEqual(["budget-monthly-cap"]);
+    expect(panel.budget.lint[0]!.severity).toBe("warn");
+    expect(panel.budget.lint[0]!.subject_id).toBe("monthly:CNY");
+    expect(panel.budget.skipped.some((line) => line.includes("budget-monthly-cap"))).toBe(false);
+
+    await gateway.writeDoc(
+      BUDGET_CONFIG_PATH,
+      ["apiVersion: yushu.budget/v1", "currency: CNY", "monthly_cap: 0.005"].join("\n"),
+      firstWrite.hash,
+    );
+    panel = await readCostPanel(gateway, {});
+    expect(panel.budget.lint[0]!.severity).toBe("error");
+  });
+
+  it("budget.yaml 解析失败 → 错误原文外显 + budget-config-invalid，不静默当成「未配置」", async () => {
+    const { gateway } = await setupProject();
+    await saveAiConfig(gateway, {
+      providers: providersWith({ pricing: { currency: "CNY", input: 2, output: 8 } }) as never,
+    });
+    // 拼错的键（monthly_caps）：静默忽略会让护栏以为"没配预算"，正是最坏的失败方式
+    await gateway.writeDoc(BUDGET_CONFIG_PATH, ["apiVersion: yushu.budget/v1", "monthly_caps: 30"].join("\n"));
+
+    const panel = await readCostPanel(gateway, {});
+    expect(panel.budget.exists).toBe(true);
+    expect(panel.budget.error).toContain("未知键");
+    expect(panel.budget.lint[0]!.code).toBe("budget-config-invalid");
+    expect(panel.budget.lint[0]!.severity).toBe("error");
+    expect(panel.budget.lint[0]!.message).toContain("按内置默认");
+  });
+
+  it("组装输入超出窗口 → budget-context-overflow（error）；未选章纲时整条未跑", async () => {
+    const { gateway, volumeId, chapterId } = await setupProject();
+    await saveAiConfig(gateway, {
+      providers: providersWith({
+        pricing: { currency: "CNY", input: 2, output: 8 },
+        limits: { context: 100, max_output: 50 },
+      }) as never,
+    });
+
+    const withTarget = await readCostPanel(gateway, { volumeId, chapterId });
+    const overflow = withTarget.budget.lint.find((finding) => finding.code === "budget-context-overflow");
+    expect(overflow?.severity).toBe("error");
+    expect(withTarget.cache).not.toBeNull(); // 同一次预览同时供编排核对
+
+    const withoutTarget = await readCostPanel(gateway, {});
+    expect(withoutTarget.budget.lint.map((finding) => finding.code)).not.toContain("budget-context-overflow");
+    expect(withoutTarget.budget.skipped.some((line) => line.includes("budget-context-overflow"))).toBe(true);
+  });
+
+  it("未定价与缺 token 记录：只计条数，不冒充「本月花了 0」", async () => {
+    const { gateway } = await setupProject();
+    await saveAiConfig(gateway, { providers: providersWith({}) as never }); // 无 pricing
+    await appendAiUsage(dir, {
+      id: "ai-b-4",
+      type: "generate",
+      task: "drafting",
+      provider_id: "mock",
+      model: "mock-model",
+      status: "ok",
+      time: thisMonth(),
+      tokens: { prompt: 1000, completion: 500 },
+    });
+    await appendAiUsage(dir, {
+      id: "ai-b-5",
+      type: "generate",
+      task: "drafting",
+      provider_id: "mock",
+      model: "mock-model",
+      status: "ok",
+      time: thisMonth(6),
+      chars: 20, // 只有字数：既无 usage 也无估算
+    });
+
+    const panel = await readCostPanel(gateway, {});
+    expect(panel.budget.spentRows).toEqual([]); // 分子为空，但下面两个计数说明"为什么为空"
+    expect(panel.budget.unpriced).toBe(1);
+    expect(panel.budget.uncounted).toBe(1);
+    expect(panel.budget.records).toBe(2);
+  });
+
+  it("实报缺失但有本地估算 → 计入合计并单列在估算口径", async () => {
+    const { gateway } = await setupProject();
+    await saveAiConfig(gateway, {
+      providers: providersWith({ pricing: { currency: "CNY", input: 2, output: 8 } }) as never,
+    });
+    await appendAiUsage(dir, {
+      id: "ai-b-6",
+      type: "generate",
+      task: "drafting",
+      provider_id: "mock",
+      model: "mock-model",
+      status: "ok",
+      time: thisMonth(),
+      estimate: { prompt: 1000, completion: 500 },
+    });
+
+    const panel = await readCostPanel(gateway, {});
+    expect(panel.budget.spentRows[0]!.totalText).toBe("¥0.0060");
+    expect(panel.budget.spentRows[0]!.usageText).toBe("¥0");
+    expect(panel.budget.spentRows[0]!.estimateText).toBe("¥0.0060");
+    expect(panel.budget.uncounted).toBe(0);
   });
 });

@@ -898,6 +898,22 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     });
     const usageForTokens = await api.ai.usage();
     const costPanel = await api.ai.cost({ volumeId: volume.id, chapterId: co.id });
+    // R49 预算护栏接线取证：坏配置 → 极小月度上限 → 复原为「不设上限」（不给后续探针留污染）
+    await api.doc.write("config/budget.yaml", "apiVersion: yushu.budget/v1\\nmonthly_caps: 30\\n");
+    const badBudget = (await api.ai.cost({})).budget;
+    const badBudgetFile = await api.doc.read("config/budget.yaml");
+    await api.doc.write(
+      "config/budget.yaml",
+      "apiVersion: yushu.budget/v1\\ncurrency: CNY\\nmonthly_cap: 0.00001\\n",
+      badBudgetFile.hash,
+    );
+    const capBudget = (await api.ai.cost({})).budget;
+    const capBudgetFile = await api.doc.read("config/budget.yaml");
+    await api.doc.write(
+      "config/budget.yaml",
+      "apiVersion: yushu.budget/v1\\ncurrency: CNY\\n",
+      capBudgetFile.hash,
+    );
     const costProbe = {
       pricingKept: (savedPricing.config.providers[0] ? savedPricing.config.providers[0].models : [])
         .some((m) => !!m.pricing && m.pricing.input === 2),
@@ -927,6 +943,23 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       cacheWarn: costPanel.cache ? costPanel.cache.warnings.join("；").slice(0, 140) : "",
       savingText: costPanel.cache ? costPanel.cache.savingText : "",
       notes: costPanel.notes.length,
+      // R49 预算护栏与成本体检（三条都取实测原文，不靠单测外推）：
+      //  ① 解析失败必须外显——拼错的键不得静默当成「未配置」；
+      //  ② 月度上限极小 → budget-monthly-cap 升 error，且金额只取本月记录；
+      //  ③ 未选章纲时 overflow 规则整条「未跑」必须进 skipped，不得显示成"没问题"。
+      budgetInvalid: badBudget.error ? badBudget.error.slice(0, 60) : "(no-error)",
+      budgetInvalidCode: badBudget.lint.length > 0 ? badBudget.lint[0].code : "(none)",
+      budgetKeepsCapNull: badBudget.monthlyCap === null,
+      capSeverity: capBudget.lint.some((f) => f.code === "budget-monthly-cap")
+        ? capBudget.lint.filter((f) => f.code === "budget-monthly-cap")[0].severity
+        : "(none)",
+      capSpent: capBudget.spentRows.length > 0 ? capBudget.spentRows[0].totalText : "(empty)",
+      capMonthKey: capBudget.monthKey,
+      capSkippedCount: capBudget.skipped.length,
+      // 未选章纲那次读数：溢出规则必须列进「未跑」而不是假装没问题
+      noTargetSkipsOverflow: capBudget.skipped.some((line) => line.indexOf("budget-context-overflow") >= 0),
+      // 带章纲那次能否真跑溢出规则，取决于 mock 是否声明 limits.context——只如实记录不断言
+      overflowFoundWithTarget: costPanel.budget.lint.some((f) => f.code === "budget-context-overflow"),
     };
     console.log("[e2e] Token 与成本:", JSON.stringify(costProbe));
 
@@ -1780,6 +1813,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         cacheWarn: string;
         savingText: string;
         notes: number;
+        budgetInvalid: string;
+        budgetInvalidCode: string;
+        budgetKeepsCapNull: boolean;
+        capSeverity: string;
+        capSpent: string;
+        capMonthKey: string;
+        capSkippedCount: number;
+        noTargetSkipsOverflow: boolean;
+        overflowFoundWithTarget: boolean;
       };
       security: {
         backend: boolean;
@@ -2687,6 +2729,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.cost.savingText.includes("不估算") &&
       result.cost.notes >= 5 &&
       result.cost.pricingFallback === 0 &&
+      // R49 预算护栏与成本体检并入面板：坏配置外显、月度超支升 error、未跑规则进 skipped
+      result.cost.budgetInvalid.includes("未知键") &&
+      result.cost.budgetInvalidCode === "budget-config-invalid" &&
+      result.cost.budgetKeepsCapNull &&
+      result.cost.capSeverity === "error" &&
+      result.cost.capSpent.startsWith("¥") &&
+      result.cost.capMonthKey.length === 7 &&
+      result.cost.noTargetSkipsOverflow &&
+      result.cost.capSkippedCount >= 1 &&
       // T3-14 密钥安全（后端可用与不可用两条分支都必须诚实通过）
       result.security.ok &&
       result.security.plaintextBlocked.includes("明文") &&

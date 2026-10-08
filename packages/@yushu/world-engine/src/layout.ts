@@ -22,6 +22,9 @@ export const LLM_CONFIG_PATH = `${CONFIG_DIR}/llm.yaml`;
 /** 任务路由与可靠性配置（T3-2；缺省时用内置默认，见 @yushu/llm defaultRoutingConfig） */
 export const ROUTING_CONFIG_PATH = `${CONFIG_DIR}/routing.yaml`;
 
+/** 成本预算护栏配置（T3-12 / J09；可选文件，缺省 = 不设月度上限，见 @yushu/llm defaultBudgetConfig） */
+export const BUDGET_CONFIG_PATH = `${CONFIG_DIR}/budget.yaml`;
+
 /** 设定卡路径：world/cards/<type>/<id>.md */
 export function cardPath(type: string, id: string): string {
   return `${CARDS_DIR}/${type}/${id}.md`;

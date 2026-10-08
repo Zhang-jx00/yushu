@@ -11,6 +11,7 @@ import type {
   AiUsageEntryPayload,
   ContextPreviewPayload,
   CostCacheAuditPayload,
+  BudgetStatePayload,
   CostRowPayload,
   DraftHintPayload,
 } from "../../../src/shared/ipc";
@@ -144,6 +145,55 @@ function CostBreakdownTable({ rows, keyLabel }: { rows: CostRowPayload[]; keyLab
         ))}
       </tbody>
     </table>
+  );
+}
+
+/**
+ * 预算护栏与成本体检区（只读）：本月已用、生效上限、体检发现与「没跑成的规则」全部来自主进程载荷。
+ * 空 findings **不等于**没问题——`skipped` 会点名哪些规则因缺输入而未跑（不把"没跑"显示成"没问题"）。
+ */
+function CostBudgetPanel({ budget }: { budget: BudgetStatePayload }) {
+  return (
+    <div className="ai-cost-budget">
+      <div className="muted ai-budget-spent">
+        本月（{budget.monthKey}，按记录时间 UTC 归月）已用：
+        {budget.spentRows.length === 0
+          ? "无可折算记录"
+          : budget.spentRows
+              .map((row) => `${row.totalText}（实报 ${row.usageText} + 估算 ${row.estimateText}）`)
+              .join("；")}
+        {budget.unpriced > 0 ? ` · ${budget.unpriced} 条未定价不计金额` : ""}
+        {budget.uncounted > 0 ? ` · ${budget.uncounted} 条缺 token 口径无法计量` : ""}
+      </div>
+      <div className="muted ai-budget-config">
+        月度上限 {budget.monthlyCapText} · 临近提示 {Math.round(budget.warnRatio * 100)}% · 单章异常倍数{' '}
+        {budget.chapterMultiple}×（{budget.path}
+        {budget.exists ? " 已加载" : " 不存在，按内置默认"}）
+      </div>
+      {budget.lint.length === 0 ? (
+        <p className="muted ai-budget-lint">体检未发现 error / warn 级问题（未跑成的规则见下方说明）。</p>
+      ) : (
+        <ul className="issues ai-budget-lint">
+          {budget.lint.map((finding) => (
+            <li
+              key={`${finding.code}-${finding.subject_id}`}
+              className={finding.severity === "error" ? "error" : "warn"}
+            >
+              <code>{finding.code}</code>〔{finding.subject_id}〕{finding.message}
+            </li>
+          ))}
+        </ul>
+      )}
+      {budget.skipped.length > 0 && (
+        <ul className="issues ai-budget-skipped">
+          {budget.skipped.map((reason) => (
+            <li key={reason} className="muted">
+              未跑：{reason}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -1372,6 +1422,9 @@ export function AiView() {
                     : "未选择章纲：只做聚合，不核对缓存编排（选择生成目标后再点「刷新成本面板」即一并核对）"}
                 </p>
               )}
+
+              <div className="muted">预算护栏与成本体检（config/budget.yaml · J09 四条规则，只报不改）</div>
+              <CostBudgetPanel budget={costPanel.budget} />
 
               <div className="muted">口径说明</div>
               <ul className="issues ai-cost-notes">

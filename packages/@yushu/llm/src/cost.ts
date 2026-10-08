@@ -339,14 +339,21 @@ export function summarizeCosts(
 }
 
 function countWithTokens(entries: CostEntry[]): number {
-  return entries.filter(
-    (entry) =>
-      entry.tokens !== undefined &&
-      (entry.tokens.prompt !== undefined ||
-        entry.tokens.completion !== undefined ||
-        entry.tokens.cached !== undefined ||
-        entry.tokens.cache_write !== undefined),
-  ).length;
+  return entries.filter(hasUsageTokens).length;
+}
+
+/**
+ * 记录是否带 usage 实报的 token（任一分量声明过即可）。
+ * 导出给面板侧共用——「参与计价」「无 usage 线索」「回落计数」若各写一份判据，三者迟早互相矛盾。
+ */
+export function hasUsageTokens(entry: CostEntry): boolean {
+  return (
+    entry.tokens !== undefined &&
+    (entry.tokens.prompt !== undefined ||
+      entry.tokens.completion !== undefined ||
+      entry.tokens.cached !== undefined ||
+      entry.tokens.cache_write !== undefined)
+  );
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = { CNY: "¥", USD: "$" };

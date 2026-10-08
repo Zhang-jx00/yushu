@@ -800,6 +800,42 @@ export interface CostCacheAuditPayload {
   target: string;
 }
 
+/** 成本体检发现（J09 lint；severity 与记忆体检同为 `error | warn`） */
+export interface CostLintFindingPayload {
+  severity: "error" | "warn";
+  code: string;
+  /** 涉及主体（provider/模型、章节、月度、组装），便于面板定位 */
+  subject_id: string;
+  message: string;
+}
+
+/** 预算护栏状态（config/budget.yaml）——面板要能说清"哪些规则跑了、哪些为何没跑" */
+export interface BudgetStatePayload {
+  path: string;
+  exists: boolean;
+  /** 解析失败原文；非空时护栏按内置默认继续，但**必须外显**（不得静默回落成"没配置"） */
+  error: string | null;
+  /** 生效的月度上限（null = 未配置 = 不设限；文本另给，金额格式化只在主进程一处） */
+  monthlyCap: number | null;
+  monthlyCapText: string;
+  currency: string | null;
+  warnRatio: number;
+  chapterMultiple: number;
+  /** 归月口径：UTC ISO 前 7 位（与记录写入侧 toISOString 同源） */
+  monthKey: string;
+  /** 本月已用（按币种分列；未定价与无 token 的记录不进分子） */
+  spentRows: Array<{ currency: string; totalText: string; usageText: string; estimateText: string }>;
+  /** 本月内「有 token 但未配价」的条数——与「花了 0」是两件事 */
+  unpriced: number;
+  /** 本月内「usage 与估算都缺」的条数 */
+  uncounted: number;
+  /** 归入本月的记录总数 */
+  records: number;
+  lint: CostLintFindingPayload[];
+  /** 因缺输入而**没跑**的规则与原因（不把"没跑"显示成"没问题"） */
+  skipped: string[];
+}
+
 export interface AiCostPanelPayload {
   path: string;
   /** 读到并参与统计的记录条数（受主进程扫描上限约束，上限值见 notes） */
@@ -816,6 +852,8 @@ export interface AiCostPanelPayload {
   pricingFallback: number;
   pricing: CostPricingRowPayload[];
   cache: CostCacheAuditPayload | null;
+  /** 预算护栏与成本体检（J09 §5：月度上限 / 组装溢出 / 单章异常 / usage 缺失） */
+  budget: BudgetStatePayload;
   /** 口径说明（面板如实展示，避免把估算当账单） */
   notes: string[];
 }

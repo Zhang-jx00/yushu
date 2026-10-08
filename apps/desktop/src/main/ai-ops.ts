@@ -8,12 +8,14 @@ import {
   chat,
   costTokensOf,
   createLocalProvider,
+  defaultBudgetConfig,
   defaultLlmConfig,
   defaultRoutingConfig,
   detectLlmConfigVersion,
   extractJson,
   lintLlmConfig,
   orderProvidersByRoute,
+  parseBudgetConfig,
   parseLlmConfig,
   parseRoutingConfig,
   planChannels,
@@ -22,6 +24,7 @@ import {
   resolveRoute,
   serializeLlmConfig,
   stream,
+  type BudgetConfig,
   type ChatResult,
   type LlmConfig,
   type LlmFallbackInfo,
@@ -30,6 +33,7 @@ import {
 } from "@yushu/llm";
 import { estimateTokens } from "@yushu/memory";
 import {
+  BUDGET_CONFIG_PATH,
   LLM_CONFIG_PATH,
   OUTLINE_PATH,
   ROUTING_CONFIG_PATH,
@@ -195,6 +199,28 @@ export async function loadRoutingConfigForUse(gateway: ProjectGateway): Promise<
   const snapshot = await gateway.readDoc(ROUTING_CONFIG_PATH).catch(() => null);
   if (!snapshot) return defaultRoutingConfig();
   return parseRoutingConfig(snapshot.content);
+}
+
+/**
+ * 读取 config/budget.yaml（**可选文件**：不存在 = 不设月度上限，走内置默认）。
+ *
+ * 解析失败**不静默回落到默认值**——那会让作者以为护栏正按他写的上限盯着，实际盯的是另一套数。
+ * 错误原文带回给面板外显，并由调用方额外记一条 error 级体检发现（budget-config-invalid）。
+ */
+export async function loadBudgetConfigForUse(
+  gateway: ProjectGateway,
+): Promise<{ config: BudgetConfig; exists: boolean; error: string | null }> {
+  const snapshot = await gateway.readDoc(BUDGET_CONFIG_PATH).catch(() => null);
+  if (!snapshot) return { config: defaultBudgetConfig(), exists: false, error: null };
+  try {
+    return { config: parseBudgetConfig(snapshot.content), exists: true, error: null };
+  } catch (err) {
+    return {
+      config: defaultBudgetConfig(),
+      exists: true,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 const RETRY_POLICY_LABELS = ["RateLimitError", "InternalServerError", "NetworkError"] as const;
