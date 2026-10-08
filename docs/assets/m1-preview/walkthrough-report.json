@@ -1,11 +1,11 @@
 {
   "mode": "--ui-walkthrough",
   "scene": "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-39）",
-  "startedAt": "2026-10-08T10:28:03.916Z",
-  "finishedAt": "2026-10-08T10:28:47.964Z",
-  "totalMs": 44048,
-  "projectDir": "D:/Temp/yushu-walkthrough-v105",
-  "mockBaseUrl": "http://127.0.0.1:53461/v1",
+  "startedAt": "2026-10-08T10:55:42.402Z",
+  "finishedAt": "2026-10-08T10:56:26.855Z",
+  "totalMs": 44453,
+  "projectDir": "D:/Temp/yushu-walkthrough-v107",
+  "mockBaseUrl": "http://127.0.0.1:60753/v1",
   "screenshotsDir": "docs/assets/m1-preview",
   "okCount": 39,
   "failCount": 0,
@@ -29,9 +29,9 @@
       "step": 1,
       "title": "进入项目页（App 自动加载已挂载项目）",
       "ok": true,
-      "detail": "项目页已就绪，标签 10 个；root=D:\\Temp\\yushu-walkthrough-v105",
+      "detail": "项目页已就绪，标签 10 个；root=D:\\Temp\\yushu-walkthrough-v107",
       "screenshot": "docs/assets/m1-preview/step1-project.png",
-      "ms": 164
+      "ms": 173
     },
     {
       "step": 2,
@@ -39,7 +39,7 @@
       "ok": true,
       "detail": "已完成步骤 5 / 5；计数文本：世界构建层级 | 已建卡 5 张",
       "screenshot": "docs/assets/m1-preview/step2-genesis.png",
-      "ms": 1233
+      "ms": 1239
     },
     {
       "step": 3,
@@ -47,7 +47,7 @@
       "ok": true,
       "detail": "卷纲 3 条；当前卷章纲 10 条",
       "screenshot": "docs/assets/m1-preview/step3-outline.png",
-      "ms": 429
+      "ms": 446
     },
     {
       "step": 4,
@@ -55,7 +55,7 @@
       "ok": true,
       "detail": "草稿章节已创建，章纲显示「草稿章节已建」（chapter_id 已回填）",
       "screenshot": "docs/assets/m1-preview/step4-chapter-draft.png",
-      "ms": 745
+      "ms": 742
     },
     {
       "step": 5,
@@ -63,15 +63,15 @@
       "ok": true,
       "detail": "候选文本=\"天启界的夜色\"（长度 6，含「生成完成」=true）",
       "screenshot": "docs/assets/m1-preview/step5-ai-stream.png",
-      "ms": 660
+      "ms": 684
     },
     {
       "step": 6,
       "title": "整段采纳（替换正文）并留痕",
       "ok": true,
-      "detail": "采纳回执含「替换采纳」=true；使用记录：采纳 | 2026-10-08 10:28:07 · - · ok · 6 字 · 关联 ai-8a0b6c2d | 生成 | 2026-10-08 10:28:07 · mock-model · ok · 6 字",
+      "detail": "采纳回执含「替换采纳」=true；使用记录：采纳 | 2026-10-08 10:55:45 · - · ok · 6 字 · 关联 ai-f0d2ab22 | 生成 | 2026-10-08 10:55:45 · mock-model · ok · 6 字",
       "screenshot": "docs/assets/m1-preview/step6-adopt.png",
-      "ms": 206
+      "ms": 197
     },
     {
       "step": 7,
@@ -79,7 +79,7 @@
       "ok": true,
       "detail": "导出回执=true；对账全部一致=true；存在失配=false",
       "screenshot": "docs/assets/m1-preview/step7-export.png",
-      "ms": 641
+      "ms": 1033
     },
     {
       "step": 8,
@@ -87,7 +87,7 @@
       "ok": true,
       "detail": "命中表可见「加微信」=true；片段=\"误 1 / 警告 0 / 提示 0）\\n级别\\t词条\\t位置\\t上下文\\t替换建议\\n错误\\t加微信\\t第1章（待拟题） · 第 17 字符\\t夜色 临走时他低声说：加微信详谈。\"",
       "screenshot": "docs/assets/m1-preview/step8-sensitive.png",
-      "ms": 457
+      "ms": 478
     },
     {
       "step": 9,
@@ -95,7 +95,7 @@
       "ok": true,
       "detail": "索引状态含「已构建」=true；分片写入回执=true；「林渊」结果：「林渊」：实体 0 · 正文块 0；「测试设定」命中行数=10",
       "screenshot": "docs/assets/m1-preview/step9-index.png",
-      "ms": 1824
+      "ms": 1931
     },
     {
       "step": 10,
@@ -103,7 +103,7 @@
       "ok": true,
       "detail": "CodeMirror 已挂载；正文前 40 字=天启界的夜色临走时他低声说：加微信详谈。；富文本已挂载=true（富文本正文前 30 字=天启界的夜色临走时他低声说：加微信详谈。）；已切回源码=true；含实时字数=true",
       "screenshot": "docs/assets/m1-preview/step10-editor.png",
-      "ms": 751
+      "ms": 742
     },
     {
       "step": 11,
@@ -111,15 +111,15 @@
       "ok": true,
       "detail": "实体提及装饰=true；提及面板=本章提及（1）：测试设定1；点击跳转档案并选中=true",
       "screenshot": "docs/assets/m1-preview/step11-mentions.png",
-      "ms": 969
+      "ms": 958
     },
     {
       "step": 12,
       "title": "编辑器：自动保存落盘 + frontmatter 字数同步（T2-6 切片）",
       "ok": true,
-      "detail": "自动保存状态=已自动保存 18:28:13；重新读盘（chapters/vol-f2lgbh/ch-q5wbog.md）含「自动保存测试段落。」=true；frontmatter 字数=42（正文实际=42，一致=true）",
+      "detail": "自动保存状态=已自动保存 18:55:52；重新读盘（chapters/vol-f2lgbh/ch-q5wbog.md）含「自动保存测试段落。」=true；frontmatter 字数=42（正文实际=42，一致=true）",
       "screenshot": "docs/assets/m1-preview/step12-autosave.png",
-      "ms": 1203
+      "ms": 1230
     },
     {
       "step": 13,
@@ -127,7 +127,7 @@
       "ok": true,
       "detail": "标签栏隐藏=true；侧栏隐藏=true；提示可见=true；scrollTop=550；光标行居中偏差=0px（<120 判定=true）；Esc 退出后标签栏恢复=true、提示消失=true",
       "screenshot": "docs/assets/m1-preview/step13-focus.png",
-      "ms": 1759
+      "ms": 1764
     },
     {
       "step": 14,
@@ -135,7 +135,7 @@
       "ok": true,
       "detail": "设定栏出现=true；卡片含「测试设定1」=true；摘要=\"问卷回答 创世事件：测试设定1 代价与遗留物：（待补充） 神话母题：（待补充）\"；底部提及面板隐藏=true；打开设定卡跳转档案=true；切页返回后重开双栏=true、加载卡片=true",
       "screenshot": "docs/assets/m1-preview/step14-split.png",
-      "ms": 1628
+      "ms": 1623
     },
     {
       "step": 15,
@@ -143,7 +143,7 @@
       "ok": true,
       "detail": "增量回执=增量：复用 11 · 更新 0 · 移除 0 个文件 · 解析 utility 进程；复用>0=true；更新=0；解析=utility 进程",
       "screenshot": "docs/assets/m1-preview/step15-incremental.png",
-      "ms": 436
+      "ms": 418
     },
     {
       "step": 16,
@@ -151,15 +151,15 @@
       "ok": true,
       "detail": "未点击重建按钮；「自动增量：已同步」可见=true；检索「落霞峰」命中行数=1",
       "screenshot": "docs/assets/m1-preview/step16-auto-index.png",
-      "ms": 5752
+      "ms": 5762
     },
     {
       "step": 17,
       "title": "项目文件：本地快照（立即快照 → 列表 → 恢复二次确认）（T2-7 切片 A）",
       "ok": true,
-      "detail": "快照列表 3 条（最新：2026-10-08 10:28:23 · 手动 · 11 文件 · 15.5 KB | 恢复）；二次确认行出现并可取消=true",
+      "detail": "快照列表 3 条（最新：2026-10-08 10:56:02 · 手动 · 11 文件 · 15.5 KB | 恢复）；二次确认行出现并可取消=true",
       "screenshot": "docs/assets/m1-preview/step17-snapshot.png",
-      "ms": 950
+      "ms": 948
     },
     {
       "step": 18,
@@ -167,15 +167,15 @@
       "ok": true,
       "detail": "今日字数=882；目标保存回执=true；目标进度可见=true（进度条=true）；柱状图 30 根",
       "screenshot": "docs/assets/m1-preview/step18-stats.png",
-      "ms": 448
+      "ms": 459
     },
     {
       "step": 19,
       "title": "会话异常退出检测：上次会话未正常退出提示（T2-8 切片 B）",
       "ok": true,
-      "detail": "横幅文本：检测到上次会话未正常退出（开始于 2026-10-05 09:00:00）最近快照 2026-10-08 10:28:03 可在「项目文件 → 本地快照」整体回退。",
+      "detail": "横幅文本：检测到上次会话未正常退出（开始于 2026-10-05 09:00:00）最近快照 2026-10-08 10:55:42 可在「项目文件 → 本地快照」整体回退。",
       "screenshot": "docs/assets/m1-preview/step19-session.png",
-      "ms": 78
+      "ms": 72
     },
     {
       "step": 20,
@@ -183,7 +183,7 @@
       "ok": true,
       "detail": "有效字数行=true（档位标签「未达标」）；速度曲线点数=30；热力格=84；点击详情=true",
       "screenshot": "docs/assets/m1-preview/step20-stats-b.png",
-      "ms": 589
+      "ms": 603
     },
     {
       "step": 21,
@@ -191,15 +191,15 @@
       "ok": true,
       "detail": "空查询候选=5；Esc 关闭=true；键盘路径（↓ 高亮第 2 项后回车）插入=true；点击「测试设定5」插入=true；切源码后文档含新提及=true；提及面板同步=true；源码形态装饰数=3；截图时菜单开启=true",
       "screenshot": "docs/assets/m1-preview/step21-rich-mention.png",
-      "ms": 2817
+      "ms": 2848
     },
     {
       "step": 22,
       "title": "编辑器：外部改动自动三方合并（T2-6 完整版）",
       "ok": true,
-      "detail": "自动合并完成=true；磁盘含双方改动=true；编辑器已同步合并结果=true；自动保存未冻结=true；基线/磁盘一致=false（基线 1029 字 / 磁盘 1030 字 / hash 一致=true）；自动保存状态=已自动保存 18:28:29",
+      "detail": "自动合并完成=true；磁盘含双方改动=true；编辑器已同步合并结果=true；自动保存未冻结=true；基线/磁盘一致=false（基线 1029 字 / 磁盘 1030 字 / hash 一致=true）；自动保存状态=已自动保存 18:56:08",
       "screenshot": "docs/assets/m1-preview/step22-auto-merge.png",
-      "ms": 2238
+      "ms": 2263
     },
     {
       "step": 23,
@@ -207,23 +207,23 @@
       "ok": true,
       "detail": "汇总：天启界 · 共 30 章（已建草稿 1）· 总计 918 字刷新；虚拟滚动：总章数=30 顶部渲染=14 中部渲染=18（只渲染视窗窗口=true，滚动后首行 第 1 章→第 2 章=true）；「打开」跳转编辑器=true，草稿列表选中=true",
       "screenshot": "docs/assets/m1-preview/step23-library.png",
-      "ms": 1626
+      "ms": 1621
     },
     {
       "step": 24,
       "title": "码字统计：写作会话与真实速度（活动心跳 → 今日速度）（T2-9 切片 C）",
       "ok": true,
-      "detail": "今日速度行=\"今日速度—活跃 不足 1 分钟 · 1 个会话（本地估算：空闲 ≥2 分钟不计）\"；UI 会话数=1；心跳回执：活跃 21142ms / 会话 1（真实键入触发；空闲 ≥2 分钟不计，首次键入即开新会话）",
+      "detail": "今日速度行=\"今日速度—活跃 不足 1 分钟 · 1 个会话（本地估算：空闲 ≥2 分钟不计）\"；UI 会话数=1；心跳回执：活跃 21194ms / 会话 1（真实键入触发；空闲 ≥2 分钟不计，首次键入即开新会话）",
       "screenshot": "docs/assets/m1-preview/step24-stats-speed.png",
-      "ms": 1199
+      "ms": 1192
     },
     {
       "step": 25,
       "title": "项目文件：版本管理（Git）——初始化 / 一次批量改动 = 一次提交（T2-7 切片 B）",
       "ok": true,
-      "detail": "未初始化态=true；提交前变更=11 个文件；提交回执=true；提交列表=1 条；HEAD=b53b811a30（提交后变更应归零；回滚须二次确认，保留 pre_restore 快照）",
+      "detail": "未初始化态=true；提交前变更=11 个文件；提交回执=true；提交列表=1 条；HEAD=e4600e3e55（提交后变更应归零；回滚须二次确认，保留 pre_restore 快照）",
       "screenshot": "docs/assets/m1-preview/step25-git.png",
-      "ms": 953
+      "ms": 961
     },
     {
       "step": 26,
@@ -231,7 +231,7 @@
       "ok": true,
       "detail": "Provider 卡片：mock | 本地 | openai_chat | 可用 | 密钥：无需鉴权 | mock-model · 旗舰 · 流式 / usage · 上下文 32768 | 本地隐私模式：请求不出本机（能力差异见下方标注） | base_url | 模型名 | API Key 环境变量名（留空=无鉴权，如本地端点） | API Key（加密保存：本机 safeStorage 密文，真源只记 key_ref） | 加密保存",
       "screenshot": "docs/assets/m1-preview/step26-ai-provider-v2.png",
-      "ms": 524
+      "ms": 547
     },
     {
       "step": 27,
@@ -239,7 +239,7 @@
       "ok": true,
       "detail": "路由摘要：路由（config/routing.yaml）：drafting → 旗舰（require：流式） · 重试 5 · 冷却 30s · 并发 4",
       "screenshot": "docs/assets/m1-preview/step27-ai-routing.png",
-      "ms": 539
+      "ms": 551
     },
     {
       "step": 28,
@@ -247,15 +247,15 @@
       "ok": true,
       "detail": "隐私提示=true；能力标注=\"标注：mock / mock-model——未声明 capabilities：按保守默认处理（tools / structured_output / reasoning / vision / batch 视为不支持） | 标注：mock——\"；预设添加=ollama(true)；保存回执=true；provider 数=2",
       "screenshot": "docs/assets/m1-preview/step28-ai-local.png",
-      "ms": 760
+      "ms": 740
     },
     {
       "step": 29,
       "title": "记忆：五层记忆（候选不入库 → 采纳 rev0 → 人工修订 rev1 保护 / 事实出处链，T3-5）",
       "ok": true,
-      "detail": "候选生成=true；候选未自动入库=true（入库前 rev 行=\"未入库：生成候选后经「采纳候选（AI 入库）」写入\"）；采纳后 rev0=true；人工修订后 rev1=true；AI 覆盖被拒=true；事实出处有效=true；rev 行=\"已入库 · rev 1 · 更新 2026-10-08 10:28:36（人工已修订：AI 不得覆盖）\"",
+      "detail": "候选生成=true；候选未自动入库=true（入库前 rev 行=\"未入库：生成候选后经「采纳候选（AI 入库）」写入\"）；采纳后 rev0=true；人工修订后 rev1=true；AI 覆盖被拒=true；事实出处有效=true；rev 行=\"已入库 · rev 1 · 更新 2026-10-08 10:56:15（人工已修订：AI 不得覆盖）\"",
       "screenshot": "docs/assets/m1-preview/step29-memory.png",
-      "ms": 1150
+      "ms": 1170
     },
     {
       "step": 30,
@@ -263,7 +263,7 @@
       "ok": true,
       "detail": "事实注入配置摘要=含（trigger · 优先级 50）；预演：第 1 章「第1章（待拟题）」· 触发文本 1067 字 · 注入 5 条 / 排除 2 条 · 合计 178 token（估算）；注入条目=5（trigger 命中=true、摘要常驻=true）；排除=2（含原因清单=true）",
       "screenshot": "docs/assets/m1-preview/step30-injection.png",
-      "ms": 879
+      "ms": 845
     },
     {
       "step": 31,
@@ -271,7 +271,7 @@
       "ok": true,
       "detail": "默认：第 1 章「第1章（待拟题）」· 合计 2357 token / 预算 32000 · 稳定前缀 320 token · 截断 0 条 · 去重 0 条（id 0 / 相似 0）；槽位表 8 行=true（system_prompt / recent_prose 在列=true）；小预算逐出证据=\"【budget】rag:chk-bbd51d26-004（rag_chunks）——全局预算 40 超限：按逐出顺序（rag_chunks → facts → triggered_\"；小预算 system_prompt 保留=true；小预算回执=\"第 1 章「第1章（待拟题）」· 合计 40 token / 预算 40 · 稳定前缀 40 token · 截断 1 条 · 去重 0 条（id 0 / 相似\"",
       "screenshot": "docs/assets/m1-preview/step31-assembly.png",
-      "ms": 1065
+      "ms": 982
     },
     {
       "step": 32,
@@ -279,15 +279,15 @@
       "ok": true,
       "detail": "回执：查询「天启界」（自定义）· 向量路 9 条 / 关键词路 2 条 · 融合 9 条 → 重排 6 条 · 向量实现 本地余弦兜底（256 维） · 向量库存量 9；命中行=6（出处列=true）；向量实现注记=本地确定性嵌入（256 维，字面 bigram 哈希）+ 余弦 KNN 兜底：未配置 sqlite-vec 扩展路径（环境变量 YUSHU_SQLITE_VEC；首行=1 ch-q5wbog · [0, 61) · 3040f119 【外部开头改动】 天启界的夜色 临走时他低声说：加微信详谈。 @测试设定1 走进了夜色里。 自动保存测试段落。 #1 · 0.200 #1 · 1.64 ",
       "screenshot": "docs/assets/m1-preview/step32-rag.png",
-      "ms": 1013
+      "ms": 1003
     },
     {
       "step": 33,
       "title": "记忆：上下文预览器与可复现快照（槽位/来源/Token/命中键/截断 + 指纹，T3-9）",
       "ok": true,
-      "detail": "预览器条目=13（表头五列=true；命中键含「天启界」=true）；回执：快照：.yushu/context-log/context-ch-q5wbog-2026-10-08T10-28-40-357Z.json · fingerprint 0f32d3e5612e · 14725 B · 合计 2357 token · 截断 0 条；首行=system_prompt 内置人设 + 派系包约束 320 — —",
+      "detail": "预览器条目=13（表头五列=true；命中键含「天启界」=true）；回执：快照：.yushu/context-log/context-ch-q5wbog-2026-10-08T10-56-19-374Z.json · fingerprint c0698f50038c · 14725 B · 合计 2357 token · 截断 0 条；首行=system_prompt 内置人设 + 派系包约束 320 — —",
       "screenshot": "docs/assets/m1-preview/step33-context-snapshot.png",
-      "ms": 1114
+      "ms": 1003
     },
     {
       "step": 34,
@@ -295,7 +295,7 @@
       "ok": true,
       "detail": "回执：「第1章（待拟题）」· 候选 5 条（新增 4 / 补充 0 / 冲突 1）· mock / mock-model · 请求 1 次；候选行=5（三分类徽标=true；出处与置信度=true）；采纳回执=\"新增（可入库）item玄铁令置信度 0.82已入库：world/cards/item/itm-3r2cku.md 第一章末获得的关键道具（示例候选）。 出处：「玄铁令」\"",
       "screenshot": "docs/assets/m1-preview/step34-extract.png",
-      "ms": 1133
+      "ms": 1113
     },
     {
       "step": 35,
@@ -303,15 +303,15 @@
       "ok": true,
       "detail": "多候选=2（差异化=true；句级差异行=true；打字机匀速=true）；局部采纳=\"局部采纳：已追加 1/2 句 → chapters/vol-f2lgbh/ch-q5wbog.md（933 字）\"；拒绝统计=\"拒绝原因统计（本机）：太水×1（共 1 条，沉淀提示词改进）\"",
       "screenshot": "docs/assets/m1-preview/step35-multi-candidate.png",
-      "ms": 1596
+      "ms": 1610
     },
     {
       "step": 36,
       "title": "AI 副驾：Token 与成本面板 / 稳定前缀编排核对（T3-12，J09）",
       "ok": true,
-      "detail": "回执=\"成本面板：合计 未配置价格｜输入 48 tok｜偏差 +13741.7%（偏差过大：核查 provider 是否回传真实 usage、定价与估算口径是否匹配）\"；输入 tok=48；未配置价格=true；断点=true；置头=true；缓存注记=true；口径说明=true；表行=11；编排=\"核对对象 mock · mock-model · 章节 co-zpxuse · 断点置于「world_constraints」之后（下标 2）编排：✓ 稳定在前、易变在后稳定前缀 619 tok · 易变 953 tok · 缓存能力未声明\"",
+      "detail": "回执=\"成本面板：合计 未配置价格｜输入 48 tok｜偏差 +13741.7%（偏差过大：核查 provider 是否回传真实 usage、定价与估算口径是否匹配）\"；输入 tok=48；未配置价格=true；断点=true；置头=true；缓存注记=true；口径说明=true；表行=13；编排=\"核对对象 mock · mock-model · 章节 co-zpxuse · 断点置于「world_constraints」之后（下标 2）编排：✓ 稳定在前、易变在后稳定前缀 619 tok · 易变 953 tok · 缓存能力未声明\"",
       "screenshot": "docs/assets/m1-preview/step36-cost-panel.png",
-      "ms": 712
+      "ms": 713
     },
     {
       "step": 37,
@@ -319,7 +319,7 @@
       "ok": true,
       "detail": "三态=\"密钥：无需鉴权\"；输入框 type=password；autocomplete=new-password；后端可用=true；回执=\"密钥已加密保存（safeStorage 密文 → .yushu/secrets.json，不入 Git/索引/快照）；config/llm.yaml 只记录 key_ref「moc\"；保存后三态=\"密钥：已加密保存\"；清除后三态=\"密钥：无需鉴权\"；页面回显密钥=false；已清除=true；后端提示=\"\"",
       "screenshot": "docs/assets/m1-preview/step37-key-security.png",
-      "ms": 703
+      "ms": 698
     },
     {
       "step": 38,
@@ -327,7 +327,7 @@
       "ok": true,
       "detail": "结果行=4（采纳后重扫剩 1）；未确认即禁用=true；勾选后可采纳=true；采纳回执=\"已采纳 3 处（改的是编辑器内容，落盘由自动保存完成）\"；编辑器已改对=true；已落盘（走既有保存路径）=true；候选未选定即禁用=true；选定后已改=true；候选回执=\"已采纳 1 处（改的是编辑器内容，落盘由自动保存完成）\"",
       "screenshot": "docs/assets/m1-preview/step38-proofread.png",
-      "ms": 1914
+      "ms": 1892
     },
     {
       "step": 39,
@@ -335,7 +335,7 @@
       "ok": true,
       "detail": "关闭后生成按钮禁用=true；主进程 aiEnabled=false；绕过UI直调结果=\"[E_AI_DISABLED] AI 调用当前已关闭（默认关闭，逐项开启）：请在 / [E_AI_DISABLED] AI 调用当前已\"；本地命名=3 个；离线自查可行=true（结果 0 条）；恢复后 aiEnabled=true",
       "screenshot": "docs/assets/m1-preview/step39-ai-off.png",
-      "ms": 1158
+      "ms": 1163
     }
   ],
   "failures": [],
