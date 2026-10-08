@@ -4,7 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProjectGateway } from "../src/main/file-gateway.js";
-import { gitCommit, gitInit, gitRollback, gitState, GIT_DEFAULT_AUTHOR, GIT_EXCLUDES } from "../src/main/git-ops.js";
+import {
+  gitCommit,
+  gitInit,
+  gitRollback,
+  gitState,
+  GIT_DEFAULT_AUTHOR,
+  GIT_EXCLUDES,
+  isTransientScanError,
+  withTransientRetry,
+} from "../src/main/git-ops.js";
 import { createProject } from "../src/main/project-ops.js";
 import { snapshotState } from "../src/main/snapshot-ops.js";
 
@@ -208,5 +217,66 @@ describe("项目根 .gitignore（init 补齐，派生目录连遍历都不进）
     });
     if (verdict.code === 1) throw new Error(`.yushu/secrets.json 未被 .gitignore 命中：外部 git add . 会提交凭据库`);
     if (verdict.code !== 0 && verdict.code !== 1) return; // git 不可用：跳过外部对照
+  });
+});
+/**
+ * 易失文件竞态重试（第 45 轮）：`.yushu/` 里 SQLite `-wal` / `-shm` 侧车会在索引写入瞬间出现又消失，
+ * isomorphic-git 遍历 lstat 落空即抛 ENOENT。这不是仓库故障，重试即可；
+ * 但**只能对这一类错误重试**——业务错误码借道重试会把真故障藏起来。
+ */
+describe("易失文件竞态重试（withTransientRetry / isTransientScanError）", () => {
+  it("识别：ENOENT + lstat/readdir 才算竞态；ENOENT 之外的错误不算", () => {
+    expect(isTransientScanError(new Error("ENOENT: no such file or directory, lstat '.yushu/index.db-shm'"))).toBe(true);
+    expect(isTransientScanError(Object.assign(new Error("boom"), { code: "ENOENT", syscall: "readdir" }))).toBe(false);
+    expect(isTransientScanError(new Error("EACCES: permission denied, lstat 'x'"))).toBe(false);
+    expect(isTransientScanError(new Error("[E_GIT_NOT_INIT] 尚未初始化"))).toBe(false);
+    expect(isTransientScanError(undefined)).toBe(false);
+  });
+
+  it("竞态错误重试到成功为止（第 3 次通过）", async () => {
+    let calls = 0;
+    const value = await withTransientRetry("probe", async () => {
+      calls += 1;
+      if (calls < 3) throw new Error("ENOENT: no such file or directory, lstat '.yushu/index.db-wal'");
+      return "ok";
+    });
+    expect(value).toBe("ok");
+    expect(calls).toBe(3);
+  });
+
+  it("非竞态错误**立即上抛**，不重试也不改写", async () => {
+    let calls = 0;
+    await expect(
+      withTransientRetry("probe", async () => {
+        calls += 1;
+        throw new Error("[E_DOC_CONFLICT] 并发修改");
+      }),
+    ).rejects.toMatchObject({ message: expect.stringContaining("E_DOC_CONFLICT") });
+    expect(calls).toBe(1);
+  });
+
+  it("重试仍失败时给可操作错误码与次数（不静默吞掉）", async () => {
+    let calls = 0;
+    await expect(
+      withTransientRetry("statusMatrix", async () => {
+        calls += 1;
+        throw new Error("ENOENT: no such file or directory, lstat '.yushu/index.db-shm'");
+      }),
+    ).rejects.toMatchObject({ code: "E_GIT_SCAN" });
+    expect(calls).toBe(3);
+  });
+
+  it("git 初始化 + 提交在存在易失侧车文件时仍成功（回归：曾经打断 e2e 的那类错误）", async () => {
+    await mkdir(join(dir, ".yushu"), { recursive: true });
+    await writeFile(join(dir, ".yushu", "index.db-shm"), "shm", "utf8");
+    await writeFile(join(dir, ".yushu", "index.db-wal"), "wal", "utf8");
+    await gitInit(gateway);
+    const commit = await gitCommit(gateway, "含侧车文件时提交");
+    expect(commit.files).toBeGreaterThan(0);
+    const state = await gitState(gateway);
+    expect(state.changes).toEqual([]);
+    // 中途删掉侧车文件：后续扫描不应因此报错
+    await rm(join(dir, ".yushu", "index.db-shm"), { force: true });
+    expect((await gitState(gateway)).initialized).toBe(true);
   });
 });

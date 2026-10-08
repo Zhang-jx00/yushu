@@ -305,7 +305,7 @@ export function buildScript(body: string): string {
       const t0 = Date.now();
       for (;;) {
         let r = null;
-        try { r = fn(); } catch (e) { r = null; }
+        try { r = await fn(); } catch (e) { r = null; } // await：允许异步谓词（如反复读盘核对）
         if (r) return r;
         if (Date.now() - t0 > timeout) return null;
         await sleep(interval);
@@ -993,6 +993,7 @@ const STEPS: StepDef[] = [
       const menu = await waitFor(() => document.querySelector('.mention-menu'), 4000);
       if (!menu) return { ok: false, note: '输入 @ 后未出现候选菜单：' + pageText() };
       const allCount = document.querySelectorAll('.mention-menu li').length;
+
       // 2) Esc 关闭菜单，并清理本次留下的 @（避免污染后续计数）
       press('Escape');
       const escClosed = await waitFor(() => (document.querySelector('.mention-menu') === null ? true : null), 4000);
@@ -1841,6 +1842,104 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 38,
+    title: "编辑器：中文自查面板（别字/标点采纳、确认闸门、繁简候选须选定，T3-13）",
+    file: "step38-proofread.png",
+    body: String.raw`
+      await tab('编辑器');
+      const ie = await waitFor(() => window.__yushuEditorDebug, 8000);
+      if (!ie) return { ok: false, note: '编辑器调试句柄 __yushuEditorDebug 未暴露' };
+      const view = await waitFor(() => window.__yushuCmView, 8000);
+      if (!view) return { ok: false, note: '调试句柄 window.__yushuCmView 未暴露' };
+      const drafts = await window.yushu.ai.drafts();
+      const path = drafts[0] && drafts[0].chapterPath;
+      if (!path) return { ok: false, note: '无草稿章节：' + pageText() };
+      // 植入待修正文（经产品自身的写入通道，等价于作者键入后保存），再让编辑器对齐磁盘
+      const DIRTY = '他走头无路,只能甘败下风。头发被风吹乱。';
+      const before = await window.yushu.chapter.read(path);
+      await window.yushu.chapter.write({ path, body: DIRTY, baseHash: before.hash });
+      await ie.reload();
+      const panel = await waitFor(() => document.querySelector('.proofread-panel'), 12000);
+      if (!panel) return { ok: false, note: '未找到中文自查面板：' + pageText() };
+      panel.querySelector('.proofread-refresh').click();
+      const listed = await waitFor(
+        () => (panel.querySelectorAll('.proofread-row').length > 0 ? panel.querySelectorAll('.proofread-row') : null),
+        15000,
+      );
+      if (!listed) return { ok: false, note: '自查无结果行（回执=' + String((panel.querySelector('.proofread-receipt') || {}).textContent || '') + '）：' + pageText() };
+      const rowsBefore = listed.length;
+      // ① 确认闸门在 UI 上也必须成立：未勾选「我已确认」时所有采纳按钮禁用
+      const allBtn = panel.querySelector('.proofread-adopt-all');
+      const disabledBeforeConfirm =
+        !!allBtn && allBtn.disabled && [...panel.querySelectorAll('.proofread-adopt')].every((b) => b.disabled);
+      const confirm = panel.querySelector('.proofread-confirm');
+      if (!confirm) return { ok: false, note: '确认复选框缺失' };
+      confirm.click();
+      await sleep(250);
+      const enabledAfterConfirm = await waitFor(() => {
+        const b = panel.querySelector('.proofread-adopt-all');
+        return b && !b.disabled ? true : null;
+      }, 8000);
+      // ② 采纳全部「可自动修」（别字 + 半角标点）
+      panel.querySelector('.proofread-adopt-all').click();
+      const adopted = await waitFor(() => {
+        const el = panel.querySelector('.proofread-action');
+        return el && el.textContent.includes('已采纳') ? el.textContent.replace(/\s+/g, ' ') : null;
+      }, 15000);
+      const docText = String(view.state.doc.toString());
+      const docFixed = docText.includes('走投无路') && docText.includes('甘拜下风') && !docText.includes('走头无路');
+      // ③ 落盘仍走既有保存路径：等自动保存把改动写下去（面板自身从不写文件）
+      const persisted = await waitFor(async () => {
+        const disk = await window.yushu.chapter.read(path);
+        return disk.body.includes('走投无路') && disk.body.includes('甘拜下风') ? true : null;
+      }, 15000);
+      // ④ 繁简歧义必须从候选里选：未选定时该条「采纳」禁用，选定后才能提交
+      const ambRow = [...panel.querySelectorAll('.proofread-row')].find((r) => r.querySelector('.proofread-candidate'));
+      let candidateOk = false;
+      let disabledBeforeChoice = false;
+      let ambReceipt = '';
+      if (ambRow) {
+        const firstBtn = ambRow.querySelector('.proofread-adopt');
+        disabledBeforeChoice = !!(firstBtn && firstBtn.disabled);
+        const select = ambRow.querySelector('.proofread-candidate');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+        setter.call(select, '髮');
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(200);
+        const enabledAfterChoice = !(ambRow.querySelector('.proofread-adopt') || { disabled: true }).disabled;
+        if (disabledBeforeChoice && enabledAfterChoice) {
+          // 等「操作回执发生变化」而非只等它含「已采纳」——上一轮的旧回执同样含该词，会误读成刚提交的那次
+          const prevAction = String((panel.querySelector('.proofread-action') || {}).textContent || '');
+          ambRow.querySelector('.proofread-adopt').click();
+          ambReceipt = (await waitFor(() => {
+            const el = panel.querySelector('.proofread-action');
+            const text = el ? el.textContent.replace(/\s+/g, ' ') : '';
+            return text.includes('已采纳') && text !== prevAction ? text : null;
+          }, 15000)) || '';
+          candidateOk = (await waitFor(() => (String(view.state.doc.toString()).includes('髮') ? true : null), 10000)) === true;
+        }
+      }
+      const rowsAfter = panel.querySelectorAll('.proofread-row').length;
+      return {
+        ok:
+          rowsBefore >= 3 &&
+          disabledBeforeConfirm &&
+          enabledAfterConfirm === true &&
+          !!adopted &&
+          docFixed &&
+          persisted === true &&
+          !!ambRow &&
+          disabledBeforeChoice &&
+          candidateOk &&
+          ambReceipt.indexOf('已采纳 1 处') >= 0,
+        note: '结果行=' + rowsBefore + '（采纳后重扫剩 ' + rowsAfter + '）；未确认即禁用=' + disabledBeforeConfirm +
+          '；勾选后可采纳=' + (enabledAfterConfirm === true) + '；采纳回执="' + String(adopted || '').slice(0, 56) + '"' +
+          '；编辑器已改对=' + docFixed + '；已落盘（走既有保存路径）=' + (persisted === true) +
+          '；候选未选定即禁用=' + disabledBeforeChoice + '；选定后已改=' + candidateOk + '；候选回执="' + ambReceipt.slice(0, 36) + '"',
+      };
+    `,
+  },
 ];
 
 /**
@@ -1947,7 +2046,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-37）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-38）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

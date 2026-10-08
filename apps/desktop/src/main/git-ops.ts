@@ -110,9 +110,38 @@ function classifyChange(head: number, workdir: number): GitChangePayload["state"
   return "modified";
 }
 
+/**
+ * 易失文件竞态重试（只认"扫描中途文件消失"这一类）：
+ * `.yushu/` 里的 SQLite `-wal` / `-shm` 侧车会在索引写入 / 关闭连接的瞬间出现又消失，
+ * isomorphic-git 遍历时 lstat 落空即抛 `ENOENT: …, lstat '…'`（e2e 实撞两次，一次在加 `.gitignore` 之前、
+ * 一次之后——忽略规则减少但不保证消除遍历进入该目录）。这类错误**不是仓库故障**，重试即可；
+ * 其它错误（权限、真正的损坏、业务错误码）一律原样抛出，绝不借重试掩盖。
+ */
+export function isTransientScanError(err: unknown): boolean {
+  const message = String((err as { message?: string })?.message ?? err ?? "");
+  return /ENOENT/.test(message) && /(lstat|stat|readdir|scandir)/i.test(message);
+}
+
+export async function withTransientRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isTransientScanError(err)) throw err;
+      lastErr = err;
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 40 * attempt));
+    }
+  }
+  const message = String((lastErr as { message?: string })?.message ?? lastErr ?? "");
+  throw new YushuError("E_GIT_SCAN", `${label} 连续 ${attempts} 次被易失文件竞态打断：${message}`);
+}
+
 /** 工作区变更（按路径升序；已按口径过滤——内容白名单 + 排除目录） */
 async function listChanges(git: GitApi, dir: string): Promise<GitChangePayload[]> {
-  const rows = await git.statusMatrix({ fs, dir, filter: (path) => isGitPath(path) });
+  const rows = await withTransientRetry("statusMatrix", () =>
+    git.statusMatrix({ fs, dir, filter: (path) => isGitPath(path) }),
+  );
   const changes: GitChangePayload[] = [];
   for (const row of rows) {
     const path = row[0];

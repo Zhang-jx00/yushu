@@ -1102,6 +1102,68 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       }
     })();
 
+    // T3-13 中文自查探针（J14）：两个通道都必须只读，且未确认一律不改稿
+    let proofreadProbe = {
+      ok: false, warn: 0, info: 0, blocked: 0, applied: 0, editCount: 0,
+      diskUnchanged: false, spansOk: false, candidateGuard: "", error: "",
+    };
+    try {
+      const pfBefore = await api.chapter.read(draft.chapterPath);
+      await api.chapter.write({
+        path: draft.chapterPath,
+        body: "他走头无路,只能甘败下风。头发被风吹乱，慢慢的退后三步。",
+        baseHash: pfBefore.hash,
+      });
+      const panel = await api.text.proofread({ path: draft.chapterPath });
+      const autoEdits = panel.findings.filter((f) => f.autofix).map((f) => ({ start: f.span.start, rule: f.rule }));
+      const unconfirmed = await api.text.fixBody({ path: draft.chapterPath, edits: autoEdits, confirmed: false });
+      const confirmed = await api.text.fixBody({ path: draft.chapterPath, edits: autoEdits, confirmed: true });
+      const diskAfter = await api.chapter.read(draft.chapterPath);
+      const ambiguous = panel.findings.find((f) => f.rule === "proofread-conversion-ambiguous");
+      const bogus = ambiguous
+        ? await api.text.fixBody({
+            path: draft.chapterPath,
+            edits: [{ start: ambiguous.span.start, rule: ambiguous.rule, replacement: "随便写点什么" }],
+            confirmed: true,
+          })
+        : null;
+      const spansOk = panel.findings.every(
+        (f) => unconfirmed.beforeBody.slice(f.span.start, f.span.end) === f.span.text,
+      );
+      const diskUnchanged = diskAfter.body === unconfirmed.beforeBody;
+      const candidateGuard = bogus
+        ? bogus.applied.length === 0
+          ? "rejected:" + String((bogus.rejected[0] || {}).reason || "")
+          : "APPLIED"
+        : "(no-ambiguous)";
+      proofreadProbe = {
+        ok:
+          panel.counts.warn >= 2 &&
+          panel.checkedRules.length === 6 &&
+          unconfirmed.body === unconfirmed.beforeBody &&
+          unconfirmed.applied.length === 0 &&
+          unconfirmed.blocked === autoEdits.length &&
+          confirmed.applied.length === autoEdits.length &&
+          confirmed.body.indexOf("走投无路") >= 0 &&
+          confirmed.body.indexOf("走头无路") < 0 &&
+          spansOk &&
+          diskUnchanged &&
+          candidateGuard.indexOf("候选") >= 0,
+        warn: panel.counts.warn,
+        info: panel.counts.info,
+        blocked: unconfirmed.blocked,
+        applied: confirmed.applied.length,
+        editCount: autoEdits.length,
+        diskUnchanged,
+        spansOk,
+        candidateGuard,
+        error: "",
+      };
+    } catch (err) {
+      proofreadProbe = { ...proofreadProbe, error: String((err && err.message) || err).slice(0, 160) };
+    }
+    console.log("[e2e] 中文自查:", JSON.stringify(proofreadProbe));
+
     return {
       packs: catalog.packs.length, ready: preview.ready, root: snap.root, cards: list.length,
       worldTitle: world && world.title, cardPath: card.path, readBack: doc.card.name,
@@ -1211,6 +1273,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       ux: uxProbe,
       cost: costProbe,
       security: securityProbe,
+      proofread: proofreadProbe,
     };
   })()`;
   try {
@@ -1523,6 +1586,18 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         plaintextBlocked: string;
         restoredOk: boolean;
         probeError: string;
+      };
+      proofread: {
+        ok: boolean;
+        warn: number;
+        info: number;
+        blocked: number;
+        applied: number;
+        editCount: number;
+        diskUnchanged: boolean;
+        spansOk: boolean;
+        candidateGuard: string;
+        error: string;
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
@@ -2377,6 +2452,11 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.security.ok &&
       result.security.plaintextBlocked.includes("明文") &&
       result.security.restoredOk &&
+      // T3-13 中文自查（只读、未确认不改、繁简候选须选定）
+      result.proofread.ok &&
+      result.proofread.diskUnchanged &&
+      result.proofread.spansOk &&
+      result.proofread.error === "" &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
@@ -2411,7 +2491,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 密钥安全（加密保存后明文不落盘、真源只记 key_ref、后端不可用即拒存、含明文 llm.yaml 被 error 阻断，T3-14）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 密钥安全（加密保存后明文不落盘、真源只记 key_ref、后端不可用即拒存、含明文 llm.yaml 被 error 阻断，T3-14）→ 中文自查（别字与半角标点给候选、未确认不改稿、修复不写盘、繁简歧义须选定候选，T3-13）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
