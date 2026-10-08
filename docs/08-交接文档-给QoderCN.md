@@ -17,7 +17,7 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **639/639 全绿**（71 个测试文件）——`pnpm test`（第 49 轮 R49 / T3-12 收口后） |
+| 单测 | **678/678 全绿**（73 个测试文件）——`pnpm test`（第 50 轮 R50 / M4 规则 DSL 求值层后） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
 | UI 预演 | **39/39 全绿**（最近一次新目录 **v110**，44.2s，`screenshotFailures:[]`、证据缺失=0）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
@@ -89,7 +89,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 - **M2 编辑器与索引（v0.2.0）**：双形态编辑器（CodeMirror 6 / TipTap）、`@` 提及（两形态 + 候选菜单）、保存管线（800ms 防抖自动保存 / 失焦与切页 flush / 关闭前 flush / 三方自动合并 / 冲突旁路文件）、崩溃恢复（编辑日志 + 恢复面板 + 真强杀实测）、本地快照（内容寻址 + 环形保留 20 + 整体回滚 + pre_destructive）、码字统计（净增/有效字数/速度曲线/写作日历/会话与真实速度）、Git 版本管理（isomorphic-git：init/commit/rollback，惰性加载）、索引（分片重建 + 进度流 + 增量 + 自愈 + racy 防护 + utilityProcess 解析下沉）、性能预算（perf-budget.yaml + synth-1m + 回归对比工具）、稿件总览（虚拟滚动）、大章节流。M2 验收 A1–A5 机器验证全绿。
 - **M3 AI Provider 与上下文记忆（R30–R39，本次交接的主体）**：
 
-### 3.2 M3 逐轮明细（每轮 = 3 条提交：引擎 → 桌面端 → docs+证据）
+### 3.2 逐轮明细（M3 与 M4 起步；每轮 = 引擎 → 桌面端 → docs+证据）
 
 | 轮 | 任务 | 交付要点（一句话版；细节见 docs/04 注记 + docs/06 §八） |
 |---|---|---|
@@ -120,6 +120,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 | R48 | 成本章节维度贯通 + 预算护栏与成本体检引擎 | 补第 40 轮自己写下的 J09 遗留：① `CostEntry` 加 `chapter_id`/`time`、`summarizeCosts.byChapter`（**未标注章节归入「（未标注章节）」一行，不静默丢条目**）→ `AiCostPanelPayload.byChapter` → 面板复用 `CostBreakdownTable`；写侧核实 `chapter_id` 自 R40 起就在 `.yushu/ai-usage.jsonl` 里，本轮补的是**读侧贯通**（别把"读到"写成"写到"）。② 新增 `llm/budget.ts`：`config/budget.yaml` 严格解析（`apiVersion` 必填 + **未知键一律拒绝**——拼错的键被静默忽略会让护栏以为"未配置"）、确定性序列化、缺省不设月度上限。③ `lintCost` 四条规则：`cost-usage-missing`（warn，**adopt 不发请求整类排除**）、`budget-context-overflow`（error，`inputTokens > context − max_output`）、`budget-monthly-cap`（warn/error，缺省 0.8）、`cost-per-chapter-anomaly`（warn，> 均值 3×；**样本 < 3 章整条沉默**——两章时高的那章必然超倍数，属误报源）；未定价与跨币种不参与异常判定；`chapterCostsOf` 引擎与面板共用。**只报不改**（降级/拦截属策略变更，需用户在场）；错误用 `YushuError` + `E_LLM_BUDGET`（不引 `LlmError`，shared 侧循环导入）。自查抓到面板章节表**漏表头 + 缩进错位**、`spec.capabilities` 可选需可选链。单测 +13 → **627/627（71 文件）**，typecheck 11 包全 Done，e2e ✅，预演 **39/39**（改动前 v106；补表头后按 §6.3 重跑 **v107** 仍 39/39、证据缺失=0）。**遗留**：预算与体检并入面板 notes 的接线未做（`spentThisMonth` 按 `time` 归月、`assembly` 取组装实测）；`per_call_confirm_over` 只有字段与解析、**尚无拦截点** |
 
 | R49 | 预算护栏与成本体检接入面板（T3-12 收口） | 补第 48 轮留下的断头路（引擎有规则、面板看不到结果）：主进程按 `CostEntry.time` 归自然月算 `spentThisMonth`（**实报优先、缺实报用本地估算补**，两口径 `bySource` 分列）、章节金额复用 `chapterCostsOf`、组装实测 token **与编排核对共用同一次 context preview**（两处各读一次盘会取到不同正文，同一面板自相矛盾）。`config/budget.yaml` 落地为**可选文件**（world-engine 加 `BUDGET_CONFIG_PATH`），**解析失败不静默回落成"没配置"**：错误原文外显 + 追加 error 级 `budget-config-invalid` 排在最前。**缺输入的规则整条列入 `skipped` 并逐条点名**（未配上限 / 未选章纲 / 模型未声明 `limits.context` / 可折算章节 <3 / 无 provider 声明 usage）——延续 R45 `skippedRules` 那条线：**不把"没跑"显示成"没问题"**。面板新增「预算护栏与成本体检」区（本月已用含"N 条未定价不计金额"、生效上限与阈值、findings 着色、skipped 说明）。**自己埋的坑自己抓到**：`resolvePricing` 原把 `fallbackEntries` 计数塞在查价闭包里，三处聚合共用后同一条记录被计 2 次（单测当场红）→ 查价改无副作用、计数单独走一遍，token 判据抽成 `hasUsageTokens` 两侧共用。单测 +12 → **639/639（71 文件）**，typecheck 11 包全 Done，e2e ✅（探针新增 `budgetInvalidCode:"budget-config-invalid" / capSeverity:"error" / capSpent:"¥0.0003" / capMonthKey:"2026-10" / noTargetSkipsOverflow:true`，坏 yaml 读完复原不污染后续探针），预演 step36 扩断言 **39/39**（v108；删「未跑：」前缀 → v109 step36 FAIL 退出码 1；复原 → v110 终版）。变异 7 次全能红（引擎 3 + 接线 3 + 预演断言 1）。**未勾 A3 的唯一原因仍是偏差数值需真实 provider，与分解维度无关**（四维已齐，已更正 docs/04 §6.5）。`per_call_confirm_over` **仍无拦截点** |
+
+| R50 | M4/T4-1 规则 DSL 求值沙箱（引擎侧） | 新建 `@yushu/genre-engine/src/rule-dsl.ts`（放这包是因 docs/04 §7.4 指定它承载「规则 DSL 求值沙箱」），形状原样承接 docs/03 §8.2 + G06 草案（`id/severity/scope/when/message/priority`，severity 仍 `error\|warn\|info`）。**四道闸门**：操作符白名单（未知操作符抛 `E_RULE_OPERATOR` **不静默当假**；`reduce/map/filter/merge/some/every/cat/regex/fetch/fs/env/now/date` 逐个点名拒绝理由）、禁循环（无迭代原语，唯一遍历是 `in` 且候选长度计入预算）、**深度 16 在加载期就拒**（求值期再设同闸兜住手造规则）、**求值预算用节点计数不用墙钟**（`Date.now()` 超时破坏确定性——本轮最重要口径）。取数：`var` 点分路径纯读、拒 `__proto__/constructor/prototype` 与函数（永不调用），`readPath` 导出供 T4-2 复用；比较：只接受有限数字（**不比中文字典序**）、等值严格、除零报错；结论：`evidence` 只登记真正读到的 var（短路分支不进），`{a.chapter}` 取不到留「（缺 路径）」不整条失败。**自抓两处实现错**：`*` 与 `+` 共用 reduce 初值 0 致乘法恒 0；`in` 候选侧把字面量清单当表达式拒绝（最常见写法被自家沙箱拦在门外）→ 改「数组=字面量、对象=求值」。单测 +34 → **673/673（72 文件）**，typecheck 11 包全 Done；**6 次变异全能红**（白名单→3 红、双节点预算→1 红、加载期深度→1 红、求值期深度→1 红、原型链→1 红、隐式转换→1 红）。**随后被真实包数据打脸一次（重要教训）**：`packs/xuanhuan-xitong/rules/` 里本来就有两份规则件、`loadPack` 也早已解析它们，而我的解析器只认自己测试里假想的裸 `rules:` 形状——真件是 `apiVersion + id + title + source + rules:` **信封**，且六条里有两条 `when` 一个对象塞两个键。改：双形状解析、**裸列表必须有版本**、信封 `title/source` 逐条盖到 `origin` **不静默丢弃**（读了字段不带出去＝抹掉可追溯性，与 R40「saveConfig 抹 pricing」同类）、包内两条规则改写 `and + ==`；新增 `pack-rules.test.ts`（5 例，直接读真件）长期钉住 → **678/678（73 文件）**，变异增至 **8 次**（+静默丢 origin→1 红、+信封未知键放行→1 红）。**纯引擎轮：未碰桌面端，故不跑 e2e / 预演，也不声称跑过**。版本合并与 priority 排序**未实现**（等多包真规则再说，不凭空发明）。 |
 
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
@@ -308,14 +310,16 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 
 **R48 + R49 补完 J09 成本线遗留（T3-12 至此勾选）**：R48 把 `byChapter` 贯通到面板并落地 `llm/budget.ts`（`parseBudgetConfig` / `lintCost` 四条规则，12 例单测）；R49 把体检真正接进面板——归自然月的「本月已用」（实报优先、缺实报用估算补，两口径分列）、组装实测输入 token **与编排核对共用同一次 preview**、`config/budget.yaml` 解析失败**外显而不静默回落**（追加 error 级 `budget-config-invalid`）、缺输入的规则整条列入 `skipped` 逐条点名。单测 639/639（71 文件）、e2e ✅、预演 **39/39**（终版 v110）。详见 docs/04 §6.3 T3-12 三轮注记与 docs/06 §八 第 48–49 轮。
 
-**下一轮（R50）——M4 / T4-1 规则 DSL 求值层（引擎侧，先不碰桌面端）**：
-1. 落在 **`@yushu/genre-engine`**（docs/04 §7.4 已指定该包承载「规则 DSL 求值沙箱 + 规则加载与版本合并」；它已有 `loadPack / lintPack / fuse`，规则即数据的口径与派系包同源）。研究依据 `docs/research/G-流派总论/G06-派系包建模.md`：§2 第 4 条「规则 DSL 沙箱 → 表达式禁循环禁 IO，求值超时与递归深度上限」，§5 第 86 行起有「条件=JSONLogic 子集 + 产出=结构化动作」的 YAML 示例草案。
-2. **必须实现的四道沙箱闸门**：① 操作符白名单（`var / > / < / == / and / or / in / cat` 一类的纯函数子集，**未知操作符直接报错不降级**）；② **禁循环**——不实现任何迭代原语（`reduce`/`map` 类一律拒绝），只允许有限深度嵌套；③ **递归深度上限**（建议 16，超限报 `E_RULE_DEPTH`）；④ **求值超时**（同步求值无法真中断，用「节点计数上限」代替墙钟时间，**别拿 `Date.now()` 假装超时**——那会让同输入同输出被破坏）。
-3. 规则形状按 T4-1 验收口径：`{id, severity: error|warn|info, scope: scene|chapter|cross_chapter|project, when: <JSONLogic 子集>, then: <结构化动作>, source: {pack, version}}`；**`severity` 与 T3-13 一样只有三档**，`scope` 决定 R53 报告聚合粒度。**求值输出** `{rule_id, severity, span?, evidence, fix?}`——与 `@yushu/text` 的 finding 同形，别让 M4 长出第二套结果结构。
-4. 单测要求（沿用本项目口径）：每条闸门一例命中 + 一例**不该命中**；新断言先做**红/绿配对**（改判定看它能不能红）；确定性断言（同输入同输出、排序有码点兜底键）。
-5. 桌面端接入留 R51（规则管理面板 + `rule:*` 通道四处同步）；本轮纯引擎，**不要提前写 IPC**。
+**R50（M4/T4-1 求值层）已完成**：`@yushu/genre-engine/src/rule-dsl.ts` 落地四道沙箱闸门（操作符白名单 / 禁循环 / 加载期+求值期双深度闸 / **节点计数预算代替墙钟超时**），单测 +34 → 673/673（72 文件），6 次变异全能红；**纯引擎轮未碰桌面端，故没跑 e2e 与预演**（详见 docs/04 §7.3 T4-1 注记与 docs/06 §八 第 50 轮）。**两条与本文上一版建议不同的实现事实，以代码为准**：① `cat` 与 `then/action` **没有实现**——docs/03 §8.2 与 G06 的规则草案本身就没有动作字段，结论文案走 `message` 的 `{占位}`；② `in` 的候选侧支持**字面量清单**（`["爽文","黑深残"]`），这是规则里最常见的写法。
 
-> 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。**M3 功能任务（T3-1～T3-14）已全部勾选**，R50 起进入 M4（docs/04 §7）。
+**下一轮（R51）——规则 DSL 桌面端接入（求值器可用化，仍不碰 T4-2 的真数据）**：
+1. **包里的规则件已经存在，别再造第二份**：`packs/xuanhuan-xitong/pack.yaml` 的 11 件套已声明 `rules: [rules/power-consistency.yaml, rules/realm-progress.yaml]`，`loadPack` 也已把它们解析进 `resolvedFiles.rules`（R50 的 `pack-rules.test.ts` 就在读这两个文件）。**缺的是"内容层"**：没有任何地方调用 `parseRuleDocument` 校验这两份文件，也没有 lint。本轮补：`loadPack` 之后对每个 rules 文件跑 `parseRuleDocument`，**解析失败必须让 `lintPack` 报 error，不得跳过该文件**。
+2. `lintPack` 增加规则件检查：可解析、id 唯一、`severity/scope` 合法、深度不超限（复用 R50 的加载期闸），并按既有 `LintIssue{rule,severity,message}` 形状出报告。
+3. 桌面端只读通道 **`rule:list`**（IPC 四处同步：`shared/ipc.ts` → `main/ipc.ts` 用 `wrap` **不是 `wrapWrite`** → `preload.cjs` 白名单 → `renderer/src/api.ts`）：返回当前项目已融合包的全部规则（含来源包与件路径）+ 每件解析结果。UI 放「派系包」或新 tab：列出 id / severity / scope / message，解析失败行显式标红并给出原因。
+4. **沙箱试算器**（求值层可用化的关键，也是 R52 接真数据前的唯一安全入口）：面板给一个 JSON 输入框（形如 `{"a":{...},"b":{...}}`）+ 所选规则 → 调 `rule:dryRun` 返回 `{matched, message, evidence}`；**输入非法 JSON 直接拒**，求值抛错要把 `E_RULE_*` 原样显示（这正是沙箱的价值：作者能看见"这条规则写崩了"而不是拿到一个 false）。
+5. 取证：单测覆盖 `loadPack` 收集 rules 件与 lint 报错；e2e 探针跑「解析包规则 → 试算命中 / 不命中 / 沙箱拒绝」三条路径并断言 `diskUnchanged`（两个通道都不写盘）；预演新增 **step40**，**跑全新目录（v111…）**，`scene` 同步改为「步骤 10-40」。
+
+> 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。**M3 功能任务（T3-1～T3-14）已全部勾选，R50 起在 M4**（docs/04 §7）。
 
 祝顺利。有任何与本文冲突的地方，以 `docs/04`/`docs/03` 与仓库实际代码为准，并把修正回写进相应文档。
 
