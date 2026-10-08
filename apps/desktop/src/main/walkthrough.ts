@@ -1749,6 +1749,98 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 37,
+    title: "AI 副驾：API Key 加密保存 / 三态显示 / 后端不可用即禁用（T3-14，K12）",
+    file: "step37-key-security.png",
+    body: String.raw`
+      await tab('AI 副驾');
+      const card = await waitFor(() => {
+        const list = [...document.querySelectorAll('.provider')].filter((x) => x.innerText.includes('mock'));
+        return list.length > 0 ? list[0] : null;
+      }, 12000);
+      if (!card) return { ok: false, note: '找不到 provider 卡片：' + pageText() };
+      card.scrollIntoView({ block: 'center' });
+      // 每次重新取卡片：React 重渲染会替换子节点，缓存的引用会读到旧 DOM
+      const keyBadge = () => {
+        const c = [...document.querySelectorAll('.provider')].filter((x) => x.innerText.includes('mock'))[0];
+        if (!c) return '';
+        return [...c.querySelectorAll('.muted, span, div')]
+          .map((el) => String(el.textContent).replace(/\s+/g, ' ').trim())
+          .find((text) => text.startsWith('密钥：')) || '';
+      };
+      const stateLine = keyBadge();
+      const input = card.querySelector('.ai-key-input');
+      if (!input) return { ok: false, note: '找不到密钥输入框（三态行="' + stateLine + '"）：' + pageText() };
+      const type = String(input.getAttribute('type') || '');
+      const autocomplete = String(input.getAttribute('autocomplete') || '');
+      const backendDisabled = input.disabled === true;
+      const noteEl = card.querySelector('.ai-key-backend-note');
+      const backendNote = noteEl ? String(noteEl.textContent).replace(/\s+/g, ' ') : '';
+      const DEMO_KEY = 'sk-walkthrough-demo-0123456789abcdef';
+      let receipt = '';
+      let cleared = false;
+      let echo = false;
+      let stateAfterSave = '';
+      let stateAfterClear = '';
+      if (!backendDisabled) {
+        // React 受控输入：必须走原生 setter + input 事件，直接改 .value 不会进组件状态
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(input, DEMO_KEY);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        const saveBtn = card.querySelector('.ai-key-save');
+        if (!saveBtn || saveBtn.disabled) return { ok: false, note: '「加密保存」不可用：' + pageText() };
+        saveBtn.click();
+        receipt = (await waitFor(() => {
+          const hit = [...document.querySelectorAll('.ai .muted, .ai .notice, .ai p, .ai .warn')]
+            .map((el) => String(el.textContent).replace(/\s+/g, ' '))
+            .find((text) => text.includes('密钥已加密保存'));
+          return hit || null;
+        }, 15000)) || '';
+        if (!receipt) return { ok: false, note: '加密保存后无回执：' + pageText() };
+        // 三态徽标必须真的翻到「已加密保存」——只看 IPC 回执会漏掉"存成功但显示没跟上"
+        stateAfterSave =
+          (await waitFor(() => {
+            const t = keyBadge();
+            return t.includes('已加密保存') ? t : null;
+          }, 15000)) || keyBadge();
+        echo = String(document.body.innerText).includes(DEMO_KEY);
+        const clearBtn = card.querySelector('.ai-key-clear');
+        if (clearBtn) {
+          clearBtn.click();
+          cleared = (await waitFor(() => {
+            const t = [...document.querySelectorAll('.ai .muted, .ai .notice, .ai p, .ai .warn')]
+              .map((el) => String(el.textContent))
+              .find((text) => text.includes('已清除凭据'));
+            return t ? true : null;
+          }, 15000)) === true;
+          stateAfterClear =
+            (await waitFor(() => {
+              const t = keyBadge();
+              return t !== '' && !t.includes('已加密保存') ? t : null;
+            }, 15000)) || keyBadge();
+        }
+      }
+      await sleep(150);
+      // 后端可用 → 必须走完「加密保存 + 回执 + 徽标翻态 + 页面不回显 + 清除后徽标回落」；
+      // 后端不可用 → 必须禁用输入并明说「不会写明文」（宁可不能用也不降级存明文）
+      const branchOk = backendDisabled
+        ? backendNote.includes('不会写明文')
+        : receipt.includes('key_ref') &&
+          echo === false &&
+          cleared &&
+          stateAfterSave.includes('已加密保存') &&
+          stateAfterClear !== '' &&
+          !stateAfterClear.includes('已加密保存');
+      return {
+        ok: stateLine !== '' && type === 'password' && branchOk,
+        note: '三态="' + stateLine.slice(0, 40) + '"；输入框 type=' + type + '；autocomplete=' + (autocomplete || '（未设）') +
+          '；后端可用=' + (!backendDisabled) + '；回执="' + receipt.slice(0, 90) + '"' +
+          '；保存后三态="' + stateAfterSave.slice(0, 30) + '"；清除后三态="' + stateAfterClear.slice(0, 30) + '"' +
+          '；页面回显密钥=' + echo + '；已清除=' + cleared + '；后端提示="' + backendNote.slice(0, 70) + '"',
+      };
+    `,
+  },
 ];
 
 /**
@@ -1790,11 +1882,31 @@ async function captureStep(
   return { png: lastPng, note: `滞后帧（${notes.join("；")}）：已写入但证据存疑` };
 }
 
+/**
+ * 截图落盘（带重试）：Windows 下刚生成的 PNG 可能被杀软 / 缩略图预览短暂占用，
+ * 单次 `writeFile` 会抛 `UNKNOWN: unknown error`。预演跑到一半因证据写入而崩掉是最糟的失败方式，
+ * 所以重试 3 轮；仍失败则把「哪一步缺证据」如实上报（缺证据 = 本轮不算通过，不冒充已完成）。
+ */
+async function writeScreenshot(png: Buffer, rel: string): Promise<string> {
+  let lastErr = "";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await fs.writeFile(join(repoRoot, rel), png);
+      return "";
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+  }
+  return `重试 3 轮仍失败（${lastErr}）`;
+}
+
 /** 逐步执行：记录 {step,title,ok,detail,screenshot,ms}；失败不中断（前置失败时后续步骤自行报错并说明） */
 export async function runWalkthrough(win: BrowserWindow, options: WalkthroughContext): Promise<void> {
   const startedAt = new Date().toISOString();
   const t0 = Date.now();
   const results: StepResult[] = [];
+  const screenshotFailures: string[] = [];
   let lastPng: Buffer | null = null;
 
   // 暴露编辑器调试句柄（window.__yushuCmView），供 step12 以真实 CodeMirror 事务模拟键入
@@ -1817,8 +1929,13 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
     const screenshotRel = `${SCREENSHOT_REL_DIR}/${def.file}`;
     const shot = await captureStep(win, lastPng);
     if (shot.png) {
-      await fs.writeFile(join(repoRoot, screenshotRel), shot.png);
-      lastPng = shot.png;
+      const writeErr = await writeScreenshot(shot.png, screenshotRel);
+      if (writeErr) {
+        screenshotFailures.push(`step${def.step}（${def.file}）：${writeErr}`);
+        detail += ` ｜截图未落盘：${writeErr}`;
+      } else {
+        lastPng = shot.png;
+      }
     }
     if (shot.note) detail += ` ｜截图：${shot.note}`;
     const ms = Date.now() - stepStart;
@@ -1830,7 +1947,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-36）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-37）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,
@@ -1856,6 +1973,8 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
     },
     steps: results,
     failures: failures.map((item) => ({ step: item.step, title: item.title, detail: item.detail })),
+    // 缺哪一步的截图证据就写出来：证据不齐全时本轮不得声称通过（不冒充已完成）
+    screenshotFailures,
   };
   await fs
     .writeFile(join(repoRoot, SCREENSHOT_REL_DIR, "walkthrough-report.json"), JSON.stringify(report, null, 2), "utf8")
@@ -1867,6 +1986,10 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   for (const item of failures) console.log(`[walkthrough] 失败 step${item.step}：${item.detail}`);
 
   options.mock.server.close();
-  console.log(`[walkthrough] DONE ok=${report.okCount} fail=${report.failCount}`);
-  app.exit(failures.length === 0 ? 0 : 1);
+  const evidenceMissing = screenshotFailures.length;
+  for (const item of screenshotFailures) console.log(`[walkthrough] 证据缺失 ${item}`);
+  console.log(
+    `[walkthrough] DONE ok=${report.okCount} fail=${report.failCount} 证据缺失=${evidenceMissing}`,
+  );
+  app.exit(failures.length === 0 && evidenceMissing === 0 ? 0 : 1);
 }

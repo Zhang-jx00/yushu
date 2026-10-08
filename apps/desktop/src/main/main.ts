@@ -122,7 +122,12 @@ void app.whenReady().then(() => {
         app.exit(1);
       });
       win.webContents.once("did-finish-load", () => {
-        void runWalkthrough(win, context);
+        // 预演中途一旦抛出未捕获异常（如证据写入失败），必须响亮地退出码 1，
+        // 不能只留一个 UnhandledPromiseRejection 警告 + 窗口常开——那会让调用方一直等到超时。
+        void runWalkthrough(win, context).catch((err: unknown) => {
+          console.error("[walkthrough] 执行中断:", err);
+          app.exit(1);
+        });
       });
     })().catch((err: unknown) => {
       console.error("[walkthrough] 启动失败:", err);
@@ -912,6 +917,90 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     };
     console.log("[e2e] Token 与成本:", JSON.stringify(costProbe));
 
+    // T3-14 密钥安全探针（三种情形都要诚实断言，不粉饰）：
+    //  ① 后端可用：加密保存后明文既不进凭据库文件、也不进真源；真源只多一行 key_ref；随后仍可正常取用配置。
+    //  ② 后端不可用：必须拒存并给 E_SECRETS_BACKEND，且**不产生任何文件**（绝不降级写明文）。
+    //  ③ 无论①②：把含明文 api_key 的 llm.yaml 交回系统读取，必须被 parseLlmConfig 阻断（随后立即复原，
+    //     避免污染后续探针）。
+    const SECRET_MARK = "sk-e2e-plaintext-abcdefghijklmnopabcdefghijklmnop";
+    let probeError = "";
+    let securityProbe = {
+      backend: false,
+      ok: false,
+      storedKeyOk: false,
+      keyRefWritten: "",
+      secretsHavePlain: null,
+      yamlHavePlain: null,
+      secretsFileCreated: false,
+      backendReject: "",
+      plaintextBlocked: "",
+      restoredOk: false,
+    };
+    try {
+    const cfgBeforeKey = await api.ai.config();
+    const backend = cfgBeforeKey.keyBackendAvailable === true;
+    let storedKeyOk = false;
+    let keyRefWritten = "";
+    let secretsHavePlain = null;
+    let yamlHavePlain = null;
+    let backendReject = "";
+    let secretsFileCreated = false;
+    if (backend) {
+      const saved = await api.ai.saveKey("mock", SECRET_MARK);
+      const state = (saved.keyStates || []).find((s) => s.provider_id === "mock") || {};
+      storedKeyOk = state.has_stored_key === true;
+      keyRefWritten = String((saved.config.providers[0] || {}).key_ref || "");
+      const secretsDoc = await api.doc.read(".yushu/secrets.json").catch(() => null);
+      secretsHavePlain = secretsDoc ? String(secretsDoc.content).includes(SECRET_MARK) : null;
+      secretsFileCreated = secretsDoc !== null;
+      yamlHavePlain = String((await api.doc.read("config/llm.yaml")).content).includes(SECRET_MARK);
+    } else {
+      try {
+        await api.ai.saveKey("mock", SECRET_MARK);
+        backendReject = "(未拒绝——后端不可用却保存成功)";
+      } catch (err) {
+        backendReject = String((err && err.code) || err);
+      }
+      secretsFileCreated = (await api.doc.read(".yushu/secrets.json").catch(() => null)) !== null;
+    }
+    const yamlBefore = await api.doc.read("config/llm.yaml");
+    let plaintextBlocked = "";
+    let poisonedWrite = "";
+    try {
+      poisonedWrite = String(await api.doc.write(
+        "config/llm.yaml",
+        yamlBefore.content + "api_key: " + SECRET_MARK + "\\n",
+        yamlBefore.hash,
+      ) ? "written" : "");
+      await api.ai.config();
+      plaintextBlocked = "(未报错——明文被静默接受)";
+    } catch (err) {
+      plaintextBlocked = String((err && err.message) || err).slice(0, 80) + " | write=" + poisonedWrite;
+    }
+    const poisoned = await api.doc.read("config/llm.yaml");
+    await api.doc.write("config/llm.yaml", yamlBefore.content, poisoned.hash);
+    const restored = await api.ai.config();
+    securityProbe = {
+      backend,
+      ok: backend
+        ? storedKeyOk && keyRefWritten === "mock" && secretsHavePlain === false && yamlHavePlain === false && secretsFileCreated && restored.exists
+        : backendReject === "E_SECRETS_BACKEND" && !secretsFileCreated,
+      storedKeyOk,
+      keyRefWritten,
+      secretsHavePlain,
+      yamlHavePlain,
+      secretsFileCreated,
+      backendReject,
+      plaintextBlocked,
+      restoredOk: restored.exists === true,
+    };
+    } catch (err) {
+      probeError = String((err && (err.code ? err.code + ": " : "") + (err.message || err)) || err).slice(0, 200);
+      securityProbe = { ...securityProbe, backendReject: securityProbe.backendReject || probeError };
+    }
+    securityProbe = { ...securityProbe, ok: securityProbe.ok && probeError === "", probeError };
+    console.log("[e2e] 密钥安全:", JSON.stringify(securityProbe));
+
     // 命名生成器（T1-8）：本地离线 + 种子可复现
     const naming = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
     const namingAgain = await api.naming.generate({ kind: "character", seed: "e2e", count: 4 });
@@ -1121,6 +1210,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       extract: extractProbe,
       ux: uxProbe,
       cost: costProbe,
+      security: securityProbe,
     };
   })()`;
   try {
@@ -1420,6 +1510,19 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         cacheWarn: string;
         savingText: string;
         notes: number;
+      };
+      security: {
+        backend: boolean;
+        ok: boolean;
+        storedKeyOk: boolean;
+        keyRefWritten: string;
+        secretsHavePlain: boolean | null;
+        yamlHavePlain: boolean | null;
+        secretsFileCreated: boolean;
+        backendReject: string;
+        plaintextBlocked: string;
+        restoredOk: boolean;
+        probeError: string;
       };
     };
     console.log("[e2e] 结果:", JSON.stringify(result));
@@ -2270,6 +2373,10 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.cost.savingText.includes("不估算") &&
       result.cost.notes >= 5 &&
       result.cost.pricingFallback === 0 &&
+      // T3-14 密钥安全（后端可用与不可用两条分支都必须诚实通过）
+      result.security.ok &&
+      result.security.plaintextBlocked.includes("明文") &&
+      result.security.restoredOk &&
       crossProject.rejectedIds.includes("fact-foreign") &&
       crossProject.errorCodes.includes("memory-cross-project-leak") &&
       !crossProject.factIds.includes("fact-foreign") &&
@@ -2304,7 +2411,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       closeFlush.withinDebounce;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 密钥安全（加密保存后明文不落盘、真源只记 key_ref、后端不可用即拒存、含明文 llm.yaml 被 error 阻断，T3-14）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：断言未满足",
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
