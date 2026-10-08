@@ -11,16 +11,16 @@
 
 **御书**：本地优先的开源网文创作工具（Electron + React + TypeScript monorepo）。核心理念：Markdown/YAML 为唯一真源、SQLite 仅作索引、AI 结果一律候选化（采纳是用户显式动作）、离线能力完整（AI 可整体关闭）。
 
-当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）已完成 T3-1～T3-12（共 12 个任务、R30–R40 十一轮）**。M3 只剩 T3-13 / T3-14 两个任务 + §6.5 三条验收（A2 / A3 / A4——均需真实 provider 或真人试跑才能量化）待核；A1/A5/A6 已达成并有机器证据（A5/A6 于 R41 复核勾选）。
+当前进度：**M1（世界基座）、M2（编辑器与索引，v0.2.0）已完成验收；M3（AI Provider 与上下文记忆）的 14 个任务已完成 13 个（T3-1～T3-12 + T3-14，R30–R43）**。M3 只剩 **T3-13 中文处理初版** + §6.5 三条验收（A2 / A3 / A4——均需真实 provider 或真人试跑才能量化）待核；A1/A5/A6 已达成并有机器证据（A5/A6 于 R41 复核勾选）。
 
 | 项目 | 状态 |
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **483/483 全绿**（59 个测试文件）——`pnpm test`（第 40 轮 R40 / T3-12 后） |
+| 单测 | **517/517 全绿**（62 个测试文件）——`pnpm test`（第 43 轮 R43 / T3-14 收口后） |
 | 类型检查 | **10 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
-| e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e` |
-| UI 预演 | **36/36 全绿**（最近一次新目录 v84）——见 §6.3 |
+| e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针，并连续两次复跑全绿 |
+| UI 预演 | **37/37 全绿**（最近一次新目录 v92，41.5s，`screenshotFailures:[]`）——见 §6.3 |
 | 性能实测 | 10/10 达标（最近一次 R36 报告 `docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json`）；R40 未触热路径，本轮不适用 |
 | 版本 | `v0.2.0` tag **已在远端**（本文上一版记为"远端未推"，已过期更正） |
 
@@ -102,6 +102,10 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 | R39 | T3-11 写作 UX | `typewriter-buffer.ts`（token 缓冲 + rAF 每帧 flush；匀速/瞬时两档）；`candidate-diff.ts`（中文句级切分/diff/局部采纳合并）；AI 副驾多候选生成（2-3 串行 + 独立标记）+ 候选卡片（句级差异/替换/追加/按句勾选局部采纳）+ 拒绝原因记录（`.yushu/ai-feedback.jsonl` + 统计）；`batch.ts` 半价通道规划（batch_eligible + planChannel）+ 通道展示 + usage 记 channel |
 | R40 | T3-12 Token 与成本 | `cost.ts`（每 1M tokens 单价、实报+估算双口径、未配置价格返回 null、按任务/模型/合计聚合、多币种不强行合计、偏差中位数、`accumulateUsage` 跨轮累加）；`cache.ts`（`checkCacheOrchestration`：稳定前缀置头 / 断点下标 / 击穿点名 / 门槛 / 节省投影仅在已声明读价时给出）；三协议 usage 缓存字段归一（子集扣出 vs 互斥直映）；`structured.ts` 逐轮累加 usage；`llm.yaml` 模型 `pricing` + **修复 saveConfig 全量替换抹掉手写价格的隐患**；ai-usage 记 `tokens`+`estimate`；`cost-ops.ts` + `ai:cost`；AI 副驾成本面板；偏差 >50% 告警。单测 483/483、预演 36/36（v84）。**另修掉一处 M2 遗留**：富文本 `@` 菜单重开时继承上次高亮（会预选第 3 项、回车插错卡）→ 抽 `nextMentionActive` 只在同一次 `@` 会话内继承 |
 
+| R41 | 验收复核（无功能改动） | A5（跨项目泄漏探针原文）与 A6（小预算逐出证据）补机器证据后在 docs/04 §6.5 勾选；`.gitignore` 增 `.qoder-credits/`（工具产物**不删只忽略**） |
+| R42 | T3-14 安全（引擎 + 主进程侧） | `@yushu/llm/secrets.ts`（`detectPlaintextSecrets` 落地 K12 `key-plaintext-detected`、`maskSecret` 去标识化、`SecretsStore` 信封按键名排序）；**修掉旧的静默行为**（`parseLlmConfig` 过去对未知 `api_key` 字段"读已知丢其余"＝明文静静留在盘上）→ 含明文一律 `E_LLM_CONFIG` 拒绝且信息不含密钥本体；取值顺序 **会话 > 凭据库 > 环境变量**；主进程 `secrets-ops.ts`（`.yushu/secrets.json`、tmp+rename、**后端不可用即拒存不降级**、**损坏不覆写**）；`secrets-ops`/`ai-ops` 不 import electron（后端经 `installKeyCipher` 注入）以便无 Electron 单测。单测 +20（503/503，61 文件） |
+| R43 | T3-14 安全（桌面端 UI + 取证收口） | IPC 四处同步 `ai:saveKey` / `ai:clearKey`（`apiKey` 单向入参，返回值只含 `key_ref` 与三态布尔）；`ai-ops` 的 `saveProviderKey`（密文入库 → 真源只补 `key_ref`，走 `readAiConfig→patchProvider→saveAiConfig` 保住定价往返与 baseHash；保存前失效旧会话 Key；空串拒存）与 `clearProviderKey`（先删密文再改真源，避免悬空 `key_ref`）；AI 副驾三态徽标 + `type=password`/`autocomplete=new-password` + 后端不可用即**禁用**保存；e2e「密钥安全」探针 + 预演 step37（**37/37**，v92）。**补两处自查缺口**：第 42 轮没测 `ai-ops` 接线（新增 `ai-key-ops.test.ts` 9 例）、step37 原先只断"有回执"漏了"显示没跟上"（补两处翻态断言）；六次定向变异做红/绿配对（颠倒保存次序 → 3 红）。**另修两个工装缺陷**：预演截图写入遇 Windows 短暂占用即崩且窗口常开（→ 重试 3 轮 + `screenshotFailures` 计入退出码 + 入口 `.catch` 即 `app.exit(1)`）、`gitInit` 不写 `.gitignore` 导致遍历仍 stat `.yushu/` 里易失的 SQLite 侧车（`ENOENT ... lstat '.yushu/index.db-shm'` 打断过一次 e2e）→ 现幂等补齐项目根 `.gitignore`，**"凭据与派生物不入 Git" 由「御书自己过滤」升级为「仓库本身就不收」**（`git check-ignore` 外部对照）。单测 517/517（62 文件） |
+
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
 1. **真源与派生分离**：Markdown/YAML 是唯一真源；SQLite（`.yushu/index.db`）与 `.yushu/context-log/`、`.yushu/ai-usage.jsonl`、`.yushu/ai-feedback.jsonl`、`.yushu/recovery/`、`.yushu/snapshots/`、`exports/` 都是派生物——可删可重建，绝不作为真源，不入 Git。
@@ -120,7 +124,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 ### 4.1 M3 剩余任务（docs/04 §6.3 的两个未做项）
 
 - **T3-13 中文处理初版**：OpenCC 繁简转换、中文标点规范化、错别字与重复表达检测（J14）。可先做纯逻辑包（不依赖外网词典），检测结果候选化。
-- **T3-14 安全**：API Key 走 `safeStorage.encryptStringAsync`（只存 ciphertext + key_ref）；导入/导出项目自动剔除密钥（K12）。当前是「环境变量/会话内存 Key」过渡态（明文禁止落盘已有 lint 保障）。
+- ~~**T3-14 安全**~~ **已完成（R42 + R43）**：API Key 走 safeStorage 加密，密文只落 `.yushu/secrets.json`（派生物，随 `.yushu/` 被 Git / 索引 / 快照排除），真源 `config/llm.yaml` 只写 `key_ref`；含明文的 `llm.yaml` 在 `parseLlmConfig` 入口即被 `E_LLM_CONFIG` 拒绝（`key-plaintext-detected`）。**注意两处口径升级**：① R42 前"明文禁止落盘"只是 docs 里的期望，代码中并无该规则（旧解析器对未知 `api_key` 字段静默丢弃），现已真正落地；② R43 起 `gitInit` 会幂等补齐**项目根 `.gitignore`**（`.yushu/` / `exports/` / `node_modules/`）——派生物与凭据的"不入 Git"从应用内过滤升级为仓库自身不收，用户 `git add .` 也不会提交密文库。**新增派生目录时必须同步 `PROJECT_GITIGNORE_LINES`**（有单测钉住它与 `GIT_EXCLUDES` 同源）。剩余：M5 做项目打包 / 导入导出时接显式 `stripSecrets`。
 
 ### 4.2 M3 验收未核项（docs/04 §6.5）
 
@@ -155,7 +159,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 ### 5.1 立即（M3 收口，建议 3-4 轮）
 
-1. ~~**T3-12 成本与缓存**（含 A3 取证）~~ **已完成（R40）** → 2. **A5 / A6 复核勾选** **已完成（R41）** → 3. **T3-14 安全（Key 加密）** → 4. **T3-13 中文处理** → 5. **A2 / A4 取证轮**（补 e2e/网络审计探针与 docs 证据；A3 的偏差量化需真实 provider）。收口后按 docs/04 §6.7：A1–A6 全绿 → `v0.4.0` 打 tag。
+1. ~~**T3-12 成本与缓存**（含 A3 取证）~~ **已完成（R40）** → 2. **A5 / A6 复核勾选** **已完成（R41）** → 3. ~~**T3-14 安全（Key 加密）**~~ **已完成（R42 引擎与主进程 + R43 桌面端与取证）** → 4. **T3-13 中文处理（下一轮 R44–R45）** → 5. **A2 / A4 取证轮**（补 e2e/网络审计探针与 docs 证据；A3 的偏差量化需真实 provider）。收口后按 docs/04 §6.7：A1–A6 全绿 → `v0.4.0` 打 tag。
 
 ### 5.2 之后（以 docs/04 为准，勿偏离）
 
@@ -167,7 +171,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 ### 5.3 工程债（低优先，随手做）
 
 - `docs/00-交接文档-给Trae.md` 是 M1 时代的；新内容一律写进 `docs/04/06` 与本文，避免多源。
-- walkthrough 报告 `scene` 字段仍写「步骤 10-25」，可顺手更新为当前范围。
+- ~~walkthrough 报告 `scene` 字段仍写「步骤 10-25」，可顺手更新为当前范围。~~ **已更新**（R40 改为「步骤 10-36」，R43 随 step37 改为「步骤 10-37」——新增步骤时记得同步这里）
 - e2e 探针串行较长（~40s），暂无拆分必要；新增探针请保持「先落盘再断言、口径可打印」风格。
 
 ---
@@ -211,7 +215,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
   - 非流式（stream 缺失/false）：固定返回 **「非流式一次性回复」**；**例外**：请求含 `yushu.extract/entity_extraction`（抽取任务契约 id）时返回固定候选 JSON（5 条：林渊=补充 / 玄铁令=新增 / 林渊·location=冲突 / 天启界=新增 / 测试设定1）；
   - `e2e` 启动参数 `failFirst:1, failStatus:429`：**首个请求 429**，用于重试探针（`hits>=2 && failures===1` 为断言口径）。
 - **e2e 探针**都在 `apps/desktop/src/main/main.ts` 的 `runE2E` 大脚本（渲染层字符串）里，尾部一段很长的 `ok = ... && ...` 布尔表达式是唯一断言处；新增探针记得同时更新：脚本内 result 对象、外层 `result` 类型声明、尾部断言、成功消息文案。**坑位**：「AI 降级探针」会把 mock 模型保存为 `stream:false` **且不恢复**——任何在其之后需要流式的探针必须自行恢复（见 R39 的 `configForRestore` 段）。
-- **walkthrough**：步骤数组 `STEPS`（`walkthrough.ts`），每步 `{step, title, file, body}`，`body` 用 **String.raw**（`'\n'` 才是真换行；普通模板会提前转义，见 memory 教训）。新步骤 append 到末尾即可（计数自动）；截图落在 `docs/assets/m1-preview/`。已知坑：**AiView 随标签页卸载重建**（`ProjectScreen` 里 `tab === "ai" && <AiView/>`），依赖其内部状态（如 AI 开关）的步骤要「自给自足」地先设置；断言选择器要避免误匹配面板标题（如 `局部采纳：` 全角冒号才指向回执）。
+- **walkthrough**：步骤数组 `STEPS`（`walkthrough.ts`），每步 `{step, title, file, body}`，`body` 用 **String.raw**（`'\n'` 才是真换行；普通模板会提前转义，见 memory 教训）。新步骤 append 到末尾即可（计数自动）；截图落在 `docs/assets/m1-preview/`。已知坑：**AiView 随标签页卸载重建**（`ProjectScreen` 里 `tab === "ai" && <AiView/>`），依赖其内部状态（如 AI 开关）的步骤要「自给自足」地先设置；断言选择器要避免误匹配面板标题（如 `局部采纳：` 全角冒号才指向回执）。 **e2e 侧同类坑（R43 实撞）**：`runE2E` 的大脚本是**普通模板字符串**，里面写的 `
+` 会被外层先转义成真实换行，把注入脚本的字符串字面量截断 → 渲染层只报 `Uncaught SyntaxError: Invalid or unexpected token`（不带出错内容，极难定位）；注入脚本内需要换行时一律写双反斜杠形式。
 - **auth/网络**：e2e / walkthrough / trial 全程离线 mock，不联网、不需要真 Key；perf-test 也离线。
 
 ---
@@ -223,7 +228,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 3. 跨项目记忆泄漏是 error 红线（`memory-cross-project-leak`，测试必须覆盖）。
 4. 写操作必须带 `baseHash` 并发检测；冲突绝不静默覆盖（主文件保持外部版本）。
 5. 敏感词词库外置可更新；导出防手滑（UI 勾选 + 服务端 `confirmed` 强校验）；导出产物写 `exports/<书名>-<时间戳>.txt` 不覆盖。
-6. 密钥安全：明文 Key 禁止落盘/进日志。**R42 起该保障已真实存在**（此前仅写在 docs/03 §13 与 K12 建议里，代码中并无此规则——本文上一版表述有误导，已更正）：`@yushu/llm` `detectPlaintextSecrets` + `parseLlmConfig` 将 `key-plaintext-detected` 落成 error 级阻断，密文只存 `.yushu/secrets.json`（safeStorage 后端不可用即拒绝保存，绝不写明文），错误信息只带去标识化证据。
+6. 密钥安全：明文 Key 禁止落盘/进日志。**R42 起该保障已真实存在**（此前仅写在 docs/03 §13 与 K12 建议里，代码中并无此规则——本文上一版表述有误导，已更正）：`@yushu/llm` `detectPlaintextSecrets` + `parseLlmConfig` 将 `key-plaintext-detected` 落成 error 级阻断，密文只存 `.yushu/secrets.json`（safeStorage 后端不可用即拒绝保存，绝不写明文），错误信息只带去标识化证据。 **R43 起再收紧一层**：`gitInit` 幂等补齐项目根 `.gitignore`（`.yushu/` / `exports/` / `node_modules/`，与 `PROJECT_GITIGNORE_LINES` 同源并有单测钉住），使凭据库密文与索引库**连外部 `git add .` 也收不走**——不再只靠御书自己的结果侧过滤；同时 isomorphic-git 会剪掉整棵 ignored 子树，不再 stat `.yushu/` 里易失的 SQLite `-wal` / `-shm` 侧车。**新增派生目录时必须同步 `GIT_EXCLUDES` 与 `PROJECT_GITIGNORE_LINES` 两处**。
 7. 不要触碰用户其它两个 GitHub 项目；推送凭据只按 §6.2 方式使用。
 8. 性能：改动触及索引写入 / 启动 / 输入路径时，必须跑 `perf-test` 并对比回归（阈值 20%），把报告落到 `docs/assets/perf/` 并在 docs/06 如实记录；预算门禁在 `perf-budget.yaml`。
 
@@ -233,13 +238,13 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 ```bash
 pnpm install
-pnpm test          # 期望 425/425（56 文件）
+pnpm test          # 期望 517/517（62 文件，第 43 轮口径）
 pnpm typecheck     # 期望 10 个包/应用 Done
-pnpm --filter @yushu/desktop e2e      # 期望末行 [e2e] 通过：…（含 T3-8/9/10/11 探针）
-pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-walkthrough-<新编号>"   # 期望 DONE ok=35 fail=0
+pnpm --filter @yushu/desktop e2e      # 期望末行 [e2e] 通过：…（含 T3-12 成本与 T3-14 密钥安全探针）
+pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-walkthrough-<新编号>"   # 期望 DONE ok=37 fail=0 证据缺失=0（退出码把「证据缺失」也算失败）
 ```
 
-验收基线数字（截至 `2d3115a4`）：单测 425、typecheck 10 包全绿、e2e 全链路通过（含 RAG/快照/抽取/写作 UX 探针）、walkthrough 35/35（v78，总耗时 ~40s）、perf 10/10（R36 报告）。
+验收基线数字（截至 R43 / `e975688` 之后）：单测 **517/517（62 文件）**、typecheck 10 包全绿、e2e 全链路通过（含 RAG / 快照 / 抽取 / 写作 UX / 成本 / **密钥安全** 探针；R43 连续两次复跑全绿）、walkthrough **37/37**（v92，总耗时 ~41.5s，`screenshotFailures:[]`）、perf 10/10（R36 报告，其后各轮未触热路径）。
 
 ---
 
@@ -279,13 +284,13 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 
 **T3-12 Token 与成本已于 R40 完成**（2026-10-07：成本数学 / 跨协议 usage 归一 / 定价透传 / `ai:cost` 通道 / 成本面板 / 编排核对；单测 483/483、e2e 与预演 36/36 全绿（v84），详见 docs/04 §6.3 T3-12 注记与 docs/06 §八 第 40 轮）。下一轮按 §5.1 顺序建议：
 
-**T3-14 安全（API Key 加密落盘）**：
-1. `ai-ops.ts` 的会话内存 Key（`sessionKeys`）之外，新增持久态：`safeStorage.encryptStringSync` 产 ciphertext，只写 `.yushu/secrets.json`（派生物、不入 Git）+ `key_ref`；解密只在主进程内存态，**密文与明文都不经 IPC 回传渲染层**。
-2. `config/llm.yaml` 保持只存 `api_key_env`（或 `key_ref` 标识）；`lintLlmConfig` 增加 `key-plaintext-detected` 的 error 级判定路径（现为规则名，需要落到实际校验）。
-3. 导入/导出项目（`export:*` 与项目迁移路径）自动剔除密钥文件与 frontmatter 中的密钥字段。
-4. Provider 面板增加「已加密保存 / 仅本次会话 / 环境变量」三态显示（不显示 Key 本体，哪怕是掩码）。
-5. 单测覆盖：密文可回解、明文绝不落盘（写盘路径拦截断言）、导出包剔除密钥；e2e 探针 + 预演新 step。
-6. 顺带把 §4.2 的 **A5 / A6 标记 `[x]`**（**R41 已完成**：e2e 探针原文与证据文字已写入 docs/04 §6.5 与 docs/06 §八 第 41 轮），并同步 docs/06 §五 的测试计数（现 483/483，59 个文件）。
+**T3-14 安全已于 R42 + R43 完成**（2026-10-08：明文阻断 / 凭据库信封 / safeStorage 注入式后端 / `ai:saveKey`+`ai:clearKey` / 三态徽标 / e2e 密钥探针 / 预演 step37；单测 517/517（62 文件）、e2e 连续两次全绿、预演 **37/37**（v92），详见 docs/04 §6.3 T3-14 两轮注记与 docs/06 §八 第 42–43 轮）。
+
+**下一轮按 §5.1 顺序建议——T3-13 中文处理初版（J14，建议拆两轮）**：
+1. **引擎侧（R44）**：新建 `@yushu/text` 纯逻辑包（**离线、确定性、无外网词典**）——① 繁简转换（内置映射表，转换歧义要点名而非硬猜，规则 id `proofread-conversion-ambiguous`）；② 中文标点规范化（半角/全角、引号配对、省略号与破折号，`proofread-punctuation-gb`）；③ 错别字与重复表达检测（`proofread-typo` / `proofread-repetition-high`）；④ 长句与"的"链等轻提示（`proofread-long-sentence` / `proofread-demiscue`）。全部输出 `{rule_id, severity, span[start,end), evidence, fix?}`，**自动修复未确认一律 error 级**（`proofread-autofix-unconfirmed`：未经用户确认不得改稿）。
+2. **桌面端（R45）**：编辑器侧栏「自查」面板接 `text:proofread` 通道（IPC 四处同步），逐条可定位到正文 span、可采纳单条建议；e2e 探针 + 预演新 step（**step38**，跑在**全新目录**）。
+3. 单测要求：每条规则至少一例命中 + 一例**不该命中**（防误报）；新断言先做红/绿配对（改判定看它能不能红）。
+4. 顺带同步 docs/06 §五 的测试计数与 §二 的预演步数（现为 37 步，`scene` 字段写「步骤 10-37」）。，**密文与明文都不经 IPC 回传渲染层**。
 
 > 提醒：A2 / A3 / A4 三条验收都卡在「需要真实 provider 或真实网络审计」，纯离线轮次无法达成——安排取证轮时需要先确认用户侧可用端点，不要在 mock 上声称达成。
 
