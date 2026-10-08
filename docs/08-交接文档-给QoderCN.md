@@ -223,7 +223,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 3. 跨项目记忆泄漏是 error 红线（`memory-cross-project-leak`，测试必须覆盖）。
 4. 写操作必须带 `baseHash` 并发检测；冲突绝不静默覆盖（主文件保持外部版本）。
 5. 敏感词词库外置可更新；导出防手滑（UI 勾选 + 服务端 `confirmed` 强校验）；导出产物写 `exports/<书名>-<时间戳>.txt` 不覆盖。
-6. 密钥安全：明文 Key 禁止落盘/进日志（`key-plaintext-detected` 为 error 级规则；T3-14 前用「环境变量 / 会话内存 Key」过渡）。
+6. 密钥安全：明文 Key 禁止落盘/进日志。**R42 起该保障已真实存在**（此前仅写在 docs/03 §13 与 K12 建议里，代码中并无此规则——本文上一版表述有误导，已更正）：`@yushu/llm` `detectPlaintextSecrets` + `parseLlmConfig` 将 `key-plaintext-detected` 落成 error 级阻断，密文只存 `.yushu/secrets.json`（safeStorage 后端不可用即拒绝保存，绝不写明文），错误信息只带去标识化证据。
 7. 不要触碰用户其它两个 GitHub 项目；推送凭据只按 §6.2 方式使用。
 8. 性能：改动触及索引写入 / 启动 / 输入路径时，必须跑 `perf-test` 并对比回归（阈值 20%），把报告落到 `docs/assets/perf/` 并在 docs/06 如实记录；预算门禁在 `perf-budget.yaml`。
 
