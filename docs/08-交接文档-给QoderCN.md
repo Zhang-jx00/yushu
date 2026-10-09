@@ -17,7 +17,7 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **702/702 全绿**（75 个测试文件）——`pnpm test`（第 51 轮 R51 / 规则页与沙箱试算后） |
+| 单测 | **729/729 全绿**（76 个测试文件）——`pnpm test`（第 52 轮 R52 / 结构完整性三条规则后；纯引擎轮，e2e 与预演未重跑） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
 | UI 预演 | **40/40 全绿**（最近一次新目录 **v114**，45.1s，`screenshotFailures:[]`、证据缺失=0）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
@@ -124,6 +124,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 | R50 | M4/T4-1 规则 DSL 求值沙箱（引擎侧） | 新建 `@yushu/genre-engine/src/rule-dsl.ts`（放这包是因 docs/04 §7.4 指定它承载「规则 DSL 求值沙箱」），形状原样承接 docs/03 §8.2 + G06 草案（`id/severity/scope/when/message/priority`，severity 仍 `error\|warn\|info`）。**四道闸门**：操作符白名单（未知操作符抛 `E_RULE_OPERATOR` **不静默当假**；`reduce/map/filter/merge/some/every/cat/regex/fetch/fs/env/now/date` 逐个点名拒绝理由）、禁循环（无迭代原语，唯一遍历是 `in` 且候选长度计入预算）、**深度 16 在加载期就拒**（求值期再设同闸兜住手造规则）、**求值预算用节点计数不用墙钟**（`Date.now()` 超时破坏确定性——本轮最重要口径）。取数：`var` 点分路径纯读、拒 `__proto__/constructor/prototype` 与函数（永不调用），`readPath` 导出供 T4-2 复用；比较：只接受有限数字（**不比中文字典序**）、等值严格、除零报错；结论：`evidence` 只登记真正读到的 var（短路分支不进），`{a.chapter}` 取不到留「（缺 路径）」不整条失败。**自抓两处实现错**：`*` 与 `+` 共用 reduce 初值 0 致乘法恒 0；`in` 候选侧把字面量清单当表达式拒绝（最常见写法被自家沙箱拦在门外）→ 改「数组=字面量、对象=求值」。单测 +34 → **673/673（72 文件）**，typecheck 11 包全 Done；**6 次变异全能红**（白名单→3 红、双节点预算→1 红、加载期深度→1 红、求值期深度→1 红、原型链→1 红、隐式转换→1 红）。**随后被真实包数据打脸一次（重要教训）**：`packs/xuanhuan-xitong/rules/` 里本来就有两份规则件、`loadPack` 也早已解析它们，而我的解析器只认自己测试里假想的裸 `rules:` 形状——真件是 `apiVersion + id + title + source + rules:` **信封**，且六条里有两条 `when` 一个对象塞两个键。改：双形状解析、**裸列表必须有版本**、信封 `title/source` 逐条盖到 `origin` **不静默丢弃**（读了字段不带出去＝抹掉可追溯性，与 R40「saveConfig 抹 pricing」同类）、包内两条规则改写 `and + ==`；新增 `pack-rules.test.ts`（5 例，直接读真件）长期钉住 → **678/678（73 文件）**，变异增至 **8 次**（+静默丢 origin→1 红、+信封未知键放行→1 红）。**纯引擎轮：未碰桌面端，故不跑 e2e / 预演，也不声称跑过**。版本合并与 priority 排序**未实现**（等多包真规则再说，不凭空发明）。 |
 
 | R51 | 规则 DSL 桌面端接入（T4-1 收口） | 补第 50 轮缺的**内容层**：`genre-engine/rules.ts` 的 `loadPackRuleSets` 真读包内 `rules/*.yaml` 交给 `parseRuleDocument`，每件带 `{file,packId,rules,error,expressionIssues}`。与 `loadPackTaboos` 的"失败静默跳过"**刻意相反**——悄悄消失的规则让作者看到"没发现问题"，真相却是"这条没跑"，**沉默的校验器比没有校验器更坏**。`rule-dsl.ts` 补静态侧 `collectExpressionIssues`（不求值就指出"一个对象两个键，请用 and/or""未知操作符 regex：禁正则"）；`lintPack` 新增 `rule-unparsable` / `rule-expression` / `rule-duplicate-id`（同包撞 id 拒绝按加载顺序取后者）。IPC 两个**只读**通道 `rule:catalog` / `rule:dryRun`（`wrap` 不用 `wrapWrite`；试算只吃夹具、不读正文不写盘）+ 第 11 个标签页「规则」（目录汇总 / 逐件表格 / 沙箱试算 / 依据表），空目录明写「不等于这些包没有规则」，试算**命中·未命中·被沙箱拒绝**三态分开并给原始 `E_RULE_*`。**第二次被真实数据纠正**：包内规则件是 `apiVersion+id+title+source+rules` **信封**，R50 只认假想的裸 `rules:` → 补齐并把 `title/source` 逐条盖到 `origin`（读了字段不带出去＝抹掉可追溯性，同 R40 saveConfig 抹 pricing）。单测 +24 → **702/702（75 文件）**，typecheck 11 包全 Done，e2e ✅（`total:6 / hit:true / evidenceCount:4 / missMatched:false / rejectCode:"[E_RULE_UNORDERABLE]…" / diskUnchanged:true`），预演新增 **step40** → **40/40**（终版 v114 45.1s）。**step40 两次真实红跑**：v111（我的选择器 `.rules-table tbody td.error` 写宽了，严重度单元格也带 error 类）＝预演抓到**我自己的断言**而非产品缺陷；v113（故意把命中行类名换成未命中行）证明回执断言能红。`scene` → 步骤 10-40。**未实现**：同 id 版本合并、`priority` 参与排序、规则编辑 UI（派系包是外部制品） |
+
+| R52 | M4/T4-2 结构完整性三条规则（引擎侧） | 新建 `world-engine/consistency.ts`：`checkStructure({entities,refs})` 纯数据结构 + `checkStructureFromSources(reader)` 文件直算，**不 import search、不读 SQLite**（索引可删，删库后结论必须一字不变＝§7.5 A5 口径）。`ref-dangling`（error，**只按 id 精确匹配**，孤儿引用也算结构破坏）、`ref-cycle`（error，码点排序 + 路径旋转到环内最小 id；**深度上限 64 并计 `cycleDepthCapped`，不假装没环**；同一强连通分量只报先发现的环，不枚举全部初等环）、`layer-order-violation`（error，上游层引用下游层；层未知不判定、同层不算）。**两处权威文件互相矛盾，做显式裁决并写进注释**：严重度 docs/03:381=error vs K05:122=warn → 取 docs/03；倒置方向取 K05 的具体例子（地理引用人物）。「没跑」与「没问题」分开：`ch-`/`co-`/`vol-` 目标逐条登记 `outOfScope`；`enabledLayers` 落实"未启用层不参与校验"；world.yaml 不合式按全启用并写 `worldNote`（测试里 `expect(worldNote).toBeNull()` 防止解析静默失败造成假绿）。**变异 6 次，其中一次杀掉自己的死代码**：`seen` 环去重集合关掉后 27 例全绿 → 无测试能杀它 → 按"没有失败测试就没有代码"删除（其余五次分别 1/1/1/4/2 红）。TDD 三轮红绿，+27 例 → **729/729（76 文件）**，typecheck 11 包全 Done；**纯引擎轮未跑 e2e / 预演，也不声称跑过**。**T4-2 保持未勾选**：八类语义规则需事实/声线卡比对；`chapter.outline_ref` 与 `source_chapters` 的存在性校验（章节↔大纲双向对账）也未做 |
 
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
@@ -316,14 +318,15 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 
 **R51（规则 DSL 桌面端接入）已完成，T4-1 勾选**：内容层加载（`rules.ts`）+ `lintPack` 三条规则检查 + 两个只读通道 `rule:catalog` / `rule:dryRun` + 第 11 个标签页「规则」+ 预演 step40（终版 v114 40/40、e2e 规则探针 `diskUnchanged:true`）。详见 docs/04 §7.3 T4-1 两轮注记与 docs/06 §八 第 50–51 轮。
 
-**下一轮（R52）——M4 / T4-2 结构完整性三条规则（引擎侧，先取证再动手）**：
-1. **已取证的事实（别重复调查）**：`collectIndexInput`（`packages/@yushu/world-engine/src/index-input.ts:258-387`）从真源产出的 `IndexInput`（`:65-70`）里，`entities`（行形状 `IndexEntityRow{id,type,layer,name,aliases,visibility,filePath}`）**只有设定卡**——扫描门在 `:293` 的 `path.startsWith("world/cards/")`，push 在 `:312`；**章节与大纲不进 entities**。`refs`（`IndexRefRow{referrer,relation,target}`）**也只有一个生产者**：设定卡 frontmatter 的 `refs`（emit 在 `:321-323`，`relation` 原样取自卡）。所以悬空判定只能对**卡内引用**下结论。`chapter.outline_ref` 与 `card.source_chapters` 目前**没有任何存在性校验**（schema 只 `minLength:1`，`packages/@yushu/schema/src/schemas.ts:65-76` 与 `:194`），别把它们当成已覆盖。
-2. **不要建在 SQL 上**：索引是可删的派生物（红线 1）。检查器的输入用 `IndexInput`（纯真源产物），**删库后结果必须不变**——这是 M4 §7.5 A5 的验收口径。
-3. **两份权威文件口径不一致，要显式裁决**：`docs/03-开发规划方案.md:381` 把 `layer-order-violation` 列为 **error**，而 `docs/research/K-软件工程与产品/K05-世界引擎数据模型与影响传播.md:122` 记 **warn**。取 docs/03（架构文档为约束源）= error，并在代码注释与 docs/04 注记里写明分歧，别装作没看见。方向按 K05 的例子定义：**上游层引用下游层即倒置**（如 geography 卡引用 characters 卡），同层引用不算。
-4. `layer-disabled-ref`（指向未启用层的引用）**本轮不做**，但「未启用层不参与校验」要落地：检查器接受 `enabledLayers?: string[]`，未启用层的卡**整条跳过**。
-5. **环检测要自终止且可解释**：visited + 路径栈，**每个环只报一次**（从环内最小 id 起笔、邻接按 id 码点排序，不碰 localeCompare），证据文案给出完整路径 `a → b → c → a`。用例至少覆盖：自引用、二元互指、长链末端回指，以及**不该命中的 DAG**。
-6. **悬空判定的口径要写死**：target 与「实体 id 精确相等」才算存在（**不做名称/别名模糊匹配**，否则会把真悬空洗成命中）；`ch-` 前缀的 target 属章节引用，本轮**不判悬空**（章节不在 entities 里），但要在证据里如实写「未纳入校验范围」，不能静默放过。
-7. 落点建议 `packages/@yushu/world-engine/src/consistency.ts`（纯逻辑、无 IO），finding 形状沿用 `{rule, severity, subject, related?, evidence}`（与 `genre-engine/src/lint.ts` 的 `LintIssue` 同族）；测试夹具直接复用 `packages/@yushu/world-engine/test/index-input.test.ts:18-28` 的 `readerOf(files)`（纯内存源，无 fs 无 SQL）。桌面接入与报告面板留 R53。
+**R52（结构完整性三条规则）已完成**：`world-engine/consistency.ts` 的 `checkStructure` / `checkStructureFromSources`（真源直算、不读索引），三条规则 + 27 例单测 + 6 次变异（其中一次删掉了无测试可杀的 `seen` 冗余分支）。详见 docs/04 §7.3 T4-2 注记与 docs/06 §八 第 52 轮。**T4-2 未勾选**：八类语义规则与"章节↔大纲"双向对账都还没做。
+
+**下一轮（R53）——M4 / T4-3 一致性报告格式（每条发现挂 span + evidence + fix，白名单必须记理由）**：
+1. **span 从哪来**：现有 `checkStructure` 只有实体 id，没有原文区间。卡内引用的区间用 `yaml` 包的 **`parseDocument`**（不是 `parse`）拿 AST 节点的 `range`——`ref` 条目的起止偏移就在节点上，确定性且不需要自己数行。**先写一个小探针脚本验证 range 偏移与字符串切片对得上**（本项目踩过的坑：span 一律用 UTF-16 下标，与 T3-13 `@yushu/text` 同口径，否则面板高亮会错位）。
+2. **报告结构**：`{rule, severity, scope, span:{file, start, end, text}, evidence:[…], fix?}`——**与 T3-13 的 finding 同形**，别让 M4 长出第二套结果结构（这条已在 R50 注记里写过，本轮正式落实）。`evidence` 至少给出：引用发起卡的 `filePath`、relation、目标 id、层级序号（现在 `consistency.ts` 的 evidence 是中文句子，报告里要同时保留结构化字段，不能只剩句子）。
+3. **白名单落在真源而不是 `.yushu/`**：新增 `config/consistency.yaml`（与 llm / routing / budget 同一套严格约定：`apiVersion` 必填、**未知键拒绝**、**每条豁免必须有 reason**，无 reason 直接 error 拒绝加载）。落 `.yushu/` 就成派生物，作者的判断会随清库丢失。豁免匹配键要稳定（`rule + subject + related`，别用行号——文件一改就飘）。
+4. **报告落点有个待裁决冲突**：docs/04 §7.4 写 `reports/consistency-*.yaml`，但红线 1 说派生物不入真源、`.yushu/*` 永不进 Git。**动手前先决定**：要么落 `.yushu/consistency/`（推荐，与 context-log 同级），要么落 `reports/` 并同时补进 `PROJECT_GITIGNORE_LINES` 与 `GIT_EXCLUDES`（`git-ops.ts` 有单测钉住两者同源，漏一处会红）。**别两边都写**。
+5. **审计入口**：A6（§7.5）要求白名单可审计——面板要能列出「谁在什么时候因为什么豁免了哪条」，因此豁免项需要 `decided_at`（ISO 字符串，由主进程写入时取一次，不参与确定性比较）。
+6. **验证口径**：单测每条规则至少一例 span 精确到字符（含中文标点的正文，UTF-16 下标最容易在这里错），加"不该豁免"侧（reason 为空 / 未知键 / 无 apiVersion）；新断言先做红 / 绿配对；桌面接入与 e2e 探针、预演新 step（**step41**，跑全新目录 **v115…**，`scene` 同步「步骤 10-41」）按改动面照常做。
 
 > 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。**M3 功能任务（T3-1～T3-14）已全部勾选，R50 起在 M4**（docs/04 §7）。
 
