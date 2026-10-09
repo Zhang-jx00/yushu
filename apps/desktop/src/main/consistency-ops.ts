@@ -9,6 +9,7 @@ import {
   type SuppressedEntry,
 } from "@yushu/world-engine";
 import { mentionedEntityIds } from "@yushu/memory";
+import { STRUCTURE_RULE_IDS } from "@yushu/world-engine";
 import type {
   AiAdoptAuditPayload,
   ConsistencyCheckPayload,
@@ -17,6 +18,8 @@ import type {
   ConsistencyTimingPayload,
 } from "../shared/ipc.js";
 import { gatewayReader } from "./index-ops.js";
+import { evaluatePackRules } from "./rule-findings.js";
+import { projectPackIds } from "./rule-ops.js";
 import type { ProjectGateway } from "./file-gateway.js";
 
 /**
@@ -56,6 +59,7 @@ function toEntry(entry: ConsistencyEntry): ConsistencyEntryPayload {
     evidence: entry.evidence,
     fix: entry.fix,
     span: entry.span === null ? null : { ...entry.span },
+    ...(entry.origin === undefined ? {} : { origin: entry.origin }),
   };
 }
 
@@ -93,6 +97,25 @@ async function computeReport(
   payload: ConsistencyCheckPayload,
 ): Promise<ConsistencyReportPayload> {
   const structure = await checkStructureFromSources(gatewayReader(gateway));
+  const scope = resolveScope(structure.entities, payload.entityIds, payload.scopeText);
+  // 派系包规则拿项目数据求值（战力类）：轻校验有范围时只读范围内那些卡
+  const packRun = await evaluatePackRules(gateway, {
+    packIds: await projectPackIds(gateway),
+    entities: structure.entities,
+    ...(timing === "post-generate" && scope.scoped ? { entityIds: scope.ids } : {}),
+  });
+  const packFindings = packRun.findings.map((finding) => ({
+    rule: finding.rule,
+    severity: finding.severity,
+    subject: finding.subject,
+    ...(finding.related === undefined ? {} : { related: finding.related }),
+    evidence: finding.evidence,
+    fix: finding.fix,
+    origin: finding.origin,
+  }));
+  // 豁免清单只认**本次真的参与求值的那些 id**（内置三条 + 包里的规则 id）：
+  // 仍然不许豁免一条不存在的规则，但包规则接入后不能再被这句挡在门外
+  const knownRuleIds = [...STRUCTURE_RULE_IDS, ...packRun.evaluated, ...packRun.notEvaluated.map((item) => item.id)];
 
   let allow: ConsistencyAllowList | null = null;
   let allowExists = false;
@@ -101,7 +124,7 @@ async function computeReport(
   if (allowSnap) {
     allowExists = true;
     try {
-      allow = parseConsistencyAllowList(allowSnap.content);
+      allow = parseConsistencyAllowList(allowSnap.content, knownRuleIds);
     } catch (err) {
       // 读不了就**不应用任何豁免**：静默放行等于把坏清单变成"全部正常"
       allowError = err instanceof Error ? err.message : String(err);
@@ -112,7 +135,7 @@ async function computeReport(
   const cardTexts: Record<string, string> = {};
   const filePathById = new Map(structure.entities.map((entity) => [entity.id, entity.filePath]));
   const needed = new Set<string>();
-  for (const finding of structure.findings) {
+  for (const finding of [...structure.findings, ...packFindings]) {
     const file = filePathById.get(finding.subject);
     if (file && cardTexts[file] === undefined) needed.add(file);
   }
@@ -122,13 +145,12 @@ async function computeReport(
   }
 
   const report = buildConsistencyReport({
-    findings: structure.findings,
+    findings: [...structure.findings, ...packFindings],
     entities: structure.entities,
     cardTexts,
     allow,
   });
 
-  const scope = resolveScope(structure.entities, payload.entityIds, payload.scopeText);
   let entries = report.entries;
   let filteredOut = 0;
   // 轻校验只在**给了范围**时过滤；范围空着不过滤——没范围就报全部比"悄悄清零"诚实
@@ -153,6 +175,7 @@ async function computeReport(
     unusedAllow: report.unusedAllow,
     outOfScope: structure.outOfScope.map((item) => ({ ...item })),
     skipped: { ...structure.skipped },
+    pack: { evaluated: packRun.evaluated, notEvaluated: packRun.notEvaluated, errors: packRun.errors },
     counted: {
       findings: structure.findings.length,
       entries: entries.length,

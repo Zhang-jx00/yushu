@@ -263,8 +263,24 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
                 ? ` · 环搜索深度封顶 ${consistency.skipped.cycleDepthCapped} 次（未假装没有环）`
                 : ""}
             </p>
+            {/* 派系包规则本轮跑了哪些、哪些没跑、哪些数据读不出——三件都必须看得见 */}
+            <p className="muted consistency-pack">
+              包规则：本轮求值 {consistency.pack.evaluated.length} 条
+              {consistency.pack.evaluated.length > 0 ? `（${consistency.pack.evaluated.join(", ")}）` : ""} · 未参与{" "}
+              {consistency.pack.notEvaluated.length} 条
+              {consistency.pack.errors.length > 0 ? ` · 数据读不出 ${consistency.pack.errors.length} 处` : ""}
+            </p>
+            {consistency.pack.notEvaluated.length > 0 && (
+              <p className="muted consistency-pack-skipped">
+                没跑的规则不算通过，只是没数据可比：
+                {consistency.pack.notEvaluated.map((item) => `${item.id}（${item.reason}）`).join("；")}
+              </p>
+            )}
+            {consistency.pack.errors.length > 0 && (
+              <p className="warn consistency-pack-errors">{consistency.pack.errors.join("；")}</p>
+            )}
             {consistency.entries.length === 0 ? (
-              <p className="muted consistency-clean">本次没有结构类结论（不代表未纳入范围的项也查过）。</p>
+              <p className="muted consistency-clean">本次没有一致性结论（结构类 + 已求值的包规则；不代表未纳入范围的项也查过）。</p>
             ) : (
               <table className="slot-table consistency-table">
                 <thead>
@@ -274,6 +290,7 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
                     <th>主体</th>
                     <th>依据</th>
                     <th>建议修法</th>
+                    <th>出处</th>
                     <th>原文</th>
                   </tr>
                 </thead>
@@ -290,6 +307,7 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
                       </td>
                       <td>{entry.evidence}</td>
                       <td>{entry.fix}</td>
+                      <td className="muted">{entry.origin ?? "内置结构规则"}</td>
                       <td>
                         {entry.span ? (
                           <button

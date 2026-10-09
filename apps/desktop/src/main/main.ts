@@ -1304,6 +1304,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       auditHitRule: "(未跑)",
       auditFilteredOut: -1,
       auditMs: -1,
+      packRuleFound: false,
+      packRuleOrigin: "(无)",
+      packSpanOk: false,
+      packEvaluated: "(未跑)",
+      packSkipped: -1,
+      packErrorNames: "(未跑)",
       staleAfterWrite: false,
       diskUnchanged: false,
       restoredOk: false,
@@ -1366,6 +1372,50 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       });
       const consRestored = await api.card.read(consCardPath);
       const consClean = await api.consistency.check({ timing: "manual" });
+      // 派系包规则拿项目数据求值（R57）：刻意放在复原检查之后——为了让包规则出结论
+      // 而改动既有断言（entriesAfterRestore === 0）是不能做的事
+      await api.card.write({
+        card: {
+          id: "char-power-probe",
+          type: "character",
+          name: "战力样本",
+          layer: "characters",
+          aliases: [],
+          refs: [],
+          source_chapters: [],
+          visibility: "hidden",
+          format_version: 1,
+          extensions: {
+            power_log: [
+              { chapter: "第 3 章", tier: 3, combat_power: 100 },
+              { chapter: "第 4 章", tier: 4, combat_power: 80 },
+            ],
+          },
+        },
+        body: "为派系包规则求值造的卡。",
+      });
+      await api.card.write({
+        card: {
+          id: "char-badlog-probe",
+          type: "character",
+          name: "坏台账样本",
+          layer: "characters",
+          aliases: [],
+          refs: [],
+          source_chapters: [],
+          visibility: "hidden",
+          format_version: 1,
+          extensions: { power_log: [{ chapter: "序章", tier: 1, combat_power: 10 }] },
+        },
+        body: "章号写不出来的卡：必须报错点名，而不是当没这条规则。",
+      });
+      const packCheck = await api.consistency.check({ timing: "manual" });
+      const packEntry = packCheck.entries.find((entry) => entry.rule === "power-no-regress");
+      let packSliceOk = false;
+      if (packEntry && packEntry.span) {
+        const packCardFile = await api.doc.read(packEntry.span.file);
+        packSliceOk = packCardFile.content.slice(packEntry.span.start, packEntry.span.end).indexOf("combat_power: 80") >= 0;
+      }
       const consAfter = await api.chapter.read(draft.chapterPath);
       consProbe = {
         ok: true,
@@ -1389,6 +1439,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         auditFilteredOut: auditAdopt.audit.filteredOut,
         // 轻校验是同步跑在采纳回执里的：把真实耗时打出来，规模一大就是要在这里先看见
         auditMs: Date.now() - auditT0,
+        packRuleFound: packEntry !== undefined,
+        packRuleOrigin: packEntry && packEntry.origin ? packEntry.origin.slice(0, 40) : "(无出处)",
+        packSpanOk: packSliceOk,
+        packEvaluated: packCheck.pack.evaluated.join(","),
+        packSkipped: packCheck.pack.notEvaluated.length,
+        packErrorNames: packCheck.pack.errors.length > 0 ? "char-badlog-probe" : "(无错误点名)",
         staleAfterWrite: staleBefore,
         diskUnchanged: consBefore.hash === consAfter.hash,
         restoredOk:
@@ -2037,6 +2093,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         auditHitRule: string;
         auditFilteredOut: number;
         auditMs: number;
+        packRuleFound: boolean;
+        packRuleOrigin: string;
+        packSpanOk: boolean;
+        packEvaluated: string;
+        packSkipped: number;
+        packErrorNames: string;
         staleAfterWrite: boolean;
         diskUnchanged: boolean;
         restoredOk: boolean;
@@ -3029,6 +3091,13 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       [`result.consistency.entries >= 1`, result.consistency.entries >= 1],
       [`result.consistency.spans >= 1`, result.consistency.spans >= 1],
       [`result.consistency.restoredOk`, result.consistency.restoredOk],
+      [`result.consistency.packRuleFound`, result.consistency.packRuleFound],
+      [`result.consistency.packRuleOrigin.includes("xuanhuan-xitong")`,
+        result.consistency.packRuleOrigin.includes("xuanhuan-xitong")],
+      [`result.consistency.packSpanOk`, result.consistency.packSpanOk],
+      [`result.consistency.packEvaluated === "power-no-regress"`, result.consistency.packEvaluated === "power-no-regress"],
+      [`result.consistency.packSkipped === 5`, result.consistency.packSkipped === 5],
+      [`result.consistency.packErrorNames === "char-badlog-probe"`, result.consistency.packErrorNames === "char-badlog-probe"],
       [`result.consistency.entriesAfterRestore === 0`, result.consistency.entriesAfterRestore === 0],
       // A2 任务路由（离线那一半）：旗舰端点失败 → 回落小模型端点出文；冷却跳过坏端点；一次动作一条记录
       [`result.routingA2.ok`, result.routingA2.ok],

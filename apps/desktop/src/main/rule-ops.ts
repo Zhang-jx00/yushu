@@ -43,7 +43,8 @@ function toRow(rule: ConsistencyRule, set: PackRuleSet): RuleRowPayload {
   };
 }
 
-async function projectPackIds(gateway: ProjectGateway): Promise<string[]> {
+/** 项目所选派系包 id（规则求值与目录共用一处，避免两处各读一遍 project.toml） */
+export async function projectPackIds(gateway: ProjectGateway): Promise<string[]> {
   const snap = await gateway.readDoc(PROJECT_CONFIG_PATH).catch(() => null);
   return snap ? parseProjectConfig(snap.content).genre.packs : [];
 }

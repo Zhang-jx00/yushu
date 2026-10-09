@@ -954,6 +954,8 @@ export interface ConsistencyEntryPayload {
   fix: string;
   /** 原文区间（UTF-16 下标，与中文自查同口径）；找不到原文时为 null，不给假区间 */
   span: { file: string; start: number; end: number; text: string } | null;
+  /** 结论出处：派系包规则带「派系包 x（文件）」，内置结构规则没有这一项（作者要分得清是谁说的） */
+  origin?: string;
   /** 仅 suppressed 条目有：豁免理由与决策时间（审计入口） */
   reason?: string;
   decidedAt?: string;
@@ -990,6 +992,17 @@ export interface ConsistencyReportPayload {
   unusedAllow: string[];
   outOfScope: Array<{ referrer: string; relation: string; target: string; reason: string }>;
   skipped: { disabledLayerEntities: number; cycleDepthCapped: number };
+  /**
+   * 派系包规则本轮的求值情况（R57）。
+   *
+   * `notEvaluated` 与 `errors` 都必须外显：一条悄悄没跑的规则，作者看到的是"没发现问题"，
+   * 真相是"这条没数据可比"——沉默的校验器比没有校验器更坏。
+   */
+  pack: {
+    evaluated: string[];
+    notEvaluated: Array<{ id: string; reason: string }>;
+    errors: string[];
+  };
   counted: { findings: number; entries: number; suppressed: number; filteredOut: number };
 }
 

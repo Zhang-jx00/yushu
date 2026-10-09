@@ -2211,6 +2211,74 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 43,
+    title: "规则页：派系包规则拿项目数据求值（战力台账结论 + 未参与点名 + 坏台账报错）（M4/T4-2，R57）",
+    file: "step43-pack-rule-data.png",
+    body: String.raw`
+      await tab('规则');
+      const view = await waitFor(() => document.querySelector('.rules-view'), 12000);
+      if (!view) return { ok: false, note: '未进入规则页：' + pageText() };
+      // 一张台账正确（境界升、战力降）+ 一张章号写不出（必须报错点名，不能当没这张卡）。
+      // 造卡是幂等的：本步骤可能被有界重试再跑一遍，那时卡已存在（E_DOC_CONFLICT 不算失败）
+      const ensureCard = async (card, body) => {
+        try { await window.yushu.card.write({ card, body }); } catch (e) { /* 已存在就用现成的 */ }
+      };
+      await ensureCard({
+        id: 'char-power-wt', type: 'character', name: '战力样本', layer: 'characters',
+        aliases: [], refs: [], source_chapters: [], visibility: 'hidden', format_version: 1,
+        extensions: { power_log: [
+          { chapter: '第 3 章', tier: 3, combat_power: 100 },
+          { chapter: '第 4 章', tier: 4, combat_power: 80 },
+        ] },
+      }, '为派系包规则求值造的卡。');
+      await ensureCard({
+        id: 'char-badlog-wt', type: 'character', name: '坏台账样本', layer: 'characters',
+        aliases: [], refs: [], source_chapters: [], visibility: 'hidden', format_version: 1,
+        extensions: { power_log: [{ chapter: '序章', tier: 1, combat_power: 10 }] },
+      }, '章号写不出来的卡。');
+      const manualBtn = document.querySelector('.consistency-manual');
+      if (!manualBtn) return { ok: false, note: '找不到「全书体检」按钮：' + pageText() };
+      manualBtn.click();
+      // 等的是「这一轮新报告里出现了包规则结论」，不是上一轮就在的汇总行——
+      // 第一版在这里等 .consistency-pack 文案，命中了上一轮的旧报告，于是把新结论读成 0 条
+      const packRow = await waitFor(() => {
+        const found = [...document.querySelectorAll('.consistency-table tbody tr')]
+          .find((tr) => String(tr.textContent).includes('power-no-regress'));
+        return found || null;
+      }, 20000);
+      const errShown = await waitFor(() => {
+        const el = document.querySelector('.consistency-pack-errors');
+        const t = el ? String(el.textContent).replace(/\s+/g, ' ') : '';
+        return t.includes('char-badlog-wt') ? t : null;
+      }, 20000);
+      const packLineEl = document.querySelector('.consistency-pack');
+      const packLine = packLineEl ? String(packLineEl.textContent).replace(/\s+/g, ' ') : '';
+      const skippedLine = document.querySelector('.consistency-pack-skipped');
+      const skippedText = skippedLine ? String(skippedLine.textContent).replace(/\s+/g, ' ') : '';
+      const diskBack = await window.yushu.doc.read('world/cards/character/char-power-wt.md');
+      const diskHasLog = String(diskBack.content).indexOf('power_log') >= 0;
+      const rows = [...document.querySelectorAll('.consistency-table tbody tr')];
+      const originText = packRow ? String([...packRow.querySelectorAll('td')][5]?.textContent || '').trim() : '(无该行)';
+      const jumpInRow = packRow ? !!packRow.querySelector('.consistency-jump') : false;
+      if (jumpInRow) packRow.querySelector('.consistency-jump').click();
+      const jumped = await waitFor(() => {
+        const on = document.querySelector('.tab.on');
+        return on && String(on.textContent).includes('世界观档案') ? true : null;
+      }, 12000);
+      await tab('规则');
+      const backOk = !!document.querySelector('.consistency-pack');
+      return {
+        ok: packRow !== null && diskHasLog && packLine.includes('power-no-regress') && packLine.includes('未参与 5 条') &&
+          skippedText.includes('数据绑定') && errShown !== null && originText.includes('xuanhuan-xitong') &&
+          jumpInRow && jumped === true && backOk,
+        note: '盘上含 power_log=' + diskHasLog + '；表行=' + rows.length + '；汇总="' + packLine.slice(0, 110) +
+          '"；未参与段="' + skippedText.slice(0, 60) + '"；错误行="' + (errShown || '').slice(0, 70) +
+          '"；出处="' + originText.slice(0, 46) + '"；该行可跳转=' + jumpInRow +
+          '；跳到档案=' + (jumped === true) + '；跳回=' + backOk,
+      };
+    `,
+  },
 ];
 
 /**
@@ -2338,7 +2406,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-42）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-43）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

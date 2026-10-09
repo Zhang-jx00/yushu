@@ -261,3 +261,90 @@ describe("采纳后即时轻校验（post-generate 的调用点）", () => {
     expect(audit.entries).toEqual([]);
   });
 });
+
+
+/**
+ * 派系包结论并入同一份体检报告（R57 的桌面侧）。
+ *
+ * 这一组盯的是"两条通路会不会走岔"：包规则结论必须和内置结构结论**共用**同一份报告、
+ * 同一套 span、同一条豁免清单；同时没跑的规则要在汇总里看得见。
+ */
+describe("体检报告并入派系包规则（R57）", () => {
+  // 走**应用真实的卡片写入路径**（writeCardDoc）而不是手写 YAML：手写会绕过 frontmatter 序列化，
+  // 正是 R57 预演 step43 抓到的那条盲区——单测绿、应用里读不到台账。
+  const powerCard = (
+    id: string,
+    name: string,
+    log: Array<Record<string, unknown>>,
+  ) =>
+    writeCardDoc(gateway, {
+      card: {
+        id,
+        type: "character",
+        name,
+        layer: "characters",
+        aliases: [],
+        refs: [],
+        source_chapters: [],
+        visibility: "hidden",
+        format_version: 1,
+        extensions: { power_log: log },
+      },
+      body: "正文。",
+    });
+
+  const REGRESS = [
+    { chapter: "第 3 章", tier: 3, combat_power: 100 },
+    { chapter: "第 4 章", tier: 4, combat_power: 80 },
+  ];
+
+  it("包规则结论与内置结构结论同表出现，各带自己的出处", async () => {
+    await powerCard("char-power", "林渊战力样本", REGRESS);
+    const report = await runConsistencyCheck(gateway, { timing: "manual" });
+    const rules = report.entries.map((entry) => entry.rule);
+    expect(rules).toContain("ref-dangling");
+    expect(rules).toContain("power-no-regress");
+    const pack = report.entries.find((entry) => entry.rule === "power-no-regress")!;
+    expect(pack.origin).toContain("xuanhuan-xitong");
+    expect(pack.subject).toBe("char-power");
+    // span 落在台账那一行，面板可切片（与 refs 类同一口径）
+    const cardText = (await gateway.readDoc("world/cards/character/char-power.md"))!.content;
+    expect(pack.span).not.toBeNull();
+    expect(cardText.slice(pack.span!.start, pack.span!.end)).toContain("combat_power: 80");
+  });
+
+  it("没数据绑定的包规则在汇总里点名，不静默算通过", async () => {
+    const report = await runConsistencyCheck(gateway, { timing: "manual" });
+    expect(report.pack.evaluated).toEqual(["power-no-regress"]);
+    expect(report.pack.notEvaluated).toHaveLength(5);
+    expect(report.pack.notEvaluated[0]!.reason).toContain("数据绑定");
+  });
+
+  it("豁免清单能豁免包规则：进 suppressed 带理由（knownIds 已放开到参与求值的集合）", async () => {
+    await powerCard("char-power", "林渊战力样本", REGRESS);
+    await writeAllow(
+      [
+        "apiVersion: yushu.consistency-allow/v1",
+        "entries:",
+        "  - rule: power-no-regress",
+        "    subject: char-power",
+        "    related: 第 4 章",
+        "    reason: 作者确认第 4 章是刻意反转（天赋被夺后的虚弱期）",
+        "    decided_at: 2026-10-09",
+        "",
+      ].join("\n"),
+    );
+    const report = await runConsistencyCheck(gateway, { timing: "manual" });
+    expect(report.allowError).toBeNull();
+    expect(report.entries.map((entry) => entry.rule)).not.toContain("power-no-regress");
+    expect(report.suppressed.map((entry) => entry.rule)).toContain("power-no-regress");
+    expect(report.unusedAllow).toEqual([]);
+  });
+
+  it("台账本身读不出时把错误带到报告里，而不是当没这条规则", async () => {
+    await powerCard("char-bad", "坏台账样本", [{ chapter: "序章", tier: 1, combat_power: 10 }]);
+    const report = await runConsistencyCheck(gateway, { timing: "manual" });
+    expect(report.pack.errors.length).toBe(1);
+    expect(report.pack.errors[0]).toContain("char-bad");
+  });
+});
