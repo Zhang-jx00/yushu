@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  AiAdoptAuditPayload,
   AiCostPanelPayload,
   AiConfigState,
   AiDraftTarget,
@@ -285,6 +286,8 @@ export function AiView() {
   const [costReceipt, setCostReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** 采纳后即时轻校验的回执（M4/T4-4 post-generate）：null = 本会话还没采纳过 */
+  const [adoptAudit, setAdoptAudit] = useState<AiAdoptAuditPayload | null>(null);
   const streamIdRef = useRef<string | null>(null);
 
   // 写作 UX（T3-11）：打字机缓冲 / 多候选 / 句级 diff 与局部采纳 / 拒绝原因
@@ -627,6 +630,7 @@ export function AiView() {
       setNotice(
         `已${mode === "replace" ? "替换" : "追加"}采纳 → ${adopted.chapterPath}（${adopted.wordCount} 字，baseHash 并发检测通过）`,
       );
+      setAdoptAudit(adopted.audit);
       await refreshDrafts();
       await refreshUsage();
       await refreshPreview({ volumeId: selected.volumeId, chapterId: selected.chapterId });
@@ -658,6 +662,7 @@ export function AiView() {
       setNotice(
         `候选 ${entry.index}/${entry.total} 已${mode === "replace" ? "替换" : "追加"}采纳 → ${adopted.chapterPath}（${adopted.wordCount} 字）`,
       );
+      setAdoptAudit(adopted.audit);
       setCandidates((prev) =>
         prev.map((item) => (item.streamId === entry.streamId ? { ...item, adopted: mode } : item)),
       );
@@ -693,6 +698,7 @@ export function AiView() {
         mode: "append",
       });
       setNotice(`局部采纳：已追加 ${checked.length}/${sentences.length} 句 → ${adopted.chapterPath}（${adopted.wordCount} 字）`);
+      setAdoptAudit(adopted.audit);
       setCandidates((prev) =>
         prev.map((item) => (item.streamId === entry.streamId ? { ...item, adopted: "append" } : item)),
       );
@@ -1186,6 +1192,55 @@ export function AiView() {
             </>
           )}
           {notice && <div className="muted">{notice}</div>}
+          {adoptAudit && (
+            <div className="panel ai-adopt-audit">
+              <h3>采纳后即时轻校验（生成后 · 本次正文涉及的实体）</h3>
+              {!adoptAudit.ran ? (
+                <div className="error-text ai-adopt-audit-error">
+                  轻校验未跑成：{adoptAudit.error}（正文已落盘，采纳不受影响）
+                </div>
+              ) : (
+                <>
+                  <div className="ai-adopt-audit-summary">
+                    本次正文提到 {adoptAudit.scopeIds.length} 个已登记实体
+                    {adoptAudit.scopeIds.length > 0 ? `：${adoptAudit.scopeIds.join("、")}` : "（没提到任何设定卡实体，故不把全书结论倒在这里）"}
+                    {" "}· 结论 {adoptAudit.entries.length} 条 · 范围外未展示 {adoptAudit.filteredOut} 条
+                  </div>
+                  {adoptAudit.entries.length > 0 ? (
+                    <table className="slot-table consistency-table">
+                      <thead>
+                        <tr>
+                          <th>级别</th>
+                          <th>规则</th>
+                          <th>主体</th>
+                          <th>依据</th>
+                          <th>建议修法</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adoptAudit.entries.map((entry, index) => (
+                          <tr key={`${entry.rule}-${entry.subject}-${entry.related ?? ""}-${index}`}>
+                            <td className={entry.severity === "error" ? "error" : "warn"}>{entry.severity}</td>
+                            <td>
+                              <code>{entry.rule}</code>
+                            </td>
+                            <td>
+                              <code>{entry.subject}</code>
+                              {entry.related ? <span className="muted"> → {entry.related}</span> : null}
+                            </td>
+                            <td>{entry.evidence}</td>
+                            <td>{entry.fix}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="muted ai-adopt-audit-clean">本次范围内的实体没有结构性结论（全书体检见「规则」页）</div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           {error && <div className="error-text">{error}</div>}
         </div>
 

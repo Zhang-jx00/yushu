@@ -1298,6 +1298,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       findings: 0,
       allowErrorWhenBroken: "",
       entriesAfterBroken: -1,
+      auditRan: false,
+      auditTargetId: "",
+      auditScopeIds: "(未跑)",
+      auditHitRule: "(未跑)",
+      auditFilteredOut: -1,
+      auditMs: -1,
       staleAfterWrite: false,
       diskUnchanged: false,
       restoredOk: false,
@@ -1305,7 +1311,6 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       error: "",
     };
     try {
-      const consBefore = await api.chapter.read(draft.chapterPath);
       // 项目里本来没有悬空引用可跳：先造一条、测完复原，让"每条发现能跳回原文"这一验收真被走一遍
       const consCardPath = (await api.card.list()).find((c) => !c.error)?.path || "";
       const consOriginal = await api.card.read(consCardPath);
@@ -1315,6 +1320,19 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         body: consOriginal.body,
         baseHash: consOriginal.hash,
       });
+      // 采纳后即时轻校验（T4-4 的 post-generate 调用点，R56）：范围来自**刚采纳进去的正文**，
+      // 所以这里刻意采纳一句"提到被污染那张卡的名字"的话
+      const auditTarget = consOriginal.card;
+      const auditT0 = Date.now();
+      const auditAdopt = await api.ai.adopt({
+        usageId: "ai-e2e-post-adopt",
+        volumeId: volume.id,
+        chapterId: co.id,
+        text: auditTarget.name + "在此处驻足，回望来路。",
+        mode: "append",
+      });
+      // 采纳是真实写入：consBefore 必须在它之后取，否则"体检全程只读"会被这次采纳判红（第 56 轮首跑就是这里红）
+      const consBefore = await api.chapter.read(draft.chapterPath);
       const manual = await api.consistency.check({ timing: "manual" });
       const invariant = manual.counted.entries + manual.counted.suppressed === manual.counted.findings;
       let sliceOk = true;
@@ -1362,6 +1380,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         findings: manual.counted.findings,
         allowErrorWhenBroken: brokenAllow.allowError ? brokenAllow.allowError.slice(0, 60) : "(未报错)",
         entriesAfterBroken: brokenAllow.counted.entries,
+        auditRan: auditAdopt.audit.ran,
+        auditTargetId: auditTarget.id,
+        auditScopeIds: auditAdopt.audit.scopeIds.join(","),
+        auditHitRule: auditAdopt.audit.entries.length === 1
+          ? auditAdopt.audit.entries[0].rule
+          : "(条数 " + auditAdopt.audit.entries.length + ")",
+        auditFilteredOut: auditAdopt.audit.filteredOut,
+        // 轻校验是同步跑在采纳回执里的：把真实耗时打出来，规模一大就是要在这里先看见
+        auditMs: Date.now() - auditT0,
         staleAfterWrite: staleBefore,
         diskUnchanged: consBefore.hash === consAfter.hash,
         restoredOk:
@@ -2004,6 +2031,12 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         findings: number;
         allowErrorWhenBroken: string;
         entriesAfterBroken: number;
+        auditRan: boolean;
+        auditTargetId: string;
+        auditScopeIds: string;
+        auditHitRule: string;
+        auditFilteredOut: number;
+        auditMs: number;
         staleAfterWrite: boolean;
         diskUnchanged: boolean;
         restoredOk: boolean;
@@ -2987,6 +3020,11 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       [`result.consistency.staleAfterWrite`, result.consistency.staleAfterWrite],
       [`result.consistency.allowErrorWhenBroken.includes("reason")`, result.consistency.allowErrorWhenBroken.includes("reason")],
       [`result.consistency.entriesAfterBroken === result.consistency.findings`, result.consistency.entriesAfterBroken === result.consistency.findings],
+      [`result.consistency.auditRan`, result.consistency.auditRan],
+      [`result.consistency.auditScopeIds === result.consistency.auditTargetId`,
+        result.consistency.auditScopeIds === result.consistency.auditTargetId],
+      [`result.consistency.auditHitRule === "ref-dangling"`, result.consistency.auditHitRule === "ref-dangling"],
+      [`result.consistency.auditFilteredOut === 0`, result.consistency.auditFilteredOut === 0],
       [`result.consistency.diskUnchanged`, result.consistency.diskUnchanged],
       [`result.consistency.entries >= 1`, result.consistency.entries >= 1],
       [`result.consistency.spans >= 1`, result.consistency.spans >= 1],

@@ -2154,6 +2154,63 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 42,
+    title: "AI 副驾：采纳后即时轻校验（post-generate 命中分支与范围外过滤）（M4/T4-4，R56）",
+    file: "step42-post-adopt-audit.png",
+    body: String.raw`
+      await tab('AI 副驾');
+      // 造一张会被本次生成文本提到的卡（mock 固定出文含「夜色」），并挂一条悬空引用。
+      // 不这么做，轻校验在预演里只会走"范围为空"那一支，命中分支与范围外过滤都没人看过。
+      await window.yushu.card.write({
+        card: { type: 'character', name: '夜色', layer: 'characters', refs: [{ relation: '师从', target: 'fac-ghost-step42' }] },
+        body: '为采纳后轻校验造的卡。',
+      });
+      const label = await waitFor(() => [...document.querySelectorAll('label.checkbox')].find((l) => l.textContent.includes('启用 AI 调用')), 12000);
+      if (!label) return { ok: false, note: '找不到「启用 AI 调用」复选框：' + pageText() };
+      const cb = label.querySelector('input');
+      if (cb && !cb.checked) { cb.click(); await sleep(250); }
+      const genBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === '开始生成');
+        return b && !b.disabled ? b : null;
+      }, 15000);
+      if (!genBtn) return { ok: false, note: '「开始生成」不可用：' + pageText() };
+      genBtn.click();
+      const cand = await waitFor(() => {
+        const c = document.querySelector('.candidate');
+        return c && c.textContent.trim() !== '' && document.body.innerText.includes('生成完成') ? c : null;
+      }, 20000);
+      if (!cand) return { ok: false, note: '候选未生成：' + pageText() };
+      const adoptBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === '追加到正文');
+        return b && !b.disabled ? b : null;
+      }, 12000);
+      if (!adoptBtn) return { ok: false, note: '「追加到正文」不可用：' + pageText() };
+      adoptBtn.click();
+      // 回执必须自带轻校验面板（范围来自刚采纳的那段正文）
+      const summary = await waitFor(() => {
+        const el = document.querySelector('.ai-adopt-audit-summary');
+        const text = el ? String(el.textContent).replace(/\s+/g, ' ') : '';
+        return text.includes('本次正文提到') && text.includes('结论') ? text : null;
+      }, 20000);
+      if (!summary) return { ok: false, note: '采纳后轻校验汇总未出现：' + pageText() };
+      const mentioned = Number((summary.match(/提到 (\d+) 个/) || [])[1] ?? -1);
+      const entryCount = Number((summary.match(/结论 (\d+) 条/) || [])[1] ?? -1);
+      const filteredOut = Number((summary.match(/范围外未展示 (\d+) 条/) || [])[1] ?? -1);
+      const rows = [...document.querySelectorAll('.ai-adopt-audit .consistency-table tbody tr')].length;
+      const errorLine = document.querySelector('.ai-adopt-audit-error');
+      const noticeOk = document.body.innerText.includes('追加采纳');
+      await sleep(200);
+      return {
+        // 命中分支必须有真东西：提到 1 个实体、结论 ≥1 条、表行数与结论数一致，
+        // 且 step41 留下的那张卡（范围外）确实没混进来而是被计数
+        ok: !errorLine && noticeOk && mentioned === 1 && entryCount >= 1 && rows === entryCount && filteredOut >= 1,
+        note: '汇总="' + summary.slice(0, 130) + '"；提到=' + mentioned + '；结论=' + entryCount +
+          '；表行=' + rows + '；范围外=' + filteredOut + '；采纳回执在位=' + noticeOk +
+          (errorLine ? '；未跑成="' + String(errorLine.textContent).slice(0, 60) + '"' : ''),
+      };
+    `,
+  },
 ];
 
 /**
@@ -2281,7 +2338,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-41）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-42）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,
@@ -2298,6 +2355,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
       "步骤 8：该步骤排在编辑器页步骤之前；经 window.yushu.ai.adopt 追加一次含敏感词正文后再走 UI 的「重新核对」",
       "步骤 12 / 16：经 __yushuDebug 暴露的编辑器调试句柄 await reload()（等价于点击已选中章节的强制重载）作为同步点；其后全部经真实 CodeMirror 事务输入与产品 IPC 断言落盘（step16 进一步断言保存后索引自动刷新，全程未点重建按钮）",
       "步骤 22：外部改动经 window.yushu.chapter.write 模拟（等价于外部工具改文件）；三方合并本身走编辑器自动保存的真实冲突管线（无人工干预）",
+      "步骤 42：前置数据（带悬空引用的卡）经 window.yushu.card.write 造出——被验的对象是「点真实按钮采纳之后副驾自己长出的轻校验面板」，造数不走 UI 不影响该断言",
     ],
     notes: [
       "步骤 9 的「林渊」在本预演项目中不存在（第 2 步卡名为占位「测试设定N」），故追加「测试设定」关键词证明检索链路有命中",
