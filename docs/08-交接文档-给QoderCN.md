@@ -17,7 +17,7 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **729/729 全绿**（76 个测试文件）——`pnpm test`（第 52 轮 R52 / 结构完整性三条规则后；纯引擎轮，e2e 与预演未重跑） |
+| 单测 | **747/747 全绿**（77 个测试文件）——`pnpm test`（第 53 轮 R53 / 报告格式与豁免清单后；R52–R53 均为纯引擎轮，e2e 与预演未重跑，最新预演证据仍是 R51 的 v114） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
 | UI 预演 | **40/40 全绿**（最近一次新目录 **v114**，45.1s，`screenshotFailures:[]`、证据缺失=0）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
@@ -126,6 +126,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 | R51 | 规则 DSL 桌面端接入（T4-1 收口） | 补第 50 轮缺的**内容层**：`genre-engine/rules.ts` 的 `loadPackRuleSets` 真读包内 `rules/*.yaml` 交给 `parseRuleDocument`，每件带 `{file,packId,rules,error,expressionIssues}`。与 `loadPackTaboos` 的"失败静默跳过"**刻意相反**——悄悄消失的规则让作者看到"没发现问题"，真相却是"这条没跑"，**沉默的校验器比没有校验器更坏**。`rule-dsl.ts` 补静态侧 `collectExpressionIssues`（不求值就指出"一个对象两个键，请用 and/or""未知操作符 regex：禁正则"）；`lintPack` 新增 `rule-unparsable` / `rule-expression` / `rule-duplicate-id`（同包撞 id 拒绝按加载顺序取后者）。IPC 两个**只读**通道 `rule:catalog` / `rule:dryRun`（`wrap` 不用 `wrapWrite`；试算只吃夹具、不读正文不写盘）+ 第 11 个标签页「规则」（目录汇总 / 逐件表格 / 沙箱试算 / 依据表），空目录明写「不等于这些包没有规则」，试算**命中·未命中·被沙箱拒绝**三态分开并给原始 `E_RULE_*`。**第二次被真实数据纠正**：包内规则件是 `apiVersion+id+title+source+rules` **信封**，R50 只认假想的裸 `rules:` → 补齐并把 `title/source` 逐条盖到 `origin`（读了字段不带出去＝抹掉可追溯性，同 R40 saveConfig 抹 pricing）。单测 +24 → **702/702（75 文件）**，typecheck 11 包全 Done，e2e ✅（`total:6 / hit:true / evidenceCount:4 / missMatched:false / rejectCode:"[E_RULE_UNORDERABLE]…" / diskUnchanged:true`），预演新增 **step40** → **40/40**（终版 v114 45.1s）。**step40 两次真实红跑**：v111（我的选择器 `.rules-table tbody td.error` 写宽了，严重度单元格也带 error 类）＝预演抓到**我自己的断言**而非产品缺陷；v113（故意把命中行类名换成未命中行）证明回执断言能红。`scene` → 步骤 10-40。**未实现**：同 id 版本合并、`priority` 参与排序、规则编辑 UI（派系包是外部制品） |
 
 | R52 | M4/T4-2 结构完整性三条规则（引擎侧） | 新建 `world-engine/consistency.ts`：`checkStructure({entities,refs})` 纯数据结构 + `checkStructureFromSources(reader)` 文件直算，**不 import search、不读 SQLite**（索引可删，删库后结论必须一字不变＝§7.5 A5 口径）。`ref-dangling`（error，**只按 id 精确匹配**，孤儿引用也算结构破坏）、`ref-cycle`（error，码点排序 + 路径旋转到环内最小 id；**深度上限 64 并计 `cycleDepthCapped`，不假装没环**；同一强连通分量只报先发现的环，不枚举全部初等环）、`layer-order-violation`（error，上游层引用下游层；层未知不判定、同层不算）。**两处权威文件互相矛盾，做显式裁决并写进注释**：严重度 docs/03:381=error vs K05:122=warn → 取 docs/03；倒置方向取 K05 的具体例子（地理引用人物）。「没跑」与「没问题」分开：`ch-`/`co-`/`vol-` 目标逐条登记 `outOfScope`；`enabledLayers` 落实"未启用层不参与校验"；world.yaml 不合式按全启用并写 `worldNote`（测试里 `expect(worldNote).toBeNull()` 防止解析静默失败造成假绿）。**变异 6 次，其中一次杀掉自己的死代码**：`seen` 环去重集合关掉后 27 例全绿 → 无测试能杀它 → 按"没有失败测试就没有代码"删除（其余五次分别 1/1/1/4/2 红）。TDD 三轮红绿，+27 例 → **729/729（76 文件）**，typecheck 11 包全 Done；**纯引擎轮未跑 e2e / 预演，也不声称跑过**。**T4-2 保持未勾选**：八类语义规则需事实/声线卡比对；`chapter.outline_ref` 与 `source_chapters` 的存在性校验（章节↔大纲双向对账）也未做 |
+
+| R53 | M4/T4-3 一致性报告格式 + 必须记理由的豁免清单（引擎侧） | `consistency-report.ts`：`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内 refs 的 **UTF-16 区间**（与 T3-13 同口径，同一个面板不能有两套下标）；报告条目 `{rule,severity,subject,related?,path?,evidence,span,fix}` **与校对 finding 同形**；找不到原文 `span:null` 不造 0-0 假区间；`fix` 给可执行方向 + 统一豁免出口（倒置类要点名两端层名 → 给 `StructureFinding` 补 `fromLayer/toLayer`，由测试倒逼而非预留）。豁免 `config/consistency.yaml` 落实 A6：**无 reason 拒载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝（不支持 until/通配，免得给"会自己失效"的假安全感）**；匹配键用 规则+主体+目标不用行号；被豁免条目进 `suppressed` 带理由与决策时间；**用不上的豁免进 `unusedAllow`**。**两个坑由测试逼出**：`item.get("relation")` 对标量返回解好值的 JS 数据（要 `get(key,true)` 才有节点与 range）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间＝每张正常卡都失去跳转。**TDD 两轮红绿 + 18 例 → 747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌一点→4、不要求 reason→1、不报 unusedAllow→2），**1 次未杀到**（`!range` 兜底不可达）如实记录不声称测过。纯引擎轮未跑 e2e / 预演。**报告落点仍未决**：docs/04 §7.4 写 `reports/consistency-*.yaml` 与"派生物不入真源"冲突 → 建议落 `.yushu/consistency/`，R54 一并裁决 |
 
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
@@ -320,13 +322,15 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 
 **R52（结构完整性三条规则）已完成**：`world-engine/consistency.ts` 的 `checkStructure` / `checkStructureFromSources`（真源直算、不读索引），三条规则 + 27 例单测 + 6 次变异（其中一次删掉了无测试可杀的 `seen` 冗余分支）。详见 docs/04 §7.3 T4-2 注记与 docs/06 §八 第 52 轮。**T4-2 未勾选**：八类语义规则与"章节↔大纲"双向对账都还没做。
 
-**下一轮（R53）——M4 / T4-3 一致性报告格式（每条发现挂 span + evidence + fix，白名单必须记理由）**：
-1. **span 从哪来**：现有 `checkStructure` 只有实体 id，没有原文区间。卡内引用的区间用 `yaml` 包的 **`parseDocument`**（不是 `parse`）拿 AST 节点的 `range`——`ref` 条目的起止偏移就在节点上，确定性且不需要自己数行。**先写一个小探针脚本验证 range 偏移与字符串切片对得上**（本项目踩过的坑：span 一律用 UTF-16 下标，与 T3-13 `@yushu/text` 同口径，否则面板高亮会错位）。
-2. **报告结构**：`{rule, severity, scope, span:{file, start, end, text}, evidence:[…], fix?}`——**与 T3-13 的 finding 同形**，别让 M4 长出第二套结果结构（这条已在 R50 注记里写过，本轮正式落实）。`evidence` 至少给出：引用发起卡的 `filePath`、relation、目标 id、层级序号（现在 `consistency.ts` 的 evidence 是中文句子，报告里要同时保留结构化字段，不能只剩句子）。
-3. **白名单落在真源而不是 `.yushu/`**：新增 `config/consistency.yaml`（与 llm / routing / budget 同一套严格约定：`apiVersion` 必填、**未知键拒绝**、**每条豁免必须有 reason**，无 reason 直接 error 拒绝加载）。落 `.yushu/` 就成派生物，作者的判断会随清库丢失。豁免匹配键要稳定（`rule + subject + related`，别用行号——文件一改就飘）。
-4. **报告落点有个待裁决冲突**：docs/04 §7.4 写 `reports/consistency-*.yaml`，但红线 1 说派生物不入真源、`.yushu/*` 永不进 Git。**动手前先决定**：要么落 `.yushu/consistency/`（推荐，与 context-log 同级），要么落 `reports/` 并同时补进 `PROJECT_GITIGNORE_LINES` 与 `GIT_EXCLUDES`（`git-ops.ts` 有单测钉住两者同源，漏一处会红）。**别两边都写**。
-5. **审计入口**：A6（§7.5）要求白名单可审计——面板要能列出「谁在什么时候因为什么豁免了哪条」，因此豁免项需要 `decided_at`（ISO 字符串，由主进程写入时取一次，不参与确定性比较）。
-6. **验证口径**：单测每条规则至少一例 span 精确到字符（含中文标点的正文，UTF-16 下标最容易在这里错），加"不该豁免"侧（reason 为空 / 未知键 / 无 apiVersion）；新断言先做红 / 绿配对；桌面接入与 e2e 探针、预演新 step（**step41**，跑全新目录 **v115…**，`scene` 同步「步骤 10-41」）按改动面照常做。
+**R53（报告格式 + 豁免清单）已完成**：`consistency-report.ts` 的 `locateCardRefSpans` / `buildConsistencyReport` / `parseConsistencyAllowList`（详见 docs/04 §7.3 T4-3 注记与 docs/06 §八 第 53 轮）。**T4-3 仍不勾选**：M4 §7.5 A4 要的是"每条发现可**一键跳到**原文区间"，跳转动作属界面，留 R54 一并验收。
+
+**下一轮（R54）——M4 / T4-4 校验时机三态 + 一致性面板（把前两轮的引擎结果送到界面上）**：
+1. **先裁决报告落点**（R52–R53 挂起的问题）：docs/04 §7.4 写 `reports/consistency-*.yaml`，但红线 1 要求派生物不入真源、`.yushu/*` 永不进 Git。**推荐落 `.yushu/consistency/`**（与 `context-log/` 同级，已被 `.gitignore` 与 `GIT_EXCLUDES` 覆盖，不用改 `PROJECT_GITIGNORE_LINES`）；若坚持 `reports/` 则**必须同时**补 `PROJECT_GITIGNORE_LINES` 与 `GIT_EXCLUDES`（`git-ops.test.ts` 有同源断言，漏一处会红），并回填 docs/04 §7.4 的措辞。别两边都写。
+2. **三态分别接在哪**：① *生成后即时轻校验*——接在**设定抽取入库前**（`extract-ops.ts` 的确认写库路径，refs 悬空直接拒，错误码沿用 `E_EXTRACT_*` 风格），不要接在正文流式生成上（正文不产生结构边）；② *保存后异步全量*——接在 `chapter:write` / `card:write` 之后的索引调度处（`main/ipc.ts` 的 `wrapWrite` 已调度 `IndexRefresher`，同一个位置加一次一致性检查并**只缓存到主进程内存 + 面板可见**，避免每次保存都写盘）；③ *手动全书体检*——面板按钮，跑 `checkStructureFromSources` + 读 `cardTexts` + `buildConsistencyReport(allow)`。
+3. **只读通道** `consistency:check`（IPC 四处同步，用 `wrap` 不用 `wrapWrite`）。`cardTexts` 由主进程读（引擎不做 IO），传进 `buildConsistencyReport`。
+4. **面板**：扩展第 11 个标签页 `RulesView`，新增「一致性体检」段——结论逐条给 `severity` / `rule` / `subject` / `fix`，**span 存在的条目给"跳到原文"按钮**（复用 `ChapterEditorView` 已有的 `setSearchState` 定位思路，或直接打开该卡并用 span 的 `start/end` 高亮）；`suppressed` 段必须显示**理由与决策时间**（A6 的审计入口），`unusedAllow` 用 muted 提示"这些豁免一条都没匹配上，可能已失效"。
+5. **取证**：e2e 探针跑「造一张带悬空引用的卡 → 体检 → 豁免后条目进 suppressed 且带理由 → 删掉豁免又回来」，并断言**两个通道不写真源**；预演新增 **step41**（跑全新目录 **v116…**，`scene` 同步「步骤 10-41」），断言至少覆盖：结论行可见、跳转按钮存在、豁免段显示理由、unusedAllow 提示。**新断言一律先做红 / 绿配对**（R51 的教训：预演里写宽的选择器会让断言恒真或恒假）。
+6. `per_call_confirm_over`（成本侧那个"单次超价须确认"的拦截点）仍未做，属独立议题，不要顺手混进本轮。
 
 > 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。**M3 功能任务（T3-1～T3-14）已全部勾选，R50 起在 M4**（docs/04 §7）。
 
