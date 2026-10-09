@@ -94,3 +94,43 @@ describe("真实包规则件回归", () => {
     expect(evaluateRule(byId.get("realm-breakthrough-uncelebrated")!, { chapter: { has_breakthrough: true, has_breakthrough_beat: true } }).matched).toBe(false);
   });
 });
+
+/**
+ * T4-11 派系包规则回归集：**每条规则一份"这里没问题"的反例**，与上面的正例夹具一一配对。
+ *
+ * 只补反例不重复正例（正例命中已由上面一条钉住）。反例的形状刻意与正例只差一个值——
+ * 差得越少，越能说明命中与否确实由判定条件决定，而不是由夹具整体形状决定。
+ * `power-no-regress` 是包里唯一的 error 级规则，之前恰好只有正例没有反例，误报无人看守。
+ */
+const NEG_FIXTURES: Record<string, Record<string, unknown>> = {
+  // 境界提升、战力也提升：不该报崩塌
+  "power-no-regress": {
+    a: { chapter: "第 3 章", realm: { tier: 3 }, combat_power: 100 },
+    b: { chapter: "第 4 章", realm: { tier: 4 }, combat_power: 180 },
+  },
+  "power-ceiling-exceeded": { scene: { combat_power: 400 }, realm: { tier_next: { ceiling: 500 } } },
+  "power-no-cost": { scene: { power_used: true, cost_recorded: true } },
+  "realm-gap-too-large": { realm: { tier_delta: 2, from: "筑基", to: "金丹" } },
+  "realm-lifespan-missing": { realm: { lifespan_defined: true } },
+  "realm-breakthrough-uncelebrated": { chapter: { has_breakthrough: true, has_breakthrough_beat: true } },
+};
+
+describe("真实包规则件回归集（T4-11 正反配对）", () => {
+  const rules = loadPackRules().flatMap((item) => item.rules);
+
+  it("包里有 error 级规则（覆盖锁不许对着空集合假绿）", () => {
+    expect(rules.filter((rule) => rule.severity === "error").map((rule) => rule.id)).toEqual(["power-no-regress"]);
+  });
+
+  it("反例夹具逐条覆盖全部规则（新增规则不补反例就红）", () => {
+    expect(Object.keys(NEG_FIXTURES).sort()).toEqual(rules.map((rule) => rule.id).sort());
+  });
+
+  it("每条规则在自己的反例上零命中（误报率 0）", () => {
+    const hit: string[] = [];
+    for (const rule of rules) {
+      if (evaluateRule(rule, NEG_FIXTURES[rule.id]!).matched) hit.push(rule.id);
+    }
+    expect(hit).toEqual([]);
+  });
+});
