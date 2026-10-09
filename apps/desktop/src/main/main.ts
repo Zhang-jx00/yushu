@@ -2,6 +2,7 @@ import { BrowserWindow, app } from "electron";
 import { join } from "node:path";
 import { CHANNELS } from "../shared/ipc.js";
 import { CloseCoordinator, registerCloseCoordinator, unregisterCloseCoordinator } from "./close-coordinator.js";
+import { unmetAssertions, type E2eAssertion } from "./e2e-assertions.js";
 import { attachProject, registerIpcHandlers } from "./ipc.js";
 import { appRoot } from "./paths.js";
 import { runPerfProbe } from "./perf-runner.js";
@@ -2721,328 +2722,336 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     };
     console.log("[e2e] A2 端点计数:", JSON.stringify(a2Endpoints));
 
-    const ok =
-      result.ready &&
-      result.cards === 2 &&
-      result.worldTitle === "天启界" &&
-      result.cardPath.startsWith("world/cards/character/") &&
-      result.readBack === "林渊" &&
-      result.templateId === "xuanhuan-xitong/three-act-upgrade" &&
-      result.outlineVolumes === 3 &&
-      result.outlineChapters === 6 &&
-      result.chapterPath.startsWith("chapters/vol-") &&
-      result.chapterOutlineRef &&
-      result.outlineExists &&
-      result.mapped &&
-      result.ai.configReady &&
-      result.ai.configMigrated.formatVersion === 2 &&
-      result.ai.configMigrated.kind === "local" &&
-      result.ai.configMigrated.protocol === "openai_chat" &&
-      result.ai.configMigrated.modelName === "legacy-model" &&
-      result.ai.configProbe.formatVersion === 2 &&
-      result.ai.configProbe.modelName === "mock-model" &&
-      result.ai.configProbe.streamCap === true &&
-      result.ai.configProbe.toolsCap === false &&
-      result.ai.configProbe.contextLimit === 32768 &&
-      migrationBackup.exists &&
-      migrationBackup.hasLegacyV1 &&
-      result.ai.routingProbe.exists &&
-      result.ai.routingProbe.source === "config/routing.yaml" &&
-      result.ai.routingProbe.draftingPrefer.join(",") === "flagship" &&
-      result.ai.routingProbe.draftingRequire.join(",") === "stream" &&
-      result.ai.routingProbe.fallbackDrafting.join(",") === "mock" &&
-      result.ai.routingProbe.rateLimitRetries === 2 &&
-      result.ai.routingProbe.cooldownS === 30 &&
-      result.ai.routingProbe.concurrencyGlobal === 4 &&
-      result.ai.presetProbe.migrationWarnings >= 1 &&
-      result.ai.presetProbe.presetIds.join(",") === "ollama,lmstudio,llamacpp,vllm" &&
-      result.ai.downgradeProbe.done &&
-      result.ai.downgradeProbe.downgradeEvent &&
-      result.ai.downgradeProbe.deltas === 1 &&
-      result.ai.downgradeProbe.text === "非流式一次性回复" &&
-      retryProbe.failures === 1 &&
-      retryProbe.hits >= 2 &&
-      result.ai.drafts === 1 &&
-      result.ai.slots === 5 &&
-      result.ai.stableChars > 0 &&
-      result.ai.deltas === 3 &&
-      result.ai.doneText === "天启界的夜色" &&
-      result.ai.hinted >= 0 &&
-      result.ai.adoptPath === result.chapterPath &&
-      result.ai.adoptWords === 6 &&
-      result.ai.chapterHasText &&
-      result.ai.usageGenerate === 1 &&
-      result.ai.usageAdopt === 1 &&
-      result.exported.missingDrafts === 5 &&
-      result.exported.chapters === 1 &&
-      result.exported.reconcileMatched &&
-      result.exported.errorHits >= 1 &&
-      result.exported.hitTotal >= 1 &&
-      result.exported.confirmMessage.includes("E_CONFIRM_REQUIRED") &&
-      result.exported.path.startsWith("exports/") &&
-      result.exported.words > 0 &&
-      !result.exported.clean &&
-      result.exported.hasToc &&
-      result.exported.hasAiText &&
-      result.exported.noComments &&
-      result.exported.clipboardChapters === 1 &&
-      result.exported.clipboardHasSensitiveText &&
-      result.indexed.dbPath === ".yushu/index.db" &&
-      result.indexed.exists &&
-      result.indexed.files > 0 &&
-      result.indexed.entities >= 1 &&
-      result.indexed.chunks >= 3 &&
-      result.indexed.ftsRows === result.indexed.chunks &&
-      result.indexed.skipped === 0 &&
-      result.indexed.shards >= 1 &&
-      result.indexed.parseVia === "utility" &&
-      result.indexed.progressOk &&
-      result.indexed.progressShardsMatch &&
-      result.indexed.searchEntities >= 1 &&
-      result.indexed.searchChunks >= 1 &&
-      result.indexed.snippetHasHit &&
-      result.indexed.statusChunks === result.indexed.chunks &&
-      result.naming.rulesId === "xianxia" &&
-      result.naming.count === 4 &&
-      result.naming.deterministic &&
-      result.naming.allValid &&
-      result.naming.placeCount === 3 &&
-      result.library.chapters >= 6 &&
-      result.library.drafted >= 1 &&
-      result.library.words > 0 &&
-      result.library.draftedPathOk &&
-      result.chapter.readWords > 0 &&
-      result.chapter.error === "" &&
-      result.chapter.grew &&
-      result.chapter.writeWords > result.chapter.readWords &&
-      result.stats.todayDelta > 0 &&
-      result.stats.todaySaves >= 1 &&
-      result.stats.dailyDays >= 1 &&
-      result.stats.todayEffective > 0 &&
-      result.stats.speedPoints === 30 &&
-      result.stats.tiers.basic === 4000 &&
-      result.stats.tiers.advanced === 6000 &&
-      result.statsActivity.sessions >= 1 &&
-      result.statsActivity.activeMs >= 85_000 &&
-      result.statsActivity.speedCpm !== null &&
-      result.statsActivity.speedCpm > 0 &&
-      result.pipeline.conflict === "E_DOC_CONFLICT" &&
-      result.pipeline.sidecarOk &&
-      result.pipeline.mainKeptExternal &&
-      result.preDestructive.taken === 3 &&
-      result.git.initiallyUninitialized === true &&
-      result.git.initialized === true &&
-      (result.git.baselineFiles ?? 0) >= 1 &&
-      result.git.commit1Files === result.git.baselineFiles &&
-      result.git.stagedChapter === true &&
-      (result.git.commit2Files ?? 0) >= 1 &&
-      (result.git.rollbackRestored ?? 0) >= 1 &&
-      result.git.reverted === true &&
-      result.git.preRestore === true &&
-      result.git.headUnchanged === true &&
-      result.git.pendingAfterRollback === true &&
-      result.memory.candidateText === "非流式一次性回复" &&
-      result.memory.notAutoSaved &&
-      result.memory.aiRev === 0 &&
-      result.memory.humanRev === 1 &&
-      result.memory.rejectBlocked &&
-      result.memory.factOk &&
-      result.memory.factBroken &&
-      result.memory.factDeleted &&
-      result.memory.factGone &&
-      result.injection.configPersisted &&
-      result.injection.gatePersisted &&
-      result.injection.hitEntry &&
-      result.injection.missExcluded &&
-      result.injection.manualExcluded &&
-      result.injection.manualIncluded &&
-      result.injection.gateOkIncluded &&
-      result.injection.gateLaterExcluded &&
-      result.injection.summaryAlways &&
-      result.injection.chapterOrdinal === 1 &&
-      result.injection.tokens > 0 &&
-      result.assembly.slotOrder === "system_prompt>world_core>volume_summary>chapter_summary>triggered_cards>facts>rag_chunks>recent_prose" &&
-      result.assembly.slots === 8 &&
-      result.assembly.budget === 32000 &&
-      result.assembly.totalTokens > 0 &&
-      result.assembly.systemStable &&
-      result.assembly.chapterSummary &&
-      result.assembly.factsInjected &&
-      result.assembly.recentProse &&
-      result.assembly.dedupSimilar &&
-      result.assembly.stableTokens > 0 &&
-      result.assembly.smallBudget &&
-      result.assembly.smallEvicted &&
-      result.assembly.smallWithin &&
-      result.assembly.smallKeepsSystem &&
-      result.rag.autoQuery &&
-      result.rag.storeNote &&
-      (result.rag.store === "cosine" || result.rag.store === "sqlite-vec") &&
-      result.rag.fused >= 1 &&
-      result.rag.reranked >= 1 &&
-      result.rag.reranked <= 6 &&
-      result.rag.vectorHits >= 1 &&
-      result.rag.keywordHits >= 1 &&
-      result.rag.provenanceAll &&
-      result.rag.chapterProvenance &&
-      result.rag.fusedSorted &&
-      result.rag.dualPath &&
-      result.rag.rerankOk &&
-      result.rag.slotStatus === "ok" &&
-      result.rag.slotItems >= 1 &&
-      result.rag.slotProvenance &&
-      snapshotOk &&
-      result.extract.total >= 3 &&
-      result.extract.allCandidate &&
-      result.extract.provenance &&
-      result.extract.newOk &&
-      result.extract.augmentOk &&
-      result.extract.conflictOk &&
-      result.extract.conflictBlocked &&
-      result.extract.adoptPath.startsWith("world/cards/") &&
-      result.extract.adoptedStatus &&
-      result.extract.adoptedQuote &&
-      result.extract.adoptedSource &&
-      result.extract.downgrade.includes("prompt_constrained_json") &&
-      result.extract.attempts === 1 &&
-      result.extract.provider === "mock" &&
-      result.ux.multiVaried &&
-      result.ux.partialOk &&
-      result.ux.feedbackHasShui &&
-      result.ux.feedbackTotal >= 1 &&
-      result.ux.channels.includes("extract:sync") &&
-      result.ux.channelNote.includes("未声明 batch") &&
-      result.ux.extractUsageChannel === "sync" &&
+    // 具名断言清单（R55）：名字即表达式原文，失败时直接把未满足项打进 stdout。
+    // 原先是单条大布尔链，失败只报「断言未满足」，定位要靠绿跑/红跑两份结果 JSON 逐项 diff。
+    // 下列条目由原链逐字搬来（只剥行尾 && / ;），新增条目请按同样形状追加。
+    const assertions: E2eAssertion[] = [
+      [`result.ready`, result.ready],
+      [`result.cards === 2`, result.cards === 2],
+      [`result.worldTitle === "天启界"`, result.worldTitle === "天启界"],
+      [`result.cardPath.startsWith("world/cards/character/")`, result.cardPath.startsWith("world/cards/character/")],
+      [`result.readBack === "林渊"`, result.readBack === "林渊"],
+      [`result.templateId === "xuanhuan-xitong/three-act-upgrade"`, result.templateId === "xuanhuan-xitong/three-act-upgrade"],
+      [`result.outlineVolumes === 3`, result.outlineVolumes === 3],
+      [`result.outlineChapters === 6`, result.outlineChapters === 6],
+      [`result.chapterPath.startsWith("chapters/vol-")`, result.chapterPath.startsWith("chapters/vol-")],
+      [`result.chapterOutlineRef`, result.chapterOutlineRef],
+      [`result.outlineExists`, result.outlineExists],
+      [`result.mapped`, result.mapped],
+      [`result.ai.configReady`, result.ai.configReady],
+      [`result.ai.configMigrated.formatVersion === 2`, result.ai.configMigrated.formatVersion === 2],
+      [`result.ai.configMigrated.kind === "local"`, result.ai.configMigrated.kind === "local"],
+      [`result.ai.configMigrated.protocol === "openai_chat"`, result.ai.configMigrated.protocol === "openai_chat"],
+      [`result.ai.configMigrated.modelName === "legacy-model"`, result.ai.configMigrated.modelName === "legacy-model"],
+      [`result.ai.configProbe.formatVersion === 2`, result.ai.configProbe.formatVersion === 2],
+      [`result.ai.configProbe.modelName === "mock-model"`, result.ai.configProbe.modelName === "mock-model"],
+      [`result.ai.configProbe.streamCap === true`, result.ai.configProbe.streamCap === true],
+      [`result.ai.configProbe.toolsCap === false`, result.ai.configProbe.toolsCap === false],
+      [`result.ai.configProbe.contextLimit === 32768`, result.ai.configProbe.contextLimit === 32768],
+      [`migrationBackup.exists`, migrationBackup.exists],
+      [`migrationBackup.hasLegacyV1`, migrationBackup.hasLegacyV1],
+      [`result.ai.routingProbe.exists`, result.ai.routingProbe.exists],
+      [`result.ai.routingProbe.source === "config/routing.yaml"`, result.ai.routingProbe.source === "config/routing.yaml"],
+      [`result.ai.routingProbe.draftingPrefer.join(",") === "flagship"`, result.ai.routingProbe.draftingPrefer.join(",") === "flagship"],
+      [`result.ai.routingProbe.draftingRequire.join(",") === "stream"`, result.ai.routingProbe.draftingRequire.join(",") === "stream"],
+      [`result.ai.routingProbe.fallbackDrafting.join(",") === "mock"`, result.ai.routingProbe.fallbackDrafting.join(",") === "mock"],
+      [`result.ai.routingProbe.rateLimitRetries === 2`, result.ai.routingProbe.rateLimitRetries === 2],
+      [`result.ai.routingProbe.cooldownS === 30`, result.ai.routingProbe.cooldownS === 30],
+      [`result.ai.routingProbe.concurrencyGlobal === 4`, result.ai.routingProbe.concurrencyGlobal === 4],
+      [`result.ai.presetProbe.migrationWarnings >= 1`, result.ai.presetProbe.migrationWarnings >= 1],
+      [`result.ai.presetProbe.presetIds.join(",") === "ollama,lmstudio,llamacpp,vllm"`, result.ai.presetProbe.presetIds.join(",") === "ollama,lmstudio,llamacpp,vllm"],
+      [`result.ai.downgradeProbe.done`, result.ai.downgradeProbe.done],
+      [`result.ai.downgradeProbe.downgradeEvent`, result.ai.downgradeProbe.downgradeEvent],
+      [`result.ai.downgradeProbe.deltas === 1`, result.ai.downgradeProbe.deltas === 1],
+      [`result.ai.downgradeProbe.text === "非流式一次性回复"`, result.ai.downgradeProbe.text === "非流式一次性回复"],
+      [`retryProbe.failures === 1`, retryProbe.failures === 1],
+      [`retryProbe.hits >= 2`, retryProbe.hits >= 2],
+      [`result.ai.drafts === 1`, result.ai.drafts === 1],
+      [`result.ai.slots === 5`, result.ai.slots === 5],
+      [`result.ai.stableChars > 0`, result.ai.stableChars > 0],
+      [`result.ai.deltas === 3`, result.ai.deltas === 3],
+      [`result.ai.doneText === "天启界的夜色"`, result.ai.doneText === "天启界的夜色"],
+      [`result.ai.hinted >= 0`, result.ai.hinted >= 0],
+      [`result.ai.adoptPath === result.chapterPath`, result.ai.adoptPath === result.chapterPath],
+      [`result.ai.adoptWords === 6`, result.ai.adoptWords === 6],
+      [`result.ai.chapterHasText`, result.ai.chapterHasText],
+      [`result.ai.usageGenerate === 1`, result.ai.usageGenerate === 1],
+      [`result.ai.usageAdopt === 1`, result.ai.usageAdopt === 1],
+      [`result.exported.missingDrafts === 5`, result.exported.missingDrafts === 5],
+      [`result.exported.chapters === 1`, result.exported.chapters === 1],
+      [`result.exported.reconcileMatched`, result.exported.reconcileMatched],
+      [`result.exported.errorHits >= 1`, result.exported.errorHits >= 1],
+      [`result.exported.hitTotal >= 1`, result.exported.hitTotal >= 1],
+      [`result.exported.confirmMessage.includes("E_CONFIRM_REQUIRED")`, result.exported.confirmMessage.includes("E_CONFIRM_REQUIRED")],
+      [`result.exported.path.startsWith("exports/")`, result.exported.path.startsWith("exports/")],
+      [`result.exported.words > 0`, result.exported.words > 0],
+      [`!result.exported.clean`, !result.exported.clean],
+      [`result.exported.hasToc`, result.exported.hasToc],
+      [`result.exported.hasAiText`, result.exported.hasAiText],
+      [`result.exported.noComments`, result.exported.noComments],
+      [`result.exported.clipboardChapters === 1`, result.exported.clipboardChapters === 1],
+      [`result.exported.clipboardHasSensitiveText`, result.exported.clipboardHasSensitiveText],
+      [`result.indexed.dbPath === ".yushu/index.db"`, result.indexed.dbPath === ".yushu/index.db"],
+      [`result.indexed.exists`, result.indexed.exists],
+      [`result.indexed.files > 0`, result.indexed.files > 0],
+      [`result.indexed.entities >= 1`, result.indexed.entities >= 1],
+      [`result.indexed.chunks >= 3`, result.indexed.chunks >= 3],
+      [`result.indexed.ftsRows === result.indexed.chunks`, result.indexed.ftsRows === result.indexed.chunks],
+      [`result.indexed.skipped === 0`, result.indexed.skipped === 0],
+      [`result.indexed.shards >= 1`, result.indexed.shards >= 1],
+      [`result.indexed.parseVia === "utility"`, result.indexed.parseVia === "utility"],
+      [`result.indexed.progressOk`, result.indexed.progressOk],
+      [`result.indexed.progressShardsMatch`, result.indexed.progressShardsMatch],
+      [`result.indexed.searchEntities >= 1`, result.indexed.searchEntities >= 1],
+      [`result.indexed.searchChunks >= 1`, result.indexed.searchChunks >= 1],
+      [`result.indexed.snippetHasHit`, result.indexed.snippetHasHit],
+      [`result.indexed.statusChunks === result.indexed.chunks`, result.indexed.statusChunks === result.indexed.chunks],
+      [`result.naming.rulesId === "xianxia"`, result.naming.rulesId === "xianxia"],
+      [`result.naming.count === 4`, result.naming.count === 4],
+      [`result.naming.deterministic`, result.naming.deterministic],
+      [`result.naming.allValid`, result.naming.allValid],
+      [`result.naming.placeCount === 3`, result.naming.placeCount === 3],
+      [`result.library.chapters >= 6`, result.library.chapters >= 6],
+      [`result.library.drafted >= 1`, result.library.drafted >= 1],
+      [`result.library.words > 0`, result.library.words > 0],
+      [`result.library.draftedPathOk`, result.library.draftedPathOk],
+      [`result.chapter.readWords > 0`, result.chapter.readWords > 0],
+      [`result.chapter.error === ""`, result.chapter.error === ""],
+      [`result.chapter.grew`, result.chapter.grew],
+      [`result.chapter.writeWords > result.chapter.readWords`, result.chapter.writeWords > result.chapter.readWords],
+      [`result.stats.todayDelta > 0`, result.stats.todayDelta > 0],
+      [`result.stats.todaySaves >= 1`, result.stats.todaySaves >= 1],
+      [`result.stats.dailyDays >= 1`, result.stats.dailyDays >= 1],
+      [`result.stats.todayEffective > 0`, result.stats.todayEffective > 0],
+      [`result.stats.speedPoints === 30`, result.stats.speedPoints === 30],
+      [`result.stats.tiers.basic === 4000`, result.stats.tiers.basic === 4000],
+      [`result.stats.tiers.advanced === 6000`, result.stats.tiers.advanced === 6000],
+      [`result.statsActivity.sessions >= 1`, result.statsActivity.sessions >= 1],
+      [`result.statsActivity.activeMs >= 85_000`, result.statsActivity.activeMs >= 85_000],
+      [`result.statsActivity.speedCpm !== null`, result.statsActivity.speedCpm !== null],
+      // 原链靠 `&&` 的短路收窄掉 null；拆成独立条目后收窄不成立，故两条并成一条同义合取
+      [`result.statsActivity.speedCpm !== null && result.statsActivity.speedCpm > 0`,
+        result.statsActivity.speedCpm !== null && result.statsActivity.speedCpm > 0],
+      [`result.pipeline.conflict === "E_DOC_CONFLICT"`, result.pipeline.conflict === "E_DOC_CONFLICT"],
+      [`result.pipeline.sidecarOk`, result.pipeline.sidecarOk],
+      [`result.pipeline.mainKeptExternal`, result.pipeline.mainKeptExternal],
+      [`result.preDestructive.taken === 3`, result.preDestructive.taken === 3],
+      [`result.git.initiallyUninitialized === true`, result.git.initiallyUninitialized === true],
+      [`result.git.initialized === true`, result.git.initialized === true],
+      [`(result.git.baselineFiles ?? 0) >= 1`, (result.git.baselineFiles ?? 0) >= 1],
+      [`result.git.commit1Files === result.git.baselineFiles`, result.git.commit1Files === result.git.baselineFiles],
+      [`result.git.stagedChapter === true`, result.git.stagedChapter === true],
+      [`(result.git.commit2Files ?? 0) >= 1`, (result.git.commit2Files ?? 0) >= 1],
+      [`(result.git.rollbackRestored ?? 0) >= 1`, (result.git.rollbackRestored ?? 0) >= 1],
+      [`result.git.reverted === true`, result.git.reverted === true],
+      [`result.git.preRestore === true`, result.git.preRestore === true],
+      [`result.git.headUnchanged === true`, result.git.headUnchanged === true],
+      [`result.git.pendingAfterRollback === true`, result.git.pendingAfterRollback === true],
+      [`result.memory.candidateText === "非流式一次性回复"`, result.memory.candidateText === "非流式一次性回复"],
+      [`result.memory.notAutoSaved`, result.memory.notAutoSaved],
+      [`result.memory.aiRev === 0`, result.memory.aiRev === 0],
+      [`result.memory.humanRev === 1`, result.memory.humanRev === 1],
+      [`result.memory.rejectBlocked`, result.memory.rejectBlocked],
+      [`result.memory.factOk`, result.memory.factOk],
+      [`result.memory.factBroken`, result.memory.factBroken],
+      [`result.memory.factDeleted`, result.memory.factDeleted],
+      [`result.memory.factGone`, result.memory.factGone],
+      [`result.injection.configPersisted`, result.injection.configPersisted],
+      [`result.injection.gatePersisted`, result.injection.gatePersisted],
+      [`result.injection.hitEntry`, result.injection.hitEntry],
+      [`result.injection.missExcluded`, result.injection.missExcluded],
+      [`result.injection.manualExcluded`, result.injection.manualExcluded],
+      [`result.injection.manualIncluded`, result.injection.manualIncluded],
+      [`result.injection.gateOkIncluded`, result.injection.gateOkIncluded],
+      [`result.injection.gateLaterExcluded`, result.injection.gateLaterExcluded],
+      [`result.injection.summaryAlways`, result.injection.summaryAlways],
+      [`result.injection.chapterOrdinal === 1`, result.injection.chapterOrdinal === 1],
+      [`result.injection.tokens > 0`, result.injection.tokens > 0],
+      [`result.assembly.slotOrder === "system_prompt>world_core>volume_summary>chapter_summary>triggered_cards>facts>rag_chunks>recent_prose"`, result.assembly.slotOrder === "system_prompt>world_core>volume_summary>chapter_summary>triggered_cards>facts>rag_chunks>recent_prose"],
+      [`result.assembly.slots === 8`, result.assembly.slots === 8],
+      [`result.assembly.budget === 32000`, result.assembly.budget === 32000],
+      [`result.assembly.totalTokens > 0`, result.assembly.totalTokens > 0],
+      [`result.assembly.systemStable`, result.assembly.systemStable],
+      [`result.assembly.chapterSummary`, result.assembly.chapterSummary],
+      [`result.assembly.factsInjected`, result.assembly.factsInjected],
+      [`result.assembly.recentProse`, result.assembly.recentProse],
+      [`result.assembly.dedupSimilar`, result.assembly.dedupSimilar],
+      [`result.assembly.stableTokens > 0`, result.assembly.stableTokens > 0],
+      [`result.assembly.smallBudget`, result.assembly.smallBudget],
+      [`result.assembly.smallEvicted`, result.assembly.smallEvicted],
+      [`result.assembly.smallWithin`, result.assembly.smallWithin],
+      [`result.assembly.smallKeepsSystem`, result.assembly.smallKeepsSystem],
+      [`result.rag.autoQuery`, result.rag.autoQuery],
+      [`result.rag.storeNote`, result.rag.storeNote],
+      [`(result.rag.store === "cosine" || result.rag.store === "sqlite-vec")`, (result.rag.store === "cosine" || result.rag.store === "sqlite-vec")],
+      [`result.rag.fused >= 1`, result.rag.fused >= 1],
+      [`result.rag.reranked >= 1`, result.rag.reranked >= 1],
+      [`result.rag.reranked <= 6`, result.rag.reranked <= 6],
+      [`result.rag.vectorHits >= 1`, result.rag.vectorHits >= 1],
+      [`result.rag.keywordHits >= 1`, result.rag.keywordHits >= 1],
+      [`result.rag.provenanceAll`, result.rag.provenanceAll],
+      [`result.rag.chapterProvenance`, result.rag.chapterProvenance],
+      [`result.rag.fusedSorted`, result.rag.fusedSorted],
+      [`result.rag.dualPath`, result.rag.dualPath],
+      [`result.rag.rerankOk`, result.rag.rerankOk],
+      [`result.rag.slotStatus === "ok"`, result.rag.slotStatus === "ok"],
+      [`result.rag.slotItems >= 1`, result.rag.slotItems >= 1],
+      [`result.rag.slotProvenance`, result.rag.slotProvenance],
+      [`snapshotOk`, snapshotOk],
+      [`result.extract.total >= 3`, result.extract.total >= 3],
+      [`result.extract.allCandidate`, result.extract.allCandidate],
+      [`result.extract.provenance`, result.extract.provenance],
+      [`result.extract.newOk`, result.extract.newOk],
+      [`result.extract.augmentOk`, result.extract.augmentOk],
+      [`result.extract.conflictOk`, result.extract.conflictOk],
+      [`result.extract.conflictBlocked`, result.extract.conflictBlocked],
+      [`result.extract.adoptPath.startsWith("world/cards/")`, result.extract.adoptPath.startsWith("world/cards/")],
+      [`result.extract.adoptedStatus`, result.extract.adoptedStatus],
+      [`result.extract.adoptedQuote`, result.extract.adoptedQuote],
+      [`result.extract.adoptedSource`, result.extract.adoptedSource],
+      [`result.extract.downgrade.includes("prompt_constrained_json")`, result.extract.downgrade.includes("prompt_constrained_json")],
+      [`result.extract.attempts === 1`, result.extract.attempts === 1],
+      [`result.extract.provider === "mock"`, result.extract.provider === "mock"],
+      [`result.ux.multiVaried`, result.ux.multiVaried],
+      [`result.ux.partialOk`, result.ux.partialOk],
+      [`result.ux.feedbackHasShui`, result.ux.feedbackHasShui],
+      [`result.ux.feedbackTotal >= 1`, result.ux.feedbackTotal >= 1],
+      [`result.ux.channels.includes("extract:sync")`, result.ux.channels.includes("extract:sync")],
+      [`result.ux.channelNote.includes("未声明 batch")`, result.ux.channelNote.includes("未声明 batch")],
+      [`result.ux.extractUsageChannel === "sync"`, result.ux.extractUsageChannel === "sync"],
       // T3-12 Token 与成本（A3 机制取证：落盘 / 折算 / 分解 / 偏差 / 编排核对）
-      result.cost.pricingKept &&
-      result.cost.tokensRecorded >= 1 &&
-      result.cost.estimateRecorded >= 1 &&
-      result.cost.priced &&
-      result.cost.costText.startsWith("¥") &&
-      result.cost.promptTokens > 0 &&
-      result.cost.aggregateEntries >= 2 &&
-      result.cost.tasks.includes("summarize") &&
-      result.cost.tasks.includes("extract") &&
-      result.cost.models.includes("mock-model") &&
-      result.cost.deviationText.includes("%") &&
-      result.cost.cacheOrdered &&
-      result.cost.cacheMisplaced === "" &&
-      result.cost.cacheBreakpoint === "world_constraints#2" &&
-      result.cost.cacheStableTokens > 0 &&
-      result.cost.cacheDeclared === false &&
-      result.cost.cacheWarn.includes("未声明 cache") &&
-      result.cost.savingText.includes("不估算") &&
-      result.cost.notes >= 5 &&
-      result.cost.pricingFallback === 0 &&
+      [`result.cost.pricingKept`, result.cost.pricingKept],
+      [`result.cost.tokensRecorded >= 1`, result.cost.tokensRecorded >= 1],
+      [`result.cost.estimateRecorded >= 1`, result.cost.estimateRecorded >= 1],
+      [`result.cost.priced`, result.cost.priced],
+      [`result.cost.costText.startsWith("¥")`, result.cost.costText.startsWith("¥")],
+      [`result.cost.promptTokens > 0`, result.cost.promptTokens > 0],
+      [`result.cost.aggregateEntries >= 2`, result.cost.aggregateEntries >= 2],
+      [`result.cost.tasks.includes("summarize")`, result.cost.tasks.includes("summarize")],
+      [`result.cost.tasks.includes("extract")`, result.cost.tasks.includes("extract")],
+      [`result.cost.models.includes("mock-model")`, result.cost.models.includes("mock-model")],
+      [`result.cost.deviationText.includes("%")`, result.cost.deviationText.includes("%")],
+      [`result.cost.cacheOrdered`, result.cost.cacheOrdered],
+      [`result.cost.cacheMisplaced === ""`, result.cost.cacheMisplaced === ""],
+      [`result.cost.cacheBreakpoint === "world_constraints#2"`, result.cost.cacheBreakpoint === "world_constraints#2"],
+      [`result.cost.cacheStableTokens > 0`, result.cost.cacheStableTokens > 0],
+      [`result.cost.cacheDeclared === false`, result.cost.cacheDeclared === false],
+      [`result.cost.cacheWarn.includes("未声明 cache")`, result.cost.cacheWarn.includes("未声明 cache")],
+      [`result.cost.savingText.includes("不估算")`, result.cost.savingText.includes("不估算")],
+      [`result.cost.notes >= 5`, result.cost.notes >= 5],
+      [`result.cost.pricingFallback === 0`, result.cost.pricingFallback === 0],
       // R49 预算护栏与成本体检并入面板：坏配置外显、月度超支升 error、未跑规则进 skipped
-      result.cost.budgetInvalid.includes("未知键") &&
-      result.cost.budgetInvalidCode === "budget-config-invalid" &&
-      result.cost.budgetKeepsCapNull &&
-      result.cost.capSeverity === "error" &&
-      result.cost.capSpent.startsWith("¥") &&
-      result.cost.capMonthKey.length === 7 &&
-      result.cost.noTargetSkipsOverflow &&
-      result.cost.capSkippedCount >= 1 &&
+      [`result.cost.budgetInvalid.includes("未知键")`, result.cost.budgetInvalid.includes("未知键")],
+      [`result.cost.budgetInvalidCode === "budget-config-invalid"`, result.cost.budgetInvalidCode === "budget-config-invalid"],
+      [`result.cost.budgetKeepsCapNull`, result.cost.budgetKeepsCapNull],
+      [`result.cost.capSeverity === "error"`, result.cost.capSeverity === "error"],
+      [`result.cost.capSpent.startsWith("¥")`, result.cost.capSpent.startsWith("¥")],
+      [`result.cost.capMonthKey.length === 7`, result.cost.capMonthKey.length === 7],
+      [`result.cost.noTargetSkipsOverflow`, result.cost.noTargetSkipsOverflow],
+      [`result.cost.capSkippedCount >= 1`, result.cost.capSkippedCount >= 1],
       // T3-14 密钥安全（后端可用与不可用两条分支都必须诚实通过）
-      result.security.ok &&
-      result.security.plaintextBlocked.includes("明文") &&
-      result.security.restoredOk &&
+      [`result.security.ok`, result.security.ok],
+      [`result.security.plaintextBlocked.includes("明文")`, result.security.plaintextBlocked.includes("明文")],
+      [`result.security.restoredOk`, result.security.restoredOk],
       // T3-13 中文自查（只读、未确认不改、繁简候选须选定）
-      result.proofread.ok &&
-      result.proofread.diskUnchanged &&
-      result.proofread.spansOk &&
-      result.proofread.error === "" &&
+      [`result.proofread.ok`, result.proofread.ok],
+      [`result.proofread.diskUnchanged`, result.proofread.diskUnchanged],
+      [`result.proofread.spansOk`, result.proofread.spansOk],
+      [`result.proofread.error === ""`, result.proofread.error === ""],
       // R51 规则 DSL 桌面接入：目录只读、试算三态（命中 / 未命中 / 被沙箱拒绝）、坏夹具拒收、不写盘
-      result.rules.ok &&
-      result.rules.error === "" &&
-      result.rules.packIds === "xuanhuan-xitong" &&
-      result.rules.files === 2 &&
-      result.rules.total === 6 &&
-      result.rules.brokenFiles === 0 &&
-      result.rules.problemRules === 0 &&
-      result.rules.duplicateIds === 0 &&
-      result.rules.loadError === "" &&
-      result.rules.hit &&
-      result.rules.hitMessage.includes("疑似战力崩塌") &&
-      result.rules.evidenceCount === 4 &&
-      result.rules.missOk &&
-      !result.rules.missMatched &&
-      result.rules.rejectCode.includes("E_RULE_UNORDERABLE") &&
-      result.rules.badJsonRejected.includes("合法 JSON") &&
-      result.rules.diskUnchanged &&
+      [`result.rules.ok`, result.rules.ok],
+      [`result.rules.error === ""`, result.rules.error === ""],
+      [`result.rules.packIds === "xuanhuan-xitong"`, result.rules.packIds === "xuanhuan-xitong"],
+      [`result.rules.files === 2`, result.rules.files === 2],
+      [`result.rules.total === 6`, result.rules.total === 6],
+      [`result.rules.brokenFiles === 0`, result.rules.brokenFiles === 0],
+      [`result.rules.problemRules === 0`, result.rules.problemRules === 0],
+      [`result.rules.duplicateIds === 0`, result.rules.duplicateIds === 0],
+      [`result.rules.loadError === ""`, result.rules.loadError === ""],
+      [`result.rules.hit`, result.rules.hit],
+      [`result.rules.hitMessage.includes("疑似战力崩塌")`, result.rules.hitMessage.includes("疑似战力崩塌")],
+      [`result.rules.evidenceCount === 4`, result.rules.evidenceCount === 4],
+      [`result.rules.missOk`, result.rules.missOk],
+      [`!result.rules.missMatched`, !result.rules.missMatched],
+      [`result.rules.rejectCode.includes("E_RULE_UNORDERABLE")`, result.rules.rejectCode.includes("E_RULE_UNORDERABLE")],
+      [`result.rules.badJsonRejected.includes("合法 JSON")`, result.rules.badJsonRejected.includes("合法 JSON")],
+      [`result.rules.diskUnchanged`, result.rules.diskUnchanged],
       // R54 一致性体检三态：不变量成立、区间可切片、缓存语义、坏豁免清单不静默放行、全程只读
-      result.consistency.ok &&
-      result.consistency.error === "" &&
-      result.consistency.manualTiming === "manual" &&
-      result.consistency.manualRan &&
-      !result.consistency.cacheRan &&
-      result.consistency.invariantHolds &&
-      result.consistency.spanSlicesOk &&
-      result.consistency.staleAfterWrite &&
-      result.consistency.allowErrorWhenBroken.includes("reason") &&
-      result.consistency.entriesAfterBroken === result.consistency.findings &&
-      result.consistency.diskUnchanged &&
-      result.consistency.entries >= 1 &&
-      result.consistency.spans >= 1 &&
-      result.consistency.restoredOk &&
-      result.consistency.entriesAfterRestore === 0 &&
+      [`result.consistency.ok`, result.consistency.ok],
+      [`result.consistency.error === ""`, result.consistency.error === ""],
+      [`result.consistency.manualTiming === "manual"`, result.consistency.manualTiming === "manual"],
+      [`result.consistency.manualRan`, result.consistency.manualRan],
+      [`!result.consistency.cacheRan`, !result.consistency.cacheRan],
+      [`result.consistency.invariantHolds`, result.consistency.invariantHolds],
+      [`result.consistency.spanSlicesOk`, result.consistency.spanSlicesOk],
+      [`result.consistency.staleAfterWrite`, result.consistency.staleAfterWrite],
+      [`result.consistency.allowErrorWhenBroken.includes("reason")`, result.consistency.allowErrorWhenBroken.includes("reason")],
+      [`result.consistency.entriesAfterBroken === result.consistency.findings`, result.consistency.entriesAfterBroken === result.consistency.findings],
+      [`result.consistency.diskUnchanged`, result.consistency.diskUnchanged],
+      [`result.consistency.entries >= 1`, result.consistency.entries >= 1],
+      [`result.consistency.spans >= 1`, result.consistency.spans >= 1],
+      [`result.consistency.restoredOk`, result.consistency.restoredOk],
+      [`result.consistency.entriesAfterRestore === 0`, result.consistency.entriesAfterRestore === 0],
       // A2 任务路由（离线那一半）：旗舰端点失败 → 回落小模型端点出文；冷却跳过坏端点；一次动作一条记录
-      result.routingA2.ok &&
-      result.routingA2.firstProvider === "small-good" &&
-      result.routingA2.secondProvider === "small-good" &&
-      result.routingA2.cooldownSeen &&
-      result.routingA2.recordsDelta === 3 &&
-      result.routingA2.promptTokensDelta === 30 &&
-      result.routingA2.summarizeOk &&
-      result.routingA2.error === "" &&
+      [`result.routingA2.ok`, result.routingA2.ok],
+      [`result.routingA2.firstProvider === "small-good"`, result.routingA2.firstProvider === "small-good"],
+      [`result.routingA2.secondProvider === "small-good"`, result.routingA2.secondProvider === "small-good"],
+      [`result.routingA2.cooldownSeen`, result.routingA2.cooldownSeen],
+      [`result.routingA2.recordsDelta === 3`, result.routingA2.recordsDelta === 3],
+      [`result.routingA2.promptTokensDelta === 30`, result.routingA2.promptTokensDelta === 30],
+      [`result.routingA2.summarizeOk`, result.routingA2.summarizeOk],
+      [`result.routingA2.error === ""`, result.routingA2.error === ""],
       // A4：AI 关闭后三个 LLM 入口全被拒、本地能力零失败，且端点计数不增长（未发出任何请求）
-      result.aiOff.ok &&
-      result.aiOff.localFailed.length === 0 &&
-      result.aiOff.error === "" &&
-      a2Endpoints.badHits === 3 &&
-      a2Endpoints.badFailures === 3 &&
-      a2Endpoints.goodHits === 3 &&
-      a2Endpoints.goodFailures === 0 &&
+      [`result.aiOff.ok`, result.aiOff.ok],
+      [`result.aiOff.localFailed.length === 0`, result.aiOff.localFailed.length === 0],
+      [`result.aiOff.error === ""`, result.aiOff.error === ""],
+      [`a2Endpoints.badHits === 3`, a2Endpoints.badHits === 3],
+      [`a2Endpoints.badFailures === 3`, a2Endpoints.badFailures === 3],
+      [`a2Endpoints.goodHits === 3`, a2Endpoints.goodHits === 3],
+      [`a2Endpoints.goodFailures === 0`, a2Endpoints.goodFailures === 0],
       // 端点计数的**最终值**恰好停在 A2 的 3/3：A4 关闸后的三连击与本地能力电池
       // 一个请求都没发出（任一次泄漏都会让 goodHits 涨到 4+ 或 badHits 涨到 4+）
-      a2Endpoints.badHits === 3 &&
-      a2Endpoints.goodHits === 3 &&
-      crossProject.rejectedIds.includes("fact-foreign") &&
-      crossProject.errorCodes.includes("memory-cross-project-leak") &&
-      !crossProject.factIds.includes("fact-foreign") &&
-      sessionProbe.ok &&
-      result.incremental.mode === "incremental" &&
-      result.incremental.updated === 1 &&
-      result.incremental.reused === result.indexed.files - 1 &&
-      result.incremental.removed === 0 &&
-      result.incremental.issues === 0 &&
-      result.incremental.hit >= 1 &&
-      result.incremental.parseVia === "utility" &&
-      result.incremental.filesKeep &&
-      result.autoIndex.hit >= 1 &&
-      result.autoIndex.lastRunAt !== null &&
-      switchFlush.ok &&
-      switchFlush.withinDebounce &&
-      crashRecovery.journalDetected &&
-      crashRecovery.diskNotSavedYet &&
-      crashRecovery.bannerShown &&
-      crashRecovery.restoredInEditor &&
-      crashRecovery.persisted &&
-      crashRecovery.journalCleared &&
-      recoveryEdge.revertCleared &&
-      recoveryEdge.staleBlocked &&
-      snapshotProbe.takeOk &&
-      snapshotProbe.restored &&
-      snapshotProbe.cardRecreated &&
-      snapshotProbe.extraKept &&
-      snapshotProbe.preRestore &&
-      mergeProbe.ok &&
-      closeFlush.ok &&
-      closeFlush.withinDebounce;
+      [`a2Endpoints.badHits === 3`, a2Endpoints.badHits === 3],
+      [`a2Endpoints.goodHits === 3`, a2Endpoints.goodHits === 3],
+      [`crossProject.rejectedIds.includes("fact-foreign")`, crossProject.rejectedIds.includes("fact-foreign")],
+      [`crossProject.errorCodes.includes("memory-cross-project-leak")`, crossProject.errorCodes.includes("memory-cross-project-leak")],
+      [`!crossProject.factIds.includes("fact-foreign")`, !crossProject.factIds.includes("fact-foreign")],
+      [`sessionProbe.ok`, sessionProbe.ok],
+      [`result.incremental.mode === "incremental"`, result.incremental.mode === "incremental"],
+      [`result.incremental.updated === 1`, result.incremental.updated === 1],
+      [`result.incremental.reused === result.indexed.files - 1`, result.incremental.reused === result.indexed.files - 1],
+      [`result.incremental.removed === 0`, result.incremental.removed === 0],
+      [`result.incremental.issues === 0`, result.incremental.issues === 0],
+      [`result.incremental.hit >= 1`, result.incremental.hit >= 1],
+      [`result.incremental.parseVia === "utility"`, result.incremental.parseVia === "utility"],
+      [`result.incremental.filesKeep`, result.incremental.filesKeep],
+      [`result.autoIndex.hit >= 1`, result.autoIndex.hit >= 1],
+      [`result.autoIndex.lastRunAt !== null`, result.autoIndex.lastRunAt !== null],
+      [`switchFlush.ok`, switchFlush.ok],
+      [`switchFlush.withinDebounce`, switchFlush.withinDebounce],
+      [`crashRecovery.journalDetected`, crashRecovery.journalDetected],
+      [`crashRecovery.diskNotSavedYet`, crashRecovery.diskNotSavedYet],
+      [`crashRecovery.bannerShown`, crashRecovery.bannerShown],
+      [`crashRecovery.restoredInEditor`, crashRecovery.restoredInEditor],
+      [`crashRecovery.persisted`, crashRecovery.persisted],
+      [`crashRecovery.journalCleared`, crashRecovery.journalCleared],
+      [`recoveryEdge.revertCleared`, recoveryEdge.revertCleared],
+      [`recoveryEdge.staleBlocked`, recoveryEdge.staleBlocked],
+      [`snapshotProbe.takeOk`, snapshotProbe.takeOk],
+      [`snapshotProbe.restored`, snapshotProbe.restored],
+      [`snapshotProbe.cardRecreated`, snapshotProbe.cardRecreated],
+      [`snapshotProbe.extraKept`, snapshotProbe.extraKept],
+      [`snapshotProbe.preRestore`, snapshotProbe.preRestore],
+      [`mergeProbe.ok`, mergeProbe.ok],
+      [`closeFlush.ok`, closeFlush.ok],
+      [`closeFlush.withinDebounce`, closeFlush.withinDebounce],
+    ];
+    const unmet = unmetAssertions(assertions);
+    const ok = unmet.length === 0;
     console.log(
       ok
         ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 密钥安全（加密保存后明文不落盘、真源只记 key_ref、后端不可用即拒存、含明文 llm.yaml 被 error 阻断，T3-14）→ 中文自查（别字与半角标点给候选、未确认不改稿、修复不写盘、繁简歧义须选定候选，T3-13）→ 任务路由回落与冷却（旗舰端点全程 503 时由小模型端点出文、第二次动作跳过冷却端点、一次动作只记一条 usage，A2 离线半）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
-        : "[e2e] 失败：断言未满足",
+        : "[e2e] 失败：未满足断言 " + unmet.length + " 条 → " + unmet.join(" ｜ "),
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     mock.server.close();

@@ -9,6 +9,7 @@ import type { AxisValues } from "../shared/ipc.js";
 import { attachProject } from "./ipc.js";
 import { repoRoot } from "./paths.js";
 import { createProject } from "./project-ops.js";
+import { MAX_STEP_ATTEMPTS, summarizeAttempts, type StepAttempt } from "./walkthrough-attempts.js";
 
 /**
  * M1 验收场景（docs/06 §二）的 UI 自动化预演（`--ui-walkthrough[=<目录>]`）。
@@ -48,6 +49,10 @@ interface StepResult {
   detail: string;
   screenshot: string;
   ms: number;
+  /** 本步骤实际执行次数（1 = 一次过；2 = 第一次未过、重试后才过或仍未过） */
+  attempts: number;
+  /** 第一次未过、重试后通过 —— 如实标注，不洗成"一次通过" */
+  flaky: boolean;
 }
 
 interface StepDef {
@@ -2223,17 +2228,26 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   console.log(`[walkthrough] 开始：项目目录 ${options.dir}；mock ${options.mock.baseUrl}`);
   for (const def of STEPS) {
     const stepStart = Date.now();
-    let ok = false;
-    let detail = "";
-    try {
-      const res = (await win.webContents.executeJavaScript(buildScript(def.body))) as
-        | { ok?: boolean; note?: string }
-        | null;
-      ok = Boolean(res && res.ok);
-      detail = String(res && res.note ? res.note : "(脚本无返回)");
-    } catch (err) {
-      detail = `执行失败：${err instanceof Error ? err.message : String(err)}`;
+    // 失败步骤最多重试一次（R55，docs/06 §七：step17 / step21 偶发抖动根因未定）。
+    // 重试不是为了"跑绿"，而是把抖动变成可审计的记录：flaky 进报告、第一次的失败说明进 detail，
+    // 两次都失败仍算失败。真正一次过的步骤 attempts=1、flaky=false，不会被误标。
+    const attempts: StepAttempt[] = [];
+    while (attempts.length < MAX_STEP_ATTEMPTS) {
+      try {
+        const res = (await win.webContents.executeJavaScript(buildScript(def.body))) as
+          | { ok?: boolean; note?: string }
+          | null;
+        attempts.push({ ok: Boolean(res && res.ok), detail: String(res && res.note ? res.note : "(脚本无返回)") });
+      } catch (err) {
+        attempts.push({ ok: false, detail: `执行失败：${err instanceof Error ? err.message : String(err)}` });
+      }
+      const last = attempts.at(-1) ?? { ok: false, detail: "(无执行记录)" };
+      if (last.ok || attempts.length >= MAX_STEP_ATTEMPTS) break;
+      console.log(`[walkthrough] step${def.step} 第 ${attempts.length} 次未过，重试一次：${last.detail.slice(0, 200)}`);
     }
+    const outcome = summarizeAttempts(attempts);
+    const ok = outcome.ok;
+    let detail = outcome.detail;
     const screenshotRel = `${SCREENSHOT_REL_DIR}/${def.file}`;
     const shot = await captureStep(win, lastPng);
     if (shot.png) {
@@ -2247,8 +2261,20 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
     }
     if (shot.note) detail += ` ｜截图：${shot.note}`;
     const ms = Date.now() - stepStart;
-    results.push({ step: def.step, title: def.title, ok, detail, screenshot: screenshotRel, ms });
-    console.log(`[walkthrough] step${def.step} ${ok ? "OK  " : "FAIL"} ${ms}ms — ${def.title} :: ${detail}`);
+    results.push({
+      step: def.step,
+      title: def.title,
+      ok,
+      detail,
+      screenshot: screenshotRel,
+      ms,
+      attempts: attempts.length,
+      flaky: outcome.flaky,
+    });
+    console.log(
+      `[walkthrough] step${def.step} ${ok ? (outcome.flaky ? "FLAKY" : "OK  ") : "FAIL"} ${ms}ms ` +
+        `（执行 ${attempts.length} 次）— ${def.title} :: ${detail}`,
+    );
   }
 
   const finishedAt = new Date().toISOString();
@@ -2264,6 +2290,9 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
     screenshotsDir: SCREENSHOT_REL_DIR,
     okCount: results.length - failures.length,
     failCount: failures.length,
+    // 抖动如实列出（R55）：第一次未过、重试后才过的步骤。有 flaky 时不得声称"一次通过"。
+    flakySteps: results.filter((item) => item.flaky).map((item) => item.step),
+    retryPolicy: `失败步骤最多重试 ${MAX_STEP_ATTEMPTS - 1} 次；重试后通过记入 flakySteps（退出码仍为 0，但报告必须留痕）`,
     bypasses: [
       "步骤 1：UI 的存放目录为 readOnly 输入 + 系统对话框，无法自动化；改由主进程等价执行 createProject（与 project:create 同一函数）",
       "步骤 8：该步骤排在编辑器页步骤之前；经 window.yushu.ai.adopt 追加一次含敏感词正文后再走 UI 的「重新核对」",
@@ -2289,7 +2318,9 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
     .catch((err: unknown) => console.error("[walkthrough] 报告写入失败:", err));
 
   console.log(
-    `[walkthrough] 汇总：ok=${report.okCount} fail=${report.failCount} 总耗时 ${report.totalMs}ms；报告 ${SCREENSHOT_REL_DIR}/walkthrough-report.json`,
+    `[walkthrough] 汇总：ok=${report.okCount} fail=${report.failCount} 抖动=${report.flakySteps.length}${
+      report.flakySteps.length > 0 ? `[${report.flakySteps.join(",")}]` : ""
+    } 总耗时 ${report.totalMs}ms；报告 ${SCREENSHOT_REL_DIR}/walkthrough-report.json`,
   );
   for (const item of failures) console.log(`[walkthrough] 失败 step${item.step}：${item.detail}`);
 
@@ -2297,7 +2328,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const evidenceMissing = screenshotFailures.length;
   for (const item of screenshotFailures) console.log(`[walkthrough] 证据缺失 ${item}`);
   console.log(
-    `[walkthrough] DONE ok=${report.okCount} fail=${report.failCount} 证据缺失=${evidenceMissing}`,
+    `[walkthrough] DONE ok=${report.okCount} fail=${report.failCount} 证据缺失=${evidenceMissing} 抖动=${report.flakySteps.length}`,
   );
   app.exit(failures.length === 0 && evidenceMissing === 0 ? 0 : 1);
 }
