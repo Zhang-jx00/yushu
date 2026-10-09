@@ -17,10 +17,10 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **747/747 全绿**（77 个测试文件）——`pnpm test`（第 53 轮 R53 / 报告格式与豁免清单后；R52–R53 均为纯引擎轮，e2e 与预演未重跑，最新预演证据仍是 R51 的 v114） |
+| 单测 | **755/755 全绿**（78 个测试文件）——`pnpm test`（第 54 轮 R54 / 一致性体检三态与面板后） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
-| UI 预演 | **40/40 全绿**（最近一次新目录 **v114**，45.1s，`screenshotFailures:[]`、证据缺失=0）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
+| UI 预演 | **41/41 全绿**（最近一次新目录 **v118**，45.8s，`screenshotFailures:[]`、证据缺失=0）——见 §6.3；step17 / step21 存在**偶发抖动**（非本轮引入、根因未定，见 docs/06 §七） |
 | 性能实测 | 10/10 达标（最近一次 R36 报告 `docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json`）；R40 未触热路径，本轮不适用 |
 | 版本 | `v0.2.0` tag **已在远端**（本文上一版记为"远端未推"，已过期更正） |
 
@@ -129,6 +129,8 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 | R53 | M4/T4-3 一致性报告格式 + 必须记理由的豁免清单（引擎侧） | `consistency-report.ts`：`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内 refs 的 **UTF-16 区间**（与 T3-13 同口径，同一个面板不能有两套下标）；报告条目 `{rule,severity,subject,related?,path?,evidence,span,fix}` **与校对 finding 同形**；找不到原文 `span:null` 不造 0-0 假区间；`fix` 给可执行方向 + 统一豁免出口（倒置类要点名两端层名 → 给 `StructureFinding` 补 `fromLayer/toLayer`，由测试倒逼而非预留）。豁免 `config/consistency.yaml` 落实 A6：**无 reason 拒载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝（不支持 until/通配，免得给"会自己失效"的假安全感）**；匹配键用 规则+主体+目标不用行号；被豁免条目进 `suppressed` 带理由与决策时间；**用不上的豁免进 `unusedAllow`**。**两个坑由测试逼出**：`item.get("relation")` 对标量返回解好值的 JS 数据（要 `get(key,true)` 才有节点与 range）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间＝每张正常卡都失去跳转。**TDD 两轮红绿 + 18 例 → 747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌一点→4、不要求 reason→1、不报 unusedAllow→2），**1 次未杀到**（`!range` 兜底不可达）如实记录不声称测过。纯引擎轮未跑 e2e / 预演。**报告落点仍未决**：docs/04 §7.4 写 `reports/consistency-*.yaml` 与"派生物不入真源"冲突 → 建议落 `.yushu/consistency/`，R54 一并裁决 |
 
+| R54 | M4/T4-4 一致性体检三态 + 规则页面板 | `consistency-ops.ts` + 只读通道 `consistency:check`（四处同步）。三态语义各不同：`manual` 永远重算；`post-save` 由 **`wrapWrite` 置脏**（与索引刷新同一漏斗，一处覆盖所有真源写入）、下次读取才重算，命中缓存显示「复用缓存」；`post-generate` 按 `entityIds` 过滤且范围外计数进 `filteredOut`。缓存记项目根，换项目即作废。面板（第 11 页「规则」）新增体检段：汇总（结论/豁免/未纳入范围/深度封顶）· 结论表（级别·依据·建议修法·**原文跳转**）· 豁免带理由与决策时间（A6 审计）· `unusedAllow` 提示已失效；清单读不了 → `allowError` 外显且**本次不应用任何豁免**。**预演逼出两个真问题、改产品不改断言**：① 切标签页重挂载 RulesView → 体检结果丢失 → 挂载时自动取缓存；② 探针与预演项目里没有任何悬空引用、结论恒 0，"每条发现可跳原文"是空跑 → e2e 临时给既有卡加坏引用再按原 payload 复原（并断言复原后归零），step41 真的造卡真的点跳转。**桌面单测 +8 → 755/755（78 文件）**，typecheck 11 包全 Done，e2e ✅（`spans:1 / entries:1 / spanSlicesOk / restoredOk / entriesAfterRestore:0 / diskUnchanged`），预演 **step41 → 41/41**（v118 45.8s，scene 已同步 10-41）；变异 5 次各杀 1 红。**T4-4 未勾选**：`post-generate` 未接在 AI 采纳后的调用点、"重规则 + AI 采样"未实现、报告不落盘（`reports/` 与派生物红线冲突，留 T4-5 裁决） |
+
 ### 3.3 系统骨架关键约定（必须遵守，改代码前先读）
 
 1. **真源与派生分离**：Markdown/YAML 是唯一真源；SQLite（`.yushu/index.db`）与 `.yushu/context-log/`、`.yushu/ai-usage.jsonl`、`.yushu/ai-feedback.jsonl`、`.yushu/recovery/`、`.yushu/snapshots/`、`exports/` 都是派生物——可删可重建，绝不作为真源，不入 Git。
@@ -195,7 +197,7 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 ### 5.3 工程债（低优先，随手做）
 
 - `docs/00-交接文档-给Trae.md` 是 M1 时代的；新内容一律写进 `docs/04/06` 与本文，避免多源。
-- ~~walkthrough 报告 `scene` 字段仍写「步骤 10-25」，可顺手更新为当前范围。~~ **已更新**（R40「步骤 10-36」→ R43 10-37 → R45 10-38 → R47 10-39 → R51 10-40；**新增步骤时记得同步这里**，`grep "步骤 10-" apps/desktop/src/main/walkthrough.ts` 一眼可验）
+- ~~walkthrough 报告 `scene` 字段仍写「步骤 10-25」，可顺手更新为当前范围。~~ **已更新**（R40「步骤 10-36」→ R43 10-37 → R45 10-38 → R47 10-39 → R51 10-40 → R54 10-41；**新增步骤时记得同步这里**，`grep "步骤 10-" apps/desktop/src/main/walkthrough.ts` 一眼可验）
 - e2e 探针串行较长（~40s），暂无拆分必要；新增探针请保持「先落盘再断言、口径可打印」风格。
 
 ---
@@ -324,13 +326,14 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 
 **R53（报告格式 + 豁免清单）已完成**：`consistency-report.ts` 的 `locateCardRefSpans` / `buildConsistencyReport` / `parseConsistencyAllowList`（详见 docs/04 §7.3 T4-3 注记与 docs/06 §八 第 53 轮）。**T4-3 仍不勾选**：M4 §7.5 A4 要的是"每条发现可**一键跳到**原文区间"，跳转动作属界面，留 R54 一并验收。
 
-**下一轮（R54）——M4 / T4-4 校验时机三态 + 一致性面板（把前两轮的引擎结果送到界面上）**：
-1. **先裁决报告落点**（R52–R53 挂起的问题）：docs/04 §7.4 写 `reports/consistency-*.yaml`，但红线 1 要求派生物不入真源、`.yushu/*` 永不进 Git。**推荐落 `.yushu/consistency/`**（与 `context-log/` 同级，已被 `.gitignore` 与 `GIT_EXCLUDES` 覆盖，不用改 `PROJECT_GITIGNORE_LINES`）；若坚持 `reports/` 则**必须同时**补 `PROJECT_GITIGNORE_LINES` 与 `GIT_EXCLUDES`（`git-ops.test.ts` 有同源断言，漏一处会红），并回填 docs/04 §7.4 的措辞。别两边都写。
-2. **三态分别接在哪**：① *生成后即时轻校验*——接在**设定抽取入库前**（`extract-ops.ts` 的确认写库路径，refs 悬空直接拒，错误码沿用 `E_EXTRACT_*` 风格），不要接在正文流式生成上（正文不产生结构边）；② *保存后异步全量*——接在 `chapter:write` / `card:write` 之后的索引调度处（`main/ipc.ts` 的 `wrapWrite` 已调度 `IndexRefresher`，同一个位置加一次一致性检查并**只缓存到主进程内存 + 面板可见**，避免每次保存都写盘）；③ *手动全书体检*——面板按钮，跑 `checkStructureFromSources` + 读 `cardTexts` + `buildConsistencyReport(allow)`。
-3. **只读通道** `consistency:check`（IPC 四处同步，用 `wrap` 不用 `wrapWrite`）。`cardTexts` 由主进程读（引擎不做 IO），传进 `buildConsistencyReport`。
-4. **面板**：扩展第 11 个标签页 `RulesView`，新增「一致性体检」段——结论逐条给 `severity` / `rule` / `subject` / `fix`，**span 存在的条目给"跳到原文"按钮**（复用 `ChapterEditorView` 已有的 `setSearchState` 定位思路，或直接打开该卡并用 span 的 `start/end` 高亮）；`suppressed` 段必须显示**理由与决策时间**（A6 的审计入口），`unusedAllow` 用 muted 提示"这些豁免一条都没匹配上，可能已失效"。
-5. **取证**：e2e 探针跑「造一张带悬空引用的卡 → 体检 → 豁免后条目进 suppressed 且带理由 → 删掉豁免又回来」，并断言**两个通道不写真源**；预演新增 **step41**（跑全新目录 **v116…**，`scene` 同步「步骤 10-41」），断言至少覆盖：结论行可见、跳转按钮存在、豁免段显示理由、unusedAllow 提示。**新断言一律先做红 / 绿配对**（R51 的教训：预演里写宽的选择器会让断言恒真或恒假）。
-6. `per_call_confirm_over`（成本侧那个"单次超价须确认"的拦截点）仍未做，属独立议题，不要顺手混进本轮。
+**R54（三态时机 + 一致性面板）已完成，T4-4 未勾选**（理由：`post-generate` 还没接在 AI 采纳之后的调用点、"重规则 + AI 采样"未实现、报告不落盘）。详见 docs/04 §7.3 T4-4 注记与 docs/06 §八 第 54 轮。**两个教训值得记**：切标签页会重挂载视图（要跨页保留的状态必须走缓存或上层 state）；探针项目里没有坏数据时"结论 0 + 断言全绿"是空跑，验收要求"能跳到原文"就必须自己造一条再复原。
+
+**下一轮（R55）——本轮批次收口：预演稳定性 + e2e 具名断言 + 规则回归集 + 十轮总复核**：
+1. **e2e 具名断言**（登记在 docs/06 §七 的已知缺口）：`main.ts` 里那个 `const ok = a && b && …` 的巨型布尔式失败时只打「断言未满足」，不说是哪一条（R43 排查时全靠 diff 红绿两份结果 JSON）。改法：把每条断言收成 `Array<[string, boolean]>`（名字就用表达式原文，够定位），打印未满足的名字清单，`ok = failed.length === 0`。**这是纯重构**：改完必须与改前同样绿（同一项目内先跑一次基线，再改，再跑一次对照，别顺手改语义）。
+2. **预演偶发抖动**：step17（本地快照列表）/ step21（富文本 @ 菜单高亮）在 R45 各自偶发失败、根因未定（docs/06 §七）。不要靠"重跑三次取最好看的一次"糊过去——要么定位到根因（怀疑方向：截图/遮挡导致的合成暂停、`waitFor` 轮询与自动保存防抖抢时点），要么实现**可审计的重试**：失败步骤最多重试一次，**重试后通过也记 `flaky: [steps]` 并写进报告与退出码判据**（有 flaky 时退出码仍 0，但汇总行必须打印，且 docs 里不许再声称"一次通过"）。
+3. **T4-11 规则回归集**：给每条 error 级规则（`ref-dangling` / `ref-cycle` / `layer-order-violation` + 派系包 DSL 规则）建正/负样例集，断言"该命中全命中、不该命中零误报"，并把误报率写进断言（当前口径应为 0）。落点建议 `packages/@yushu/world-engine/test/rule-regression.test.ts` + 夹具用 `readerOf(files)` 纯内存真源（不碰 fs/SQL）。**每个新断言先做红/绿配对**（R50–R54 已 20+ 次，本轮继续）。
+4. **十轮总复核（R46–R55）**：逐轮对照 docs/04 / docs/06 的注记与仓库实际代码是否一致（重点：本轮批次的 R48–R54 有没有把"读到"写成"写到"、有没有把未实现说成已实现）；核对三处文档的计数与版本号是否与最后一次真实输出一致；`git log --oneline` 与 `git status` 干净度；跑一次全量四连（test / typecheck / e2e / 预演新目录）并把数字写进 docs/06 §八 末尾的"批次复核"段。
+5. **批次结束条件**：以上四点做完、全绿、已推送，即完成用户要求的"一次十轮"（R46–R55）。**下一步该做什么要重新排**：M4 剩余 T4-5～T4-12、M3 的 A3 需要用户侧真实 provider 端点（拿不到就明说，不要挂空）。
 
 > 提醒：**M3 的 A1 / A2 / A4 / A5 / A6 均已由机器证据达成并勾选；只剩 A3（成本偏差量化）需要用户侧真实 provider 端点**——纯离线轮次无法达成，不要在 mock 上声称达成。**M3 功能任务（T3-1～T3-14）已全部勾选，R50 起在 M4**（docs/04 §7）。
 
