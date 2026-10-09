@@ -25,6 +25,9 @@ export const ROUTING_CONFIG_PATH = `${CONFIG_DIR}/routing.yaml`;
 /** 成本预算护栏配置（T3-12 / J09；可选文件，缺省 = 不设月度上限，见 @yushu/llm defaultBudgetConfig） */
 export const BUDGET_CONFIG_PATH = `${CONFIG_DIR}/budget.yaml`;
 
+/** 一致性豁免清单（M4 / T4-3，可选文件；**每条豁免必须写理由**，故属真源而非派生物） */
+export const CONSISTENCY_ALLOW_PATH = `${CONFIG_DIR}/consistency.yaml`;
+
 /** 设定卡路径：world/cards/<type>/<id>.md */
 export function cardPath(type: string, id: string): string {
   return `${CARDS_DIR}/${type}/${id}.md`;

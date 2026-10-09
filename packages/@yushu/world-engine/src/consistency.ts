@@ -258,6 +258,9 @@ export interface StructureSourceReport extends StructureReport {
   sources: { entities: number; refs: number };
   /** world.yaml 缺失或非法时的说明（此时按全部层启用，不猜配置） */
   worldNote: string | null;
+  /** 原样带回实体与引用行：调用方要做区间定位时不必再扫一遍真源 */
+  entities: IndexEntityRow[];
+  refs: IndexRefRow[];
 }
 
 /**
@@ -280,8 +283,10 @@ export async function checkStructureFromSources(reader: IndexSourceReader): Prom
   const report = checkStructure({ entities: input.entities, refs: input.refs, ...(enabledLayers ? { enabledLayers } : {}) });
   return {
     ...report,
-    enabledLayers: (enabledLayers ?? LAYER_KEYS as readonly string[]).slice(),
+    enabledLayers: (enabledLayers ?? (LAYER_KEYS as readonly string[])).slice(),
     sources: { entities: input.entities.length, refs: input.refs.length },
     worldNote,
+    entities: input.entities,
+    refs: input.refs,
   };
 }
