@@ -671,6 +671,22 @@ export interface AiAdoptResult {
   hash: string;
   wordCount: number;
   chars: number;
+  /**
+   * 采纳后即时轻校验（M4 / T4-4 的 post-generate）。**总是带上**：
+   * 跑成了给结论，没跑成给 `ran:false + error`——采纳已经落盘，这时抛错会让作者重复采纳。
+   */
+  audit: AiAdoptAuditPayload;
+}
+
+/** 轻校验回执（范围来自刚采纳的正文，其余计数沿用体检报告口径） */
+export interface AiAdoptAuditPayload {
+  ran: boolean;
+  /** 未跑成的原因（跑成时为空串） */
+  error: string;
+  scopeIds: string[];
+  entries: ConsistencyEntryPayload[];
+  /** 因不在本次范围内而未展示的条数 */
+  filteredOut: number;
 }
 
 export interface AiUsageEntryPayload {
@@ -948,6 +964,11 @@ export interface ConsistencyCheckPayload {
   timing?: ConsistencyTimingPayload;
   /** 生成后即时轻校验的范围：只报这些实体发起的结论 */
   entityIds?: string[];
+  /**
+   * 轻校验的另一条定范围的路：给**本次刚写进正文的文本**，范围由实体提及自己算出来。
+   * 与 entityIds 同时给出时以 entityIds 为准（调用方明确知道的比猜的可靠）。
+   */
+  scopeText?: string;
 }
 
 export interface ConsistencyReportPayload {
@@ -962,6 +983,8 @@ export interface ConsistencyReportPayload {
   worldNote: string | null;
   entities: number;
   refs: number;
+  /** 本次轻校验实际生效的实体范围（由 entityIds 或 scopeText 的提及解析得出） */
+  scopeIds: string[];
   entries: ConsistencyEntryPayload[];
   suppressed: ConsistencyEntryPayload[];
   unusedAllow: string[];

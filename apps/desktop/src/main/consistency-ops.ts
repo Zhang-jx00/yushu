@@ -5,9 +5,12 @@ import {
   CONSISTENCY_ALLOW_PATH,
   type ConsistencyAllowList,
   type ConsistencyEntry,
+  type IndexEntityRow,
   type SuppressedEntry,
 } from "@yushu/world-engine";
+import { mentionedEntityIds } from "@yushu/memory";
 import type {
+  AiAdoptAuditPayload,
   ConsistencyCheckPayload,
   ConsistencyEntryPayload,
   ConsistencyReportPayload,
@@ -64,10 +67,30 @@ function toSuppressed(entry: SuppressedEntry): ConsistencyEntryPayload {
   };
 }
 
+/**
+ * 轻校验范围的来源优先级：调用方明确给出的 `entityIds` > 从刚写完的正文里算出的提及。
+ * 用正文自己定范围是为了不让调用方"想报谁就报谁"——采纳了林渊那段，就该看见林渊的问题。
+ */
+function resolveScope(
+  entities: readonly IndexEntityRow[],
+  entityIds?: string[],
+  scopeText?: string,
+): { scoped: boolean; ids: string[] } {
+  if (entityIds && entityIds.length > 0) return { scoped: true, ids: [...entityIds].sort() };
+  if (scopeText !== undefined) {
+    const ids = mentionedEntityIds(
+      scopeText,
+      entities.map((entity) => ({ id: entity.id, name: entity.name, aliases: entity.aliases })),
+    );
+    return { scoped: true, ids: [...new Set(ids)].sort() };
+  }
+  return { scoped: false, ids: [] };
+}
+
 async function computeReport(
   gateway: ProjectGateway,
   timing: ConsistencyTimingPayload,
-  entityIds?: string[],
+  payload: ConsistencyCheckPayload,
 ): Promise<ConsistencyReportPayload> {
   const structure = await checkStructureFromSources(gatewayReader(gateway));
 
@@ -105,11 +128,12 @@ async function computeReport(
     allow,
   });
 
+  const scope = resolveScope(structure.entities, payload.entityIds, payload.scopeText);
   let entries = report.entries;
   let filteredOut = 0;
-  if (timing === "post-generate" && entityIds && entityIds.length > 0) {
-    const scope = new Set(entityIds);
-    const kept = entries.filter((entry) => scope.has(entry.subject));
+  // 轻校验只在**给了范围**时过滤；范围空着不过滤——没范围就报全部比"悄悄清零"诚实
+  if (timing === "post-generate" && scope.scoped) {
+    const kept = entries.filter((entry) => new Set(scope.ids).has(entry.subject));
     filteredOut = entries.length - kept.length;
     entries = kept;
   }
@@ -123,6 +147,7 @@ async function computeReport(
     worldNote: structure.worldNote,
     entities: structure.sources.entities,
     refs: structure.sources.refs,
+    scopeIds: timing === "post-generate" ? scope.ids : [],
     entries: entries.map(toEntry),
     suppressed: report.suppressed.map(toSuppressed),
     unusedAllow: report.unusedAllow,
@@ -151,10 +176,37 @@ export async function runConsistencyCheck(
   if (timing === "post-save" && !stale && cache !== null) {
     return { ...cache, timing, ranAgain: false };
   }
-  const fresh = await computeReport(gateway, timing, payload.entityIds);
+  const fresh = await computeReport(gateway, timing, payload);
   if (timing !== "post-generate") {
     cache = fresh;
     stale = false;
   }
   return fresh;
+}
+
+/**
+ * 采纳后即时轻校验（M4 / T4-4 的 post-generate 调用点，R56）。
+ *
+ * **绝不抛错**：调用时正文已经落盘了，这里抛出去会让副驾把整次操作报成"采纳失败"，
+ * 而作者的真实选择是再采纳一次（重复写入）。拿不到结论就如实说"没跑成 + 为什么"。
+ */
+export async function postAdoptAudit(gateway: ProjectGateway, text: string): Promise<AiAdoptAuditPayload> {
+  try {
+    const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: text });
+    return {
+      ran: true,
+      error: "",
+      scopeIds: report.scopeIds,
+      entries: report.entries,
+      filteredOut: report.counted.filteredOut,
+    };
+  } catch (err) {
+    return {
+      ran: false,
+      error: err instanceof Error ? err.message : String(err),
+      scopeIds: [],
+      entries: [],
+      filteredOut: 0,
+    };
+  }
 }

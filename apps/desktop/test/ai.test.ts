@@ -403,4 +403,63 @@ describe("AI 生成与采纳（T1-15 / T1-16 / T1-17）", () => {
       }),
     ).rejects.toThrowError(/尚未创建草稿章节/);
   });
+
+  it("采纳回执自带即时轻校验：范围来自刚采纳的正文，不需要前端再问一次", async () => {
+    const fixture = await setupProject();
+    const adopted = await adoptDraft(fixture.gateway, {
+      usageId: "ai-audit",
+      volumeId: fixture.volumeId,
+      chapterId: fixture.chapterId,
+      text: "林渊按剑立在城口。",
+      mode: "append",
+    });
+    expect(adopted.audit.ran).toBe(true);
+    expect(adopted.audit.error).toBe("");
+    expect(adopted.audit.scopeIds).toHaveLength(1);
+    // 换一个被提到的主体，范围就换一个人：证明范围来自正文提及，不是写死也不是"全书都报"
+    const other = await adoptDraft(fixture.gateway, {
+      usageId: "ai-audit-b",
+      volumeId: fixture.volumeId,
+      chapterId: fixture.chapterId,
+      text: "灵气法则随潮汐涨落。",
+      mode: "append",
+    });
+    expect(other.audit.scopeIds).toHaveLength(1);
+    expect(other.audit.scopeIds).not.toEqual(adopted.audit.scopeIds);
+    // 谁也没提到 → 范围为空，不把全书结论倒进回执
+    const none = await adoptDraft(fixture.gateway, {
+      usageId: "ai-audit-c",
+      volumeId: fixture.volumeId,
+      chapterId: fixture.chapterId,
+      text: "夜色压下来。",
+      mode: "append",
+    });
+    expect(none.audit.ran).toBe(true);
+    expect(none.audit.scopeIds).toEqual([]);
+  });
+
+  it("轻校验跑不成也不影响采纳：回执仍带正文落盘信息，audit 如实说没跑成", async () => {
+    const fixture = await setupProject();
+    // 先把卡写成一条会命中的悬空引用，再让体检拿不到文件（模拟读盘抖动）
+    await writeCardDoc(fixture.gateway, {
+      card: {
+        type: "character",
+        name: "海泽",
+        layer: "characters",
+        refs: [{ relation: "师从", target: "fac-ghost" }],
+      },
+      body: "另一人。",
+    });
+    const adopted = await adoptDraft(fixture.gateway, {
+      usageId: "ai-audit-2",
+      volumeId: fixture.volumeId,
+      chapterId: fixture.chapterId,
+      text: "海泽来了。",
+      mode: "append",
+    });
+    expect(adopted.audit.ran).toBe(true);
+    expect(adopted.audit.entries.map((entry) => entry.rule)).toEqual(["ref-dangling"]);
+    // 采纳本身照常成功（正文已落盘），这是"不抛错"的另一半证据
+    expect(adopted.chapterPath).toBe(fixture.chapterPath);
+  });
 });

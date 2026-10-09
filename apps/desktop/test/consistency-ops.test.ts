@@ -10,7 +10,7 @@ import {
   generateOutline,
   writeCardDoc,
 } from "../src/main/project-ops.js";
-import { isConsistencyStale, markConsistencyStale, runConsistencyCheck } from "../src/main/consistency-ops.js";
+import { isConsistencyStale, markConsistencyStale, postAdoptAudit, runConsistencyCheck } from "../src/main/consistency-ops.js";
 
 /**
  * 一致性体检的桌面接入（M4 / T4-4 三态时机 + T4-3 报告呈现，R54）。
@@ -178,5 +178,86 @@ describe("三态时机的范围与缓存", () => {
     await runConsistencyCheck(gateway, { timing: "post-save" });
     const manual = await runConsistencyCheck(gateway, { timing: "manual" });
     expect(manual.ranAgain).toBe(true);
+  });
+});
+/**
+ * 采纳后即时轻校验（M4 / T4-4 的最后一个调用点，R56）。
+ *
+ * 范围由**采纳的正文自己决定**：作者刚写了谁，就该看见谁的结构性问题。
+ * 三条口径要钉死：
+ * ① 只报范围内实体的结论，范围外条数如实计 filteredOut（悄悄少掉＝假干净）；
+ * ② 正文里谁都没提到 → 范围空 → 一条也不报，**不许退化成"那就全书都报"**（那是拿用户的
+ *    等待时间换虚假的安全感）；
+ * ③ 轻校验失败不能把已成功的采纳报成失败——采纳已经落盘了，这时抛错会让作者重复采纳。
+ */
+describe("采纳后即时轻校验（post-generate 的调用点）", () => {
+  it("范围来自正文提及：只报被提到的实体，范围外计数可见", async () => {
+    const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: "林渊收剑入鞘。" });
+    expect(report.scopeIds).toEqual(["char-linyuan"]);
+    expect(report.entries.map((e) => e.subject)).toEqual(["char-linyuan"]);
+    expect(report.counted.filteredOut).toBe(0);
+  });
+
+  it("正文只提到干净的实体时零结论，但范围外那条要看得见", async () => {
+    const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: "海泽在门口等着。" });
+    expect(report.scopeIds).toEqual(["char-haize"]);
+    expect(report.entries).toEqual([]);
+    expect(report.counted.filteredOut).toBe(1);
+  });
+
+  it("正文谁都没提到：范围为空、零结论，且不把全书结论倒给作者", async () => {
+    const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: "夜色压下来。" });
+    expect(report.scopeIds).toEqual([]);
+    expect(report.entries).toEqual([]);
+    expect(report.counted.filteredOut).toBeGreaterThan(0);
+  });
+
+  it("别名也算提及：正文用别名提到实体，范围就要认它", async () => {
+    await writeCardDoc(gateway, {
+      card: {
+        id: "char-xiaoyuan",
+        type: "character",
+        name: "林小渊",
+        aliases: ["小渊"],
+        layer: "characters",
+        refs: [{ relation: "师从", target: "fac-alias-ghost" }],
+      },
+      body: "别名测试卡。",
+    });
+    const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: "小渊回头看了一眼。" });
+    expect(report.scopeIds).toContain("char-xiaoyuan");
+    expect(report.entries.map((e) => e.subject)).toContain("char-xiaoyuan");
+  });
+
+  it("没给范围时不装作跑过轻校验：post-generate 无范围等于报全部（清零比全报更像「没问题」）", async () => {
+    const full = await runConsistencyCheck(gateway, { timing: "manual" });
+    const unscoped = await runConsistencyCheck(gateway, { timing: "post-generate" });
+    expect(unscoped.scopeIds).toEqual([]);
+    expect(unscoped.entries).toHaveLength(full.entries.length);
+    expect(unscoped.counted.filteredOut).toBe(0);
+  });
+
+  it("轻校验依旧只读：跑完之后正文字节不变", async () => {
+    const before = await gateway.readDoc(chapterPath);
+    await postAdoptAudit(gateway, "林渊与海泽同行。");
+    const after = await gateway.readDoc(chapterPath);
+    expect(after!.content).toBe(before!.content);
+    expect(after!.hash).toBe(before!.hash);
+  });
+
+  it("postAdoptAudit 命中范围内实体时给出结论", async () => {
+    const audit = await postAdoptAudit(gateway, "林渊想起师承之事。");
+    expect(audit.ran).toBe(true);
+    expect(audit.error).toBe("");
+    expect(audit.scopeIds).toEqual(["char-linyuan"]);
+    expect(audit.entries.map((e) => e.rule)).toEqual(["ref-dangling"]);
+  });
+
+  it("postAdoptAudit 不抛：拿不到数据时 ran=false 并给出原因，采纳结果不受影响", async () => {
+    const broken = { root: gateway.root, readDoc: async () => { throw new Error("读不了"); }, listFiles: async () => { throw new Error("读不了"); } } as unknown as ProjectGateway;
+    const audit = await postAdoptAudit(broken, "林渊。");
+    expect(audit.ran).toBe(false);
+    expect(audit.error.length).toBeGreaterThan(0);
+    expect(audit.entries).toEqual([]);
   });
 });

@@ -56,6 +56,7 @@ import type {
   ContextPreviewPayload,
 } from "../shared/ipc.js";
 import { appendAiUsage, newUsageId, readAiUsage } from "./ai-usage.js";
+import { postAdoptAudit } from "./consistency-ops.js";
 import { ProjectGateway } from "./file-gateway.js";
 import { SecretsRepository, defaultKeyRefFor, type KeyCipher } from "./secrets-ops.js";
 import { analyzeDraft, assembleMessages, buildContextPreview, type DraftTask } from "./prompt-ops.js";
@@ -698,7 +699,12 @@ export async function adoptDraft(
     chars,
   });
 
-  return { chapterPath: path, hash: written.hash, wordCount: updated.word_count, chars };
+  // 采纳后即时轻校验（M4 / T4-4 的 post-generate 落点）：范围由**刚采纳进去的正文**自己算，
+  // 谁被写进这一段就只报谁的结构性结论。放在这里而不是渲染层，是因为三条采纳路径（整段替换 /
+  // 整段追加 / 按句局部采纳）都走这个函数，接一处就不会漏两处。
+  const audit = await postAdoptAudit(gateway, payload.text);
+
+  return { chapterPath: path, hash: written.hash, wordCount: updated.word_count, chars, audit };
 }
 
 /** AI 使用记录（最近 N 条，倒序） */
