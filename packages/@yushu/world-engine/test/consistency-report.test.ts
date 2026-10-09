@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildConsistencyReport,
   locateCardRefSpans,
+  locatePowerLogSpans,
   parseConsistencyAllowList,
   serializeConsistencyAllowList,
   type ConsistencyAllowList,
@@ -277,6 +278,160 @@ describe("豁免应用", () => {
     const report = buildConsistencyReport({ ...base, allow });
     expect(report.entries).toHaveLength(1);
     expect(report.unusedAllow).toEqual(["ref-cycle|char-linyuan|fac-ghost"]);
+  });
+});
+
+/**
+ * 派系包规则接入后的两处契约（R57）。
+ *
+ * 战力类结论来自包内 DSL 规则（id 形如 `power-no-regress`），不是内置那三条。
+ * 两处必须同时放开，否则会出现"结论报得出来、豁免却写不进去"的半截状态：
+ * ① 豁免清单的"rule 必须是已实现 id"要认得**本次参与求值的那些 id**（仍然不许豁免一条不存在的规则）；
+ * ② 台账里的每一条要能定位回原文，作者才知道结论是从哪一行来的。
+ */
+const LF = String.fromCharCode(10);
+
+describe("派系包规则的豁免与出处（R57）", () => {
+  const allowText = (rule) =>
+    ["apiVersion: yushu.consistency-allow/v1", "entries:", "  - rule: " + rule, "    subject: char-linyuan", "    reason: 作者确认这段是刻意反转", ""].join(LF);
+
+  it("默认只认内置三条：包规则 id 不在已知集合里仍然拒载", () => {
+    expect(() => parseConsistencyAllowList(allowText("power-no-regress"))).toThrowError(/已实现的规则 id/);
+  });
+
+  it("把参与求值的包规则 id 传进去就认（A6 仍要求写理由）", () => {
+    const parsed = parseConsistencyAllowList(allowText("power-no-regress"), ["ref-dangling", "power-no-regress"]);
+    expect(parsed.entries[0]!.rule).toBe("power-no-regress");
+    expect(() => parseConsistencyAllowList(allowText("power-no-regress"), ["ref-dangling"])).toThrowError(/已实现的规则 id/);
+  });
+
+  it("power_log 各条能定位原文区间（供结论一键跳过去）", () => {
+    const text = [
+      "---",
+      "id: char-linyuan",
+      "type: character",
+      "name: 林渊",
+      "layer: characters",
+      "aliases: []",
+      "refs: []",
+      "source_chapters: []",
+      "visibility: hidden",
+      "format_version: 1",
+      "extensions:",
+      "  power_log:",
+      "    - chapter: 第 3 章",
+      "      tier: 3",
+      "      combat_power: 100",
+      "    - chapter: 第 4 章",
+      "      tier: 4",
+      "      combat_power: 80",
+      "---",
+      "",
+      "正文。",
+      "",
+    ].join(LF);
+    const spans = locatePowerLogSpans(text);
+    expect(spans).toHaveLength(2);
+    const second = spans[1]!;
+    expect(second.chapterNo).toBe(4);
+    expect(text.slice(second.start, second.end)).toContain("combat_power: 80");
+  });
+
+  it("卡里没有 power_log 时返回空数组（不造区间）", () => {
+    const text = ["---", "id: a", "type: character", "name: A", "layer: characters", "---", "", "正文。", ""].join(LF);
+    expect(locatePowerLogSpans(text)).toEqual([]);
+  });
+});
+
+/**
+ * 派系包结论并入同一份报告（R57 的收口处）。
+ *
+ * 结构类结论与包规则结论必须走**同一条**报告通路：同一套 span、同一套豁免、同一个面板。
+ * 长出第二套结果结构，是 docs/04 反复避免的事（T3-13 的 finding 同形口径同理）。
+ */
+describe("派系包结论并入同一份报告（R57）", () => {
+  const entities = [
+    {
+      id: "char-linyuan",
+      type: "character",
+      layer: "characters",
+      name: "林渊",
+      aliases: [],
+      visibility: "hidden",
+      filePath: "world/cards/character/char-linyuan.md",
+    },
+  ];
+  const cardText = [
+    "---",
+    "id: char-linyuan",
+    "type: character",
+    "name: 林渊",
+    "layer: characters",
+    "aliases: []",
+    "refs: []",
+    "source_chapters: []",
+    "visibility: hidden",
+    "format_version: 1",
+    "extensions:",
+    "  power_log:",
+    "    - chapter: 第 3 章",
+    "      tier: 3",
+    "      combat_power: 100",
+    "    - chapter: 第 4 章",
+    "      tier: 4",
+    "      combat_power: 80",
+    "---",
+    "",
+    "正文。",
+    "",
+  ].join(LF);
+
+  const packFinding = {
+    rule: "power-no-regress",
+    severity: "error",
+    subject: "char-linyuan",
+    related: "第 4 章",
+    evidence: "战力台账：第 3 章 境界 3 / 战力 100 → 第 4 章 境界 4 / 战力 80",
+    fix: "补一条能解释回落的事件，或下调第 4 章的战斗表现",
+    origin: "派系包 xuanhuan-xitong（rules/power-consistency.yaml）",
+  };
+
+  it("包规则结论带出处进报告，span 落在战力台账那一行而不是 refs", () => {
+    const result = buildConsistencyReport({
+      findings: [packFinding],
+      entities,
+      cardTexts: { "world/cards/character/char-linyuan.md": cardText },
+    });
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.rule).toBe("power-no-regress");
+    expect(result.entries[0]!.origin).toContain("xuanhuan-xitong");
+    const span = result.entries[0]!.span;
+    expect(span).not.toBeNull();
+    expect(cardText.slice(span!.start, span!.end)).toContain("combat_power: 80");
+    expect(result.entries[0]!.fix).toContain("下调");
+  });
+
+  it("豁免清单能豁免包规则：进 suppressed 带理由，不是静默消失", () => {
+    const allow = parseConsistencyAllowList(["apiVersion: yushu.consistency-allow/v1", "entries:", "  - rule: power-no-regress", "    subject: char-linyuan", "    related: 第 4 章", "    reason: 作者确认这段是刻意反转", ""].join(LF), ["ref-dangling", "power-no-regress"]);
+    const result = buildConsistencyReport({
+      findings: [packFinding],
+      entities,
+      cardTexts: { "world/cards/character/char-linyuan.md": cardText },
+      allow,
+    });
+    expect(result.entries).toEqual([]);
+    expect(result.suppressed).toHaveLength(1);
+    expect(result.suppressed[0]!.reason).toContain("刻意");
+    expect(result.unusedAllow).toEqual([]);
+  });
+
+  it("找不到对应台账行时给 null 区间，不造 0-0 假位置", () => {
+    const result = buildConsistencyReport({
+      findings: [{ ...packFinding, related: "第 99 章" }],
+      entities,
+      cardTexts: { "world/cards/character/char-linyuan.md": cardText },
+    });
+    expect(result.entries[0]!.span).toBeNull();
   });
 });
 

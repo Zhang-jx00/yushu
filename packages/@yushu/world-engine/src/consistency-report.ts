@@ -7,6 +7,7 @@ import {
   type StructureSeverity,
 } from "./consistency.js";
 import type { IndexEntityRow } from "./index-input.js";
+import { powerLogChapterNo } from "./power-log.js";
 
 /**
  * 一致性报告与豁免（M4 / T4-3，docs/03 §11.2 与 docs/04 §7.5 A4 / A6）。
@@ -46,7 +47,13 @@ const ALLOW_KEYS = ["apiVersion", "entries"] as const;
 const ENTRY_KEYS = ["rule", "subject", "related", "reason", "decided_at"] as const;
 
 /** 解析 `config/consistency.yaml`（与 llm / routing / budget 同一套严格约定） */
-export function parseConsistencyAllowList(text: string): ConsistencyAllowList {
+/**
+ * 解析 `config/consistency.yaml`（与 llm / routing / budget 同一套严格约定）。
+ *
+ * `knownIds` 是**本次真的参与求值的规则 id**：内置三条之外，派系包规则（如 `power-no-regress`）
+ * 接入后也要能被豁免。仍然只认这份名单——豁免一条不存在的规则，等于给将来某个同名规则预先放行。
+ */
+export function parseConsistencyAllowList(text: string, knownIds: readonly string[] = STRUCTURE_RULE_IDS): ConsistencyAllowList {
   let raw: unknown;
   try {
     raw = parseYaml(text);
@@ -72,7 +79,7 @@ export function parseConsistencyAllowList(text: string): ConsistencyAllowList {
   const list = record["entries"];
   if (list === undefined) throw new ConsistencyAllowError("config/consistency.yaml 缺少 entries（没有豁免就写空数组）");
   if (!Array.isArray(list)) throw new ConsistencyAllowError("config/consistency.yaml 的 entries 应为数组");
-  const entries = list.map((item, index) => parseAllowEntry(item, `entries[${index}]`));
+  const entries = list.map((item, index) => parseAllowEntry(item, `entries[${index}]`, knownIds));
   const seen = new Set<string>();
   for (const entry of entries) {
     const key = allowKey(entry.rule, entry.subject, entry.related);
@@ -82,7 +89,7 @@ export function parseConsistencyAllowList(text: string): ConsistencyAllowList {
   return { apiVersion: CONSISTENCY_ALLOW_API_VERSION, entries };
 }
 
-function parseAllowEntry(value: unknown, where: string): ConsistencyAllowEntry {
+function parseAllowEntry(value: unknown, where: string, knownIds: readonly string[]): ConsistencyAllowEntry {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new ConsistencyAllowError(`${where} 应为映射`);
   }
@@ -93,9 +100,9 @@ function parseAllowEntry(value: unknown, where: string): ConsistencyAllowEntry {
     }
   }
   const rule = record["rule"];
-  if (typeof rule !== "string" || !(STRUCTURE_RULE_IDS as readonly string[]).includes(rule)) {
+  if (typeof rule !== "string" || !knownIds.includes(rule)) {
     throw new ConsistencyAllowError(
-      `${where}.rule 应为已实现的规则 id 之一（${STRUCTURE_RULE_IDS.join(" | ")}），实际 ${String(rule)}`,
+      `${where}.rule 应为已实现的规则 id 之一（${knownIds.join(" | ")}），实际 ${String(rule)}`,
     );
   }
   const subject = record["subject"];
@@ -195,6 +202,49 @@ export function locateCardRefSpans(text: string): CardRefSpan[] {
 
 /* ---------------- 报告条目 ---------------- */
 
+export interface CardPowerLogSpan {
+  chapter: string;
+  chapterNo: number;
+  start: number;
+  end: number;
+}
+
+/**
+ * 定位设定卡里 `extensions.power_log` 各条目的原文区间（战力类结论要能跳回作者写的那一行）。
+ *
+ * 与 `locateCardRefSpans` 同一套做法：偏移取自 YAML AST 的 `range`，章号用同一个解析函数
+ * （两处各写一份数字规则，早晚会漂移成"配对认得、跳转认不得"）。认不出章号的条目**跳过不给区间**，
+ * 而不是给一条 0-0 的假位置。
+ */
+export function locatePowerLogSpans(text: string): CardPowerLogSpan[] {
+  if (text.trim() === "") return [];
+  let doc: ReturnType<typeof parseDocument>;
+  try {
+    doc = parseDocument(text);
+  } catch {
+    return [];
+  }
+  if (doc.errors.some((error) => !error.message.includes("multiple documents"))) return [];
+  const root = doc.contents;
+  if (!isMap(root)) return [];
+  const extensions = root.get("extensions", true);
+  if (!isMap(extensions)) return [];
+  const log = extensions.get("power_log", true);
+  if (!isSeq(log)) return [];
+  const spans: CardPowerLogSpan[] = [];
+  for (const item of log.items) {
+    if (!isMap(item)) continue;
+    const chapter = item.get("chapter", true);
+    const range = item.range;
+    if (!isScalar(chapter) || !range) continue;
+    const raw = String(chapter.value ?? "");
+    const chapterNo = powerLogChapterNo(raw);
+    if (chapterNo === null) continue;
+    spans.push({ chapter: raw, chapterNo, start: range[0], end: range[1] });
+  }
+  return spans;
+}
+
 export interface ConsistencySpan {
   file: string;
   start: number;
@@ -203,8 +253,29 @@ export interface ConsistencySpan {
   text: string;
 }
 
+/**
+ * 参与报告的结论形状：内置结构规则 + 派系包 DSL 规则**共用一套**。
+ *
+ * `rule` 因此是字符串而不是那三条的联合类型——否则包规则一接进来就得长出第二套结果结构，
+ * 面板、豁免、跳转各要写两遍（docs/04 反复避免的事）。`origin` 只在包规则上有：
+ * 作者要分得清"这条是御书内置说的"还是"这个派系包说的"。
+ */
+export interface ReportFinding {
+  rule: string;
+  severity: StructureSeverity;
+  subject: string;
+  related?: string;
+  path?: string[];
+  evidence: string;
+  /** 包规则自带修法文案（内置结构规则由 fixText 生成） */
+  fix?: string;
+  fromLayer?: string;
+  toLayer?: string;
+  origin?: string;
+}
+
 export interface ConsistencyEntry {
-  rule: StructureRuleId;
+  rule: string;
   severity: StructureSeverity;
   subject: string;
   related?: string;
@@ -212,6 +283,8 @@ export interface ConsistencyEntry {
   evidence: string;
   /** 找不到原文时为 null——**不给 0-0 的假区间** */
   span: ConsistencySpan | null;
+  /** 结论出处（派系包规则带包与文件；内置结构规则没有这一项） */
+  origin?: string;
   /** 可执行的修法（含"要留白就走豁免并写理由"的出口） */
   fix: string;
 }
@@ -223,7 +296,7 @@ export interface SuppressedEntry extends ConsistencyEntry {
 }
 
 export interface ConsistencyReportInput {
-  findings: readonly StructureFinding[];
+  findings: readonly ReportFinding[];
   entities: readonly IndexEntityRow[];
   /** 卡文件路径 → 全文（由调用方读，本模块不做 IO） */
   cardTexts: Readonly<Record<string, string>>;
@@ -238,7 +311,7 @@ export interface ConsistencyReportResult {
   counted: { findings: number; entries: number; suppressed: number };
 }
 
-function fixText(finding: StructureFinding): string {
+function fixText(finding: ReportFinding): string {
   switch (finding.rule) {
     case "ref-dangling":
       return "把该引用的 target 改成存在的实体 id，或删掉这条引用；确认要留白就在 config/consistency.yaml 记理由豁免（必须写 reason）。";
@@ -269,6 +342,17 @@ export function buildConsistencyReport(input: ConsistencyReportInput): Consisten
     return computed;
   };
 
+  const powerSpansByFile = new Map<string, CardPowerLogSpan[]>();
+  const powerSpansFor = (file: string | undefined): CardPowerLogSpan[] => {
+    if (!file) return [];
+    const cached = powerSpansByFile.get(file);
+    if (cached) return cached;
+    const text = input.cardTexts[file];
+    const computed = text === undefined ? [] : locatePowerLogSpans(text);
+    powerSpansByFile.set(file, computed);
+    return computed;
+  };
+
   const allowEntries = input.allow?.entries ?? [];
   const usedAllow = new Set<string>();
   const entries: ConsistencyEntry[] = [];
@@ -276,7 +360,7 @@ export function buildConsistencyReport(input: ConsistencyReportInput): Consisten
 
   for (const finding of input.findings) {
     const file = filePathById.get(finding.subject);
-    const span = spanFor(finding, file, spansFor(file), input.cardTexts);
+    const span = spanFor(finding, file, spansFor(file), powerSpansFor(file), input.cardTexts);
     const entry: ConsistencyEntry = {
       rule: finding.rule,
       severity: finding.severity,
@@ -285,7 +369,8 @@ export function buildConsistencyReport(input: ConsistencyReportInput): Consisten
       ...(finding.path === undefined ? {} : { path: finding.path }),
       evidence: finding.evidence,
       span,
-      fix: fixText(finding),
+      fix: finding.fix && finding.fix.trim() !== "" ? finding.fix : fixText(finding),
+      ...(finding.origin === undefined ? {} : { origin: finding.origin }),
     };
     const hit = allowEntries.find((item) => matchesAllow(item, finding));
     if (hit) {
@@ -314,21 +399,26 @@ export function buildConsistencyReport(input: ConsistencyReportInput): Consisten
 }
 
 function spanFor(
-  finding: StructureFinding,
+  finding: ReportFinding,
   file: string | undefined,
-  spans: CardRefSpan[],
+  refSpans: CardRefSpan[],
+  powerSpans: CardPowerLogSpan[],
   cardTexts: Readonly<Record<string, string>>,
 ): ConsistencySpan | null {
   if (!file || finding.related === undefined) return null;
-  const match = spans.find((item) => item.target === finding.related);
-  if (!match) return null;
   const text = cardTexts[file];
   if (text === undefined) return null;
-  return { file, start: match.start, end: match.end, text: text.slice(match.start, match.end).trimEnd() };
+  // 结构类结论指向被引用的那条 refs 条目；战力类结论指向台账里"后一章"那一行。
+  // 两处都用"按 related 找原文"的同一套做法，找不到就返回 null，不落到 0-0 假区间。
+  const ref = refSpans.find((item) => item.target === finding.related);
+  if (ref) return { file, start: ref.start, end: ref.end, text: text.slice(ref.start, ref.end).trimEnd() };
+  const power = powerSpans.find((item) => item.chapter === finding.related);
+  if (power) return { file, start: power.start, end: power.end, text: text.slice(power.start, power.end).trimEnd() };
+  return null;
 }
 
 /** 豁免匹配：给了 related 就三段全等；没给就是「规则 + 主体」级豁免（该主体的多处发现一并豁免） */
-function matchesAllow(entry: ConsistencyAllowEntry, finding: StructureFinding): boolean {
+function matchesAllow(entry: ConsistencyAllowEntry, finding: ReportFinding): boolean {
   if (entry.rule !== finding.rule || entry.subject !== finding.subject) return false;
   return entry.related === undefined || entry.related === finding.related;
 }
