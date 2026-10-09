@@ -14,6 +14,12 @@ import { parseWorldConfig } from "./world-config.js";
  */
 
 export type StructureRuleId = "ref-dangling" | "ref-cycle" | "layer-order-violation";
+/** 已实现的结构规则 id（豁免清单按这份名单校验，避免"豁免了一条不存在的规则"） */
+export const STRUCTURE_RULE_IDS: readonly StructureRuleId[] = [
+  "ref-dangling",
+  "ref-cycle",
+  "layer-order-violation",
+];
 export type StructureSeverity = "error" | "warn" | "info";
 
 export interface StructureFinding {
@@ -25,6 +31,9 @@ export interface StructureFinding {
   related?: string;
   /** 环路径（仅 ref-cycle，首尾同 id） */
   path?: string[];
+  /** 层级倒置两端的层名（报告要按层给修法，不能只靠句子） */
+  fromLayer?: string;
+  toLayer?: string;
   /** 可读证据：谁在哪个文件通过什么关系引用了谁 */
   evidence: string;
 }
@@ -135,6 +144,8 @@ export function checkStructure(input: StructureInput): StructureReport {
       severity: "error",
       subject: from.id,
       related: to.id,
+      fromLayer: from.layer,
+      toLayer: to.layer,
       evidence:
         `倒置引用：「${from.name}」处于第 ${fromIndex + 1} 层 ${from.layer}，却经关系「${link.relation}」` +
         `依赖第 ${toIndex + 1} 层 ${to.layer} 的「${to.name}」——上游设定不应依赖下游产物（会影响传播方向与回滚范围）`,

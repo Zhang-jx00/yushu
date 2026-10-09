@@ -8,3 +8,4 @@ export * from "./chapters.js";
 export * from "./index-input.js";
 export * from "./naming.js";
 export * from "./consistency.js";
+export * from "./consistency-report.js";
