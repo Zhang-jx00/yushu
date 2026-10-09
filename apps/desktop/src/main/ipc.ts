@@ -23,6 +23,8 @@ import {
   type RuleCatalogPayload,
   type RuleDryRunPayload,
   type RuleDryRunResult,
+  type ConsistencyCheckPayload,
+  type ConsistencyReportPayload,
   type TextProofreadPayload,
   type AiRejectPayload,
   type AiFeedbackState,
@@ -118,6 +120,7 @@ import { createSafeStorageCipher } from "./secrets-ops.js";
 import { installKeyCipher } from "./ai-ops.js";
 import { readCostPanel } from "./cost-ops.js";
 import { dryRunRule, readRuleCatalog } from "./rule-ops.js";
+import { markConsistencyStale, runConsistencyCheck } from "./consistency-ops.js";
 import { buildFixedBody, readProofreadPanel } from "./text-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
@@ -257,6 +260,8 @@ function wrapWrite<T>(fn: () => Promise<T> | T): Promise<IpcResult<T>> {
   return wrap(async () => {
     const result = await fn();
     indexRefresh.schedule();
+    // 真源一变，一致性结论就过期（异步全量态：不在写路径上算，等面板下次读取时重算）
+    markConsistencyStale();
     return result;
   });
 }
@@ -488,6 +493,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNELS.ruleCatalog, () => wrap<RuleCatalogPayload>(() => readRuleCatalog(requireGateway())));
   ipcMain.handle(CHANNELS.ruleDryRun, (_event, payload: RuleDryRunPayload) =>
     wrap<RuleDryRunResult>(() => dryRunRule(requireGateway(), payload)),
+  );
+
+  // 一致性体检（M4/T4-4）：**只读**——结论只算不落盘（派生报告该落哪儿待 T4-5 一并裁决）。
+  ipcMain.handle(CHANNELS.consistencyCheck, (_event, payload?: ConsistencyCheckPayload) =>
+    wrap<ConsistencyReportPayload>(() => runConsistencyCheck(requireGateway(), payload ?? {})),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

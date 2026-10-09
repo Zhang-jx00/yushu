@@ -2069,6 +2069,86 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 41,
+    title: "规则页：一致性体检三态（全书体检 / 缓存复用 / 坏豁免清单不静默放行）（M4/T4-4，R54）",
+    file: "step41-consistency.png",
+    body: String.raw`
+      await tab('规则');
+      const view = await waitFor(() => document.querySelector('.rules-view'), 12000);
+      if (!view) return { ok: false, note: '未进入规则页：' + pageText() };
+      const manualBtn = document.querySelector('.consistency-manual');
+      if (!manualBtn) return { ok: false, note: '找不到「全书体检」按钮：' + pageText() };
+      // 造一条悬空引用：不这么做，"每条发现能跳回原文"这条验收就永远是空跑（结论 0 也算通过）
+      await window.yushu.card.write({
+        card: { type: 'character', name: '体检目标', layer: 'characters', refs: [{ relation: '师从', target: 'fac-ghost-step41' }] },
+        body: '为一致性体检造的卡。',
+      });
+      manualBtn.click();
+      const summaryLine = await waitFor(() => {
+        const el = document.querySelector('.consistency-summary');
+        const text = el ? String(el.textContent).replace(/\s+/g, ' ') : '';
+        return text.includes('时机 manual') && text.includes('已重算') ? text : null;
+      }, 20000);
+      if (!summaryLine) return { ok: false, note: '体检汇总未出现：' + pageText() };
+      const rows = [...document.querySelectorAll('.consistency-table tbody tr')].length;
+      const clean = !!document.querySelector('.consistency-clean');
+      const findings = Number((summaryLine.match(/结论 (\d+)/) || [])[1] ?? -1);
+      const suppressedCount = Number((summaryLine.match(/豁免 (\d+)/) || [])[1] ?? -1);
+      const outOfScopeCount = Number((summaryLine.match(/未纳入范围 (\d+)/) || [])[1] ?? -1);
+      const spanButtons = [...document.querySelectorAll('.consistency-jump')].length;
+      // 汇总里的三个计数必须都能解析到（解析不到是 -1 → 判红）：少一个就说明文案与计数口径漂移
+      const countsParsed = findings >= 0 && suppressedCount >= 0 && outOfScopeCount >= 0;
+      const countedOk = rows === findings && findings >= 1 && spanButtons >= 1;
+      // 一键跳到原文（M4 §7.5 A4）：点跳转按钮应切到世界观档案并聚焦该卡
+      const jumpBtn = document.querySelector('.consistency-jump');
+      if (jumpBtn) jumpBtn.click();
+      const jumped = await waitFor(() => {
+        const on = document.querySelector('.tab.on');
+        return on && String(on.textContent).includes('世界观档案') && document.querySelector('.archive') ? true : null;
+      }, 12000);
+      await tab('规则');
+      const backAgain = !!document.querySelector('.consistency-summary');
+      // 缓存语义：紧接着点「取最近结果」应显示"复用缓存"而不是又算一遍
+      document.querySelector('.consistency-post-save').click();
+      const cachedLine = await waitFor(() => {
+        const el = document.querySelector('.consistency-summary');
+        const text = el ? String(el.textContent).replace(/\s+/g, ' ') : '';
+        return text.includes('复用缓存') ? text : null;
+      }, 15000);
+      // 坏豁免清单：必须外显错误，且结论不得被清空（不静默放行）
+      const before = findings;
+      await window.yushu.doc.write('config/consistency.yaml',
+        'apiVersion: yushu.consistency-allow/v1\nentries:\n  - rule: ref-dangling\n    subject: char-x\n');
+      document.querySelector('.consistency-manual').click();
+      const allowErrorLine = await waitFor(() => {
+        const el = document.querySelector('.consistency-allow-error');
+        return el && String(el.textContent).includes('reason') ? String(el.textContent).replace(/\s+/g, ' ') : null;
+      }, 20000);
+      const afterBroken = Number((String(document.querySelector('.consistency-summary')?.textContent || '')
+        .match(/结论 (\d+)/) || [])[1] ?? -1);
+      // 复原成"没有豁免"的合法清单，别把坏状态漏给后续步骤
+      const cur = await window.yushu.doc.read('config/consistency.yaml');
+      await window.yushu.doc.write('config/consistency.yaml',
+        'apiVersion: yushu.consistency-allow/v1\nentries: []\n', cur.hash);
+      document.querySelector('.consistency-manual').click();
+      const restoredLine = await waitFor(() => {
+        const el = document.querySelector('.consistency-summary');
+        const text = el ? String(el.textContent).replace(/\s+/g, ' ') : '';
+        return text.includes('时机 manual') && text.includes('已重算') && !document.querySelector('.consistency-allow-error') ? text : null;
+      }, 20000);
+      return {
+        ok: summaryLine !== null && cachedLine !== null && allowErrorLine !== null && restoredLine !== null &&
+          countedOk && afterBroken === before && countsParsed && jumped === true && backAgain,
+        note: '汇总="' + summaryLine.slice(0, 120) + '"；表行=' + rows + '；空态=' + clean +
+          '；跳转生效=' + (jumped === true) + '；跳回规则页=' + backAgain +
+          '；结论=' + findings + '；豁免=' + suppressedCount + '；未纳入范围=' + outOfScopeCount +
+          '；跳转按钮=' + spanButtons + '；缓存复用=' + (cachedLine !== null) +
+          '；坏清单报错="' + (allowErrorLine || '').slice(0, 70) + '"；坏清单后结论=' + afterBroken +
+          '；复原=' + (restoredLine !== null),
+      };
+    `,
+  },
 ];
 
 /**
@@ -2175,7 +2255,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-40）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-41）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

@@ -15,6 +15,8 @@ import type {
   RuleCatalogPayload,
   RuleDryRunPayload,
   RuleDryRunResult,
+  ConsistencyCheckPayload,
+  ConsistencyReportPayload,
   AiCostPayload,
   AiStartResult,
   AiStreamEvent,
@@ -158,6 +160,10 @@ export interface YushuApi {
   rule: {
     catalog: () => Promise<RuleCatalogPayload>;
     dryRun: (payload: RuleDryRunPayload) => Promise<RuleDryRunResult>;
+  };
+  /** 一致性体检（M4/T4-4 三态时机）：只读，结论不落盘 */
+  consistency: {
+    check: (payload?: ConsistencyCheckPayload) => Promise<ConsistencyReportPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;

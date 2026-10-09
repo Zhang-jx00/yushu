@@ -53,6 +53,8 @@ export const CHANNELS = {
   ruleCatalog: "rule:catalog",
   /** 规则沙箱试算：**只读**，只吃调用方给的 JSON 夹具，不读正文、不写盘 */
   ruleDryRun: "rule:dryRun",
+  /** 一致性体检（M4/T4-4 三态时机）：**只读**，结论只算不落盘 */
+  consistencyCheck: "consistency:check",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -920,6 +922,52 @@ export interface RuleDryRunResult {
   evidence: Record<string, string>;
   /** 失败原因（包/规则找不到、夹具非法 JSON、被沙箱拒绝）；ok=false 时非空 */
   error: string;
+}
+
+/* ---------- 一致性体检（M4 / T4-3 + T4-4，R54；结构与 @yushu/world-engine 的 consistency-report 同形） ---------- */
+
+export type ConsistencyTimingPayload = "post-generate" | "post-save" | "manual";
+
+export interface ConsistencyEntryPayload {
+  rule: string;
+  severity: "error" | "warn" | "info";
+  subject: string;
+  related?: string;
+  path?: string[];
+  evidence: string;
+  fix: string;
+  /** 原文区间（UTF-16 下标，与中文自查同口径）；找不到原文时为 null，不给假区间 */
+  span: { file: string; start: number; end: number; text: string } | null;
+  /** 仅 suppressed 条目有：豁免理由与决策时间（审计入口） */
+  reason?: string;
+  decidedAt?: string;
+}
+
+export interface ConsistencyCheckPayload {
+  /** 缺省 manual（手动全书体检，永远重算） */
+  timing?: ConsistencyTimingPayload;
+  /** 生成后即时轻校验的范围：只报这些实体发起的结论 */
+  entityIds?: string[];
+}
+
+export interface ConsistencyReportPayload {
+  timing: ConsistencyTimingPayload;
+  /** 这次是真的算了一遍，还是复用了未失效的缓存 */
+  ranAgain: boolean;
+  allowPath: string;
+  allowExists: boolean;
+  /** 豁免清单读不了的原因；非空时**不应用任何豁免**，结论照旧报出 */
+  allowError: string | null;
+  /** world.yaml 缺失 / 不合式时按全部层启用的说明 */
+  worldNote: string | null;
+  entities: number;
+  refs: number;
+  entries: ConsistencyEntryPayload[];
+  suppressed: ConsistencyEntryPayload[];
+  unusedAllow: string[];
+  outOfScope: Array<{ referrer: string; relation: string; target: string; reason: string }>;
+  skipped: { disabledLayerEntities: number; cycleDepthCapped: number };
+  counted: { findings: number; entries: number; suppressed: number; filteredOut: number };
 }
 
 /* ---------- 中文自查（T3-13，J14；结构与 @yushu/text 同形——本文件保持零依赖，故用结构类型镜像） ---------- */

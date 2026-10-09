@@ -1,0 +1,160 @@
+import {
+  buildConsistencyReport,
+  checkStructureFromSources,
+  parseConsistencyAllowList,
+  CONSISTENCY_ALLOW_PATH,
+  type ConsistencyAllowList,
+  type ConsistencyEntry,
+  type SuppressedEntry,
+} from "@yushu/world-engine";
+import type {
+  ConsistencyCheckPayload,
+  ConsistencyEntryPayload,
+  ConsistencyReportPayload,
+  ConsistencyTimingPayload,
+} from "../shared/ipc.js";
+import { gatewayReader } from "./index-ops.js";
+import type { ProjectGateway } from "./file-gateway.js";
+
+/**
+ * 一致性体检的桌面接线（M4 / T4-3 报告呈现 + T4-4 三态时机，R54）。
+ *
+ * 通道**只读**：结论只算不写，落点问题（派生报告该不该进真源）在本轮明确搁置——
+ * docs/04 §7.4 写的 `reports/consistency-*.yaml` 与"派生物不入真源"的红线冲突，
+ * 要落盘应落 `.yushu/`，而那属 T4-5 提案快照体系一起做，不在这个只读轮里先建第二条写路径。
+ *
+ * 三态的分工：
+ * - `post-generate`（生成后即时轻校验）：只报本次涉及实体发起的结论，范围外条数如实计数；
+ * - `post-save`（保存后异步全量）：写通道置脏后由面板下次读取时重算，**不在输入路径上同步算**；
+ * - `manual`（全书体检）：永远重算，作者点按钮就是要看当下的真结果。
+ */
+
+let cache: ConsistencyReportPayload | null = null;
+let stale = true;
+/** 缓存归属的项目根目录：换了项目必须作废，否则新项目的空白会被旧结论顶替 */
+let cacheRoot: string | null = null;
+
+/** 任何写真源的通道之后调用：结论过期，但缓存保留（面板可显示"上次结果 · 已过期"而不是空白） */
+export function markConsistencyStale(): void {
+  stale = true;
+}
+
+export function isConsistencyStale(): boolean {
+  return stale;
+}
+
+function toEntry(entry: ConsistencyEntry): ConsistencyEntryPayload {
+  return {
+    rule: entry.rule,
+    severity: entry.severity,
+    subject: entry.subject,
+    ...(entry.related === undefined ? {} : { related: entry.related }),
+    ...(entry.path === undefined ? {} : { path: entry.path }),
+    evidence: entry.evidence,
+    fix: entry.fix,
+    span: entry.span === null ? null : { ...entry.span },
+  };
+}
+
+function toSuppressed(entry: SuppressedEntry): ConsistencyEntryPayload {
+  return {
+    ...toEntry(entry),
+    reason: entry.reason,
+    ...(entry.decidedAt === undefined ? {} : { decidedAt: entry.decidedAt }),
+  };
+}
+
+async function computeReport(
+  gateway: ProjectGateway,
+  timing: ConsistencyTimingPayload,
+  entityIds?: string[],
+): Promise<ConsistencyReportPayload> {
+  const structure = await checkStructureFromSources(gatewayReader(gateway));
+
+  let allow: ConsistencyAllowList | null = null;
+  let allowExists = false;
+  let allowError: string | null = null;
+  const allowSnap = await gateway.readDoc(CONSISTENCY_ALLOW_PATH).catch(() => null);
+  if (allowSnap) {
+    allowExists = true;
+    try {
+      allow = parseConsistencyAllowList(allowSnap.content);
+    } catch (err) {
+      // 读不了就**不应用任何豁免**：静默放行等于把坏清单变成"全部正常"
+      allowError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  // 只为"确实要跳过去"的文件读原文，别为一张空项目读遍全库
+  const cardTexts: Record<string, string> = {};
+  const filePathById = new Map(structure.entities.map((entity) => [entity.id, entity.filePath]));
+  const needed = new Set<string>();
+  for (const finding of structure.findings) {
+    const file = filePathById.get(finding.subject);
+    if (file && cardTexts[file] === undefined) needed.add(file);
+  }
+  for (const file of needed) {
+    const snap = await gateway.readDoc(file).catch(() => null);
+    if (snap) cardTexts[file] = snap.content;
+  }
+
+  const report = buildConsistencyReport({
+    findings: structure.findings,
+    entities: structure.entities,
+    cardTexts,
+    allow,
+  });
+
+  let entries = report.entries;
+  let filteredOut = 0;
+  if (timing === "post-generate" && entityIds && entityIds.length > 0) {
+    const scope = new Set(entityIds);
+    const kept = entries.filter((entry) => scope.has(entry.subject));
+    filteredOut = entries.length - kept.length;
+    entries = kept;
+  }
+
+  return {
+    timing,
+    ranAgain: true,
+    allowPath: CONSISTENCY_ALLOW_PATH,
+    allowExists,
+    allowError,
+    worldNote: structure.worldNote,
+    entities: structure.sources.entities,
+    refs: structure.sources.refs,
+    entries: entries.map(toEntry),
+    suppressed: report.suppressed.map(toSuppressed),
+    unusedAllow: report.unusedAllow,
+    outOfScope: structure.outOfScope.map((item) => ({ ...item })),
+    skipped: { ...structure.skipped },
+    counted: {
+      findings: structure.findings.length,
+      entries: entries.length,
+      suppressed: report.suppressed.length,
+      filteredOut,
+    },
+  };
+}
+
+/** 跑一次一致性体检（按三态时机决定是否复用缓存与是否按范围过滤） */
+export async function runConsistencyCheck(
+  gateway: ProjectGateway,
+  payload: ConsistencyCheckPayload = {},
+): Promise<ConsistencyReportPayload> {
+  const timing: ConsistencyTimingPayload = payload.timing ?? "manual";
+  if (cacheRoot !== gateway.root) {
+    cacheRoot = gateway.root;
+    cache = null;
+    stale = true;
+  }
+  if (timing === "post-save" && !stale && cache !== null) {
+    return { ...cache, timing, ranAgain: false };
+  }
+  const fresh = await computeReport(gateway, timing, payload.entityIds);
+  if (timing !== "post-generate") {
+    cache = fresh;
+    stale = false;
+  }
+  return fresh;
+}

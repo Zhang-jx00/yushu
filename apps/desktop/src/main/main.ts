@@ -1282,6 +1282,99 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     }
     console.log("[e2e] 规则目录与试算:", JSON.stringify(ruleProbe));
 
+    // R54 一致性体检三态（T4-4）：全程只读 + 缓存语义 + 坏豁免清单 fail-safe。
+    // 断言不依赖项目里恰好有几条悬空引用（那会随夹具漂移），而是钉住"每次跑都必须成立"的不变量。
+    let consProbe = {
+      ok: false,
+      manualTiming: "",
+      manualRan: false,
+      cacheRan: false,
+      invariantHolds: false,
+      spanSlicesOk: true,
+      spans: 0,
+      entries: 0,
+      suppressed: 0,
+      findings: 0,
+      allowErrorWhenBroken: "",
+      entriesAfterBroken: -1,
+      staleAfterWrite: false,
+      diskUnchanged: false,
+      restoredOk: false,
+      entriesAfterRestore: -1,
+      error: "",
+    };
+    try {
+      const consBefore = await api.chapter.read(draft.chapterPath);
+      // 项目里本来没有悬空引用可跳：先造一条、测完复原，让"每条发现能跳回原文"这一验收真被走一遍
+      const consCardPath = (await api.card.list()).find((c) => !c.error)?.path || "";
+      const consOriginal = await api.card.read(consCardPath);
+      const consPolluted = await api.card.write({
+        path: consCardPath,
+        card: { ...consOriginal.card, refs: [{ relation: "师从", target: "fac-e2e-dangling" }] },
+        body: consOriginal.body,
+        baseHash: consOriginal.hash,
+      });
+      const manual = await api.consistency.check({ timing: "manual" });
+      const invariant = manual.counted.entries + manual.counted.suppressed === manual.counted.findings;
+      let sliceOk = true;
+      for (const entry of manual.entries) {
+        if (!entry.span) continue;
+        const file = await api.doc.read(entry.span.file);
+        if (file.content.slice(entry.span.start, entry.span.end).indexOf(entry.span.text.trim()) < 0) sliceOk = false;
+      }
+      // 缓存语义：连着两次 post-save，第一次必算（manual 已把缓存刷新为新鲜，故第二次复用）
+      await api.consistency.check({ timing: "post-save" });
+      const cachedRun = await api.consistency.check({ timing: "post-save" });
+      // 坏豁免清单：必须报错外显，且结论不得被清空（不静默放行）
+      const allowRead = await api.doc.read("config/consistency.yaml").catch(() => null);
+      await api.doc.write(
+        "config/consistency.yaml",
+        "apiVersion: yushu.consistency-allow/v1\\nentries:\\n  - rule: ref-dangling\\n    subject: char-x\\n",
+        allowRead ? allowRead.hash : undefined,
+      );
+      const brokenAllow = await api.consistency.check({ timing: "manual" });
+      const staleBefore = cachedRun.ranAgain === false;
+      await api.doc.write(
+        "config/consistency.yaml",
+        "apiVersion: yushu.consistency-allow/v1\\nentries: []\\n",
+        (await api.doc.read("config/consistency.yaml")).hash,
+      );
+      await api.card.write({
+        path: consCardPath,
+        card: consOriginal.card,
+        body: consOriginal.body,
+        baseHash: (await api.card.read(consCardPath)).hash,
+      });
+      const consRestored = await api.card.read(consCardPath);
+      const consClean = await api.consistency.check({ timing: "manual" });
+      const consAfter = await api.chapter.read(draft.chapterPath);
+      consProbe = {
+        ok: true,
+        manualTiming: manual.timing,
+        manualRan: manual.ranAgain,
+        cacheRan: cachedRun.ranAgain,
+        invariantHolds: invariant,
+        spanSlicesOk: sliceOk,
+        spans: manual.entries.filter((entry) => entry.span !== null).length,
+        entries: manual.counted.entries,
+        suppressed: manual.counted.suppressed,
+        findings: manual.counted.findings,
+        allowErrorWhenBroken: brokenAllow.allowError ? brokenAllow.allowError.slice(0, 60) : "(未报错)",
+        entriesAfterBroken: brokenAllow.counted.entries,
+        staleAfterWrite: staleBefore,
+        diskUnchanged: consBefore.hash === consAfter.hash,
+        restoredOk:
+          consRestored.card.name === consOriginal.card.name &&
+          JSON.stringify(consRestored.card.refs ?? []) === JSON.stringify(consOriginal.card.refs ?? []) &&
+          consRestored.body === consOriginal.body,
+        entriesAfterRestore: consClean.counted.entries,
+        error: "",
+      };
+    } catch (err) {
+      consProbe = { ...consProbe, error: String((err && err.message) || err).slice(0, 160) };
+    }
+    console.log("[e2e] 一致性体检:", JSON.stringify(consProbe));
+
     // A2 任务路由取证（docs/04 §6.5，离线可做的那一半）：
     //  ① 旗舰端点全程 503 → 一次动作内先重试、再按 fallback 链回落到小模型端点并成功出文；
     //  ② 失败达阈进入冷却 → **第二次动作不再尝试坏端点**（冷却跳过事件带原因）；
@@ -1585,6 +1678,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       security: securityProbe,
       proofread: proofreadProbe,
       rules: ruleProbe,
+      consistency: consProbe,
       routingA2: routingA2,
       aiOff: aiOffProbe,
     };
@@ -1895,6 +1989,25 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         capSkippedCount: number;
         noTargetSkipsOverflow: boolean;
         overflowFoundWithTarget: boolean;
+      };
+      consistency: {
+        ok: boolean;
+        manualTiming: string;
+        manualRan: boolean;
+        cacheRan: boolean;
+        invariantHolds: boolean;
+        spanSlicesOk: boolean;
+        spans: number;
+        entries: number;
+        suppressed: number;
+        findings: number;
+        allowErrorWhenBroken: string;
+        entriesAfterBroken: number;
+        staleAfterWrite: boolean;
+        diskUnchanged: boolean;
+        restoredOk: boolean;
+        entriesAfterRestore: number;
+        error: string;
       };
       security: {
         backend: boolean;
@@ -2857,6 +2970,22 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       result.rules.rejectCode.includes("E_RULE_UNORDERABLE") &&
       result.rules.badJsonRejected.includes("合法 JSON") &&
       result.rules.diskUnchanged &&
+      // R54 一致性体检三态：不变量成立、区间可切片、缓存语义、坏豁免清单不静默放行、全程只读
+      result.consistency.ok &&
+      result.consistency.error === "" &&
+      result.consistency.manualTiming === "manual" &&
+      result.consistency.manualRan &&
+      !result.consistency.cacheRan &&
+      result.consistency.invariantHolds &&
+      result.consistency.spanSlicesOk &&
+      result.consistency.staleAfterWrite &&
+      result.consistency.allowErrorWhenBroken.includes("reason") &&
+      result.consistency.entriesAfterBroken === result.consistency.findings &&
+      result.consistency.diskUnchanged &&
+      result.consistency.entries >= 1 &&
+      result.consistency.spans >= 1 &&
+      result.consistency.restoredOk &&
+      result.consistency.entriesAfterRestore === 0 &&
       // A2 任务路由（离线那一半）：旗舰端点失败 → 回落小模型端点出文；冷却跳过坏端点；一次动作一条记录
       result.routingA2.ok &&
       result.routingA2.firstProvider === "small-good" &&

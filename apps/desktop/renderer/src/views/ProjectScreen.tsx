@@ -181,7 +181,7 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
         )}
         {tab === "ai" && <AiView />}
         {tab === "memory" && <MemoryView />}
-        {tab === "rules" && <RulesView />}
+        {tab === "rules" && <RulesView onOpenCard={openCardInArchive} />}
         {tab === "export" && <ExportView />}
         {tab === "archive" && <ArchiveView focusCardPath={archiveFocus} />}
         {tab === "stats" && <StatsView />}

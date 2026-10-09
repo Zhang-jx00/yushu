@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import type { RuleCatalogPayload, RuleDryRunResult, RuleRowPayload } from "../../../src/shared/ipc";
+import type {
+  ConsistencyCheckPayload,
+  ConsistencyReportPayload,
+  RuleCatalogPayload,
+  RuleDryRunResult,
+  RuleRowPayload,
+} from "../../../src/shared/ipc";
 import { api } from "../api";
 
 /**
@@ -24,13 +30,29 @@ const SCOPE_LABEL: Record<string, string> = {
   project: "全书",
 };
 
-export function RulesView() {
+export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void }) {
   const [catalog, setCatalog] = useState<RuleCatalogPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ruleId, setRuleId] = useState("");
   const [fixture, setFixture] = useState(SAMPLE_FIXTURE);
   const [dryRun, setDryRun] = useState<RuleDryRunResult | null>(null);
   const [dryRunError, setDryRunError] = useState<string | null>(null);
+  const [consistency, setConsistency] = useState<ConsistencyReportPayload | null>(null);
+  const [consistencyError, setConsistencyError] = useState<string | null>(null);
+  const [consistencyBusy, setConsistencyBusy] = useState(false);
+
+  const runConsistency = useCallback(async (payload: ConsistencyCheckPayload) => {
+    try {
+      setConsistencyError(null);
+      setConsistencyBusy(true);
+      setConsistency(await api().consistency.check(payload));
+    } catch (err) {
+      setConsistency(null);
+      setConsistencyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setConsistencyBusy(false);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -48,7 +70,10 @@ export function RulesView() {
 
   useEffect(() => {
     void refresh();
-    // 挂载即拉一次目录；刷新由按钮触发，避免每次改夹具都打主进程
+    // 挂载即取一次「最近结果」：标签页切换会重挂载本组件，若不在这里回填，
+    // 作者点完"跳到原文"再回来就看不到刚才的结论了（主进程缓存未过期时是零成本复用）。
+    void runConsistency({ timing: "post-save" });
+    // 挂载时拉一次目录与缓存结果；刷新由按钮触发，避免每次改夹具都打主进程
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allRules: Array<RuleRowPayload & { file: string }> = (catalog?.files ?? []).flatMap((file) =>
@@ -196,6 +221,109 @@ export function RulesView() {
               </p>
             )}
           </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <h3>一致性体检（结构类规则 · 只读）</h3>
+        <div className="consistency-toolbar">
+          <button
+            className="btn consistency-manual"
+            onClick={() => void runConsistency({ timing: "manual" })}
+            disabled={consistencyBusy}
+          >
+            全书体检
+          </button>
+          <button
+            className="btn consistency-post-save"
+            onClick={() => void runConsistency({ timing: "post-save" })}
+            disabled={consistencyBusy}
+          >
+            取最近结果
+          </button>
+          <span className="muted consistency-hint">
+            保存正文或改卡后结论即过期；「取最近结果」在未过期时复用缓存，不打断输入。
+          </span>
+        </div>
+        {consistencyError && <p className="error consistency-error">体检失败：{consistencyError}</p>}
+        {consistency && (
+          <>
+            {consistency.allowError && (
+              <p className="error consistency-allow-error">
+                豁免清单读不了，本次「未应用任何豁免」（不静默放行）：{consistency.allowError}
+              </p>
+            )}
+            {consistency.worldNote && <p className="warn consistency-world-note">{consistency.worldNote}</p>}
+            <p className="muted consistency-summary">
+              时机 {consistency.timing} · {consistency.ranAgain ? "已重算" : "复用缓存"} · 实体{" "}
+              {consistency.entities} 引用 {consistency.refs} · 结论 {consistency.counted.entries} · 豁免{" "}
+              {consistency.counted.suppressed} · 未纳入范围 {consistency.outOfScope.length}
+              {consistency.counted.filteredOut > 0 ? ` · 范围外过滤 ${consistency.counted.filteredOut}` : ""}
+              {consistency.skipped.cycleDepthCapped > 0
+                ? ` · 环搜索深度封顶 ${consistency.skipped.cycleDepthCapped} 次（未假装没有环）`
+                : ""}
+            </p>
+            {consistency.entries.length === 0 ? (
+              <p className="muted consistency-clean">本次没有结构类结论（不代表未纳入范围的项也查过）。</p>
+            ) : (
+              <table className="slot-table consistency-table">
+                <thead>
+                  <tr>
+                    <th>级别</th>
+                    <th>规则</th>
+                    <th>主体</th>
+                    <th>依据</th>
+                    <th>建议修法</th>
+                    <th>原文</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {consistency.entries.map((entry, index) => (
+                    <tr key={`${entry.rule}-${entry.subject}-${entry.related ?? ""}-${index}`}>
+                      <td className={entry.severity === "error" ? "error" : "warn"}>{entry.severity}</td>
+                      <td>
+                        <code>{entry.rule}</code>
+                      </td>
+                      <td>
+                        <code>{entry.subject}</code>
+                        {entry.related ? <span className="muted"> → {entry.related}</span> : null}
+                      </td>
+                      <td>{entry.evidence}</td>
+                      <td>{entry.fix}</td>
+                      <td>
+                        {entry.span ? (
+                          <button
+                            className="btn consistency-jump"
+                            onClick={() => onOpenCard?.(entry.span!.file)}
+                          >
+                            {entry.span.file.split("/").pop()}#{entry.span.start}
+                          </button>
+                        ) : (
+                          <span className="muted">（无原文区间）</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {consistency.suppressed.length > 0 && (
+              <ul className="issues consistency-suppressed">
+                {consistency.suppressed.map((item, index) => (
+                  <li key={`sup-${item.rule}-${item.subject}-${index}`} className="muted">
+                    已豁免 <code>{item.rule}</code> · <code>{item.subject}</code>
+                    {item.related ? ` → ${item.related}` : ""}：{item.reason}
+                    {item.decidedAt ? `（${item.decidedAt}）` : "（未记决策时间）"}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {consistency.unusedAllow.length > 0 && (
+              <p className="muted consistency-unused">
+                用不上的豁免（可能已失效，建议清理）：{consistency.unusedAllow.join("、")}
+              </p>
+            )}
+          </>
         )}
       </section>
     </div>
