@@ -10,3 +10,4 @@ export * from "./naming.js";
 export * from "./consistency.js";
 export * from "./consistency-report.js";
 export * from "./power-log.js";
+export * from "./audit-sample.js";

@@ -435,3 +435,33 @@ describe("派系包结论并入同一份报告（R57）", () => {
   });
 });
 
+/**
+ * 采样类结论自带区间（R58）。
+ *
+ * AI 采样指认的是**章节正文里的某一段**，不是设定卡 frontmatter 的某条引用——
+ * 所以这条结论必须能把区间直接带进来，而不是只能靠"按 related 去卡里找"。
+ * 找不到卡不等于找不到原文。
+ */
+describe("结论自带原文区间（R58 采样类）", () => {
+  it("自带 span 的结论原样带出，不因不在设定卡里就塌成 null", () => {
+    const result = buildConsistencyReport({
+      findings: [
+        {
+          rule: "ai-sampled-drift",
+          severity: "warn",
+          subject: "ch-001",
+          evidence: "该段断言「玉佩出自皇室」，设定库与出处记忆中均无支撑",
+          fix: "补一条设定来源，或改写为角色猜测",
+          origin: "AI 采样（mock / mock-model）",
+          span: { file: "chapters/vol-1/ch-001.md", start: 4, end: 20, text: "夜色像水一样" },
+        },
+      ],
+      entities: [],
+      cardTexts: {},
+    });
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.span).toMatchObject({ file: "chapters/vol-1/ch-001.md", start: 4, end: 20 });
+    expect(result.entries[0]!.origin).toContain("AI 采样");
+  });
+});
+

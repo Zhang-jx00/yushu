@@ -272,6 +272,11 @@ export interface ReportFinding {
   fromLayer?: string;
   toLayer?: string;
   origin?: string;
+  /**
+   * 结论自带原文区间（AI 采样指认的是**章节正文的某一段**，不在设定卡 frontmatter 里）。
+   * 给了就直接用，不再去卡里按 related 找——找不到卡不等于找不到原文。
+   */
+  span?: ConsistencySpan;
 }
 
 export interface ConsistencyEntry {
@@ -405,6 +410,7 @@ function spanFor(
   powerSpans: CardPowerLogSpan[],
   cardTexts: Readonly<Record<string, string>>,
 ): ConsistencySpan | null {
+  if (finding.span) return { ...finding.span };
   if (!file || finding.related === undefined) return null;
   const text = cardTexts[file];
   if (text === undefined) return null;
