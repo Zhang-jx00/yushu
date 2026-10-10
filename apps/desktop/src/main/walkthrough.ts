@@ -2163,6 +2163,10 @@ const STEPS: StepDef[] = [
         const text = el ? String(el.textContent).replace(/\s+/g, ' ') : '';
         return text.includes('时机 manual') && text.includes('已重算') && !document.querySelector('.consistency-allow-error') ? text : null;
       }, 20000);
+      // 截图取证：把体检结论表滚进视口（规则页很长，不滚只拍到页首的规则目录）
+      const consPanel = document.querySelector('.consistency-summary');
+      if (consPanel) consPanel.scrollIntoView({ block: 'start' });
+      await sleep(150);
       return {
         ok: summaryLine !== null && cachedLine !== null && allowErrorLine !== null && restoredLine !== null &&
           countedOk && afterBroken === before && countsParsed && jumped === true && backAgain,
@@ -2222,6 +2226,10 @@ const STEPS: StepDef[] = [
       const errorLine = document.querySelector('.ai-adopt-audit-error');
       const noticeOk = document.body.innerText.includes('追加采纳');
       await sleep(200);
+      // 截图要能作证：把本次断言的那一段滚进视口（规则页很长，不滚就只拍到页首）
+      const auditPanel = document.querySelector('.ai-adopt-audit');
+      if (auditPanel) auditPanel.scrollIntoView({ block: 'start' });
+      await sleep(150);
       return {
         // 命中分支必须有真东西：提到 1 个实体、结论 ≥1 条、表行数与结论数一致，
         // 且 step41 留下的那张卡（范围外）确实没混进来而是被计数
@@ -2289,6 +2297,10 @@ const STEPS: StepDef[] = [
       }, 12000);
       await tab('规则');
       const backOk = !!document.querySelector('.consistency-pack');
+      // 截图取证：滚到包规则那一段，否则截图只有页首的规则目录
+      const packPanel = document.querySelector('.consistency-pack');
+      if (packPanel) packPanel.scrollIntoView({ block: 'start' });
+      await sleep(150);
       return {
         ok: packRow !== null && diskHasLog && packLine.includes('power-no-regress') && packLine.includes('未参与 5 条') &&
           skippedText.includes('数据绑定') && errShown !== null && originText.includes('xuanhuan-xitong') &&
@@ -2332,6 +2344,10 @@ const STEPS: StepDef[] = [
       const cellText = cells.length > 6 ? String(cells[6].textContent || '').trim() : '';
       const rejected = Number((aiLine.match(/丢弃 (\d+) 条/) || [])[1] ?? -1);
       const sampled = Number((aiLine.match(/已核验 (\d+) 段/) || [])[1] ?? -1);
+      // 截图取证：滚到 AI 采样那一段（含汇总行与并表结论），否则截图只有页首
+      const aiPanel = document.querySelector('.consistency-ai-line');
+      if (aiPanel) aiPanel.scrollIntoView({ block: 'start' });
+      await sleep(150);
       return {
         ok: aiRow !== undefined && sampled >= 1 && rejected === 0 && aiOrigin.includes("AI 采样") &&
           aiJump === false && cellText.includes("正文片段") && structRows >= 1 && packRows >= 1,
