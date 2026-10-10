@@ -62,6 +62,22 @@ function parseLine(line: string): { key: string; value: string } | null {
 }
 
 /**
+ * 单行判定：这一行是否携带明文密钥。命中返回 `{field, evidence}`（evidence 已去标识化），否则 null。
+ * 检测与脱敏**必须共用这一个判断**——两处各写一份的话，"扫得出来但没抹掉"就是静默泄漏。
+ */
+function plaintextInLine(line: string): { field: string; evidence: string } | null {
+  const parsed = parseLine(line);
+  if (!parsed || parsed.value === "") return null;
+  if (REFERENCE_FIELD_NAMES.has(parsed.key)) return null;
+  const hit = SECRET_PATTERNS.find(
+    (item) => (item.field === "*" || item.field === parsed.key) && item.re.test(parsed.value),
+  );
+  const isSecretField = SECRET_FIELD_NAMES.has(parsed.key) && parsed.value.length >= 12;
+  if (!hit && !isSecretField) return null;
+  return { field: parsed.key, evidence: maskSecret(parsed.value) };
+}
+
+/**
  * 扫描配置文本中的疑似明文密钥（K12 规则 `key-plaintext-detected`，error 级）。
  * 只做**高置信**判定：已知密钥形状、或密钥类字段带 ≥12 字符字面值；
  * 引用型写法（`api_key_env: YUSHU_LLM_API_KEY`、`key_ref: primary`）与非密钥字段一律放行。
@@ -75,21 +91,31 @@ export function detectPlaintextSecrets(text: string): SecretFinding[] {
       providerId = idMatch[1]!.replace(/^["']|["']$/g, "");
       continue;
     }
-    const parsed = parseLine(line);
-    if (!parsed || parsed.value === "") continue;
-    if (REFERENCE_FIELD_NAMES.has(parsed.key)) continue;
-    const hit = SECRET_PATTERNS.find(
-      (item) => (item.field === "*" || item.field === parsed.key) && item.re.test(parsed.value),
-    );
-    const isSecretField = SECRET_FIELD_NAMES.has(parsed.key) && parsed.value.length >= 12;
-    if (!hit && !isSecretField) continue;
-    findings.push({
-      field: parsed.key,
-      evidence: maskSecret(parsed.value),
-      ...(providerId ? { provider_id: providerId } : {}),
-    });
+    const hit = plaintextInLine(line);
+    if (hit) {
+      findings.push({ ...hit, ...(providerId ? { provider_id: providerId } : {}) });
+    }
   }
   return findings;
+}
+
+/**
+ * 把文本里的明文密钥行改成注释（R59 ②：v1 → v2 迁移备份写盘前用）。
+ *
+ * 备份的意义是"配置结构可回滚"，不是"密钥可回滚"——所以抹掉字面值、留下 `field` 与去标识化指纹，
+ * 用户能认出被拿走的是哪把钥匙，但副本文件里不会再躺着一份明文。
+ * 输出走注释行：`#` 开头的行不再被 `parseLine` 认成键值，因此**脱敏结果可重复扫描且检不出**。
+ */
+export function redactPlaintextSecrets(text: string): { text: string; redacted: number } {
+  let redacted = 0;
+  const lines = text.split(/\r?\n/).map((line) => {
+    const hit = plaintextInLine(line);
+    if (!hit) return line;
+    redacted += 1;
+    const indent = /^\s*/.exec(line)![0];
+    return `${indent}# [yushu 迁移脱敏] 字段 ${hit.field} 的明文值已移除（${hit.evidence}）；请改用 api_key_env 或 key_ref`;
+  });
+  return { text: lines.join("\n"), redacted };
 }
 
 /** 凭据库信封的密文条目（`ciphertext` 为 safeStorage 产物的 base64；本模块不解其义） */

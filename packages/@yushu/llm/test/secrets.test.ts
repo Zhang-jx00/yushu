@@ -3,6 +3,7 @@ import {
   LLM_API_VERSION,
   LLM_FORMAT_VERSION,
   detectPlaintextSecrets,
+  redactPlaintextSecrets,
   emptySecretsStore,
   findSecret,
   maskSecret,
@@ -192,5 +193,60 @@ describe("resolveApiKey 取值顺序：本次会话 > 凭据库解密 > 环境�
     expect(
       resolveApiKey(local, { storedKeys: { ollama: "should-not-be-used" }, env: {} }),
     ).toBeUndefined();
+  });
+});
+
+/**
+ * 迁移备份的明文脱敏（R59 ②）。
+ *
+ * 场景：v1 的 config/llm.yaml 里带着明文 api_key，保存 v2 前系统会把 v1 原文备份成
+ * `config/llm.yaml.bak-v1`（Git 跟踪路径）。逐字备份等于把同一把明文钥匙复制到第二个文件里——
+ * 主文件按红线清了，副本还在。备份的意义是"结构可回滚"，不是"密钥可回滚"，所以脱敏要做在写盘之前。
+ */
+describe("redactPlaintextSecrets（迁移备份脱敏）", () => {
+  const V1_WITH_KEY = [
+    "apiVersion: yushu.llm/v1",
+    "format_version: 1",
+    "providers:",
+    "  - id: openai",
+    "    base_url: https://api.openai.com/v1",
+    "    api_key: sk-abcdef0123456789",
+    "    model: gpt-4o",
+    "",
+  ].join("\n");
+
+  it("明文行换成注释并计数，且脱敏后的文本再扫一遍检不出", () => {
+    const out = redactPlaintextSecrets(V1_WITH_KEY);
+    expect(out.redacted).toBe(1);
+    expect(out.text).not.toContain("sk-abcdef0123456789");
+    expect(out.text).toContain("#");
+    expect(detectPlaintextSecrets(out.text)).toEqual([]);
+  });
+
+  it("其余行逐字保留（备份还得能当 v1 结构回滚用）", () => {
+    const out = redactPlaintextSecrets(V1_WITH_KEY);
+    const kept = out.text.split("\n").filter((line) => !line.trimStart().startsWith("#"));
+    expect(kept).toEqual(V1_WITH_KEY.split("\n").filter((line) => !line.includes("api_key")));
+  });
+
+  it("引用型写法一字不动、计数为 0（不能把合规配置改坏）", () => {
+    const clean = ["providers:", "  - id: openai", "    api_key_env: OPENAI_KEY", "    key_ref: openai", ""].join("\n");
+    const out = redactPlaintextSecrets(clean);
+    expect(out.redacted).toBe(0);
+    expect(out.text).toBe(clean);
+  });
+
+  it("密钥形状出现在非密钥字段名上也要脱敏（判定不只看字段名）", () => {
+    const out = redactPlaintextSecrets(["note: use sk-zzzzyyyyxxxx1234 today", ""].join("\n"));
+    expect(out.redacted).toBe(1);
+    expect(out.text).not.toContain("sk-zzzzyyyyxxxx1234");
+  });
+
+  it("注释里留去标识化指纹，便于认出被移除的是哪把钥匙（不回显明文）", () => {
+    const out = redactPlaintextSecrets(V1_WITH_KEY);
+    const comment = out.text.split("\n").find((line) => line.trimStart().startsWith("#")) ?? "";
+    expect(comment).toContain("api_key");
+    expect(comment).toContain("len=");
+    expect(comment).not.toContain("sk-abcdef0123456789");
   });
 });
