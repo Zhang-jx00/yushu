@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { countWords } from "@yushu/core";
 import { readChapterFile } from "@yushu/world-engine";
 import type { AiStreamEvent } from "../src/shared/ipc.js";
+import { detectPlaintextSecrets } from "@yushu/llm";
 import {
   adoptDraft,
   listDraftTargets,
@@ -300,6 +301,48 @@ describe("AI 生成与采纳（T1-15 / T1-16 / T1-17）", () => {
       baseHash: saved.hash,
     });
     expect(await readFile(join(dir, "config", "llm.yaml.bak-v1"), "utf8")).toBe(backup);
+  });
+
+  /**
+   * R59 ②：v1 → v2 迁移备份不能把明文密钥复制成第二份。
+   *
+   * 真实路径是：用户的 v1 `config/llm.yaml` 里带着明文 `api_key`（K12 判定为 error，读配置就被挡住），
+   * 他改好新配置点保存 → 保存前系统把 v1 **原文**备份到 `config/llm.yaml.bak-v1`。
+   * 主文件按红线清了，副本里那把钥匙还在，而且副本和主文件一样在 Git 跟踪目录里。
+   * 备份要保的是"配置结构可回滚"，不是"密钥可回滚"，所以写盘前先脱敏。
+   */
+  it("v1 迁移备份会抹掉明文密钥，只留结构与去标识化指纹（R59 ②）", async () => {
+    const fixture = await setupProject();
+    const secret = "sk-e2etestkey0123456789";
+    const v1WithKey = [
+      "apiVersion: yushu.llm/v1",
+      "format_version: 1",
+      "providers:",
+      "  - id: openai",
+      "    base_url: https://api.openai.com/v1",
+      "    model: gpt-4o",
+      `    api_key: ${secret}`,
+      "",
+    ].join("\n");
+    // 夹具自检：这行确实会被 K12 判成明文，否则整条测试是空跑
+    expect(detectPlaintextSecrets(v1WithKey).length).toBe(1);
+    await fixture.gateway.writeDoc("config/llm.yaml", v1WithKey);
+
+    const baseUrl = await startMock();
+    // 带读到的 hash 保存（真源里已存在这份 v1，不带 hash 会被"禁止盲写"挡住）
+    const current = await fixture.gateway.readDoc("config/llm.yaml");
+    await saveAiConfig(fixture.gateway, { providers: v2Providers(baseUrl), baseHash: current.hash });
+
+    const backup = await readFile(join(dir, "config", "llm.yaml.bak-v1"), "utf8");
+    expect(backup).not.toContain(secret);
+    // 结构还在（备份仍有回滚价值），并写明被拿走的是什么
+    expect(backup).toContain("format_version: 1");
+    expect(backup).toContain("gpt-4o");
+    expect(backup).toContain("迁移脱敏");
+    expect(backup).toContain("api_key");
+    expect(detectPlaintextSecrets(backup)).toEqual([]);
+    // 主文件同样不得留明文
+    expect(await readFile(join(dir, "config", "llm.yaml"), "utf8")).not.toContain(secret);
   });
 
   it("生成：流式事件 → done（含轻提示与使用记录）；采纳写入章节正文", async () => {

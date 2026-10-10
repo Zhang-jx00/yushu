@@ -391,7 +391,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNELS.aiConfig, () => wrap<AiConfigState>(() => readAiConfig(requireGateway())));
 
   ipcMain.handle(CHANNELS.aiSaveConfig, (_event, payload: AiSaveConfigPayload) =>
-    wrap<AiConfigState>(() => saveAiConfig(requireGateway(), payload)),
+    // 覆盖 config/llm.yaml 是真源写（与 ai:saveKey / ai:clearKey 同一口径，那两个注释里就写着"会连带改真源"）
+    wrapWrite<AiConfigState>(() => saveAiConfig(requireGateway(), payload)),
   );
 
   // AI 总开关（A4）：翻转后回读配置——状态由主进程持有，渲染层只显示事实、不当事实源
@@ -670,7 +671,9 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(CHANNELS.gitRollback, (_event, payload: GitRollbackPayload) =>
-    wrap<GitRollbackResultPayload>(() => gitRollback(requireGateway(), payload.oid)),
+    // 回滚会把工作区的 md/yaml 整体落回旧提交——这是**真源改写**，与 snapshot:restore 同一类，
+    // 必须走 wrapWrite 让索引刷新、一致性结论置脏（挂在只读 wrap 上会让面板继续显示回滚前的世界）
+    wrapWrite<GitRollbackResultPayload>(() => gitRollback(requireGateway(), payload.oid)),
   );
 
   /* ---------- 五层记忆（M3 / T3-5） ---------- */

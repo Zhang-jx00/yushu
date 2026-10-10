@@ -20,6 +20,7 @@ import {
   parseRoutingConfig,
   planChannels,
   planDowngrade,
+  redactPlaintextSecrets,
   resolveCapabilities,
   resolveRoute,
   serializeLlmConfig,
@@ -328,7 +329,13 @@ export async function saveAiConfig(
   // T3-1：覆盖 v1 配置前自动备份（幂等——备份已存在则跳过；备份失败不阻断保存但留下日志线索）
   const current = await gateway.readDoc(LLM_CONFIG_PATH).catch(() => null);
   if (current && detectLlmConfigVersion(current.content) < LLM_FORMAT_VERSION) {
-    await gateway.writeDoc(LLM_CONFIG_BACKUP_PATH, current.content).catch((err) => {
+    // R59 ②：**先脱敏再落盘**。老配置里带明文 api_key 时，逐字备份等于把同一把钥匙复制到
+    // 第二个 Git 跟踪文件里——主文件按 K12 清了，副本还在。备份要保的是结构可回滚，不是密钥可回滚。
+    const { text, redacted } = redactPlaintextSecrets(current.content);
+    if (redacted > 0) {
+      console.warn(`[ai] v1 配置含 ${redacted} 处明文密钥，迁移备份已脱敏（密钥需重新录入）`);
+    }
+    await gateway.writeDoc(LLM_CONFIG_BACKUP_PATH, text).catch((err) => {
       const code = (err as { code?: string }).code;
       if (code !== "E_DOC_CONFLICT") {
         console.warn(`[ai] v1 配置备份写入失败（${LLM_CONFIG_BACKUP_PATH}）：${String(err)}`);

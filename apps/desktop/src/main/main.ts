@@ -1128,7 +1128,11 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         });
         const staged = await api.git.state();
         const c2 = await api.git.commit({ message: "e2e Git 二次改动" });
+        // 先把一致性缓存洗干净（前面那次 chapter.write 已置脏），**再**回滚——
+        // 否则"回滚后重算了"这句话会被上一次写操作白送，断言根本不可能红（R59 ①）
+        await api.consistency.check({ timing: "post-save" });
         const rb = await api.git.rollback({ oid: c1.oid });
+        const consAfterRollback = await api.consistency.check({ timing: "post-save" });
         const after = await api.chapter.read(draft.chapterPath);
         const g3 = await api.git.state();
         return {
@@ -1139,6 +1143,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
           stagedChapter: staged.changes.some((c) => c.path === draft.chapterPath && c.state === "modified"),
           commit2Files: c2.files,
           rollbackRestored: rb.restored,
+          // 回滚是真源写：缓存刚洗干净后就该被它再次置脏（走只读 wrap 时这条必红）
+          rollbackDirtiedConsistency: consAfterRollback.ranAgain,
           reverted: !after.body.includes("云隐谷") && after.body === baseline.body,
           preRestore: rb.preRestoreId !== null,
           headUnchanged: g3.head === c2.shortOid,
@@ -1978,6 +1984,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         stagedChapter?: boolean;
         commit2Files?: number;
         rollbackRestored?: number;
+        rollbackDirtiedConsistency?: boolean;
         reverted?: boolean;
         preRestore?: boolean;
         headUnchanged?: boolean;
@@ -2984,6 +2991,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       [`result.git.stagedChapter === true`, result.git.stagedChapter === true],
       [`(result.git.commit2Files ?? 0) >= 1`, (result.git.commit2Files ?? 0) >= 1],
       [`(result.git.rollbackRestored ?? 0) >= 1`, (result.git.rollbackRestored ?? 0) >= 1],
+      [`result.git.rollbackDirtiedConsistency`, result.git.rollbackDirtiedConsistency === true],
       [`result.git.reverted === true`, result.git.reverted === true],
       [`result.git.preRestore === true`, result.git.preRestore === true],
       [`result.git.headUnchanged === true`, result.git.headUnchanged === true],
