@@ -9,7 +9,7 @@ import type { AxisValues } from "../shared/ipc.js";
 import { attachProject } from "./ipc.js";
 import { repoRoot } from "./paths.js";
 import { createProject } from "./project-ops.js";
-import { MAX_STEP_ATTEMPTS, summarizeAttempts, type StepAttempt } from "./walkthrough-attempts.js";
+import { MAX_STEP_ATTEMPTS, stepBodySyntaxError, summarizeAttempts, type StepAttempt } from "./walkthrough-attempts.js";
 
 /**
  * M1 验收场景（docs/06 §二）的 UI 自动化预演（`--ui-walkthrough[=<目录>]`）。
@@ -111,6 +111,11 @@ const EXTRACT_MOCK_CANDIDATES = {
 };
 
 /** 本地 mock OpenAI（Chat Completions + SSE）：预演不依赖外网与真实 key（与 e2e 同款） */
+/** T4-4 AI 采样 mock：采样请求返回固定结论（只指认给定的序号，越界与编造一律不给） */
+const AUDIT_MOCK_ISSUES = {
+  issues: [{ index: 0, kind: "hallucination", why: "该断言在设定库与出处记忆中均无支撑" }],
+};
+
 export async function startMockOpenAI(
   delayMs = 2,
   options: MockOpenAIOptions = {},
@@ -138,7 +143,9 @@ export async function startMockOpenAI(
         // T3-10：设定抽取请求（系统提示含任务契约 id）返回候选 JSON；其余返回固定文本（降级探针口径）
         const content = raw.includes("yushu.extract/entity_extraction")
           ? JSON.stringify(EXTRACT_MOCK_CANDIDATES)
-          : "非流式一次性回复";
+          : raw.includes("yushu.audit/consistency-sampling")
+            ? JSON.stringify(AUDIT_MOCK_ISSUES)
+            : "非流式一次性回复";
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
@@ -274,6 +281,13 @@ export async function prepareProjectForDir(options: PrepareProjectOptions): Prom
  * 必须在窗口加载前完成——renderer 挂载时会调 project:current 并自动进入项目页。
  */
 export async function prepareWalkthrough(dirArg: string): Promise<WalkthroughContext> {
+  // 开跑前先解析一遍每段步骤脚本（R58）：本轮 step44 连烧三个纯解析期 bug（少括号、脏正则后缀），
+  // 每个都要跑满一整轮 70 秒才暴露。语法错挡在 0 秒，语义 bug 仍靠 note 里的原始值留证。
+  const syntaxErrors = STEPS.map((def) => stepBodySyntaxError(def.step, def.body)).filter((m) => m !== null);
+  if (syntaxErrors.length > 0) {
+    throw new Error(`[walkthrough] 步骤脚本编译不过，已中止（不创建项目、不起 mock）：\n  ${syntaxErrors.join("\n  ")}`);
+  }
+
   const dir = dirArg === "" ? await fs.mkdtemp(join(tmpdir(), "yushu-walkthrough-")) : dirArg;
   const mock = await startMockOpenAI();
 
@@ -987,7 +1001,14 @@ const STEPS: StepDef[] = [
         sel.addRange(range);
         document.execCommand('insertText', false, text);
       };
-      const press = (key) => tiptap.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      // press 每次重新取元素：tiptap 宿主会随形态切换被卸载重挂载，闭包捕获旧节点会让按键打到失效元素上
+      // （step21 长期偶发抖动的根因就在这里——typeText 早就按这条写法改过，press 漏了）
+      const press = (key) => {
+        const el = document.querySelector('.tiptap-host .tiptap');
+        if (!el) return false;
+        el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+        return true;
+      };
       // 计数口径：完整提及 @测试设定N 出现次数；atCount = 全文 @ 总数——
       // 「插入成功」与「查询词无残留」合并为 atCount === fullCount（所有 @ 都属于完整提及）
       const fullCount = () => (String(tiptap.textContent).match(/@测试设定\d/g) || []).length;
@@ -2279,6 +2300,49 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 44,
+    title: "规则页：全书体检 + AI 采样核验（结论并入同表、章节片段不给卡跳转）（M4/T4-4，R58）",
+    file: "step44-ai-audit.png",
+    body: String.raw`
+      await tab('规则');
+      const aiBtn = await waitFor(() => document.querySelector('.consistency-ai'), 12000);
+      if (!aiBtn) return { ok: false, note: '找不到「全书体检 + AI 采样核验」按钮：' + pageText() };
+      aiBtn.click();
+      const aiLine = await waitFor(() => {
+        const el = document.querySelector('.consistency-ai-line');
+        const text = el ? String(el.textContent).replace(/\s+/g, " ") : "";
+        return text.includes('AI 采样：已核验') ? text : null;
+      }, 25000);
+      if (!aiLine) {
+        const el = document.querySelector('.consistency-ai-line');
+        return { ok: false, note: 'AI 采样汇总行未达预期；当前行="' + (el ? String(el.textContent).replace(/\s+/g, ' ') : '(元素不存在)') + '"' };
+      }
+      const rows = [...document.querySelectorAll('.consistency-table tbody tr')];
+      const aiRow = rows.find((tr) => String(tr.textContent).includes('ai-sampled-hallucination'));
+      // 规则列取**单元格文本**而不是整行：级别紧挨规则 id（"errorref-dangling"），
+      // 用 \b 在行文本上匹配会因为两侧都是词字符而根本匹配不上
+      const ruleIds = rows.map((tr) => String([...tr.querySelectorAll('td')][1]?.textContent || '').trim());
+      const structRows = ruleIds.filter((id) => id === 'ref-dangling' || id === 'layer-order-violation' || id === 'ref-cycle').length;
+      const packRows = ruleIds.filter((id) => id === 'power-no-regress').length;
+      const cells = aiRow ? [...aiRow.querySelectorAll("td")] : [];
+      const aiOrigin = cells.length > 5 ? String(cells[5].textContent || '').trim() : '(无该行)';
+      // 章节正文的片段不能走「打开设定卡」那一跳：它会奔世界观档案去找一张不存在的卡
+      const aiJump = aiRow ? !!aiRow.querySelector('.consistency-jump') : true;
+      const cellText = cells.length > 6 ? String(cells[6].textContent || '').trim() : '';
+      const rejected = Number((aiLine.match(/丢弃 (\d+) 条/) || [])[1] ?? -1);
+      const sampled = Number((aiLine.match(/已核验 (\d+) 段/) || [])[1] ?? -1);
+      return {
+        ok: aiRow !== undefined && sampled >= 1 && rejected === 0 && aiOrigin.includes("AI 采样") &&
+          aiJump === false && cellText.includes("正文片段") && structRows >= 1 && packRows >= 1,
+        note: "汇总=" + aiLine.slice(0, 120) + "；采样段=" + sampled + "；丢弃=" + rejected +
+          "；AI 行存在=" + (aiRow !== undefined) + "；出处=" + aiOrigin.slice(0, 40) +
+          "；该行给卡跳转=" + aiJump + "；原文列=" + cellText.slice(0, 24) +
+          "；结构类行=" + structRows + "；包规则行=" + packRows + "；全部行=" + rows.length +
+          "；规则列=" + ruleIds.join(","),
+      };
+    `,
+  },
 ];
 
 /**
@@ -2406,7 +2470,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-43）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-44）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

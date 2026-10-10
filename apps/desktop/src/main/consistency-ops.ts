@@ -19,6 +19,7 @@ import type {
 } from "../shared/ipc.js";
 import { gatewayReader } from "./index-ops.js";
 import { evaluatePackRules } from "./rule-findings.js";
+import { runAiAudit, type AiAuditResult } from "./ai-audit.js";
 import { projectPackIds } from "./rule-ops.js";
 import type { ProjectGateway } from "./file-gateway.js";
 
@@ -98,6 +99,35 @@ async function computeReport(
 ): Promise<ConsistencyReportPayload> {
   const structure = await checkStructureFromSources(gatewayReader(gateway));
   const scope = resolveScope(structure.entities, payload.entityIds, payload.scopeText);
+  // AI 采样只在全书体检这一档跑，且必须作者显式要求（一次采样 = 一次真金白银的调用）
+  const wantAi = payload.aiAudit === true && timing === "manual";
+  const aiAudit = wantAi
+    ? await runAiAudit(gateway, {})
+    : {
+        ran: false,
+        reason:
+          timing === "post-generate"
+            ? "轻校验路径不跑采样（采纳时作者要的是即时的结构结论，采样另计）"
+            : payload.aiAudit === true
+              ? "只有「全书体检」会跑采样（当前时机不执行）"
+              : "未请求（点「AI 采样核验」才会跑）",
+        provider: "",
+        model: "",
+        sampled: 0,
+        rejected: 0,
+        findings: [],
+      };
+  const aiFindings = wantAi && aiAudit.ran
+    ? aiAudit.findings.map((finding) => ({
+        rule: finding.rule,
+        severity: finding.severity,
+        subject: finding.subject,
+        evidence: finding.evidence,
+        fix: finding.fix,
+        origin: finding.origin,
+        ...(finding.span ? { span: finding.span } : {}),
+      }))
+    : [];
   // 派系包规则拿项目数据求值（战力类）：轻校验有范围时只读范围内那些卡
   const packRun = await evaluatePackRules(gateway, {
     packIds: await projectPackIds(gateway),
@@ -115,7 +145,16 @@ async function computeReport(
   }));
   // 豁免清单只认**本次真的参与求值的那些 id**（内置三条 + 包里的规则 id）：
   // 仍然不许豁免一条不存在的规则，但包规则接入后不能再被这句挡在门外
-  const knownRuleIds = [...STRUCTURE_RULE_IDS, ...packRun.evaluated, ...packRun.notEvaluated.map((item) => item.id)];
+  const knownRuleIds = [
+    ...STRUCTURE_RULE_IDS,
+    ...packRun.evaluated,
+    ...packRun.notEvaluated.map((item) => item.id),
+    // AI 采样的结论也要能被豁免（四个类别固定，不随模型输出漂移）
+    "ai-sampled-hallucination",
+    "ai-sampled-setting-drift",
+    "ai-sampled-power-jump",
+    "ai-sampled-name-drift",
+  ];
 
   let allow: ConsistencyAllowList | null = null;
   let allowExists = false;
@@ -135,7 +174,7 @@ async function computeReport(
   const cardTexts: Record<string, string> = {};
   const filePathById = new Map(structure.entities.map((entity) => [entity.id, entity.filePath]));
   const needed = new Set<string>();
-  for (const finding of [...structure.findings, ...packFindings]) {
+  for (const finding of [...structure.findings, ...packFindings, ...aiFindings]) {
     const file = filePathById.get(finding.subject);
     if (file && cardTexts[file] === undefined) needed.add(file);
   }
@@ -145,7 +184,7 @@ async function computeReport(
   }
 
   const report = buildConsistencyReport({
-    findings: [...structure.findings, ...packFindings],
+    findings: [...structure.findings, ...packFindings, ...aiFindings],
     entities: structure.entities,
     cardTexts,
     allow,
@@ -176,6 +215,14 @@ async function computeReport(
     outOfScope: structure.outOfScope.map((item) => ({ ...item })),
     skipped: { ...structure.skipped },
     pack: { evaluated: packRun.evaluated, notEvaluated: packRun.notEvaluated, errors: packRun.errors },
+    aiAudit: {
+      ran: aiAudit.ran,
+      reason: aiAudit.reason,
+      provider: aiAudit.provider,
+      model: aiAudit.model,
+      sampled: aiAudit.sampled,
+      rejected: aiAudit.rejected,
+    },
     counted: {
       findings: structure.findings.length,
       entries: entries.length,

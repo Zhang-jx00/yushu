@@ -11,6 +11,8 @@ import {
   writeCardDoc,
 } from "../src/main/project-ops.js";
 import { isConsistencyStale, markConsistencyStale, postAdoptAudit, runConsistencyCheck } from "../src/main/consistency-ops.js";
+import { setAiEnabled, saveAiConfig } from "../src/main/ai-ops.js";
+import { closeAllMocks, startReplyMock } from "./helpers/mock-chat.js";
 
 /**
  * 一致性体检的桌面接入（M4 / T4-4 三态时机 + T4-3 报告呈现，R54）。
@@ -346,5 +348,70 @@ describe("体检报告并入派系包规则（R57）", () => {
     const report = await runConsistencyCheck(gateway, { timing: "manual" });
     expect(report.pack.errors.length).toBe(1);
     expect(report.pack.errors[0]).toContain("char-bad");
+  });
+});
+
+/**
+ * AI 采样结论并入同一份体检报告（R58）。
+ *
+ * 两条口径：① **默认不跑**——采样要烧 token，不能让"点一下全书体检"悄悄花钱；
+ * ② 跑不成（AI 关闭等）只报告 `aiAudit.ran:false + reason`，**结构结论一条都不能少**。
+ */
+describe("全书体检并入 AI 采样结论（R58）", () => {
+  it("默认不请求 AI：aiAudit.ran=false 且写明未请求", async () => {
+    const report = await runConsistencyCheck(gateway, { timing: "manual" });
+    expect(report.aiAudit.ran).toBe(false);
+    expect(report.aiAudit.reason).toContain("未请求");
+  });
+
+  it("轻校验绝不顺手跑采样（post-generate 是采纳路径上的同步动作）", async () => {
+    const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: "林渊", aiAudit: true });
+    expect(report.aiAudit.ran).toBe(false);
+    expect(report.aiAudit.reason).toContain("不跑采样");
+  });
+
+  it("请求采样但 AI 关闭：结构结论照旧，aiAudit 给出原因", async () => {
+    setAiEnabled(false);
+    const report = await runConsistencyCheck(gateway, { timing: "manual", aiAudit: true });
+    expect(report.entries.map((entry) => entry.rule)).toContain("ref-dangling");
+    expect(report.aiAudit.ran).toBe(false);
+    expect(report.aiAudit.reason).toContain("AI");
+  });
+
+  it("请求采样且模型给出结论：并入同一张表，带出处与章节区间", async () => {
+    setAiEnabled(true);
+    const baseUrl = await startReplyMock(
+      JSON.stringify({ issues: [{ index: 0, kind: "hallucination", why: "该断言在设定库中无支撑" }] }),
+    );
+    await saveAiConfig(gateway, {
+      providers: [
+        {
+          id: "mock",
+          kind: "local",
+          protocol: "openai_chat",
+          base_url: baseUrl,
+          models: [{ name: "mock-model", tier: "flagship", limits: { context: 32768, max_output: 2048 } }],
+        },
+      ] as never,
+    });
+    const before = await gateway.readDoc(chapterPath);
+    const splitAt = before!.content.indexOf("\n---\n") + 5;
+    await gateway.writeDoc(
+      chapterPath,
+      before!.content.slice(0, splitAt) + "\n林渊按剑立在城口，那枚玉佩出自皇室，夜色漫过整座边城。" + before!.content.slice(splitAt),
+      before!.hash,
+    );
+    const report = await runConsistencyCheck(gateway, { timing: "manual", aiAudit: true });
+    expect(report.aiAudit.ran).toBe(true);
+    expect(report.aiAudit.sampled).toBeGreaterThan(0);
+    const rules = report.entries.map((entry) => entry.rule);
+    expect(rules).toContain("ref-dangling");
+    expect(rules).toContain("ai-sampled-hallucination");
+    const ai = report.entries.find((entry) => entry.rule === "ai-sampled-hallucination")!;
+    expect(ai.origin).toContain("AI 采样");
+    expect(ai.span?.file).toContain("chapters/");
+    expect(ai.span?.text).toContain("玉佩出自皇室");
+    await closeAllMocks();
+    setAiEnabled(false);
   });
 });

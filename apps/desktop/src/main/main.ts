@@ -1310,6 +1310,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       packEvaluated: "(未跑)",
       packSkipped: -1,
       packErrorNames: "(未跑)",
+      aiRan: false,
+      aiReason: "(未跑)",
+      aiSampled: -1,
+      aiRejected: -1,
+      aiRule: "(未跑)",
+      aiSpanTop: "(未跑)",
+      aiOrigin: "(未跑)",
+      aiNonAiEntries: -1,
+      aiPrevEntries: -1,
       staleAfterWrite: false,
       diskUnchanged: false,
       restoredOk: false,
@@ -1417,6 +1426,25 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         packSliceOk = packCardFile.content.slice(packEntry.span.start, packEntry.span.end).indexOf("combat_power: 80") >= 0;
       }
       const consAfter = await api.chapter.read(draft.chapterPath);
+      // AI 采样核验探针（M4/T4-4 的重规则那一半）：显式请求 + 时机 manual 才会真跑一次采样。
+      // 断言的重点不是"AI 报了啥"，而是三条口径：结论并进同一份报告、越界/白名单外要计数、
+      // 结构结论一条都不能因为多了 AI 环节而变少（AI 是附加，不是替换）。
+      const aiRun = await api.consistency.check({ timing: "manual", aiAudit: true });
+      const aiEntry = aiRun.entries.find((entry) => entry.rule.startsWith("ai-sampled-"));
+      const aiProbe = {
+        ran: aiRun.aiAudit.ran,
+        reason: aiRun.aiAudit.reason.slice(0, 60),
+        sampled: aiRun.aiAudit.sampled,
+        rejected: aiRun.aiAudit.rejected,
+        rule: aiEntry ? aiEntry.rule : "(无 AI 行)",
+        origin: aiEntry && aiEntry.origin ? aiEntry.origin.slice(0, 40) : "(无出处)",
+        spanTop: aiEntry && aiEntry.span ? aiEntry.span.file.split("/")[0] : "(无 span)",
+        origin: aiEntry && aiEntry.origin ? aiEntry.origin.slice(0, 40) : "(无出处)",
+        // 合并而不是替换：AI 那一轮的非 AI 结论数必须等于上一轮（结构 + 包规则）全量。
+        // 注意不能拿 counted.findings 比——它就是结构条数，两次恒等，等于写了条永真的断言。
+        nonAiEntries: aiRun.entries.filter((entry) => !entry.rule.startsWith("ai-sampled-")).length,
+        prevEntries: packCheck.entries.length,
+      };
       consProbe = {
         ok: true,
         manualTiming: manual.timing,
@@ -1445,6 +1473,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         packEvaluated: packCheck.pack.evaluated.join(","),
         packSkipped: packCheck.pack.notEvaluated.length,
         packErrorNames: packCheck.pack.errors.length > 0 ? "char-badlog-probe" : "(无错误点名)",
+        aiRan: aiProbe.ran,
+        aiReason: aiProbe.reason,
+        aiSampled: aiProbe.sampled,
+        aiRejected: aiProbe.rejected,
+        aiRule: aiProbe.rule,
+        aiSpanTop: aiProbe.spanTop,
+        aiOrigin: aiProbe.origin,
+        aiNonAiEntries: aiProbe.nonAiEntries,
+        aiPrevEntries: aiProbe.prevEntries,
         staleAfterWrite: staleBefore,
         diskUnchanged: consBefore.hash === consAfter.hash,
         restoredOk:
@@ -2099,6 +2136,15 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         packEvaluated: string;
         packSkipped: number;
         packErrorNames: string;
+        aiRan: boolean;
+        aiReason: string;
+        aiSampled: number;
+        aiRejected: number;
+        aiRule: string;
+        aiSpanTop: string;
+        aiOrigin: string;
+        aiNonAiEntries: number;
+        aiPrevEntries: number;
         staleAfterWrite: boolean;
         diskUnchanged: boolean;
         restoredOk: boolean;
@@ -3097,6 +3143,18 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       [`result.consistency.packSpanOk`, result.consistency.packSpanOk],
       [`result.consistency.packEvaluated === "power-no-regress"`, result.consistency.packEvaluated === "power-no-regress"],
       [`result.consistency.packSkipped === 5`, result.consistency.packSkipped === 5],
+      // R58 AI 采样核验：显式请求才跑、结论并入同一份报告、越界/白名单外单独计数、
+      // 章节片段的 span 落在 chapters/（不是卡文件）、且结构结论一条都不能因为多了 AI 环节而变少
+      [`result.consistency.aiRan`, result.consistency.aiRan],
+      [`result.consistency.aiReason === ""`, result.consistency.aiReason === ""],
+      [`result.consistency.aiSampled >= 1`, result.consistency.aiSampled >= 1],
+      [`result.consistency.aiRejected === 0`, result.consistency.aiRejected === 0],
+      [`result.consistency.aiRule === "ai-sampled-hallucination"`, result.consistency.aiRule === "ai-sampled-hallucination"],
+      [`result.consistency.aiSpanTop === "chapters"`, result.consistency.aiSpanTop === "chapters"],
+      [`result.consistency.aiOrigin.includes("AI 采样")`, result.consistency.aiOrigin.includes("AI 采样")],
+      [`result.consistency.aiNonAiEntries >= 1`, result.consistency.aiNonAiEntries >= 1],
+      [`result.consistency.aiNonAiEntries === result.consistency.aiPrevEntries`,
+        result.consistency.aiNonAiEntries === result.consistency.aiPrevEntries],
       [`result.consistency.packErrorNames === "char-badlog-probe"`, result.consistency.packErrorNames === "char-badlog-probe"],
       [`result.consistency.entriesAfterRestore === 0`, result.consistency.entriesAfterRestore === 0],
       // A2 任务路由（离线那一半）：旗舰端点失败 → 回落小模型端点出文；冷却跳过坏端点；一次动作一条记录
@@ -3157,7 +3215,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     const ok = unmet.length === 0;
     console.log(
       ok
-        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 密钥安全（加密保存后明文不落盘、真源只记 key_ref、后端不可用即拒存、含明文 llm.yaml 被 error 阻断，T3-14）→ 中文自查（别字与半角标点给候选、未确认不改稿、修复不写盘、繁简歧义须选定候选，T3-13）→ 任务路由回落与冷却（旗舰端点全程 503 时由小模型端点出文、第二次动作跳过冷却端点、一次动作只记一条 usage，A2 离线半）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
+        ? "[e2e] 通过：建项目 → 设定卡 → 大纲 → 草稿章节 → AI Provider v2 能力矩阵（v1 迁移 + 备份）→ 任务路由与 429 退避重试（T3-2）→ 能力降级为一次性返回与本地预设（T3-3/T3-4）→ AI 流式生成 → 采纳 → 五层记忆（摘要候选不入库 / AI 入库 rev0 / 人工修订 rev1 后 AI 覆盖被拒 / 事实出处链失效检出 / 跨项目泄漏拒绝，T3-5）→ 注入控制（trigger 命中 / manual 清单 / reveal_gate 门控 / 摘要常驻 + token 估算，T3-6）→ 上下文组装（固定槽位顺序 / 去重 / 小预算逐出 + 稳定前缀保留，T3-7）→ RAG 混合检索（向量 + bm25 双路 / RRF 融合 / 重排 top-6 / 出处 chapter_id + 区间 + hash 进 rag_chunks 槽位，T3-8）→ 上下文预览器（逐条「槽位 / 来源 / Token / 命中键 / 截断」+ 可复现快照导出（指纹一致），T3-9）→ 设定抽取（JSON Schema 契约 + 后校验 + 三分类（新增/补充/冲突）；候选一律 candidate；仅新增可采纳入库、冲突被拒，T3-10）→ 写作 UX（多候选独立生成 / 句级 diff 与局部采纳 / 拒绝原因记录 / 半价通道规划与记账，T3-11）→ Token 与成本（usage 实报与发送前估算双口径落盘、按任务/模型可分解、折算金额与预估vs实付偏差、稳定前缀置头与缓存断点核对，T3-12）→ 密钥安全（加密保存后明文不落盘、真源只记 key_ref、后端不可用即拒存、含明文 llm.yaml 被 error 阻断，T3-14）→ 中文自查（别字与半角标点给候选、未确认不改稿、修复不写盘、繁简歧义须选定候选，T3-13）→ 任务路由回落与冷却（旗舰端点全程 503 时由小模型端点出文、第二次动作跳过冷却端点、一次动作只记一条 usage，A2 离线半）→ 一致性体检三态与报告（区间可切片 / 缓存复用 / 坏豁免清单不静默放行，T4-3/T4-4）→ 采纳后即时轻校验（命中范围与范围外计数，T4-4）→ 派系包规则拿项目数据求值（战力崩塌结论 + 未参与规则点名 + 坏台账报错，T4-2）→ 全书体检 AI 采样核验（结论并入同表 / 越界与白名单外计数 / 章节片段不给卡跳转，T4-4）→ 编辑器写正文（字数同步）→ 导出对账 → 敏感词自查 → 干净剪贴板 → 索引重建与检索 → 索引增量与自愈 → 保存即增量（自动刷新）→ 命名生成 → 冲突拒绝与旁路文件 → 切页落盘与关闭前 flush（防丢稿）→ 崩溃恢复（编辑日志 → 恢复面板 → 落盘）→ 恢复边界（撤销回卷 / 失效条目）→ 本地快照（内容寻址 → 整体回滚）→ 三方自动合并（外部改动 + 本地续写，无人工）→ 码字统计（净增 / 有效字数 / 节奏曲线）→ 破坏前快照（删卷 / 删章 / 采纳替换）→ 会话异常退出检测（pid 守卫 / 心跳 / 正常关闭不误报） 全链路成功"
         : "[e2e] 失败：未满足断言 " + unmet.length + " 条 → " + unmet.join(" ｜ "),
     );
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);

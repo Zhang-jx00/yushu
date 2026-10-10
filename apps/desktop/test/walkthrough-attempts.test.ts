@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeAttempts, type StepAttempt } from "../src/main/walkthrough-attempts.js";
+import { stepBodySyntaxError, summarizeAttempts, type StepAttempt } from "../src/main/walkthrough-attempts.js";
 
 /**
  * 预演步骤重试的汇总口径（R55）。
@@ -45,5 +45,35 @@ describe("预演步骤重试汇总", () => {
     const r = summarizeAttempts([]);
     expect(r.ok).toBe(false);
     expect(r.detail).toContain("无执行记录");
+  });
+});
+
+/**
+ * 步骤脚本的语法自检（R58）。
+ *
+ * 起因很实在：step44 的三个 bug（少一个 `)`、正则写成 `/.../\.`、`\s+` 归一化把空格吃掉）
+ * 每个都要跑满一整轮 70 秒预演才暴露出来，而它们全是**纯解析期**错误——根本不需要窗口、
+ * 不需要项目、不需要等 DOM。开跑前把每段脚本按真实包装器解析一遍，就能把它们挡在 0 秒处。
+ *
+ * 边界说清楚：自检只挡解析期错误。`match(/丢弃 \d+ 条/)[1]`（少了捕获组）语法完全合法，
+ * 运行期返回 undefined，这类只能靠断言里把原始值打出来（note 里就是 `-1`）事后看。
+ */
+describe("预演步骤脚本语法自检", () => {
+  it("合法脚本返回 null（不误伤）", () => {
+    expect(stepBodySyntaxError(1, "await tab('规则'); return { ok: true, note: '行' };")).toBeNull();
+  });
+
+  it("少一个右括号：点名步骤号，不等 70 秒预演才发现", () => {
+    const msg = stepBodySyntaxError(44, "const i = (a ?? -1;");
+    expect(msg).not.toBeNull();
+    expect(msg).toContain("step44");
+  });
+
+  it("正则后面跟脏字符（/.../\\.）也是解析期错误", () => {
+    expect(stepBodySyntaxError(44, "const re = /已核验 \\d+ 段/\\.;")).not.toBeNull();
+  });
+
+  it("async 包装外的 await 不会误判成语法错（脚本体本来就在 async 里）", () => {
+    expect(stepBodySyntaxError(43, "const v = await waitFor(() => 1, 100); return { ok: v === 1, note: '' };")).toBeNull();
   });
 });

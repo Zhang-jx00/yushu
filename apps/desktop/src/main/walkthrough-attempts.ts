@@ -1,9 +1,26 @@
+import { Script } from "node:vm";
+
 /** 一次步骤执行的结果（ok + 可审计的说明） */
 export interface StepAttempt {
   ok: boolean;
   detail: string;
 }
 
+/**
+ * 步骤脚本的解析期自检（R58）：只编译、不执行，所以不需要窗口、不需要项目、零耗时。
+ *
+ * 只挡解析期错误（少括号、脏正则后缀、关键字用错位置）。语义 bug——比如
+ * `match(/丢弃 \d+ 条/)[1]` 少了捕获组、或 `\s+` 归一化把要匹配的空格吃掉——
+ * 语法完全合法，挡不住，只能靠断言把原始值写进 note 留证。
+ */
+export function stepBodySyntaxError(step: number, body: string): string | null {
+  try {
+    new Script(`(async () => {\n${body}\n})()`);
+    return null;
+  } catch (err) {
+    return `step${step} 脚本语法错：${err instanceof Error ? err.message : String(err)}`;
+  }
+}
 /** 单个步骤最多执行几次（1 次正常 + 1 次重试）。再多就是"重跑到好看"，不是可审计的重试。 */
 export const MAX_STEP_ATTEMPTS = 2;
 

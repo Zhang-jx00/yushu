@@ -241,8 +241,16 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
           >
             取最近结果
           </button>
+          <button
+            className="btn consistency-ai"
+            onClick={() => void runConsistency({ timing: "manual", aiAudit: true })}
+            disabled={consistencyBusy}
+          >
+            全书体检 + AI 采样核验
+          </button>
           <span className="muted consistency-hint">
             保存正文或改卡后结论即过期；「取最近结果」在未过期时复用缓存，不打断输入。
+            AI 采样会真调用模型并按任务记账（默认不跑）。
           </span>
         </div>
         {consistencyError && <p className="error consistency-error">体检失败：{consistencyError}</p>}
@@ -279,6 +287,15 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
             {consistency.pack.errors.length > 0 && (
               <p className="warn consistency-pack-errors">{consistency.pack.errors.join("；")}</p>
             )}
+            {/* AI 采样这次跑没跑、跑成什么样子，必须写在明面上 */}
+            <p className="muted consistency-ai-line">
+              AI 采样：
+              {consistency.aiAudit.ran
+                ? `已核验 ${consistency.aiAudit.sampled} 段（${consistency.aiAudit.provider}/${consistency.aiAudit.model}）· 结论 ${
+                    consistency.entries.filter((entry) => entry.rule.startsWith("ai-sampled-")).length
+                  } 条 · 丢弃 ${consistency.aiAudit.rejected} 条（越界或白名单外）`
+                : `未跑（${consistency.aiAudit.reason}）`}
+            </p>
             {consistency.entries.length === 0 ? (
               <p className="muted consistency-clean">本次没有一致性结论（结构类 + 已求值的包规则；不代表未纳入范围的项也查过）。</p>
             ) : (
@@ -309,7 +326,7 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
                       <td>{entry.fix}</td>
                       <td className="muted">{entry.origin ?? "内置结构规则"}</td>
                       <td>
-                        {entry.span ? (
+                        {entry.span && entry.span.file.startsWith("world/cards/") ? (
                           <button
                             className="btn consistency-jump"
                             onClick={() => onOpenCard?.(entry.span!.file)}
@@ -317,7 +334,7 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
                             {entry.span.file.split("/").pop()}#{entry.span.start}
                           </button>
                         ) : (
-                          <span className="muted">（无原文区间）</span>
+                          <span className="muted">{entry.span ? "正文片段（在编辑器里定位）" : "（无原文区间）"}</span>
                         )}
                       </td>
                     </tr>

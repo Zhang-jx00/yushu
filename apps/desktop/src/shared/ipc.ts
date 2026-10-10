@@ -971,6 +971,11 @@ export interface ConsistencyCheckPayload {
    * 与 entityIds 同时给出时以 entityIds 为准（调用方明确知道的比猜的可靠）。
    */
   scopeText?: string;
+  /**
+   * 是否顺带跑一次 AI 采样核验（M4/T4-4 的"重规则 + AI 采样"，R58）。
+   * 只有 `manual`（全书体检）会执行：采样要烧 token，不能让一次保存或一次采纳悄悄花钱。
+   */
+  aiAudit?: boolean;
 }
 
 export interface ConsistencyReportPayload {
@@ -987,6 +992,15 @@ export interface ConsistencyReportPayload {
   refs: number;
   /** 本次轻校验实际生效的实体范围（由 entityIds 或 scopeText 的提及解析得出） */
   scopeIds: string[];
+  /** AI 采样核验这次跑了没有（未跑也要给原因——静默省略会被读成"跑了且没问题"） */
+  aiAudit: {
+    ran: boolean;
+    reason: string;
+    provider: string;
+    model: string;
+    sampled: number;
+    rejected: number;
+  };
   entries: ConsistencyEntryPayload[];
   suppressed: ConsistencyEntryPayload[];
   unusedAllow: string[];
