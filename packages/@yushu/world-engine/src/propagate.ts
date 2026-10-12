@@ -20,6 +20,12 @@ import type { IndexEntityRow, IndexRefRow } from "./index-input.js";
 export interface PropagateChange {
   entity: string;
   field: string;
+  /**
+   * 改名类改动的新值（仅 `field === "id"` 时有意义）。
+   * 写回那一步只认这一种机械可确定的编辑，所以这里必须把它带在提案里，
+   * 而不是等写回时再让调用方补一个可能已经过时的值。
+   */
+  to?: string;
 }
 
 export interface PropagateInput {
@@ -54,7 +60,8 @@ export interface ImpactRow {
 export interface Proposal {
   proposalId: string;
   change: PropagateChange;
-  status: "awaiting_confirmation" | "blocked";
+  /** applied = 已把已接受的条目写回真源（R62）；写回后不再允许重复应用 */
+  status: "awaiting_confirmation" | "blocked" | "applied";
   impact: ImpactRow[];
   /** 深度封顶：frontier = 被砍掉的下一层节点，count = 其条数 */
   truncated: { frontier: string[]; count: number } | null;

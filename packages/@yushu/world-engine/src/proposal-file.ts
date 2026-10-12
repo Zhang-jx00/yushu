@@ -21,6 +21,14 @@ export interface ProposalFile {
   /** 逐条决策：条目下标 → accept/reject/pending。没表态的条目不在这里 */
   decisions: Record<string, ProposalDecision>;
   createdAt: string;
+  /** 已写回真源的条目下标（apply 之后才有） */
+  applied: number[];
+  /**
+   * 生成提案那一刻每张受影响卡的 content hash（实体 id → sha256）。
+   * 写回时逐张比对：作者从看完提案到点「写回」之间，那张卡可能已被手改或被回滚改过。
+   * 不记这份基线，baseHash 只能在写回瞬间现读现比——自己跟自己比永远一致，等于没有并发检测（R62 实撞）。
+   */
+  sources: Record<string, string>;
   updatedAt: string;
 }
 
@@ -43,6 +51,8 @@ const TOP_KEYS = [
   "assumedRelations",
   "maxDepth",
   "decisions",
+  "applied",
+  "sources",
   "createdAt",
   "updatedAt",
 ];
@@ -102,9 +112,13 @@ export function parseProposalFile(path: string, text: string): ProposalFile {
   if (!isRecord(change) || typeof change["entity"] !== "string" || typeof change["field"] !== "string") {
     throw new ProposalError("E_PROPOSAL_PARSE", `${path} change 需要 entity 与 field 两个字符串`);
   }
+  const changeTo = change["to"];
+  if (!(changeTo === undefined || (typeof changeTo === "string" && changeTo.trim() !== ""))) {
+    throw new ProposalError("E_PROPOSAL_PARSE", `${path} change.to 给了就必须是非空字符串（空值会让写回不知道要改指哪里）`);
+  }
   const status = root["status"];
-  if (status !== "awaiting_confirmation" && status !== "blocked") {
-    throw new ProposalError("E_PROPOSAL_PARSE", `${path} status 只能是 awaiting_confirmation / blocked`);
+  if (status !== "awaiting_confirmation" && status !== "blocked" && status !== "applied") {
+    throw new ProposalError("E_PROPOSAL_PARSE", `${path} status 只能是 awaiting_confirmation / blocked / applied`);
   }
   const impactRaw = root["impact"];
   if (!Array.isArray(impactRaw)) {
@@ -149,10 +163,24 @@ export function parseProposalFile(path: string, text: string): ProposalFile {
     throw new ProposalError("E_PROPOSAL_PARSE", `${path} maxDepth 必须是 ≥1 的整数`);
   }
   const truncated = truncatedRaw as { frontier?: unknown[]; count?: unknown } | null;
+  const sourcesRaw = root["sources"];
+  if (!(sourcesRaw === undefined || (isRecord(sourcesRaw) && Object.values(sourcesRaw).every((v) => typeof v === "string" && v !== "")))) {
+    throw new ProposalError("E_PROPOSAL_PARSE", `${path} sources 必须是「实体 id → 非空 hash」的映射`);
+  }
+  const appliedRaw = root["applied"];
+  if (!(appliedRaw === undefined || (Array.isArray(appliedRaw) && appliedRaw.every((item) => Number.isInteger(item) && (item as number) >= 0)))) {
+    throw new ProposalError("E_PROPOSAL_PARSE", `${path} applied 必须是非负整数数组`);
+  }
   return {
+    applied: (appliedRaw as number[] | undefined) ?? [],
+    sources: { ...((sourcesRaw ?? {}) as Record<string, string>) },
     proposal: {
       proposalId,
-      change: { entity: change["entity"] as string, field: change["field"] as string },
+      change: {
+        entity: change["entity"] as string,
+        field: change["field"] as string,
+        ...(typeof changeTo === "string" ? { to: changeTo } : {}),
+      },
       status,
       impact,
       truncated: truncated === null ? null : {
@@ -183,6 +211,7 @@ export function serializeProposal(file: ProposalFile): string {
     "change:",
     `  entity: ${JSON.stringify(proposal.change.entity)}`,
     `  field: ${JSON.stringify(proposal.change.field)}`,
+    ...(proposal.change.to === undefined ? [] : [`  to: ${JSON.stringify(proposal.change.to)}`]),
     `assumedRelations:${list(proposal.assumedRelations)}`,
     `cycle:${proposal.cycle === null ? " null" : list(proposal.cycle)}`,
     `truncated:${proposal.truncated === null ? " null" : ""}`,
@@ -201,7 +230,14 @@ export function serializeProposal(file: ProposalFile): string {
     lines.push(`    weightAssumed: ${row.weightAssumed}`);
     lines.push(`    path:${row.path.map((item) => `\n      - ${JSON.stringify(item)}`).join("")}`);
   }
+  const sourceEntries = Object.entries(file.sources ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  lines.push(`sources:${sourceEntries.length === 0 ? " {}" : ""}`);
+  for (const [id, hash] of sourceEntries) {
+    lines.push(`  ${JSON.stringify(id)}: ${JSON.stringify(hash)}`);
+  }
   const decided = Object.entries(file.decisions).sort(([a], [b]) => Number(a) - Number(b));
+  lines.push(`applied:${file.applied.length === 0 ? " []" : file.applied.map((n) => `
+  - ${n}`).join("")}`);
   lines.push(`decisions:${decided.length === 0 ? " {}" : ""}`);
   for (const [index, decision] of decided) {
     lines.push(`  ${index}: ${decision}`);

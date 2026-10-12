@@ -46,7 +46,7 @@ const SNAPSHOT_EXCLUDE_PREFIXES = ["exports/"];
  */
 const SNAPSHOT_ID_RE = /^snap-\d{8}-\d{6}-[0-9a-f]{4,32}$/;
 const SNAPSHOT_BLOB_RE = /^[0-9a-f]{64}$/;
-const SNAPSHOT_REASONS = new Set<SnapshotReasonPayload>(["auto", "manual", "pre_restore", "pre_destructive"]);
+const SNAPSHOT_REASONS = new Set<SnapshotReasonPayload>(["auto", "manual", "pre_restore", "pre_destructive", "pre_apply_proposal"]);
 
 function isSafeRelPath(path: string): boolean {
   return (
