@@ -27,13 +27,80 @@
 
 ## 当前状态
 
-**M2 已收口（v0.2.0）**：桌面端可运行（Electron + React/TypeScript），已具备——双形态章节编辑器（CodeMirror 源码 / TipTap 富文本）与实体 `@` 提及、写作视图（专注 / 打字机 / 双栏）、起源工作台与三级大纲、AI 流式生成与整段采纳、TXT 导出与敏感词自查、中文全文检索索引（FTS5：增量重建、utilityProcess 解析、分片写入与进度流）、内容寻址快照与 Git 版本管理（一次批量改动 = 一次提交、可整体回滚）、崩溃恢复（编辑日志 / 真实强杀不丢稿实测）、码字统计（净增 / 有效字数 / 写作会话与真实速度）、性能门禁（synth-1m 百万字夹具 10/10 达标）。
+发布标签 `v0.2.0`：**M1 / M2 已收口，M3 收口 13/14，M4 进行中**。逐条账本见
+[docs/04-开发计划.md](docs/04-开发计划.md)，每轮的实测证据见
+[docs/06-M1验收与自查清单.md](docs/06-M1验收与自查清单.md)。
 
-路线图与验收证据见 [docs/04-开发计划.md](docs/04-开发计划.md) 与 [docs/06-M1验收与自查清单.md](docs/06-M1验收与自查清单.md)。
+| 里程碑 | 状态（按仓库账本实测，不是路线图承诺） |
+|---|---|
+| **M1 世界基座** | 已收口（机器自证 A1–A6；真人试跑按用户决策改由 `--ui-trial` 三画像自动化替代，材料包 `docs/07` 备着） |
+| **M2 编辑器与本地数据层** | 已收口（性能预算 10/10 达标，含 synth-1m 百万字实测） |
+| **M3 AI Provider 与上下文记忆** | 功能 13/14；T3-14 只剩「导出时剔除密钥」，等 M5 的导出链路。验收 5/6：**A3 成本偏差量化必须真实 provider 端点**，不在离线 mock 上声称达成 |
+| **M4 一致性引擎与规则** | T4-1 / T4-3 / T4-4 / T4-5 与验收 A1 / A2 / A4 / A6 已勾；语义规则八类目前只落了战力一类（T4-2），伏笔 / 时间线 / 图谱 / 编年史 / 爽点在 T4-6 ~ T4-10 |
+| **M5 地图与发布 / M6 插件生态** | 未开始 |
+
+**跑起来能做什么**：双形态章节编辑器（CodeMirror 源码 / TipTap 富文本）+ 实体 `@` 提及与候选菜单、
+专注 / 打字机 / 双栏写作视图、起源工作台与三级大纲、世界观档案、AI Provider v2 能力矩阵与任务路由与
+429 退避、流式生成与整段/句级采纳、多候选与拒绝原因、五层记忆（含出处链与跨项目隔离）、注入控制、
+RAG 混合检索、上下文组装与可复现快照、设定抽取候选化、Token 与成本双口径记账与预算护栏、
+密钥 `safeStorage` 加密（明文落盘直接阻断）、「关闭 AI」的主进程侧闸门、中文自查、
+一致性体检三态与报告（`span` / `evidence` / `fix` 三件套 + 豁免清单）、派系包规则求值、
+全书体检 AI 采样核验、影响传播提案与逐项决策后写回真源、TXT 导出与敏感词自查、
+中文全文检索（FTS5，utilityProcess 增量重建）、内容寻址快照与 Git 整体回滚、
+崩溃恢复（真实强杀不丢稿实测）、码字统计与写作会话。
+
+界面是单一 Electron 渲染层的 **11 个标签页**（起源工作台 / 三级大纲 / 编辑器 / 稿件总览 / AI 副驾 /
+记忆 / 规则 / 导出与自查 / 世界观档案 / 码字统计 / 项目文件），动效走 Premium 档位：
+一次性入场 + 克制反馈，展开容器按真实内容高度过渡。
+
+## 怎么跑起来
+
+```bash
+pnpm install
+pnpm --filter @yushu/desktop dev      # Electron + Vite 热更新
+```
+
+## 怎么验（四连门禁，缺一项不算完成）
+
+```bash
+pnpm test                # 单元/集成测试：892 例 / 89 文件
+pnpm typecheck           # 11 个包 + 2 个应用零错误（内含全量构建）
+pnpm --filter @yushu/desktop e2e     # 离线 mock LLM 的端到端全链路，逐条具名断言
+pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 47 步 UI 预演 + 逐步截图取证
+```
+
+另有 `kill-test`（强杀进程不丢稿实测）与 `perf-test`（百万字性能实测）两个专项探针。
+
+> **关于 CI**：本仓库**目前没有 CI 流水线**。上述四项每轮在本地实跑，数字与结论写进 `docs/06`。
+> M4 的退出条件里包含「规则回归集进 CI」，所以这条空缺是**已知未办**、不是被忽略——
+> 我们不用徽章冒充验证。
+
+## 仓库结构
+
+```
+apps/desktop      Electron 主进程 + preload + React 渲染层（11 个标签页）
+apps/cli          无头命令行：索引重建 / 状态 / 检索
+packages/@yushu/* 引擎层：core · schema · world-engine · genre-engine · llm · memory · search · text · export
+packs/            内置派系包（当前 1 个：玄幻-系统）
+docs/             需求总纲 / 竞品分析 / 技术架构 / 开发计划与账本 / 流派总表 / 验收清单 / 真人试跑材料包 / 交接文档 / ADR
+```
 
 ## 技术基线
 
-Electron + React/TypeScript + TipTap / CodeMirror 6；Markdown 正文 + YAML 设定卡为真源，SQLite（FTS5 中文检索）为可重建索引（向量检索规划中）；OpenAI 兼容多模型接入主干（DeepSeek / 智谱 / Kimi / 百炼 / Ollama 等全兼容）；EPUB / DOCX 导出规划中。
+Electron 44 + React 19 + TypeScript（严格模式）+ TipTap / CodeMirror 6，pnpm workspace（11 包 + 2 应用）；
+Markdown 正文 + YAML 设定卡为真源，SQLite（FTS5 中文检索 + 向量表）为可重建派生索引；
+OpenAI 兼容多模型接入主干（DeepSeek / 智谱 / Kimi / 百炼 / Ollama 等），全程可离线、无遥测、无账号体系；
+EPUB / DOCX / PDF 导出管线（T5-4）与平台规则包（T4-12）尚未开始。
+
+## 五条不会妥协的红线
+
+1. **Markdown/YAML 是唯一真源**；SQLite 与 `.yushu/` 都是派生物，删掉可重建。
+2. **AI 输出一律候选化**——未经作者确认不写正文、不改设定；采纳必须显式。
+3. **密钥永不以明文落盘**：真源只记 `api_key_env` / `key_ref`，密文进 `.yushu/secrets.json`，该目录不入 Git、不入索引、不进快照。
+4. **派生层不能变成第二真源**：一致性结论、影响传播提案都落派生区，不写 `reports/`。
+5. **确定性优先**：排序走码点序（不用 `localeCompare`），同输入必得同输出。
+
+贡献前请读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全相关的实际实现与已知边界见 [SECURITY.md](SECURITY.md)。
 
 ---
 

@@ -1,0 +1,66 @@
+name: 缺陷报告
+description: 报告一个可复现的问题
+labels: ["type/bug", "status/triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请在本地优先的语境下描述问题：御书不上传稿件、不遥测，
+        所以**日志与截图里请给路径打码**，也不要粘贴真实 API Key 或稿件原文（见 SECURITY.md）。
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 现象
+      description: 发生了什么、期望是什么。一句话说清「哪一步」出问题。
+      placeholder: |
+        在「规则」页点「全书体检」后，一致性表里 AI 采样那一行的「原文」列是空的；
+        期望显示被核验片段的正文区间。
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / 提交
+      description: 应用内「项目文件」页可看到；或 `git rev-parse --short HEAD`
+      placeholder: v0.2.0 / 7605d43
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 从中途接手能跑通的最小步骤。请写明项目是新建的还是既有的。
+      placeholder: |
+        1. 新建项目（玄幻 × 系统流）
+        2. 建 5 张设定卡 + 1 章正文（含 power_log）
+        3. 「规则」页 →「全书体检」
+        4. 看 AI 采样那一行
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 相关派生物（可选）
+      description: |
+        可以贴 `.yushu/proposals/*.yaml`、`config/llm.yaml` 的**脱敏**片段（密钥字段改成 `<redacted>`）。
+        不要贴 `.yushu/secrets.json` 内容。
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交前自检
+      options:
+        - label: 我已阅读 CONTRIBUTING.md
+          required: true
+        - label: 本文不包含真实 API Key、稿件原文或未打码的个人路径
+          required: true
+        - label: 我在离线环境也复现过（或明确说明这是需要联网/AI 的问题）
+          required: false

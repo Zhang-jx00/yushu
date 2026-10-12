@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞（请勿公开细节）
+    url: https://github.com/Zhang-jx00/yushu/blob/main/SECURITY.md
+    about: 报告渠道、哪些内容不要贴进工单、以及当前尚未做到的安全项
+  - name: 贡献方式与验收口径
+    url: https://github.com/Zhang-jx00/yushu/blob/main/CONTRIBUTING.md
+    about: 四连门禁、提交约定、新断言必须先证明它能红
+  - name: 任务清单与路线图
+    url: https://github.com/Zhang-jx00/yushu/blob/main/ROADMAP.md
+    about: 想认领功能条目从这里开始（ROADMAP 只做定位，逐条任务与验收标准在 docs/04-开发计划.md）

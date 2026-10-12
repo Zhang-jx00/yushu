@@ -1,0 +1,25 @@
+御书 (Yushu)
+Copyright 2026 御书 项目作者与贡献者
+
+本项目以 Apache License 2.0 授权（见 `LICENSE`），内核许可意图与「派系包为数据、
+插件经稳定 API 交互」的分离口径见 `docs/04-开发计划.md` §11.1。
+
+本产品包含或依赖下列第三方组件，各自的许可见其上游分发件：
+
+  Electron                                    MIT
+  React / React DOM                           MIT
+  TipTap (@tiptap/react, @tiptap/starter-kit) MIT
+  CodeMirror 6 (@codemirror/*, codemirror)    MIT
+  yaml                                        ISC
+  isomorphic-git                              MIT
+  markdown-it                                 MIT
+  turndown                                    MIT
+  esbuild / Vite（构建期）                     MIT
+  Vitest（测试期）                             MIT
+  Node.js 内置 `node:sqlite`（SQLite 为公有领域）
+
+完整依赖与版本以 `pnpm-lock.yaml` 为准（含各包的传递依赖与其许可）。
+内置派系包 `packs/xuanhuan-xitong` 为**内容数据**，许可随包的 manifest `metadata.license`
+声明，默认 CC-BY-4.0；`wordlists/sensitive-basic.yaml` 为占位示例词表，不构成合规建议。
+
+本项目不使用、不包含任何强 copyleft（GPL/AGPL）组件作为内核依赖。

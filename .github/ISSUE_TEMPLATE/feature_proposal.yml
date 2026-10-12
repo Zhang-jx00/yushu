@@ -1,0 +1,51 @@
+name: 功能建议
+description: 提出新功能、改进或派系包/插件相关的能力请求
+labels: ["type/enhancement", "status/triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先看 [`docs/04-开发计划.md`](docs/04-开发计划.md) 与 [`ROADMAP.md`](ROADMAP.md)：
+        多数「想得到的功能」已经在账本里（M4 的伏笔/时间线/图谱、M5 的地图与工坊、M6 的插件生态）。
+        如果已存在，请在对应条目下留言而不是新开单。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 它解决写作者的什么问题
+      description: 从创作场景出发，不从功能清单出发。「我写长篇时遇到 X，现在只能 Y」。
+      placeholder: |
+        我在 80 万字后经常忘了某条法则的边界条件，现在只能靠全文搜索。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的做法
+      description: 界面在哪、数据落在哪（真源 Markdown/YAML 还是派生物）、是否需要 AI 参与
+    validations:
+      required: true
+  - type: dropdown
+    id: boundary
+    attributes:
+      label: 这条建议会不会触碰项目红线
+      description: 见 README「五条不会妥协的红线」与 docs/03
+      options:
+        - 不触碰
+        - 可能与「AI 输出一律候选化」有关
+        - 可能与「Markdown/YAML 唯一真源」有关
+        - 可能与「密钥/数据主权」有关
+        - 不确定
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你想过的替代方案
+      description: 包括「用别的工具做」——这有助于判断该不该做在本项目里
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交前自检
+      options:
+        - label: 我确认 docs/04 里没有同一条目（或有但口径不同）
+          required: true
