@@ -45,6 +45,20 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **伏笔全生命周期台账·引擎侧（第 65 轮，M4/T4-6 判定层，本项不勾选）**：新建 `@yushu/world-engine/foreshadow.ts`。
+  **真源** `world/foreshadow.yaml` 走**严格解析**（未知键 / 非法枚举 / 重复 id / 缺必填一律拒绝并点名到
+  `entries[i]（id）`）与**手写键序的确定性序列化**（库 `dump` 会随版本漂键序，而真源是给人看 diff 的）。
+  **`buildForeshadowBoard(ledger, {chapters, ...})` 纯判定**：`open` / `closed` 分桶、逾期章数、复查提示、
+  单章埋设过密、终局窗口内未回收升级为 error、红鲱鱼被"兑现"、`paid` 却无回收章、`abandoned` 却无理由、
+  预期回收早于埋设、章号引用不存在。三条口径各钉一组测试：① **合法终态不报缺陷**——红鲱鱼 + 放弃带理由时
+  `findings` 必须为空（负例夹具；把正当写法报成问题，作者就学会忽略整块看板）；② **报矛盾而不替作者改状态**；
+  ③ **默认不猜阈值**——"多少章没伏笔算干旱"缺省关闭，未经真实语料定标不默认生效（同 T4-11）。
+  章号定位复用 `powerLogChapterNo`，认不出返回 `null` 而不是 0（"无法判断"不等于"没有逾期"）。
+  为「回收标记」补 `Foreshadow.payoff_chapters?` 字段，理由写进 `docs/03 §5.3`。
+  **验证**：测试先写先看它红（20 例首跑全红），实现后 `pnpm test` **912/912（90 文件）**、`pnpm typecheck` TC=0；
+  **变异 4 次全部能红**（干旱阈值默认 `0→10` 恰好红在负例夹具那条并打印多出的 info / 去掉逾期计算 /
+  未知键改静默忽略 / 行不再码点序排序）。**纯引擎轮：未碰桌面端 ⇒ 本轮没跑 e2e 与 UI 预演，也不声称跑过**；
+  调用点与看板界面在 R66，**T4-6 保持未勾**。
 - **中文排版与标签图标（第 64 轮，前端第二批：先调研后落地，零新增依赖）**：**Added（排版）** `body` 上落
   `line-break: strict`（避头尾）、`text-autospace: normal`（中日文与拉丁/数字之间补约 1/4em）、
   `text-spacing-trim: normal`；新增阅读版心令牌 `--prose-measure: 44em`（≈616px ≈ 44 字/行）作用于
