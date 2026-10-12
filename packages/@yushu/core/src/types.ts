@@ -169,6 +169,8 @@ export interface Foreshadow {
   payoff_type: string;
   is_red_herring: boolean;
   state: ForeshadowState;
+  /** 实际回收章（R65 为「回收标记」补的字段）：state=paid 却空着，会被台账报成状态与事实矛盾 */
+  payoff_chapters?: string[];
   abandon_reason?: string;
   /** 每隔多少章复查一次 */
   recheck_after: number;

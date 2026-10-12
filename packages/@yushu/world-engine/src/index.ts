@@ -13,3 +13,4 @@ export * from "./power-log.js";
 export * from "./audit-sample.js";
 export * from "./propagate.js";
 export * from "./proposal-file.js";
+export * from "./foreshadow.js";
