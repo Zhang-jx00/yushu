@@ -63,6 +63,8 @@ export const CHANNELS = {
   proposalDecide: "proposal:decide",
   /** 写回真源（R62）：**真源写操作**，走 wrapWrite；只应用已 accept 的条目 */
   proposalApply: "proposal:apply",
+  /** 伏笔台账看板（M4/T4-6，R66）：**只读**——判定层纯函数，桌面端只负责读真源并画表 */
+  foreshadowBoard: "foreshadow:board",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -2020,4 +2022,36 @@ export interface ProposalDecidePayload {
   proposalId: string;
   index: number;
   decision: ProposalDecisionPayload;
+}
+
+/** 伏笔台账看板（M4 / T4-6，R66）：判定全在引擎，这里只是它的可序列化投影 */
+export interface ForeshadowRowPayload {
+  id: string;
+  name: string;
+  state: string;
+  /** open = 还欠读者一个兑现；closed = 已回收或已带理由放弃 */
+  board: "open" | "closed";
+  isRedHerring: boolean;
+  /** 距预期回收几章；无法定位是 null，不是 0 */
+  overdueBy: number | null;
+  sinceAction: number | null;
+}
+
+export interface ForeshadowFindingPayload {
+  id: string;
+  severity: "error" | "warn" | "info";
+  rule: string;
+  message: string;
+}
+
+export interface ForeshadowBoardPayload {
+  path: string;
+  exists: boolean;
+  /** 台账读不了 / 没有台账 / 章清单为空时，这里给出**不静默**的原因 */
+  note: string;
+  chapterTotal: number;
+  currentChapter: string | null;
+  rows: ForeshadowRowPayload[];
+  findings: ForeshadowFindingPayload[];
+  stats: Record<string, number>;
 }

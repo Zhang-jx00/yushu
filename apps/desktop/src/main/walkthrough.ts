@@ -2590,6 +2590,81 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 49,
+    title: "世界观档案：伏笔台账看板（只读、判定在引擎、合法终态不报缺陷）（M4/T4-6，R66）",
+    file: "step49-foreshadow.png",
+    body: String.raw`
+      // 台账内容按**本项目真实的章序**构造（不猜 id）：早章埋、早章该收、进度写到最后 ⇒ 必然逾期
+      const outline = await window.yushu.outline.read();
+      const volumes = (outline.doc || {}).volumes || [];
+      const ids = [];
+      for (const volume of volumes) {
+        for (const chapter of volume.chapters || []) ids.push(chapter.chapter_id || chapter.id);
+      }
+      if (ids.length < 3) return { ok: false, note: '章清单只有 ' + ids.length + ' 条，构造不出逾期样本' };
+      const early = ids[1];
+      const last = ids[ids.length - 1];
+      const entry = (id, extra) => {
+        const lines = [
+          '  - id: ' + id,
+          '    name: ' + JSON.stringify(extra.name),
+          '    promise: ' + JSON.stringify(extra.promise),
+          '    carrier: 道具',
+          '    visibility: 半遮',
+          '    state: ' + extra.state,
+          '    plant_chapters: ' + JSON.stringify([early]),
+          '    expected_payoff_chapter: ' + early,
+          '    payoff_chapters: ' + JSON.stringify(extra.payoff),
+          '    payoff_type: 揭示',
+          '    is_red_herring: ' + String(extra.rh),
+          '    recheck_after: 3',
+        ];
+        if (extra.reason) lines.push('    abandon_reason: ' + JSON.stringify(extra.reason));
+        return lines.join('\n');
+      };
+      const text = ['apiVersion: yushu.foreshadow/v1', 'entries:',
+        entry('fs-overdue', { name: '祖宅的青铜钥匙', promise: '钥匙能打开地下室', state: 'due', payoff: [], rh: false }),
+        entry('fs-redherring', { name: '哑仆的半句话', promise: '指向管家是凶手', state: 'abandoned', payoff: [], rh: true, reason: '第 14 章点破是伪造的线索，不再回收' }),
+        entry('fs-contradict', { name: '断剑的重铸', promise: '重铸之日即回归之时', state: 'paid', payoff: [], rh: false }),
+      ].join('\n') + '\n';
+      // 台账是真源：走产品写通道新建（不带 baseHash = 仅允许新建，已存在则拒），工装不裸写磁盘
+      try {
+        await window.yushu.doc.write('world/foreshadow.yaml', text);
+      } catch (err) {
+        const current = await window.yushu.doc.read('world/foreshadow.yaml');
+        await window.yushu.doc.write('world/foreshadow.yaml', text, current.hash);
+      }
+      await tab('世界观档案');
+      const table = await waitFor(() => document.querySelector('.foreshadow-board .foreshadow-table') || null, 4000);
+      if (!table) return { ok: false, note: '伏笔台账表没渲染出来（面板可能没拿到数据或通道未通）' };
+      const rows = [...table.querySelectorAll('tbody tr')];
+      const summary = (document.querySelector('.foreshadow-summary') || {}).textContent || '';
+      const findings = [...document.querySelectorAll('.foreshadow-finding')];
+      const rules = findings.map((li) => {
+        const span = li.querySelectorAll('span')[1];
+        return span ? span.textContent : '';
+      });
+      const closedRh = rows.some((tr) => tr.textContent.indexOf('哑仆') >= 0 && tr.textContent.indexOf('已闭环') >= 0);
+      const overdueShown = rows.some((tr) => tr.textContent.indexOf('逾期') >= 0 && /逾期 [1-9][0-9]* 章/.test(tr.textContent));
+      const contradiction = rules.indexOf('fs-paid-without-payoff') >= 0;
+      const rhNotReported = !findings.some((li) => li.textContent.indexOf('哑仆') >= 0);
+      // 红线：这一页只读——没有"替作者改状态"的按钮
+      const writeBack = [...document.querySelectorAll('.foreshadow-board button')]
+        .some((b) => (b.textContent || '').indexOf('写回') >= 0 || (b.textContent || '').indexOf('应用') >= 0);
+      const panel = document.querySelector('.foreshadow-board');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: rows.length === 3 && overdueShown && closedRh && contradiction && rhNotReported && !writeBack &&
+          summary.indexOf('共 3 条') >= 0,
+        note: '行=' + rows.length + '；汇总="' + summary.slice(0, 64) + '"；逾期外显=' + overdueShown +
+          '；红鲱鱼已闭环=' + closedRh + '；红鲱鱼未被报缺陷=' + rhNotReported +
+          '；paid 无回收章报矛盾=' + contradiction + '；结论规则=' + JSON.stringify(rules) +
+          '；面板内写回按钮=' + writeBack,
+      };
+    `,
+  },
 ];
 
 /**
@@ -2717,7 +2792,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-48）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-49）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

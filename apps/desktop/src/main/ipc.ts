@@ -26,6 +26,7 @@ import {
   type ConsistencyCheckPayload,
   type PropagatePreviewPayload,
   type ProposalDecidePayload,
+  type ForeshadowBoardPayload,
   type ProposalPayload,
   type ConsistencyReportPayload,
   type TextProofreadPayload,
@@ -125,6 +126,7 @@ import { readCostPanel } from "./cost-ops.js";
 import { dryRunRule, readRuleCatalog } from "./rule-ops.js";
 import { markConsistencyStale, runConsistencyCheck } from "./consistency-ops.js";
 import { applyProposal, decideProposal, listProposals, previewPropagation, proposalPathOf } from "./propagation-ops.js";
+import { foreshadowBoard } from "./foreshadow-ops.js";
 import type { ProposalFile } from "@yushu/world-engine";
 
 /** 提案文件 → IPC 载荷：未决策条数在这里算，面板只负责显示（不在渲染层长出第二套判断） */
@@ -546,6 +548,10 @@ export function registerIpcHandlers(): void {
         toProposalPayload(proposalPathOf(payload.proposalId), file),
       ),
     ),
+  );
+  // 伏笔台账看板（T4-6）：判定在引擎，这里只读真源算表 ⇒ 走 wrap（不改真源，不该刷索引、不该置脏结论）
+  ipcMain.handle(CHANNELS.foreshadowBoard, () =>
+    wrap<ForeshadowBoardPayload>(() => foreshadowBoard(requireGateway())),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

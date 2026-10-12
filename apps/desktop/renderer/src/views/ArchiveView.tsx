@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { CardReadResult, CardSummary, NamingKindPayload, NamingResultPayload } from "../../../src/shared/ipc";
+import type { CardReadResult, CardSummary, ForeshadowBoardPayload, NamingKindPayload, NamingResultPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 import { Disclosure } from "../components/Disclosure";
@@ -32,6 +32,24 @@ export function ArchiveView({
   const [namingSeed, setNamingSeed] = useState("");
   const [namingResult, setNamingResult] = useState<NamingResultPayload | null>(null);
   const [namingNotice, setNamingNotice] = useState("");
+
+  // 伏笔台账（T4-6，R66）：只读看板——判定在引擎，这里只摆出来，不给"一键改状态"的按钮
+  const [board, setBoard] = useState<ForeshadowBoardPayload | null>(null);
+  const [boardError, setBoardError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    api()
+      .foreshadow.board()
+      .then((result) => {
+        if (alive) setBoard(result);
+      })
+      .catch((err: unknown) => {
+        if (alive) setBoardError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const generateNames = async () => {
     try {
@@ -268,6 +286,61 @@ export function ArchiveView({
                 保存（baseHash 并发检测）
               </button>
               {error ? <span className="error-text">{error}</span> : <span className="muted">{status}</span>}
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="panel foreshadow-board">
+        <div className="panel-title">伏笔台账（只读 · 判定在引擎）</div>
+        {boardError !== "" && <div className="error-text">{boardError}</div>}
+        {board !== null && boardError === "" && (
+          <>
+            <div className="foreshadow-summary muted">
+              {board.note}；共 {board.stats.total} 条 · 未回收 {board.stats.open} · 已回收 {board.stats.paid} ·
+              已放弃 {board.stats.abandoned} · 红鲱鱼 {board.stats.redHerring} · 逾期 {board.stats.overdue}
+            </div>
+            {board.findings.length > 0 && (
+              <ul className="foreshadow-findings">
+                {board.findings.map((finding, index) => (
+                  <li key={`${finding.id}-${finding.rule}-${index}`} className={`foreshadow-finding ${finding.severity}`}>
+                    <span className="foreshadow-sev">{finding.severity === "error" ? "必须处理" : finding.severity === "warn" ? "建议处理" : "提示"}</span>
+                    <span className="muted">{finding.rule}</span>
+                    <span>{finding.message}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {board.rows.length > 0 && (
+              <table className="slot-table foreshadow-table">
+                <thead>
+                  <tr>
+                    <th>伏笔</th>
+                    <th>状态</th>
+                    <th>看板</th>
+                    <th>逾期</th>
+                    <th>距上次动作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {board.rows.map((row) => (
+                    <tr key={row.id}>
+                      <td>
+                        {row.name}
+                        {row.isRedHerring ? <span className="foreshadow-rh">红鲱鱼</span> : null}
+                      </td>
+                      <td>{row.state}</td>
+                      <td>{row.board === "open" ? "未回收" : "已闭环"}</td>
+                      <td>{row.overdueBy === null ? "—" : `逾期 ${row.overdueBy} 章`}</td>
+                      <td>{row.sinceAction === null ? "—" : `${row.sinceAction} 章`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="muted">
+              登记方式：直接编辑 <code>{board.path}</code>（真源）。引擎不替你写伏笔，只告诉你哪几条还欠读者一个兑现；
+              红鲱鱼与"放弃 + 理由"是合法终态，不会被报成问题。
             </div>
           </>
         )}

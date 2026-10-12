@@ -2409,3 +2409,52 @@ table,
     --panel: #ffffff;
   }
 }
+
+/* ---------- R66：伏笔台账面板（世界观档案底部） ---------- */
+
+.foreshadow-summary {
+  margin: 4px 0 8px;
+}
+
+.foreshadow-findings {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.foreshadow-finding {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.foreshadow-sev {
+  flex: none;
+  min-width: 62px;
+  font-weight: 600;
+}
+
+.foreshadow-finding.error .foreshadow-sev {
+  color: var(--bad);
+}
+
+.foreshadow-finding.warn .foreshadow-sev {
+  color: var(--warn);
+}
+
+.foreshadow-finding.info .foreshadow-sev {
+  color: var(--muted);
+}
+
+.foreshadow-rh {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11.5px;
+}

@@ -19,6 +19,7 @@ import type {
   ConsistencyReportPayload,
   PropagatePreviewPayload,
   ProposalDecidePayload,
+  ForeshadowBoardPayload,
   ProposalPayload,
   AiCostPayload,
   AiStartResult,
@@ -176,6 +177,10 @@ export interface YushuApi {
     list: () => Promise<ProposalPayload[]>;
     decide: (payload: ProposalDecidePayload) => Promise<ProposalPayload>;
     apply: (payload: { proposalId: string }) => Promise<ProposalPayload>;
+  };
+  /** 伏笔台账看板（M4/T4-6，R66）：只读，判定在引擎 */
+  foreshadow: {
+    board: () => Promise<ForeshadowBoardPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;

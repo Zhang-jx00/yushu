@@ -99,6 +99,9 @@ contextBridge.exposeInMainWorld("yushu", {
     decide: (payload) => invoke("proposal:decide", payload),
     apply: (payload) => invoke("proposal:apply", payload),
   },
+  foreshadow: {
+    board: () => invoke("foreshadow:board"),
+  },
   export: {
     preview: () => invoke("export:preview"),
     run: (payload) => invoke("export:run", payload),
