@@ -2359,6 +2359,65 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 45,
+    title: "规则页：影响传播提案与逐项决策（真源只读，决策只写派生区）（M4/T4-5，R61）",
+    file: "step45-propagation.png",
+    body: String.raw`
+      await tab('规则');
+      const lawPath = 'world/cards/law/law-prop-wt.md';
+      const geoPath = 'world/cards/location/geo-prop-wt.md';
+      // 造一对有引用关系的卡；造卡不幂等（E_DOC_CONFLICT），有界重试时沿用已存在的即可
+      const ensure = async (card, body) => {
+        try { await window.yushu.card.write({ card, body }); } catch (e) { /* 已存在就用现成的 */ }
+      };
+      await ensure({
+        id: 'law-prop-wt', type: 'law', name: '灵气传播样本', layer: 'laws',
+        aliases: [], refs: [], source_chapters: [], visibility: 'hidden', format_version: 1,
+      }, '为影响传播预演造的法则卡。');
+      await ensure({
+        id: 'geo-prop-wt', type: 'location', name: '云隐谷传播样本', layer: 'geography',
+        aliases: [], refs: [{ relation: '依存', target: 'law-prop-wt' }],
+        source_chapters: [], visibility: 'hidden', format_version: 1,
+      }, '引用上面那条法则的地点卡。');
+      const lawBefore = await window.yushu.doc.read(lawPath);
+      const geoBefore = await window.yushu.doc.read(geoPath);
+      const entityInput = await waitFor(() => document.querySelector('.propagate-entity'), 12000);
+      if (!entityInput) return { ok: false, note: '找不到影响传播输入框：' + pageText() };
+      setV(entityInput, 'law-prop-wt');
+      await sleep(150);
+      const previewBtn = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('生成影响提案'));
+      if (!previewBtn) return { ok: false, note: '找不到「生成影响提案」按钮' };
+      previewBtn.click();
+      const row = await waitFor(() => {
+        const rows = [...document.querySelectorAll('.proposal-table tbody tr')];
+        return rows.find((tr) => tr.textContent.includes('geo-prop-wt')) || null;
+      }, 20000);
+      const cells = row ? [...row.querySelectorAll('td')] : [];
+      const pathShown = cells.length > 3 ? String(cells[3].textContent).indexOf('law-prop-wt → geo-prop-wt') >= 0 : false;
+      const beforeDecision = row ? String(row.querySelector('.proposal-decision').textContent).trim() : '(无该行)';
+      if (row) row.querySelector('.proposal-accept').click();
+      const decided = await waitFor(() => {
+        const again = [...document.querySelectorAll('.proposal-table tbody tr')].find((tr) => tr.textContent.includes('geo-prop-wt'));
+        const text = again ? String(again.querySelector('.proposal-decision').textContent).trim() : '';
+        return text === 'accept' ? text : null;
+      }, 20000);
+      const lawAfter = await window.yushu.doc.read(lawPath);
+      const geoAfter = await window.yushu.doc.read(geoPath);
+      const lineEl = document.querySelector('.propagate-line');
+      const line = lineEl ? String(lineEl.textContent).replace(/\s+/g, ' ') : '(无汇总行)';
+      const panel = document.querySelector('.propagate-panel');
+      if (panel) panel.scrollIntoView({ block: 'start' });
+      await sleep(200);
+      return {
+        ok: row !== null && pathShown && beforeDecision === '未决策' && decided === 'accept' &&
+          lawBefore.hash === lawAfter.hash && geoBefore.hash === geoAfter.hash && line.includes('未决策 0 条'),
+        note: '提案行=' + (row !== null) + '；路径列=' + pathShown + '；决策前=' + beforeDecision +
+          '；决策后=' + String(decided) + '；法则卡 hash 未变=' + (lawBefore.hash === lawAfter.hash) +
+          '；地点卡 hash 未变=' + (geoBefore.hash === geoAfter.hash) + '；汇总="' + line.slice(0, 70) + '"',
+      };
+    `,
+  },
 ];
 
 /**
@@ -2486,7 +2545,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-44）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-45）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

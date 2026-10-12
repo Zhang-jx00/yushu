@@ -55,6 +55,12 @@ export const CHANNELS = {
   ruleDryRun: "rule:dryRun",
   /** 一致性体检（M4/T4-4 三态时机）：**只读**，结论只算不落盘 */
   consistencyCheck: "consistency:check",
+  /** 影响传播预览（M4/T4-5）：真源只读，提案写进派生区 `.yushu/proposals/` */
+  propagatePreview: "propagate:preview",
+  /** 提案清单（派生区读） */
+  proposalList: "proposal:list",
+  /** 逐条决策：accept/reject/pending 只改派生提案文件，**不写回真源**（写回是下一轮） */
+  proposalDecide: "proposal:decide",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -1971,3 +1977,42 @@ export interface IpcError {
 }
 
 export type IpcResult<T> = IpcOk<T> | IpcError;
+/** 影响传播（M4/T4-5，R61）的 IPC 载荷。面板与主进程之间只走这几个形状 */
+export type ProposalDecisionPayload = "accept" | "reject" | "pending";
+
+export interface PropagatePreviewPayload {
+  entity: string;
+  field: string;
+  maxDepth?: number;
+}
+
+export interface ProposalImpactPayload {
+  entity: string;
+  relation: string;
+  depth: number;
+  severity: "error" | "warn" | "info";
+  /** 显式传播路径（从被改实体到本行，含两端）——A1 要求每条结论带路径 */
+  path: string[];
+  weight: number;
+  weightAssumed: boolean;
+}
+
+export interface ProposalPayload {
+  proposalId: string;
+  change: { entity: string; field: string };
+  status: "awaiting_confirmation" | "blocked";
+  impact: ProposalImpactPayload[];
+  truncated: { frontier: string[]; count: number } | null;
+  cycle: string[] | null;
+  assumedRelations: string[];
+  maxDepth: number;
+  decisions: Record<string, ProposalDecisionPayload>;
+  undecidedCount: number;
+  path: string;
+}
+
+export interface ProposalDecidePayload {
+  proposalId: string;
+  index: number;
+  decision: ProposalDecisionPayload;
+}

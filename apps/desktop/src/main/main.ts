@@ -1502,6 +1502,65 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     }
     console.log("[e2e] 一致性体检:", JSON.stringify(consProbe));
 
+    // 影响传播探针（M4/T4-5，R61）：造一对有引用关系的卡 → 预览提案 → 逐条决策 → 列回读。
+    // 断言的重点不是"传播了几条"，而是那条红线：**预览与决策都不碰真源**。
+    let propProbe = {
+      ok: false,
+      impact: -1,
+      firstPathLen: -1,
+      undecidedBefore: -1,
+      undecidedAfter: -1,
+      listed: false,
+      lawHashSame: false,
+      geoHashSame: false,
+      proposalsTotal: -1,
+      error: "",
+    };
+    try {
+      await api.card.write({
+        card: {
+          id: "law-prop-e2e", type: "law", name: "灵气浓度", layer: "laws",
+          aliases: [], refs: [], source_chapters: [], visibility: "hidden", format_version: 1,
+        },
+        body: "为影响传播探针造的法则卡。",
+      });
+      await api.card.write({
+        card: {
+          id: "geo-prop-e2e", type: "location", name: "云隐谷", layer: "geography",
+          aliases: [], refs: [{ relation: "依存", target: "law-prop-e2e" }],
+          source_chapters: [], visibility: "hidden", format_version: 1,
+        },
+        body: "引用上面那条法则的地点卡。",
+      });
+      const lawPath = "world/cards/law/law-prop-e2e.md";
+      const geoPath = "world/cards/location/geo-prop-e2e.md";
+      const lawBefore = await api.doc.read(lawPath);
+      const geoBefore = await api.doc.read(geoPath);
+      const preview = await api.propagate.preview({ entity: "law-prop-e2e", field: "content" });
+      const before = await api.proposal.list();
+      const picked = before.find((item) => item.proposalId === preview.proposalId);
+      const undecidedBefore = picked ? picked.undecidedCount : -1;
+      const decided = await api.proposal.decide({ proposalId: preview.proposalId, index: 0, decision: "accept" });
+      const after = await api.proposal.list();
+      const lawAfter = await api.doc.read(lawPath);
+      const geoAfter = await api.doc.read(geoPath);
+      propProbe = {
+        ok: true,
+        impact: preview.impact.length,
+        firstPathLen: preview.impact.length > 0 ? preview.impact[0].path.length : -1,
+        undecidedBefore,
+        undecidedAfter: decided.undecidedCount,
+        listed: after.some((item) => item.proposalId === preview.proposalId && item.decisions["0"] === "accept"),
+        lawHashSame: lawBefore.hash === lawAfter.hash,
+        geoHashSame: geoBefore.hash === geoAfter.hash,
+        proposalsTotal: after.length,
+        error: "",
+      };
+    } catch (err) {
+      propProbe = { ...propProbe, error: String((err && err.message) || err).slice(0, 160) };
+    }
+    console.log("[e2e] 影响传播提案:", JSON.stringify(propProbe));
+
     // A2 任务路由取证（docs/04 §6.5，离线可做的那一半）：
     //  ① 旗舰端点全程 503 → 一次动作内先重试、再按 fallback 链回落到小模型端点并成功出文；
     //  ② 失败达阈进入冷却 → **第二次动作不再尝试坏端点**（冷却跳过事件带原因）；
@@ -1806,6 +1865,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       proofread: proofreadProbe,
       rules: ruleProbe,
       consistency: consProbe,
+      propagation: propProbe,
       routingA2: routingA2,
       aiOff: aiOffProbe,
     };
@@ -2156,6 +2216,18 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         diskUnchanged: boolean;
         restoredOk: boolean;
         entriesAfterRestore: number;
+        error: string;
+      };
+      propagation: {
+        ok: boolean;
+        impact: number;
+        firstPathLen: number;
+        undecidedBefore: number;
+        undecidedAfter: number;
+        listed: boolean;
+        lawHashSame: boolean;
+        geoHashSame: boolean;
+        proposalsTotal: number;
         error: string;
       };
       security: {
@@ -3161,6 +3233,16 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       [`result.consistency.aiSpanTop === "chapters"`, result.consistency.aiSpanTop === "chapters"],
       [`result.consistency.aiOrigin.includes("AI 采样")`, result.consistency.aiOrigin.includes("AI 采样")],
       [`result.consistency.aiNonAiEntries >= 1`, result.consistency.aiNonAiEntries >= 1],
+      // R61 影响传播：一条反向边就该出一条带路径的结论；决策只改派生提案，**两张卡的 hash 都不能动**
+      [`result.propagation.ok`, result.propagation.ok],
+      [`result.propagation.error === ""`, result.propagation.error === ""],
+      [`result.propagation.impact === 1`, result.propagation.impact === 1],
+      [`result.propagation.firstPathLen === 2`, result.propagation.firstPathLen === 2],
+      [`result.propagation.undecidedBefore === 1`, result.propagation.undecidedBefore === 1],
+      [`result.propagation.undecidedAfter === 0`, result.propagation.undecidedAfter === 0],
+      [`result.propagation.listed`, result.propagation.listed],
+      [`result.propagation.lawHashSame（预览与决策不碰真源）`, result.propagation.lawHashSame],
+      [`result.propagation.geoHashSame`, result.propagation.geoHashSame],
       [`result.consistency.aiNonAiEntries === result.consistency.aiPrevEntries`,
         result.consistency.aiNonAiEntries === result.consistency.aiPrevEntries],
       [`result.consistency.packErrorNames === "char-badlog-probe"`, result.consistency.packErrorNames === "char-badlog-probe"],

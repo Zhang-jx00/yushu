@@ -91,6 +91,13 @@ contextBridge.exposeInMainWorld("yushu", {
   consistency: {
     check: (payload) => invoke("consistency:check", payload),
   },
+  propagate: {
+    preview: (payload) => invoke("propagate:preview", payload),
+  },
+  proposal: {
+    list: () => invoke("proposal:list"),
+    decide: (payload) => invoke("proposal:decide", payload),
+  },
   export: {
     preview: () => invoke("export:preview"),
     run: (payload) => invoke("export:run", payload),

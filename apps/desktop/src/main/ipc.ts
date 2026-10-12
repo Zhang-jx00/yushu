@@ -24,6 +24,9 @@ import {
   type RuleDryRunPayload,
   type RuleDryRunResult,
   type ConsistencyCheckPayload,
+  type PropagatePreviewPayload,
+  type ProposalDecidePayload,
+  type ProposalPayload,
   type ConsistencyReportPayload,
   type TextProofreadPayload,
   type AiRejectPayload,
@@ -121,6 +124,25 @@ import { installKeyCipher } from "./ai-ops.js";
 import { readCostPanel } from "./cost-ops.js";
 import { dryRunRule, readRuleCatalog } from "./rule-ops.js";
 import { markConsistencyStale, runConsistencyCheck } from "./consistency-ops.js";
+import { decideProposal, listProposals, previewPropagation, proposalPathOf } from "./propagation-ops.js";
+import type { ProposalFile } from "@yushu/world-engine";
+
+/** 提案文件 → IPC 载荷：未决策条数在这里算，面板只负责显示（不在渲染层长出第二套判断） */
+function toProposalPayload(path: string, file: ProposalFile): ProposalPayload {
+  return {
+    proposalId: file.proposal.proposalId,
+    change: { ...file.proposal.change },
+    status: file.proposal.status,
+    impact: file.proposal.impact.map((row) => ({ ...row, path: [...row.path] })),
+    truncated: file.proposal.truncated === null ? null : { frontier: [...file.proposal.truncated.frontier], count: file.proposal.truncated.count },
+    cycle: file.proposal.cycle === null ? null : [...file.proposal.cycle],
+    assumedRelations: [...file.proposal.assumedRelations],
+    maxDepth: file.proposal.maxDepth,
+    decisions: { ...file.decisions },
+    undecidedCount: file.proposal.impact.filter((_, index) => file.decisions[String(index)] === undefined).length,
+    path,
+  };
+}
 import { buildFixedBody, readProofreadPanel } from "./text-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
@@ -499,6 +521,23 @@ export function registerIpcHandlers(): void {
   // 一致性体检（M4/T4-4）：**只读**——结论只算不落盘（派生报告该落哪儿待 T4-5 一并裁决）。
   ipcMain.handle(CHANNELS.consistencyCheck, (_event, payload?: ConsistencyCheckPayload) =>
     wrap<ConsistencyReportPayload>(() => runConsistencyCheck(requireGateway(), payload ?? {})),
+  );
+
+  // 影响传播（M4/T4-5，R61）：真源**只读**，提案写进派生区 `.yushu/proposals/`。
+  // 因此走 `wrap` 而不是 `wrapWrite` 是有意的——它不改真源，索引与一致性结论都不该因此过期；
+  // 这条判断本身被 `ipc-write-wrappers.test.ts` 的"看着像写、其实写派生物"对照表钉住。
+  ipcMain.handle(CHANNELS.propagatePreview, (_event, payload: PropagatePreviewPayload) =>
+    wrap<ProposalPayload>(() => previewPropagation(requireGateway(), payload).then((r) => toProposalPayload(r.path, r.file))),
+  );
+  ipcMain.handle(CHANNELS.proposalList, () =>
+    wrap<ProposalPayload[]>(() => listProposals(requireGateway()).then((items) => items.map((item) => toProposalPayload(item.path, item)))),
+  );
+  ipcMain.handle(CHANNELS.proposalDecide, (_event, payload: ProposalDecidePayload) =>
+    wrap<ProposalPayload>(() =>
+      decideProposal(requireGateway(), payload.proposalId, payload.index, payload.decision).then((file) =>
+        toProposalPayload(proposalPathOf(payload.proposalId), file),
+      ),
+    ),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

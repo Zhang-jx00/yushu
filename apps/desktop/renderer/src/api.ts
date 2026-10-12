@@ -17,6 +17,9 @@ import type {
   RuleDryRunResult,
   ConsistencyCheckPayload,
   ConsistencyReportPayload,
+  PropagatePreviewPayload,
+  ProposalDecidePayload,
+  ProposalPayload,
   AiCostPayload,
   AiStartResult,
   AiStreamEvent,
@@ -164,6 +167,14 @@ export interface YushuApi {
   /** 一致性体检（M4/T4-4 三态时机）：只读，结论不落盘 */
   consistency: {
     check: (payload?: ConsistencyCheckPayload) => Promise<ConsistencyReportPayload>;
+  };
+  /** 影响传播（M4/T4-5）：真源只读，提案落派生区 */
+  propagate: {
+    preview: (payload: PropagatePreviewPayload) => Promise<ProposalPayload>;
+  };
+  proposal: {
+    list: () => Promise<ProposalPayload[]>;
+    decide: (payload: ProposalDecidePayload) => Promise<ProposalPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;

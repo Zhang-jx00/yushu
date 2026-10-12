@@ -50,6 +50,11 @@ const NON_WRITE_CHANNELS = [
   "gitInit",
   "recoveryWriteJournal",
   "recoveryClearJournal",
+  // R61 影响传播：预览与决策都只写 `.yushu/proposals/`（派生区，经 writeDerived 的窄门），
+  // 真源一个字节都不动 ⇒ 不该因此刷索引或置脏一致性结论
+  "propagatePreview",
+  "proposalDecide",
+  "proposalList",
 ] as const;
 
 /** 解析每个 `ipcMain.handle(CHANNELS.x, …)` 块，返回通道 → 所用包装器 */

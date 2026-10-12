@@ -5,6 +5,8 @@ import type {
   RuleCatalogPayload,
   RuleDryRunResult,
   RuleRowPayload,
+  ProposalDecisionPayload,
+  ProposalPayload,
 } from "../../../src/shared/ipc";
 import { api } from "../api";
 
@@ -53,6 +55,52 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
       setConsistencyBusy(false);
     }
   }, []);
+
+  // 影响传播（M4/T4-5，R61）：生成提案、逐条表态。**本轮不写回真源**，所以这里没有任何"应用"按钮——
+  // 面板上写明的边界比一个灰掉的按钮诚实：读者不必猜"接受之后会发生什么"。
+  const [propEntity, setPropEntity] = useState("");
+  const [propField, setPropField] = useState("content");
+  const [proposals, setProposals] = useState<ProposalPayload[]>([]);
+  const [propError, setPropError] = useState<string | null>(null);
+  const [propBusy, setPropBusy] = useState(false);
+
+  const refreshProposals = useCallback(async () => {
+    try {
+      setProposals(await api().proposal.list());
+    } catch (err) {
+      setPropError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const runPreview = useCallback(async () => {
+    try {
+      setPropError(null);
+      setPropBusy(true);
+      await api().propagate.preview({ entity: propEntity.trim(), field: propField.trim() || "content" });
+      await refreshProposals();
+    } catch (err) {
+      setPropError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPropBusy(false);
+    }
+  }, [propEntity, propField, refreshProposals]);
+
+  const decide = useCallback(
+    async (proposalId: string, index: number, decision: ProposalDecisionPayload) => {
+      try {
+        setPropError(null);
+        await api().proposal.decide({ proposalId, index, decision });
+        await refreshProposals();
+      } catch (err) {
+        setPropError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [refreshProposals],
+  );
+
+  useEffect(() => {
+    void refreshProposals();
+  }, [refreshProposals]);
 
   const refresh = useCallback(async () => {
     try {
@@ -360,6 +408,98 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
             )}
           </>
         )}
+      </section>
+      <section className="panel propagate-panel">
+        <h3>影响传播（提案与逐项决策）</h3>
+        <div className="propagate-bar">
+          <input
+            className="propagate-entity"
+            placeholder="被改实体 id（如 law-spirit）"
+            value={propEntity}
+            onChange={(event) => setPropEntity(event.target.value)}
+          />
+          <input
+            className="propagate-field"
+            placeholder="被改字段"
+            value={propField}
+            onChange={(event) => setPropField(event.target.value)}
+          />
+          <button className="btn propagate-preview" disabled={propBusy || propEntity.trim() === ""} onClick={() => void runPreview()}>
+            生成影响提案
+          </button>
+        </div>
+        {propError && <p className="warn propagate-error">{propError}</p>}
+        <p className="muted propagate-line">
+          {propBusy
+            ? "正在沿引用反向遍历…"
+            : proposals.length === 0
+              ? "还没有提案。填实体 id 点「生成影响提案」——真源只读，提案只写 `.yushu/proposals/`。"
+              : `已记录 ${proposals.length} 份提案 · 未决策 ${proposals.reduce((sum, item) => sum + item.undecidedCount, 0)} 条`}
+        </p>
+        {proposals.map((proposal) => (
+          <div className="proposal-block" key={proposal.proposalId}>
+            <p className="proposal-head">
+              <code>{proposal.change.entity}</code> 的 <code>{proposal.change.field}</code> 改动 ·
+              {" "}{proposal.status === "blocked" ? "被环阻断" : "等待逐项确认"} · {proposal.impact.length} 条 ·
+              {" "}未决策 {proposal.undecidedCount} 条 · 封顶 {proposal.maxDepth} 层
+              {proposal.truncated ? `（下一层还有 ${proposal.truncated.count} 个未展开）` : "（未截断）"}
+              {proposal.assumedRelations.length > 0
+                ? ` · 权重未定义的关系按 1 计：${proposal.assumedRelations.join("、")}`
+                : ""}
+            </p>
+            {proposal.status === "blocked" && (
+              <p className="warn proposal-cycle">环路径：{proposal.cycle?.join(" → ")}（先修掉成环的引用再传播）</p>
+            )}
+            {proposal.impact.length > 0 && (
+              <table className="slot-table proposal-table">
+                <thead>
+                  <tr>
+                    <th>跳数</th>
+                    <th>受影响实体</th>
+                    <th>经由关系</th>
+                    <th>传播路径</th>
+                    <th>权重</th>
+                    <th>决策</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {proposal.impact.map((row, index) => (
+                    <tr key={`${row.entity}-${index}`}>
+                      <td className={row.severity === "error" ? "error" : row.severity === "warn" ? "warn" : "muted"}>
+                        {row.depth}
+                      </td>
+                      <td>
+                        <code>{row.entity}</code>
+                      </td>
+                      <td>{row.relation}</td>
+                      <td className="muted">{row.path.join(" → ")}</td>
+                      <td>
+                        {row.weight.toFixed(2)}
+                        {row.weightAssumed ? "（含未定义权重）" : ""}
+                      </td>
+                      <td>
+                        <button className="btn proposal-accept" onClick={() => void decide(proposal.proposalId, index, "accept")}>
+                          接受
+                        </button>
+                        <button className="btn proposal-reject" onClick={() => void decide(proposal.proposalId, index, "reject")}>
+                          拒绝
+                        </button>
+                        <button className="btn proposal-pending" onClick={() => void decide(proposal.proposalId, index, "pending")}>
+                          待定
+                        </button>
+                        <span className="proposal-decision">{proposal.decisions[String(index)] ?? "未决策"}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ))}
+        <p className="muted propagate-note">
+          本轮只记录决策，<strong>不写回真源</strong>：写回要和"改前先快照 + 带 baseHash 拒覆盖"一起上，
+          否则等于让引擎替作者改设定。未确认的条目永远不会落库。
+        </p>
       </section>
     </div>
   );

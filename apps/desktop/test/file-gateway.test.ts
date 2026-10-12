@@ -99,3 +99,35 @@ describe("ProjectGateway 目录树", () => {
     expect(tree.find((t) => t.path === "world")?.type).toBe("dir");
   });
 });
+/**
+ * 派生区窄门（R61）：`.yushu/**` 不能走 `writeDoc`（那里的 WRITE_EXCLUDES 是拿来挡真源误写的），
+ * 但也不该因此让各模块自己拿裸 fs 写。这组测试钉的就是"这扇门只能开在派生区"：
+ * 一旦 `writeDerived` 的守卫被放宽，第 2、3 条立刻红——那时它就不是窄门而是后门了。
+ */
+describe("ProjectGateway 派生区写入（writeDerived / listDerived）", () => {
+  it("允许写 .yushu 下的路径并原子落盘", async () => {
+    const snap = await gw.writeDerived(".yushu/proposals/prop-a.yaml", "apiVersion: yushu.proposal/v1\n");
+    expect(snap.hash).toBe(sha256("apiVersion: yushu.proposal/v1\n"));
+    expect((await gw.readDoc(".yushu/proposals/prop-a.yaml")).content).toContain("yushu.proposal/v1");
+  });
+
+  it("拒写非派生区（拿它写真源就是绕过真源守卫）", async () => {
+    await expect(gw.writeDerived("world/world.yaml", "x")).rejects.toThrow(PathSafetyError);
+    await expect(gw.listDerived("world")).rejects.toThrow(/只允许/);
+  });
+
+  it("带 expectedHash 时外部改过就拒写，不盲写", async () => {
+    const first = await gw.writeDerived(".yushu/proposals/prop-b.yaml", "v1\n");
+    await gw.writeDerived(".yushu/proposals/prop-b.yaml", "外部改过\n");
+    await expect(gw.writeDerived(".yushu/proposals/prop-b.yaml", "v2\n", first.hash)).rejects.toThrow(DocConflictError);
+    expect((await gw.readDoc(".yushu/proposals/prop-b.yaml")).content).toBe("外部改过\n");
+  });
+
+  it("列目录只回文件名、按码点序，目录不存在给空数组而不是抛", async () => {
+    expect(await gw.listDerived(".yushu/proposals")).toEqual([]);
+    await gw.writeDerived(".yushu/proposals/prop-b.yaml", "b\n");
+    await gw.writeDerived(".yushu/proposals/prop-a.yaml", "a\n");
+    await gw.writeDerived(".yushu/proposals/nested/prop-c.yaml", "c\n");
+    expect(await gw.listDerived(".yushu/proposals")).toEqual(["prop-a.yaml", "prop-b.yaml"]);
+  });
+});
