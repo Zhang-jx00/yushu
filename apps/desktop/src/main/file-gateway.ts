@@ -114,6 +114,12 @@ export class ProjectGateway {
     }
 
     await fs.mkdir(dirname(abs), { recursive: true });
+    await this.atomicWriteAbs(abs, content);
+    return { path: relPath, content, hash: sha256(content) };
+  }
+
+  private async atomicWriteAbs(abs: string, content: string): Promise<void> {
+    await fs.mkdir(dirname(abs), { recursive: true });
     const tmp = `${abs}.${randomUUID().slice(0, 8)}.tmp`;
     // T2-6 保存管线：先写入临时文件并 fsync 落盘，再 rename —— 进程/系统崩溃窗口内
     // 要么保留旧内容、要么是完整新内容，不会出现半截文件（原子写 + 持久化的双保险）。
@@ -125,7 +131,50 @@ export class ProjectGateway {
       await handle.close();
     }
     await fs.rename(tmp, abs);
-    return { path: relPath, content, hash: sha256(content) };
+  }
+
+  /**
+   * 写派生区（`.yushu/**`）——审计里"ops 用裸 fs 直写 .yushu 绕过 FileGateway"那条的正解：
+   * 派生文件确实不能走 `writeDoc`（那里的 WRITE_EXCLUDES 就是用来挡真源误写的），
+   * 但也不该因此各写各的。所以开一扇**只认派生区**的窄门：越界检查照做，
+   * 路径不以 `.yushu/` 开头就直接拒 ⇒ 这扇门不能拿来写真源，也拿不到 baseHash 之外的并发语义。
+   */
+  async writeDerived(relPath: string, content: string, expectedHash?: string): Promise<DocSnapshot> {
+    const rel = relPath.replace(/\\/g, "/");
+    if (!rel.startsWith(".yushu/")) {
+      throw new PathSafetyError(`writeDerived 只允许写派生区 .yushu/，收到：${relPath}`);
+    }
+    const abs = this.resolveInside(rel);
+    if (expectedHash !== undefined) {
+      const current = await fs.readFile(abs, "utf8").catch((err: unknown) => {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw err;
+      });
+      if (current === null) {
+        throw new DocConflictError(rel, "派生文件不存在或已被删除");
+      }
+      if (sha256(current) !== expectedHash) {
+        throw new DocConflictError(rel, "派生文件已被外部修改（拒绝盲写）");
+      }
+    }
+    await this.atomicWriteAbs(abs, content);
+    return { path: rel, content, hash: sha256(content) };
+  }
+
+  /** 列派生区某个前缀下的文件名（不递归；按码点序，保证调用方拿到的顺序可复现） */
+  async listDerived(dirRel: string): Promise<string[]> {
+    const rel = dirRel.replace(/\\/g, "/");
+    if (!rel.startsWith(".yushu/")) {
+      throw new PathSafetyError(`listDerived 只允许列派生区 .yushu/，收到：${dirRel}`);
+    }
+    const abs = this.resolveInside(rel);
+    try {
+      const names = await fs.readdir(abs, { withFileTypes: true });
+      return names.filter((entry) => entry.isFile()).map((entry) => entry.name).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
   }
 
   async renameDoc(from: string, to: string): Promise<void> {
