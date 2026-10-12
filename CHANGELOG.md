@@ -45,6 +45,21 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **伏笔台账接入界面（第 66 轮，M4/T4-6 收口，本项勾选）**：新增只读通道 `foreshadow:board`
+  （`foreshadow-ops.ts` 读 `world/foreshadow.yaml` + 从三级大纲取**有序章清单**；走 `wrap`——真源没动就不刷索引、
+  不置脏结论）。「世界观档案」底部新增**伏笔台账看板**：汇总行 + 按 error/warn/info 分色的结论清单 +
+  逐条表（状态 / 未回收·已闭环 / 逾期章数 / 距上次动作）。**面板没有"写回 / 应用"按钮**——引擎不替作者改伏笔状态，
+  预演 step49 把这条钉成断言。step49 的台账内容**按本项目真实章序现场构造**（先读大纲拿章 id 再写文件），
+  三种样本各验一事：逾期条外显「逾期 N 章」、红鲱鱼 + 放弃带理由**已闭环且不被报缺陷**、
+  `paid` 却无回收章 ⇒ 报矛盾；实测规则集 `["fs-paid-without-payoff","fs-finale-unpaid","fs-recheck"]`。
+  台账写入走产品写通道（`doc.write` 不带 baseHash = 仅允许新建），工装不再裸写磁盘。
+  **Added（测试锁）** `apps/desktop/test/ipc-four-way.test.ts`（5 例）：`CONTRIBUTING.md` 在 R63 声称
+  "新增 IPC 通道四处同步、有源码锁会当场拦住"，**当时并没有这条测试** ⇒ 本轮补成事实。口径：注册通道必须来自
+  `CHANNELS`；注册了的必须进 preload 白名单（漏＝渲染层调不到的静默缺失）；白名单不许有未注册项；
+  preload 的「组.方法」必须都在 `YushuApi` 里有类型；本轮新增通道逐处点名。变异：注释掉 preload 一行 ⇒ 两条红并
+  点名 `foreshadow:board`。**验证**：单测 +5 → **917/917（91 文件）**、TC=0、e2e E2E=0、预演新增 **step49** →
+  **49/49**（v147，53.0s，抖动=0、证据缺失=0）。**边界如实**：登记 / 埋设 / 回收三处仍是编辑真源 YAML，
+  **没有表单式录入界面**；判定与看板侧齐了，表单录入与派系包工坊一起评估。
 - **伏笔全生命周期台账·引擎侧（第 65 轮，M4/T4-6 判定层，本项不勾选）**：新建 `@yushu/world-engine/foreshadow.ts`。
   **真源** `world/foreshadow.yaml` 走**严格解析**（未知键 / 非法枚举 / 重复 id / 缺必填一律拒绝并点名到
   `entries[i]（id）`）与**手写键序的确定性序列化**（库 `dump` 会随版本漂键序，而真源是给人看 diff 的）。
