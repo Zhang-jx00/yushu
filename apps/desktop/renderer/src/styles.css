@@ -10,10 +10,14 @@
   --good: #2f7d4f;
   --bad: #b3402e;
   --warn: #a06a12;
-  /* 动效令牌：时长与缓动只在这一处定义，组件里不写魔法数（R63 交互精修） */
-  --motion-fast: 120ms;
-  --motion-base: 220ms;
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* 动效令牌（R63·Premium 调性，用户已确认）：时长与缓动只在这一处定义，组件里不写魔法数。
+     Premium 的 350-600ms 是「揭示」区间；工作台场景把 standard 压到 240ms、慢档只给面板揭示，
+     微反馈一律 140ms——同一套曲线不同时长，既不显拖沓也不丢克制。 */
+  --motion-quick: 140ms;
+  --motion-base: 240ms;
+  --motion-slow: 380ms;
+  --ease-premium: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
 }
 
 * {
@@ -85,10 +89,10 @@ button {
   cursor: pointer;
   font: inherit;
   transition:
-    transform var(--motion-fast) var(--ease-out),
-    border-color var(--motion-fast) linear,
-    color var(--motion-fast) linear,
-    background var(--motion-fast) linear;
+    transform var(--motion-quick) var(--ease-premium),
+    border-color var(--motion-quick) linear,
+    color var(--motion-quick) linear,
+    background var(--motion-quick) linear;
 }
 
 /* 抬起 1px、按下收到 0.97：幅度小到不会让人注意到「有动画」，但手感的差别是实打实的 */
@@ -99,7 +103,7 @@ button:hover:not(:disabled) {
 }
 
 button:active:not(:disabled) {
-  transform: translateY(0) scale(0.97);
+  transform: translateY(0) scale(0.98);
 }
 
 /* 焦点框只在键盘导航时出现（:focus-visible），鼠标点击不闪框 */
@@ -2222,7 +2226,7 @@ select {
 
 .disclosure-caret {
   flex: none;
-  transition: transform var(--motion-base) var(--ease-out);
+  transition: transform var(--motion-base) var(--ease-premium);
 }
 
 /* 箭头与面板同源：展开转 180°，方向本身就是状态，不需要再多一句文字提示 */
@@ -2234,7 +2238,7 @@ select {
 .disclosure-panel {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--motion-base) var(--ease-out);
+  transition: grid-template-rows var(--motion-base) var(--ease-premium);
 }
 
 .disclosure.open .disclosure-panel {
@@ -2248,8 +2252,8 @@ select {
   opacity: 0;
   transform: translateY(-2px);
   transition:
-    opacity var(--motion-base) var(--ease-out),
-    transform var(--motion-base) var(--ease-out);
+    opacity var(--motion-base) var(--ease-premium),
+    transform var(--motion-base) var(--ease-premium);
 }
 
 .disclosure.open .disclosure-body {
@@ -2262,8 +2266,17 @@ select {
   button,
   .disclosure-panel,
   .disclosure-caret,
-  .disclosure-body {
+  .disclosure-body,
+  .slot-table tbody tr,
+  .tab {
     transition-duration: 0.01ms;
+  }
+
+  /* 位移与缩放全去掉，只留 opacity 的瞬时到位：动效不再是理解的前提 */
+  section.panel,
+  .ai-adopt-audit,
+  .consistency-summary {
+    animation: none;
   }
 
   button:hover:not(:disabled),
@@ -2275,4 +2288,41 @@ select {
     opacity: 1;
     transform: none;
   }
+}
+
+/* ---------- 一次性入场（R63·Premium / DASHBOARD 合规） ---------- */
+
+/* 只随挂载播一次：切到该页时轻轻落定，之后完全静止——工作台里不抢注意力 */
+@keyframes yushu-settle {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+section.panel,
+.ai-adopt-audit,
+.consistency-summary {
+  animation: yushu-settle var(--motion-base) var(--ease-enter) both;
+}
+
+/* 表格行只换底色、不动尺寸：行高抖动比没有反馈更难受 */
+.slot-table tbody tr {
+  transition: background var(--motion-quick) linear;
+}
+
+.slot-table tbody tr:hover {
+  background: var(--panel-2);
+}
+
+/* 当前标签：底色与描边同步过渡，视线不用重新找位置 */
+.tab {
+  transition:
+    background var(--motion-quick) linear,
+    color var(--motion-quick) linear,
+    border-color var(--motion-quick) linear;
 }
