@@ -2536,6 +2536,60 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 48,
+    title: "全局：标签图标与中文排版（避头尾/中西空格/版心/等宽数位）（R64 排版精修）",
+    file: "step48-typography.png",
+    body: String.raw`
+      // ① 标签栏：11 个标签都要有图标、图标必须 aria-hidden（可访问名来自旁边的文字）、文字不能被挤掉
+      const tabs = [...document.querySelectorAll('.tabs .tab')];
+      const icons = tabs.map((t) => t.querySelector('svg.yushu-icon'));
+      const iconCount = icons.filter((s) => s !== null).length;
+      const hiddenOk = icons.every((s) => s !== null && s.getAttribute('aria-hidden') === 'true');
+      const labelled = tabs.filter((t) => ((t.textContent || '').trim().length > 0)).length;
+      // 图标不能把标签压扁：每个至少 44px（够放 15px 图标 + 两个汉字 + 内边距）
+      const widths = tabs.map((t) => Math.round(t.getBoundingClientRect().width));
+      const squeezed = widths.filter((w) => w < 44).length;
+      const bar = document.querySelector('.tabs');
+      const overflowPx = Math.round(bar.scrollWidth - bar.clientWidth);
+      // ② 排版三性：不支持的浏览器 getPropertyValue 返回空串，所以"有值"本身就是支持证据
+      const cs = getComputedStyle(document.body);
+      const lineBreak = cs.getPropertyValue('line-break');
+      const autospace = cs.getPropertyValue('text-autospace');
+      const spacingTrim = cs.getPropertyValue('text-spacing-trim');
+      const supports = {
+        lineBreak: window.CSS.supports('line-break', 'strict'),
+        autospace: window.CSS.supports('text-autospace', 'normal'),
+        spacingTrim: window.CSS.supports('text-spacing-trim', 'normal'),
+      };
+      // ③ 版心：正文编辑容器要真被限宽（不是写了不生效，也不是限到看不见）
+      await tab('编辑器');
+      const host = await waitFor(() => document.querySelector('.cm-host') || null, 3000);
+      if (!host) return { ok: false, note: '编辑器页找不到源码形态容器（.cm-host）' };
+      const hostStyle = getComputedStyle(host);
+      const maxPx = Math.round(parseFloat(hostStyle.maxWidth || '0'));
+      const hostW = Math.round(host.getBoundingClientRect().width);
+      // ④ 等宽数位：规则页的结论表数字列不该随位数变宽而挪动
+      await tab('规则');
+      const table = await waitFor(() => document.querySelector('.slot-table') || null, 3000);
+      const numeric = table ? getComputedStyle(table).getPropertyValue('font-variant-numeric') : '';
+      const tnum = table ? getComputedStyle(table).getPropertyValue('font-feature-settings') : '';
+      if (table) table.scrollIntoView({ block: 'center' });
+      await sleep(150);
+      const tabsOk = tabs.length === 11 && iconCount === 11 && hiddenOk && labelled === 11 && squeezed === 0;
+      const typographyOk = lineBreak === 'strict' && autospace !== '' && spacingTrim !== '';
+      const measureOk = maxPx >= 480 && maxPx <= 720 && hostW > 0 && hostW <= maxPx + 1;
+      const digitsOk = numeric.indexOf('tabular-nums') >= 0 && tnum.indexOf('tnum') >= 0;
+      return {
+        ok: tabsOk && typographyOk && measureOk && digitsOk && supports.autospace && supports.spacingTrim,
+        note: '标签=' + tabs.length + ' 图标=' + iconCount + ' aria隐= ' + hiddenOk + ' 有文字=' + labelled +
+          ' 被压扁=' + squeezed + '（最窄 ' + Math.min(...widths) + 'px）；标签栏溢出=' + overflowPx + 'px；' +
+          'line-break=' + lineBreak + '；autospace=' + autospace + '；spacing-trim=' + spacingTrim +
+          '；CSS.supports ' + JSON.stringify(supports) + '；版心=' + maxPx + 'px（实测宽 ' + hostW + 'px）；' +
+          '数字列=' + numeric + ' / ' + tnum,
+      };
+    `,
+  },
 ];
 
 /**
@@ -2663,7 +2717,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-47）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-48）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

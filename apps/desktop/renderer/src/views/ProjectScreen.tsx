@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ProjectSnapshot, RecoveryEntry, SessionStatusPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { YushuIcon, type YushuIconName } from "../icons";
 import { putPendingRecovery } from "../recovery-inbox";
 import { AiView } from "./AiView";
 import { ArchiveView } from "./ArchiveView";
@@ -16,18 +17,18 @@ import { StatsView } from "./StatsView";
 
 type Tab = "workbench" | "outline" | "editor" | "library" | "ai" | "memory" | "rules" | "export" | "archive" | "files" | "stats";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "workbench", label: "起源工作台" },
-  { key: "outline", label: "三级大纲" },
-  { key: "editor", label: "编辑器" },
-  { key: "library", label: "稿件总览" },
-  { key: "ai", label: "AI 副驾" },
-  { key: "memory", label: "记忆" },
-  { key: "rules", label: "规则" },
-  { key: "export", label: "导出与自查" },
-  { key: "archive", label: "世界观档案" },
-  { key: "stats", label: "码字统计" },
-  { key: "files", label: "项目文件" },
+const TABS: { key: Tab; label: string; icon: YushuIconName }[] = [
+  { key: "workbench", label: "起源工作台", icon: "layers" },
+  { key: "outline", label: "三级大纲", icon: "list-ordered" },
+  { key: "editor", label: "编辑器", icon: "pen-line" },
+  { key: "library", label: "稿件总览", icon: "library" },
+  { key: "ai", label: "AI 副驾", icon: "sparkles" },
+  { key: "memory", label: "记忆", icon: "brain" },
+  { key: "rules", label: "规则", icon: "scale" },
+  { key: "export", label: "导出与自查", icon: "download" },
+  { key: "archive", label: "世界观档案", icon: "book-open" },
+  { key: "stats", label: "码字统计", icon: "chart-column" },
+  { key: "files", label: "项目文件", icon: "folder-tree" },
 ];
 
 /** 项目主容器：十一个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A）；稿件总览全库视图（T2-4 切片 A）；记忆页（T3-5） */
@@ -119,6 +120,7 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
             className={tab === item.key ? "tab on" : "tab"}
             onClick={() => setTab(item.key)}
           >
+            <YushuIcon name={item.icon} />
             {item.label}
           </button>
         ))}

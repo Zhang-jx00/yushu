@@ -2326,3 +2326,86 @@ section.panel,
     color var(--motion-quick) linear,
     border-color var(--motion-quick) linear;
 }
+
+/* ---------- R64：标签图标 + 中文排版 + 阅读版心（依据与取舍见 docs/03 §17） ---------- */
+
+/* 11 个标签加了图标后窄窗口一定放不下：横向滚动，而不是压缩文字或折行 */
+.tabs {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+  padding: 7px 10px;
+}
+
+/* 图标走 currentColor：未选中随 --muted、选中随 --accent，高对比主题不需要另改图标 */
+.yushu-icon {
+  flex: none;
+  opacity: 0.68;
+  transition: opacity var(--motion-quick) linear;
+}
+
+.tab.on .yushu-icon {
+  opacity: 1;
+}
+
+/* 三条标准排版属性，本机运行时 Chromium 152（Electron 44.4.5，版本号取自预演报告的
+   env 字段而不是查表猜的）实测支持：
+   · line-break: strict     —— 避头尾（「。」不落行首、「——」不拆两行）
+   · text-autospace: normal —— 中日文与拉丁/数字之间补约 1/4em（"Token与成本"这类混排）
+   · text-spacing-trim: normal —— 全角标点自带的多余空隙按排版惯例收紧
+   不支持的浏览器只会忽略这三行、不会把文字弄坏，所以敢写在 body 上。 */
+body {
+  line-break: strict;
+  text-autospace: normal;
+  text-spacing-trim: normal;
+}
+
+/* 版心：正文编辑区不限宽时一行约 70 个汉字，长文换行后返回扫视成本高。
+   中文行长按「字」度量而不是 ch（ch 是 '0' 的宽，CJK 字体下约半个全角字），所以用 em。
+   44em ≈ 616px @14px ≈ 44 字/行：常见中文阅读器是 35–45 字，取上沿是因为这是
+   写作的版面不是阅读的版面——再窄就变成"看小说的宽度"了。 */
+:root {
+  --prose-measure: 44em;
+}
+
+.cm-host,
+.tiptap-host {
+  width: 100%;
+  max-width: var(--prose-measure);
+  margin-inline: auto;
+}
+
+/* 数字等宽：字数 / token / 成本 / 速率这些列在数值变宽时不该左右挪 */
+table,
+.slot-table,
+.stats-grid strong,
+.stats-today-main strong,
+.stats-speed,
+.speed-line,
+.heat-cell,
+.library-words,
+.ai-cost-totals,
+.ai-candidate-count {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* 高对比（Windows 辅助功能「高对比度」会触发）：只加深颜色，不动版式与尺寸，
+   免得和 prefers-reduced-motion 那类副作用叠在一起排查困难 */
+@media (prefers-contrast: more) {
+  :root {
+    --ink: #14100b;
+    --muted: #554f46;
+    --border: #b9ad98;
+    --accent: #6d4218;
+    --bg: #ffffff;
+    --panel: #ffffff;
+  }
+}
