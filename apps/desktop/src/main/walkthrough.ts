@@ -2480,6 +2480,62 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 47,
+    title: "世界观档案：展开扩展字段（按真实内容高度连续过渡 + 箭头转 180°）（R63 交互精修）",
+    file: "step47-disclosure.png",
+    body: String.raw`
+      await tab('世界观档案');
+      // 「扩展字段」只在选中某张带 extensions 的卡时才渲染：逐张点列表项，直到那段出现
+      const rows = [...document.querySelectorAll('.card-list li')];
+      let opened = false;
+      let tried = 0;
+      for (const row of rows) {
+        tried += 1;
+        const target = row.querySelector('button, a, [role="button"]') || row;
+        target.click();
+        opened = await waitFor(() => (document.querySelector('.extensions .disclosure-toggle') ? true : null), 1500);
+        if (opened) break;
+      }
+      if (!opened) return { ok: false, note: '点了 ' + tried + ' 张卡都没出现扩展字段那段（列表项 ' + rows.length + ' 个）' };
+      const measure = () => {
+        const panel = document.querySelector('.extensions .disclosure-panel');
+        const body = document.querySelector('.extensions .disclosure-body');
+        return {
+          panel: panel ? Math.round(panel.getBoundingClientRect().height) : -1,
+          content: body ? Math.round(body.scrollHeight) : -1,
+        };
+      };
+      const before = measure();
+      const caretBefore = String(getComputedStyle(document.querySelector('.extensions .disclosure-caret')).transform);
+      const expandedBefore = document.querySelector('.extensions .disclosure-toggle').getAttribute('aria-expanded');
+      document.querySelector('.extensions .disclosure-toggle').click();
+      // 中途取样：瞬间弹出（无过渡）会直接跳到终值，这里就会落在 0 或终值上
+      await sleep(60);
+      const mid = measure();
+      const target = await waitFor(() => {
+        const now = measure();
+        return now.panel > 0 && Math.abs(now.panel - now.content) <= 2 ? now : null;
+      }, 4000);
+      const after = target || measure();
+      const caretAfter = String(getComputedStyle(document.querySelector('.extensions .disclosure-caret')).transform);
+      const expandedAfter = document.querySelector('.extensions .disclosure-toggle').getAttribute('aria-expanded');
+      const clipped = (() => {
+        const body = document.querySelector('.extensions .disclosure-body');
+        return body ? Math.abs(body.getBoundingClientRect().height - body.scrollHeight) > 2 : true;
+      })();
+      const panel = document.querySelector('.extensions');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(150);
+      return {
+        ok: before.panel === 0 && mid.panel > 0 && mid.panel < after.panel && after.panel > 0 && !clipped &&
+          expandedBefore === 'false' && expandedAfter === 'true' && caretBefore !== caretAfter,
+        note: '收起高=' + before.panel + '；60ms 中途高=' + mid.panel + '；终值高=' + after.panel +
+          '；内容高=' + after.content + '；被裁=' + clipped +
+          '；aria ' + expandedBefore + '→' + expandedAfter + '；箭头 ' + caretBefore.slice(0, 26) + ' → ' + caretAfter.slice(0, 26),
+      };
+    `,
+  },
 ];
 
 /**
@@ -2607,7 +2663,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-46）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-47）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

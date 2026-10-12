@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { CardReadResult, CardSummary, NamingKindPayload, NamingResultPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { cardTypeLabel, layerLabel } from "../card-labels";
+import { Disclosure } from "../components/Disclosure";
 
 const NAMING_KINDS: { kind: NamingKindPayload; label: string }[] = [
   { kind: "character", label: "角色名" },
@@ -251,10 +252,9 @@ export function ArchiveView({
             </div>
 
             {doc.card.extensions && Object.keys(doc.card.extensions).length > 0 && (
-              <details className="extensions">
-                <summary className="muted">扩展字段（派系包注入；M1 为只读预览）</summary>
+              <Disclosure className="extensions" label="扩展字段（派系包注入；M1 为只读预览）">
                 <pre>{JSON.stringify(doc.card.extensions, null, 2)}</pre>
-              </details>
+              </Disclosure>
             )}
 
             <textarea

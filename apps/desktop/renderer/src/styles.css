@@ -10,6 +10,10 @@
   --good: #2f7d4f;
   --bad: #b3402e;
   --warn: #a06a12;
+  /* 动效令牌：时长与缓动只在这一处定义，组件里不写魔法数（R63 交互精修） */
+  --motion-fast: 120ms;
+  --motion-base: 220ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 * {
@@ -80,11 +84,31 @@ button {
   color: var(--ink);
   cursor: pointer;
   font: inherit;
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) linear,
+    color var(--motion-fast) linear,
+    background var(--motion-fast) linear;
 }
 
+/* 抬起 1px、按下收到 0.97：幅度小到不会让人注意到「有动画」，但手感的差别是实打实的 */
 button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
+  transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
+/* 焦点框只在键盘导航时出现（:focus-visible），鼠标点击不闪框 */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 button:disabled {
@@ -2173,4 +2197,82 @@ select {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* ---------- 展开 / 收起（Disclosure，R63） ---------- */
+
+.disclosure {
+  margin: 8px 0;
+}
+
+.disclosure-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.disclosure-toggle:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+.disclosure-caret {
+  flex: none;
+  transition: transform var(--motion-base) var(--ease-out);
+}
+
+/* 箭头与面板同源：展开转 180°，方向本身就是状态，不需要再多一句文字提示 */
+.disclosure.open .disclosure-caret {
+  transform: rotate(180deg);
+}
+
+/* 0fr → 1fr：由浏览器按子元素真实高度插值，内容增减都跟得上，不猜 max-height */
+.disclosure-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--motion-base) var(--ease-out);
+}
+
+.disclosure.open .disclosure-panel {
+  grid-template-rows: 1fr;
+}
+
+/* min-height:0 是让这一行真能压到 0 的关键，否则内容会把行撑住、收起时留一条缝 */
+.disclosure-body {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity var(--motion-base) var(--ease-out),
+    transform var(--motion-base) var(--ease-out);
+}
+
+.disclosure.open .disclosure-body {
+  opacity: 1;
+  transform: none;
+}
+
+/* 系统要求减少动效时直接到终态：不闪、不位移，功能一点不少 */
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .disclosure-panel,
+  .disclosure-caret,
+  .disclosure-body {
+    transition-duration: 0.01ms;
+  }
+
+  button:hover:not(:disabled),
+  button:active:not(:disabled) {
+    transform: none;
+  }
+
+  .disclosure-body {
+    opacity: 1;
+    transform: none;
+  }
 }

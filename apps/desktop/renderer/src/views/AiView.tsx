@@ -17,6 +17,7 @@ import type {
   DraftHintPayload,
 } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { Disclosure } from "../components/Disclosure";
 import { TypewriterBuffer, type TypewriterMode } from "../typewriter-buffer";
 import { diffSentences, mergeSelected, splitSentences } from "../candidate-diff";
 import { REJECT_REASON_PRESETS, type AiFeedbackState } from "../../../src/shared/ipc";
@@ -1086,15 +1087,14 @@ export function AiView() {
                   ))}
                 </tbody>
               </table>
-              <details className="extensions">
-                <summary className="muted">展开槽位全文（可审计）</summary>
+              <Disclosure className="extensions" label="展开槽位全文（可审计）">
                 {preview.slots.map((slot) => (
                   <div key={slot.slot}>
                     <strong>{slot.slot}</strong>
                     <pre>{slot.text || "（空）"}</pre>
                   </div>
                 ))}
-              </details>
+              </Disclosure>
             </>
           )}
         </div>
