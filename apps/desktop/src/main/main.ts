@@ -8,6 +8,7 @@ import { appRoot } from "./paths.js";
 import { runPerfProbe } from "./perf-runner.js";
 import { parseTrialDir, runTrial } from "./trial.js";
 import { parseWalkthroughDir, prepareWalkthrough, runWalkthrough, startMockOpenAI } from "./walkthrough.js";
+import { stopRepoWorker } from "./repo-worker.js";
 
 /** 御书桌面端入口（M1：主进程 + 白名单 IPC + React renderer） */
 
@@ -3347,6 +3348,9 @@ async function runE2E(win: BrowserWindow): Promise<void> {
 }
 
 app.on("window-all-closed", () => {
+  // 索引的 utility 进程不会随窗口关闭自动退出；先收尾再走应用退出
+  // （下次打开项目时 ensureWorker 会自动重建，所以关掉是安全的）
+  stopRepoWorker();
   if (autoQuitDisabled) return;
   if (process.platform !== "darwin") app.quit();
 });

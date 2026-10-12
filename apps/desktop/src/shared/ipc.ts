@@ -122,8 +122,6 @@ export const CHANNELS = {
   extractAdopt: "extract:adopt",
 } as const;
 
-export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
-
 /**
  * 关闭前 flush 的渲染层回执（app:flushDone 单向载荷）。
  * 主进程仅记录日志（判定以窗口关闭流程为准：回执到达即放行，否则超时兜底）。

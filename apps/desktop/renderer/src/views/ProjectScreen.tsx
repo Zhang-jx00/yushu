@@ -30,7 +30,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "files", label: "项目文件" },
 ];
 
-/** 项目主容器：十个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A）；稿件总览全库视图（T2-4 切片 A）；记忆页（T3-5） */
+/** 项目主容器：十一个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A）；稿件总览全库视图（T2-4 切片 A）；记忆页（T3-5） */
 export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [tab, setTab] = useState<Tab>("workbench");
   const [archiveFocus, setArchiveFocus] = useState<{ path: string; tick: number } | null>(null);

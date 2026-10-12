@@ -1,6 +1,5 @@
 import { estimateTokens } from "@yushu/memory";
-import { YushuError } from "@yushu/core";
-import { chapterPath, parseOutline, sampleForAudit, type AuditSample, type AuditSampleInput } from "@yushu/world-engine";
+import { chapterPath, sampleForAudit, type AuditSample, type AuditSampleInput } from "@yushu/world-engine";
 import {
   costTokensOf,
   extractStructured,
@@ -242,16 +241,4 @@ export async function runAiAudit(
     rejected,
     findings,
   };
-}
-
-/** 供报告合并前的一致性检查：outline 缺失等结构性问题在这里提前给出原因而不是抛 */
-export async function assertOutlineReadable(gateway: ProjectGateway): Promise<string | null> {
-  try {
-    const snap = await gateway.readDoc("outline/outline.yaml").catch(() => null);
-    if (!snap) return "项目尚无大纲（全书体检的采样需要至少一章正文）";
-    parseOutline(snap.content);
-    return null;
-  } catch (err) {
-    return err instanceof YushuError ? err.message : String(err);
-  }
 }
