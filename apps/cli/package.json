@@ -14,7 +14,6 @@
     "rebuild": "node dist/cli.js"
   },
   "dependencies": {
-    "@yushu/core": "workspace:*",
     "@yushu/search": "workspace:*",
     "@yushu/world-engine": "workspace:*"
   }

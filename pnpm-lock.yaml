@@ -178,9 +178,6 @@ importers:
 
   apps/cli:
     dependencies:
-      '@yushu/core':
-        specifier: workspace:*
-        version: link:../../packages/@yushu/core
       '@yushu/search':
         specifier: workspace:*
         version: link:../../packages/@yushu/search
@@ -218,9 +215,6 @@ importers:
         specifier: ^1.43.0
         version: 1.43.0
     devDependencies:
-      '@codemirror/commands':
-        specifier: ^6.11.1
-        version: 6.11.1
       '@codemirror/lang-markdown':
         specifier: ^6.5.2
         version: 6.5.2
@@ -230,9 +224,6 @@ importers:
       '@codemirror/view':
         specifier: ^6.43.13
         version: 6.43.13
-      '@tiptap/pm':
-        specifier: ^3.31.3
-        version: 3.31.3
       '@tiptap/react':
         specifier: ^3.31.3
         version: 3.31.3(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -296,9 +287,6 @@ importers:
       '@yushu/core':
         specifier: workspace:*
         version: link:../core
-      '@yushu/schema':
-        specifier: workspace:*
-        version: link:../schema
       yaml:
         specifier: ^2.6.0
         version: 2.9.1
@@ -317,9 +305,6 @@ importers:
       '@yushu/core':
         specifier: workspace:*
         version: link:../core
-      yaml:
-        specifier: ^2.6.0
-        version: 2.9.1
 
   packages/@yushu/schema:
     dependencies:

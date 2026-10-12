@@ -21,7 +21,6 @@
   },
   "dependencies": {
     "@yushu/core": "workspace:*",
-    "@yushu/schema": "workspace:*",
     "yaml": "^2.6.0"
   }
 }

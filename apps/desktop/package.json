@@ -30,11 +30,9 @@
     "isomorphic-git": "^1.43.0"
   },
   "devDependencies": {
-    "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
-    "@tiptap/pm": "^3.31.3",
     "@tiptap/react": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
     "@types/markdown-it": "^14.2.0",
