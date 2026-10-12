@@ -10,6 +10,8 @@ Copyright 2026 御书 项目作者与贡献者
   React / React DOM                           MIT
   TipTap (@tiptap/react, @tiptap/starter-kit) MIT
   CodeMirror 6 (@codemirror/*, codemirror)    MIT
+  Lucide 图标（lucide-static v1.55.0 的 11 个 SVG path，逐字复制进
+    apps/desktop/renderer/src/icons.tsx，不引运行时包）        ISC
   yaml                                        ISC
   isomorphic-git                              MIT
   markdown-it                                 MIT
