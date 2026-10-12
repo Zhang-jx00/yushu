@@ -124,14 +124,14 @@ import { installKeyCipher } from "./ai-ops.js";
 import { readCostPanel } from "./cost-ops.js";
 import { dryRunRule, readRuleCatalog } from "./rule-ops.js";
 import { markConsistencyStale, runConsistencyCheck } from "./consistency-ops.js";
-import { decideProposal, listProposals, previewPropagation, proposalPathOf } from "./propagation-ops.js";
+import { applyProposal, decideProposal, listProposals, previewPropagation, proposalPathOf } from "./propagation-ops.js";
 import type { ProposalFile } from "@yushu/world-engine";
 
 /** 提案文件 → IPC 载荷：未决策条数在这里算，面板只负责显示（不在渲染层长出第二套判断） */
 function toProposalPayload(path: string, file: ProposalFile): ProposalPayload {
   return {
     proposalId: file.proposal.proposalId,
-    change: { ...file.proposal.change },
+    change: { ...(file.proposal.change as { entity: string; field: string; to?: string }) },
     status: file.proposal.status,
     impact: file.proposal.impact.map((row) => ({ ...row, path: [...row.path] })),
     truncated: file.proposal.truncated === null ? null : { frontier: [...file.proposal.truncated.frontier], count: file.proposal.truncated.count },
@@ -139,6 +139,7 @@ function toProposalPayload(path: string, file: ProposalFile): ProposalPayload {
     assumedRelations: [...file.proposal.assumedRelations],
     maxDepth: file.proposal.maxDepth,
     decisions: { ...file.decisions },
+    applied: [...file.applied],
     undecidedCount: file.proposal.impact.filter((_, index) => file.decisions[String(index)] === undefined).length,
     path,
   };
@@ -531,6 +532,13 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(CHANNELS.proposalList, () =>
     wrap<ProposalPayload[]>(() => listProposals(requireGateway()).then((items) => items.map((item) => toProposalPayload(item.path, item)))),
+  );
+  // 写回真源（R62）：这条**必须**走 wrapWrite——它逐张改写引用卡的 refs.target；
+  // 索引刷新与一致性置脏都由 wrapWrite 负责，写通道源码锁的写清单里也有它。
+  ipcMain.handle(CHANNELS.proposalApply, (_event, payload: { proposalId: string }) =>
+    wrapWrite<ProposalPayload>(() =>
+      applyProposal(requireGateway(), payload.proposalId).then((file) => toProposalPayload(proposalPathOf(payload.proposalId), file)),
+    ),
   );
   ipcMain.handle(CHANNELS.proposalDecide, (_event, payload: ProposalDecidePayload) =>
     wrap<ProposalPayload>(() =>

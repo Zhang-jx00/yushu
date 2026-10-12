@@ -1506,6 +1506,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
     // 断言的重点不是"传播了几条"，而是那条红线：**预览与决策都不碰真源**。
     let propProbe = {
       ok: false,
+      appliedOk: false,
+      reApplyRejected: false,
       impact: -1,
       firstPathLen: -1,
       undecidedBefore: -1,
@@ -1544,7 +1546,23 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       const after = await api.proposal.list();
       const lawAfter = await api.doc.read(lawPath);
       const geoAfter = await api.doc.read(geoPath);
+      // 写回那一步（R62）：另做一份**改名**提案（只有改名有机械可写的下游编辑）
+      const renamed = await api.propagate.preview({ entity: "law-prop-e2e", field: "id", to: "law-prop-e2e-v2" });
+      await api.proposal.decide({ proposalId: renamed.proposalId, index: 0, decision: "accept" });
+      const applied = await api.proposal.apply({ proposalId: renamed.proposalId });
+      const geoWritten = await api.doc.read(geoPath);
+      const snaps = await api.snapshot.state();
+      const appliedOk =
+        applied.status === "applied" &&
+        applied.applied.length === 1 &&
+        geoWritten.content.indexOf("law-prop-e2e-v2") >= 0 &&
+        geoWritten.hash !== geoAfter.hash &&
+        snaps.snapshots.some((row) => row.reason === "pre_apply_proposal");
+      // 再点一次必须被拒（不重复应用）
+      const reApply = await api.proposal.apply({ proposalId: renamed.proposalId }).then(() => false, () => true);
       propProbe = {
+        appliedOk,
+        reApplyRejected: reApply,
         ok: true,
         impact: preview.impact.length,
         firstPathLen: preview.impact.length > 0 ? preview.impact[0].path.length : -1,
@@ -2220,6 +2238,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       };
       propagation: {
         ok: boolean;
+        appliedOk: boolean;
+        reApplyRejected: boolean;
         impact: number;
         firstPathLen: number;
         undecidedBefore: number;
@@ -3243,6 +3263,9 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       [`result.propagation.listed`, result.propagation.listed],
       [`result.propagation.lawHashSame（预览与决策不碰真源）`, result.propagation.lawHashSame],
       [`result.propagation.geoHashSame`, result.propagation.geoHashSame],
+      // R62 写回：已接受的条目真的改指新 id、撤销快照在写之前生成、且不重复应用
+      [`result.propagation.appliedOk`, result.propagation.appliedOk],
+      [`result.propagation.reApplyRejected`, result.propagation.reApplyRejected],
       [`result.consistency.aiNonAiEntries === result.consistency.aiPrevEntries`,
         result.consistency.aiNonAiEntries === result.consistency.aiPrevEntries],
       [`result.consistency.packErrorNames === "char-badlog-probe"`, result.consistency.packErrorNames === "char-badlog-probe"],

@@ -60,6 +60,8 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
   // 面板上写明的边界比一个灰掉的按钮诚实：读者不必猜"接受之后会发生什么"。
   const [propEntity, setPropEntity] = useState("");
   const [propField, setPropField] = useState("content");
+  // 改名类改动才带得出机械可写的下游编辑（R62）：新 id 空着就是"正文类改动"，写回会被拒
+  const [propTo, setPropTo] = useState("");
   const [proposals, setProposals] = useState<ProposalPayload[]>([]);
   const [propError, setPropError] = useState<string | null>(null);
   const [propBusy, setPropBusy] = useState(false);
@@ -76,14 +78,39 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
     try {
       setPropError(null);
       setPropBusy(true);
-      await api().propagate.preview({ entity: propEntity.trim(), field: propField.trim() || "content" });
+      const field = propField.trim() || "content";
+      await api().propagate.preview({
+        entity: propEntity.trim(),
+        field,
+        ...(field === "id" && propTo.trim() !== "" ? { to: propTo.trim() } : {}),
+      });
       await refreshProposals();
     } catch (err) {
       setPropError(err instanceof Error ? err.message : String(err));
     } finally {
       setPropBusy(false);
     }
-  }, [propEntity, propField, refreshProposals]);
+  }, [propEntity, propField, propTo, refreshProposals]);
+
+  const apply = useCallback(
+    async (proposalId: string) => {
+      try {
+        setPropError(null);
+        await api().proposal.apply({ proposalId });
+        await refreshProposals();
+      } catch (err) {
+        setPropError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [refreshProposals],
+  );
+
+  const decideApply = useCallback(
+    async (proposalId: string) => {
+      await apply(proposalId);
+    },
+    [apply],
+  );
 
   const decide = useCallback(
     async (proposalId: string, index: number, decision: ProposalDecisionPayload) => {
@@ -424,6 +451,14 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
             value={propField}
             onChange={(event) => setPropField(event.target.value)}
           />
+          {propField.trim() === "id" && (
+            <input
+              className="propagate-to"
+              placeholder="新实体 id（改名时必填）"
+              value={propTo}
+              onChange={(event) => setPropTo(event.target.value)}
+            />
+          )}
           <button className="btn propagate-preview" disabled={propBusy || propEntity.trim() === ""} onClick={() => void runPreview()}>
             生成影响提案
           </button>
@@ -439,13 +474,30 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
         {proposals.map((proposal) => (
           <div className="proposal-block" key={proposal.proposalId}>
             <p className="proposal-head">
-              <code>{proposal.change.entity}</code> 的 <code>{proposal.change.field}</code> 改动 ·
+              <code>{proposal.change.entity}</code> 的 <code>{proposal.change.field}</code> 改动
+              {proposal.change.to ? <> → 新 id <code>{proposal.change.to}</code></> : null} ·
               {" "}{proposal.status === "blocked" ? "被环阻断" : "等待逐项确认"} · {proposal.impact.length} 条 ·
               {" "}未决策 {proposal.undecidedCount} 条 · 封顶 {proposal.maxDepth} 层
               {proposal.truncated ? `（下一层还有 ${proposal.truncated.count} 个未展开）` : "（未截断）"}
               {proposal.assumedRelations.length > 0
                 ? ` · 权重未定义的关系按 1 计：${proposal.assumedRelations.join("、")}`
                 : ""}
+            </p>
+            <p className="proposal-apply-row">
+              <button
+                className="btn proposal-apply"
+                disabled={proposal.status !== "awaiting_confirmation" || proposal.undecidedCount > 0}
+                onClick={() => void decideApply(proposal.proposalId)}
+              >
+                写回已接受的条目
+              </button>
+              <span className="muted">
+                {proposal.status === "applied"
+                  ? `已写回 ${proposal.applied.length} 条`
+                  : proposal.undecidedCount > 0
+                    ? "还有条目未决策，写回不可用"
+                    : "只改引用指向；改名本身要作者自己在真源里完成"}
+              </span>
             </p>
             {proposal.status === "blocked" && (
               <p className="warn proposal-cycle">环路径：{proposal.cycle?.join(" → ")}（先修掉成环的引用再传播）</p>

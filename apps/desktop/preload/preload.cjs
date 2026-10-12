@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld("yushu", {
   proposal: {
     list: () => invoke("proposal:list"),
     decide: (payload) => invoke("proposal:decide", payload),
+    apply: (payload) => invoke("proposal:apply", payload),
   },
   export: {
     preview: () => invoke("export:preview"),

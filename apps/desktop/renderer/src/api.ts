@@ -175,6 +175,7 @@ export interface YushuApi {
   proposal: {
     list: () => Promise<ProposalPayload[]>;
     decide: (payload: ProposalDecidePayload) => Promise<ProposalPayload>;
+    apply: (payload: { proposalId: string }) => Promise<ProposalPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;

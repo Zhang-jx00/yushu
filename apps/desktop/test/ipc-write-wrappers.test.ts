@@ -38,6 +38,7 @@ const WRITE_CHANNELS = [
   "memorySaveFact",
   "memoryDeleteFact",
   "extractAdopt",
+  "proposalApply",
 ] as const;
 
 /** 写盘但不写真源（派生物 / 索引器排除文件 / .git 内部）——走只读包装器是有意的 */
@@ -51,7 +52,7 @@ const NON_WRITE_CHANNELS = [
   "recoveryWriteJournal",
   "recoveryClearJournal",
   // R61 影响传播：预览与决策都只写 `.yushu/proposals/`（派生区，经 writeDerived 的窄门），
-  // 真源一个字节都不动 ⇒ 不该因此刷索引或置脏一致性结论
+  // 真源一个字节都不动 ⇒ 不该因此刷索引或置脏一致性结论（**写回那条 proposalApply 在写清单里**）
   "propagatePreview",
   "proposalDecide",
   "proposalList",

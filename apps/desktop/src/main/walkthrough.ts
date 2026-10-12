@@ -2418,6 +2418,68 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 46,
+    title: "规则页：写回已接受的条目（改名改指 refs.target + 撤销快照在写之前）（M4/T4-5，R62）",
+    file: "step46-apply-proposal.png",
+    body: String.raw`
+      await tab('规则');
+      const geoPath = 'world/cards/location/geo-prop-wt.md';
+      const input = await waitFor(() => document.querySelector('.propagate-entity'), 12000);
+      if (!input) return { ok: false, note: '找不到影响传播输入框：' + pageText() };
+      setV(input, 'law-prop-wt');
+      const fieldInput = document.querySelector('.propagate-field');
+      if (!fieldInput) return { ok: false, note: '找不到字段输入框' };
+      setV(fieldInput, 'id');
+      // 「新 id」输入框只在字段=id 时渲染，等它出现再填（否则 React 还没重绘）
+      const toInput = await waitFor(() => document.querySelector('.propagate-to'), 12000);
+      if (!toInput) return { ok: false, note: '改名用的「新 id」输入框没出现' };
+      setV(toInput, 'law-prop-wt-v2');
+      await sleep(200);
+      const genBtn = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('生成影响提案'));
+      if (!genBtn) return { ok: false, note: '找不到「生成影响提案」按钮' };
+      genBtn.click();
+      const renameBlock = await waitFor(() => {
+        const blocks = [...document.querySelectorAll('.proposal-block')];
+        return blocks.find((b) => String(b.textContent).includes('新 id') && String(b.textContent).includes('law-prop-wt-v2')) || null;
+      }, 20000);
+      if (!renameBlock) return { ok: false, note: '改名提案没出现（面板里没有含新 id 的那一份）：' + pageText().slice(0, 200) };
+      const acceptBtn = [...renameBlock.querySelectorAll('.proposal-accept')][0];
+      if (!acceptBtn) return { ok: false, note: '改名提案里没有可接受的条目行' };
+      acceptBtn.click();
+      const decided = await waitFor(() => {
+        const again = [...document.querySelectorAll('.proposal-block')].find((b) => b.textContent.includes('law-prop-wt-v2'));
+        const cell = again ? again.querySelector('.proposal-decision') : null;
+        return cell && String(cell.textContent).trim() === 'accept' ? 'accept' : null;
+      }, 20000);
+      const geoBefore = await window.yushu.doc.read(geoPath);
+      const applyBtn = await waitFor(() => {
+        const again = [...document.querySelectorAll('.proposal-block')].find((b) => b.textContent.includes('law-prop-wt-v2'));
+        const btn = again ? again.querySelector('.proposal-apply') : null;
+        return btn && !btn.disabled ? btn : null;
+      }, 20000);
+      if (!applyBtn) return { ok: false, note: '「写回已接受的条目」不可点（应等全部条目表态后放开）' };
+      applyBtn.click();
+      const appliedText = await waitFor(() => {
+        const again = [...document.querySelectorAll('.proposal-block')].find((b) => b.textContent.includes('law-prop-wt-v2'));
+        const row = again ? again.querySelector('.proposal-apply-row') : null;
+        const text = row ? String(row.textContent).replace(/\s+/g, ' ') : '';
+        return text.includes('已写回 1 条') ? text : null;
+      }, 25000);
+      const geoAfter = await window.yushu.doc.read(geoPath);
+      const diskRetargeted = String(geoAfter.content).indexOf('law-prop-wt-v2') >= 0;
+      const snaps = await window.yushu.snapshot.state();
+      const snapshotTaken = snaps.snapshots.some((row) => row.reason === 'pre_apply_proposal');
+      const panel = document.querySelector('.propagate-panel');
+      if (panel) panel.scrollIntoView({ block: 'start' });
+      await sleep(200);
+      return {
+        ok: decided === 'accept' && appliedText !== null && diskRetargeted && snapshotTaken && geoBefore.hash !== geoAfter.hash,
+        note: '决策=' + String(decided) + '；写回回执=' + (appliedText !== null) + '；盘上已改指新 id=' + diskRetargeted +
+          '；pre_apply_proposal 快照=' + snapshotTaken + '；卡 hash 已变（确认真被写）=' + (geoBefore.hash !== geoAfter.hash),
+      };
+    `,
+  },
 ];
 
 /**
@@ -2545,7 +2607,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-45）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-46）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

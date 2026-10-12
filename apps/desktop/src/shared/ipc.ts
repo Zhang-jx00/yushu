@@ -59,8 +59,10 @@ export const CHANNELS = {
   propagatePreview: "propagate:preview",
   /** 提案清单（派生区读） */
   proposalList: "proposal:list",
-  /** 逐条决策：accept/reject/pending 只改派生提案文件，**不写回真源**（写回是下一轮） */
+  /** 逐条决策：accept/reject/pending 只改派生提案文件，真源不动 */
   proposalDecide: "proposal:decide",
+  /** 写回真源（R62）：**真源写操作**，走 wrapWrite；只应用已 accept 的条目 */
+  proposalApply: "proposal:apply",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -1385,7 +1387,7 @@ export interface ChapterSidecarResult {
  * auto = 自动（60s 最小间隔，非强制）；manual = 手动（强制）；
  * pre_restore = 恢复前自动（强制）；pre_destructive = 破坏性操作前自动（强制，T2-8 切片 B）
  */
-export type SnapshotReasonPayload = "auto" | "manual" | "pre_restore" | "pre_destructive";
+export type SnapshotReasonPayload = "auto" | "manual" | "pre_restore" | "pre_destructive" | "pre_apply_proposal";
 
 export interface SnapshotSummaryPayload {
   /** snap-YYYYMMDD-HHMMSS-<rand4>（字典序 = 时间序） */
@@ -1983,6 +1985,8 @@ export type ProposalDecisionPayload = "accept" | "reject" | "pending";
 export interface PropagatePreviewPayload {
   entity: string;
   field: string;
+  /** 改名类改动的新值：只有它带得出机械可写的下游编辑（R62） */
+  to?: string;
   maxDepth?: number;
 }
 
@@ -1999,14 +2003,17 @@ export interface ProposalImpactPayload {
 
 export interface ProposalPayload {
   proposalId: string;
-  change: { entity: string; field: string };
-  status: "awaiting_confirmation" | "blocked";
+  /** to = 改名类改动的新 id；面板要把它显示出来，否则作者看不出"写回会把引用改指向哪里" */
+  change: { entity: string; field: string; to?: string };
+  status: "awaiting_confirmation" | "blocked" | "applied";
   impact: ProposalImpactPayload[];
   truncated: { frontier: string[]; count: number } | null;
   cycle: string[] | null;
   assumedRelations: string[];
   maxDepth: number;
   decisions: Record<string, ProposalDecisionPayload>;
+  /** 已写回真源的条目下标（R62） */
+  applied: number[];
   undecidedCount: number;
   path: string;
 }
