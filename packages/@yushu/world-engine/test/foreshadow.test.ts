@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  FORESHADOW_RULE_IDS,
   buildForeshadowBoard,
   parseForeshadowLedger,
   serializeForeshadowLedger,
@@ -185,5 +187,36 @@ describe("buildForeshadowBoard（看板与审计）", () => {
     const out = buildForeshadowBoard(ledgerOf([base]), { chapters: [] });
     expect(out.rows[0]?.overdueBy).toBeNull();
     expect(out.findings.some((f) => f.rule === "fs-no-chapters")).toBe(true);
+  });
+});
+
+describe("章号定位：作者写「第 N 章」要能落到有序清单的第 N 章（R75 修的一处真缺陷）", () => {
+  it("随机后缀的章 id 下，「第 2 章」按位置解析而不是误报悬空", () => {
+    const chapters = ["ch-q5wbog", "co-16bn6kw", "ch-zz9k2m"];
+    const entry = { ...base, plant_chapters: ["第 1 章"], expected_payoff_chapter: "第 1 章" };
+    const out = buildForeshadowBoard(ledgerOf([entry]), { chapters });
+    expect(out.findings.map((f) => f.rule)).not.toContain("fs-dangling-chapter");
+    // 进度按最后一章算：第 1 章该收而写到第 3 章 ⇒ 逾期 2 章
+    expect(out.rows[0]?.overdueBy).toBe(2);
+  });
+
+  it("「第 N 章」超出清单长度仍算定位不到（不夹到最后一章）", () => {
+    const entry = { ...base, plant_chapters: ["第 9 章"], expected_payoff_chapter: "第 1 章" };
+    const out = buildForeshadowBoard(ledgerOf([entry]), { chapters: ["ch-a", "ch-b"] });
+    expect(out.findings.map((f) => f.rule)).toContain("fs-dangling-chapter");
+  });
+});
+
+describe("规则 id 清单与代码同源（R75：并入全书体检后要能被豁免）", () => {
+  it("源码里出现的每个 fs-* 字面量都在 FORESHADOW_RULE_IDS 里", () => {
+    const source = readFileSync(new URL("../src/foreshadow.ts", import.meta.url), "utf8");
+    const used = [...new Set([...source.matchAll(/"fs-[a-z-]+"/g)].map((m) => m[0].slice(1, -1)))].sort();
+    expect(used.length).toBeGreaterThan(5);
+    expect(used.filter((id) => !(FORESHADOW_RULE_IDS as readonly string[]).includes(id))).toEqual([]);
+  });
+
+  it("清单里没有凭空调出来的 id（每条都在源码中出现）", () => {
+    const source = readFileSync(new URL("../src/foreshadow.ts", import.meta.url), "utf8");
+    for (const id of FORESHADOW_RULE_IDS) expect(source.includes(`"${id}"`)).toBe(true);
   });
 });

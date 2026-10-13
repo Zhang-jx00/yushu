@@ -134,7 +134,9 @@ describe("Git 版本管理（T2-7 切片 B）", () => {
     const pre = snap.snapshots.filter((item) => item.reason === "pre_restore");
     expect(pre.length).toBeGreaterThanOrEqual(1);
     expect(pre[0]!.id).toBe(rollback.preRestoreId);
-  });
+    // 同上一条：98 文件满载并行时越过 5s 默认闸（2026-10-13 R75 全量跑复现），单独跑实测 945ms / 952ms。
+    // 改的仍是时间预算，不是判据——挂死照样在 20s 处红。
+  }, GIT_HEAVY_TIMEOUT_MS);
 
   it("错误路径：空信息 / 无变更提交 / 未初始化 / 坏 oid 给出明确错误", async () => {
     await expect(gitCommit(gateway, "  ")).rejects.toMatchObject({ code: "E_INVALID_INPUT" });

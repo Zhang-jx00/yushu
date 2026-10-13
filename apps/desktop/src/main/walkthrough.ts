@@ -2671,15 +2671,29 @@ const STEPS: StepDef[] = [
       // 红线：这一页只读——没有"替作者改状态"的按钮
       const writeBack = [...document.querySelectorAll('.foreshadow-board button')]
         .some((b) => (b.textContent || '').indexOf('写回') >= 0 || (b.textContent || '').indexOf('应用') >= 0);
-      const panel = document.querySelector('.foreshadow-board');
+      const panel = document.querySelector('.foreshadow-panel') || document.querySelector('.foreshadow-board');
+      // 伏笔结论并入全书体检（R75）的运行时证据：去规则页点一次「全书体检」，
+      // 表里必须出现 fs- 那条，且出处写着伏笔台账（单测切过区间，这里要的是界面上真看得见）
+      await tab('规则');
+      const auditBtn = await waitFor(() => document.querySelector('.consistency-manual'), 12000);
+      if (!auditBtn) return { ok: false, note: '找不到「全书体检」按钮：' + pageText() };
+      auditBtn.click();
+      const fsRow = await waitFor(() => {
+        const rows = [...document.querySelectorAll('.consistency-table tr')];
+        return rows.find((r) => String(r.innerText).indexOf('fs-') >= 0 && String(r.innerText).indexOf('伏笔台账') >= 0) || null;
+      }, 25000);
+      const ledgerInAudit = fsRow !== null;
+      const fsRuleShown = fsRow === null ? '' : String(fsRow.innerText).replace(/\s+/g, ' ').slice(0, 46);
+      await tab('世界观档案');
       if (panel) panel.scrollIntoView({ block: 'center' });
       await sleep(200);
       return {
         ok: rows.length === 3 && overdueShown && closedRh && contradiction && rhNotReported && !writeBack &&
-          summary.indexOf('共 3 条') >= 0,
+          ledgerInAudit && summary.indexOf('共 3 条') >= 0,
         note: '行=' + rows.length + '；汇总="' + summary.slice(0, 64) + '"；逾期外显=' + overdueShown +
           '；红鲱鱼已闭环=' + closedRh + '；红鲱鱼未被报缺陷=' + rhNotReported +
           '；paid 无回收章报矛盾=' + contradiction + '；结论规则=' + JSON.stringify(rules) +
+          '；体检同表含伏笔结论=' + ledgerInAudit + '（行="' + fsRuleShown + '"）' +
           '；面板内写回按钮=' + writeBack,
       };
     `,

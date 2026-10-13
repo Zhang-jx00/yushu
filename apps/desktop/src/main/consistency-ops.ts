@@ -19,6 +19,8 @@ import type {
 } from "../shared/ipc.js";
 import { gatewayReader } from "./index-ops.js";
 import { evaluatePackRules } from "./rule-findings.js";
+import { foreshadowReportFindings } from "./foreshadow-ops.js";
+import { FORESHADOW_RULE_IDS } from "@yushu/world-engine";
 import { runAiAudit, type AiAuditResult } from "./ai-audit.js";
 import { projectPackIds } from "./rule-ops.js";
 import type { ProjectGateway } from "./file-gateway.js";
@@ -143,6 +145,9 @@ async function computeReport(
     fix: finding.fix,
     origin: finding.origin,
   }));
+  // 伏笔台账的结论并入同一张表（R75）：判定在 `foreshadow.ts`，这里只投影，不重做一遍
+  const foreshadowFindings = await foreshadowReportFindings(gateway);
+  const allFindings = [...structure.findings, ...packFindings, ...aiFindings, ...foreshadowFindings];
   // 豁免清单只认**本次真的参与求值的那些 id**（内置三条 + 包里的规则 id）：
   // 仍然不许豁免一条不存在的规则，但包规则接入后不能再被这句挡在门外
   const knownRuleIds = [
@@ -154,6 +159,9 @@ async function computeReport(
     "ai-sampled-setting-drift",
     "ai-sampled-power-jump",
     "ai-sampled-name-drift",
+    // 伏笔结论同口径：清单与引擎同源（覆盖锁在 foreshadow.test.ts），漏一条就会"报得出来却豁免不掉"
+    ...FORESHADOW_RULE_IDS,
+    "fs-ledger-unreadable",
   ];
 
   let allow: ConsistencyAllowList | null = null;
@@ -174,7 +182,7 @@ async function computeReport(
   const cardTexts: Record<string, string> = {};
   const filePathById = new Map(structure.entities.map((entity) => [entity.id, entity.filePath]));
   const needed = new Set<string>();
-  for (const finding of [...structure.findings, ...packFindings, ...aiFindings]) {
+  for (const finding of allFindings) {
     const file = filePathById.get(finding.subject);
     if (file && cardTexts[file] === undefined) needed.add(file);
   }
@@ -184,7 +192,7 @@ async function computeReport(
   }
 
   const report = buildConsistencyReport({
-    findings: [...structure.findings, ...packFindings, ...aiFindings],
+    findings: allFindings,
     entities: structure.entities,
     cardTexts,
     allow,

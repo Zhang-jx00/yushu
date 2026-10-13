@@ -426,3 +426,74 @@ describe("全书体检并入 AI 采样结论（R58）", () => {
     setAiEnabled(false);
   });
 });
+
+/** 伏笔台账结论并入全书体检（M4 / T4-2，R75）：判定在引擎，报告只投影 */
+async function writeForeshadow(entries: string[]): Promise<void> {
+  await gateway.writeDoc("world/foreshadow.yaml", ["apiVersion: yushu.foreshadow/v1", "entries:", ...entries, ""].join("\n"));
+}
+
+const OVERDUE_ENTRY = [
+  "  - id: fs-cons-1",
+  "    name: 断剑的重铸",
+  "    promise: 重铸断剑",
+  "    carrier: 道具",
+  "    visibility: 半遮",
+  "    state: planted",
+  "    plant_chapters: [\"第 1 章\"]",
+  "    expected_payoff_chapter: 第 1 章",
+  "    payoff_type: 揭示",
+  "    is_red_herring: false",
+  "    recheck_after: 3",
+];
+
+describe("伏笔结论并入体检同表（R75）", () => {
+  it("逾期伏笔出现在同表里，带台账出处与可切片的原文区间", async () => {
+    await writeForeshadow(OVERDUE_ENTRY);
+    const before = await gateway.readDoc("world/foreshadow.yaml");
+    const report = await runConsistencyCheck(gateway, { timing: "manual" });
+    // 夹具只有 2 章，必然落进终局窗口（finaleWindow 默认 5）⇒ 引擎按既定优先级报 finale-unpaid 而非 overdue
+    const entry = report.entries.find((item) => item.rule === "fs-finale-unpaid");
+    expect(entry).toBeDefined();
+    expect(entry!.subject).toBe("fs-cons-1");
+    expect(entry!.origin).toContain("伏笔台账");
+    // 区间必须真的落在台账里那条上：切片要同时含 id 与名字（不给假区间）
+    expect(entry!.span).not.toBeNull();
+    const ledgerText = (await gateway.readDoc("world/foreshadow.yaml"))!.content;
+    const sliced = ledgerText.slice(entry!.span!.start, entry!.span!.end);
+    expect(sliced).toContain("fs-cons-1");
+    expect(sliced).toContain("断剑的重铸");
+    expect(entry!.span!.file).toBe("world/foreshadow.yaml");
+    // 跑完体检台账一个字节都不能动
+    const after = await gateway.readDoc("world/foreshadow.yaml");
+    expect(after!.hash).toBe(before!.hash);
+  });
+
+  it("台账读不懂 ⇒ 如实报一条 fs-ledger-unreadable，不静默贡献零结论", async () => {
+    await writeForeshadow([...OVERDUE_ENTRY, "    未知键: 会整份拒绝"]);
+    const report = await runConsistencyCheck(gateway, { timing: "manual" });
+    const entry = report.entries.find((item) => item.rule === "fs-ledger-unreadable");
+    expect(entry).toBeDefined();
+    expect(entry!.severity).toBe("warn");
+    expect(entry!.evidence).toContain("未知键");
+    // 关键：读不懂时不能"看起来没问题"——除这条之外不该有任何伏笔结论
+    expect(report.entries.filter((item) => item.rule.startsWith("fs-") && item.rule !== "fs-ledger-unreadable")).toEqual([]);
+  });
+
+  it("伏笔结论能被豁免（规则 id 清单与引擎同源，否则报得出来却豁免不掉）", async () => {
+    await writeForeshadow(OVERDUE_ENTRY);
+    await writeAllow([
+      "apiVersion: yushu.consistency-allow/v1",
+      "entries:",
+      "  - rule: fs-finale-unpaid",
+      "    subject: fs-cons-1",
+      "    reason: 作者确认这把剑第 1 章不收，改到卷末",
+      "    decided_at: 2026-10-13",
+      "",
+    ].join("\n"));
+    const report = await runConsistencyCheck(gateway, { timing: "manual" });
+    expect(report.allowError).toBeNull();
+    expect(report.entries.map((item) => item.rule)).not.toContain("fs-finale-unpaid");
+    expect(report.suppressed.map((item) => item.rule)).toContain("fs-finale-unpaid");
+    expect(report.suppressed.find((item) => item.rule === "fs-finale-unpaid")!.reason).toContain("卷末");
+  });
+});

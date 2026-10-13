@@ -1,7 +1,13 @@
-import { buildForeshadowBoard, parseForeshadowLedger, FORESHADOW_PATH } from "@yushu/world-engine";
+import {
+  buildForeshadowBoard,
+  parseForeshadowLedger,
+  FORESHADOW_PATH,
+  type ConsistencySpan,
+} from "@yushu/world-engine";
 import type { ForeshadowBoardPayload } from "../shared/ipc.js";
 import { readOutlineSafe } from "./doc-readers.js";
 import type { ProjectGateway } from "./file-gateway.js";
+import { locateLedgerEntrySpan } from "./ledger-spans.js";
 
 /**
  * 伏笔台账的桌面接线（M4 / T4-6，R66）：**只读**。
@@ -82,4 +88,62 @@ export async function foreshadowBoard(gateway: ProjectGateway): Promise<Foreshad
     findings: board.findings,
     stats: board.stats,
   };
+}
+
+/** 投影成体检报告条目的形状（与 `ReportFinding` 结构兼容，由调用点并入同表） */
+export interface ForeshadowReportFinding {
+  rule: string;
+  severity: "error" | "warn" | "info";
+  subject: string;
+  evidence: string;
+  fix: string;
+  origin: string;
+  /** 定位不到就**不给这个键**（报告侧会退回按主体找卡；绝不塞 0-0 的假区间） */
+  span?: ConsistencySpan;
+}
+
+/**
+ * 伏笔结论并入全书体检（M4 / T4-2，R75）：**判定一行都不重写**。
+ *
+ * `buildForeshadowBoard` 已经是伏笔判定的唯一出处（R65 立的），这里只做两件事：
+ * 把结论换上报告条目的形状、并按条目 id 去 `world/foreshadow.yaml` 里定位原文区间
+ * （定位不到给 `null`，不给 0-0 的假区间）。
+ *
+ * 台账读不懂时**如实报一条 `fs-ledger-unreadable`**，而不是静默贡献零条结论——
+ * "伏笔这块没报问题"必须能区分"查过没问题"与"根本没查"（同 R74 参与表的口径）。
+ * 台账文件不存在则确实没有结论可报，返回空数组。
+ */
+export async function foreshadowReportFindings(gateway: ProjectGateway): Promise<ForeshadowReportFinding[]> {
+  const snap = await gateway.readDoc(FORESHADOW_PATH).catch(() => null);
+  if (snap === null) return [];
+  const origin = `伏笔台账（${FORESHADOW_PATH}）`;
+  let ledger;
+  try {
+    ledger = parseForeshadowLedger(snap.content);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return [{
+      rule: "fs-ledger-unreadable",
+      severity: "warn",
+      subject: FORESHADOW_PATH,
+      evidence: `台账读不了，本次没有伏笔结论：${message}`,
+      fix: "按提示修好 world/foreshadow.yaml（未知键 / 非法枚举 / 重复 id 都会整份拒绝）；要看完整报错去「世界观档案」页的伏笔看板",
+      origin,
+    }];
+  }
+  const board = buildForeshadowBoard(ledger, { chapters: await chapterOrder(gateway) });
+  return board.findings.map((finding) => {
+    // 全局结论（id 为 "-"）没有对应条目；定位不到也不给假区间——那个键干脆不出现
+    const span = finding.id === "-" ? null : locateLedgerEntrySpan(snap.content, FORESHADOW_PATH, finding.id);
+    return {
+      rule: finding.rule,
+      severity: finding.severity,
+      // "-" 是全局结论（如章清单为空），没有对应条目 ⇒ 主体落在台账文件本身
+      subject: finding.id === "-" ? FORESHADOW_PATH : finding.id,
+      evidence: finding.message,
+      fix: "改法在台账本身：编辑该条的埋设章 / 预期回收章 / 状态或回收章；确认是刻意留白就写进 config/consistency.yaml 并记理由",
+      origin,
+      ...(span ? { span } : {}),
+    };
+  });
 }

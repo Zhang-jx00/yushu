@@ -29,6 +29,27 @@ const CARRIERS: readonly ForeshadowCarrier[] = ["道具", "对白", "意象", "�
 const VISIBILITIES: readonly ForeshadowVisibility[] = ["显写", "半遮", "藏枪"];
 const STATES: readonly ForeshadowState[] = ["planted", "reinforced", "due", "paid", "abandoned"];
 
+/**
+ * 本模块可能产出的**全部结论规则 id**（R75 导出）。
+ *
+ * 伏笔结论要并入全书体检（T4-2 / T4-3），而豁免清单只放行"本次真的参与求值的规则"——
+ * 所以这份清单必须与代码同源，漏一条就会出现"结论报得出来、却豁免不掉"。
+ * 新增规则没补进来时，`foreshadow.test.ts` 的覆盖锁（扫源码里的 `fs-` 字面量）会红。
+ */
+export const FORESHADOW_RULE_IDS = [
+  "fs-abandon-reason-missing",
+  "fs-dangling-chapter",
+  "fs-density-drought",
+  "fs-density-storm",
+  "fs-finale-unpaid",
+  "fs-no-chapters",
+  "fs-overdue",
+  "fs-paid-without-payoff",
+  "fs-payoff-before-plant",
+  "fs-recheck",
+  "fs-red-herring-paid",
+] as const;
+
 /** 必填键：缺任何一条都拒绝整份台账，而不是把那条丢掉（半读半丢最坏） */
 const REQUIRED_KEYS = [
   "id",
@@ -201,7 +222,14 @@ function byCodePoint(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** 章序号：先按 id 精确匹配，再退到"第 N 章 / ch-012"这类数字口径；都认不出返回 null */
+/**
+ * 章序号：先按 id 精确匹配，再退到"第 N 章 / ch-012"这类数字口径；都认不出返回 null。
+ *
+ * 数字口径有**两种**，顺序不能反：先认"id 里带这个数"（老项目把章编进 id，如 `ch-012`），
+ * 再认"有序清单里的第 N 章"（作者的自然写法——大纲生成的 id 是随机后缀 `ch-q5wbog`，
+ * 只按 id 比数字的话「第 1 章」永远定位不到，会被误报成悬空。R75 并入体检时被测试当场抓到）。
+ * 超出清单长度仍返回 null：不夹到最后一章，"没这一章"和"我数错了"是两回事。
+ */
 function chapterIndex(chapters: string[], indexById: Map<string, number>, ref: string): number | null {
   const exact = indexById.get(ref);
   if (exact !== undefined) return exact;
@@ -210,7 +238,7 @@ function chapterIndex(chapters: string[], indexById: Map<string, number>, ref: s
   for (const [index, id] of chapters.entries()) {
     if (powerLogChapterNo(id) === num) return index;
   }
-  return null;
+  return num >= 1 && num <= chapters.length ? num - 1 : null;
 }
 
 /** 台账看板：逐条状态 + 逾期/复查/密度/终局判定。纯函数，同输入同输出 */
