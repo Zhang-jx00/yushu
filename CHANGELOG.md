@@ -45,6 +45,20 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **关系图谱 + M4 验收 A5 取证（第 69 轮，T4-9 与 A5 同时勾选）**：新建 `world-engine/relation-graph.ts`
+  ——`buildRelationGraph(entities, refs)` 吃的就是 T4-2 / T4-5 在用的两张真源行表，**图谱只是它们的一次投影：
+  不长第二套图结构、也不落盘**。三张网按 relation 名分类（`relationKinds` 可覆盖）；认不出的归 `other` 并把名字
+  列进 `unclassifiedRelations`（**不猜它属于哪张网**）；两端缺一**不成边但逐条进 `dangling`**；聚焦子图深度封顶给
+  被砍掉的**下一层**；重复边去重计数、自环保留标记、孤立节点单列、全走码点序。桌面侧 `graph:relation` 只读通道
+  （走 `wrap`，四处对账锁加了点名）+「世界观档案」底部的**自算 SVG 圆形布局**——**没引 React Flow / G6**：
+  节点顺序由引擎保证 ⇒ 同一份数据每次长同一个样子（可复现性），力导向布局会让截图无法复现；超 40 节点只画度数
+  最高的 40 个并写明"未画"。`nodes`/`edges` 的 SQLite 存储属性能优化，12 实体真源直算 <1ms，**没有测量支持就不加
+  第二套存储**。**A5 用结构断言取证**：e2e 探针先 `rebuildProjectIndex` 确保索引库存在 → 取图谱与时间线快照 →
+  删 `.yushu/index.db` → 重取 → 逐字比对，四条具名断言入清单；**第一次跑就红了**——`rebuilt.path` 是相对路径，
+  `access()` 解析到进程 CWD ⇒ `dbExistedBeforeDelete:false`，**没有这个守卫，"删了个不存在的文件"会伪装成成功验证**；
+  改 `join(dir, path)` 后 `{dbExistedBeforeDelete:true, graphSame:true, timelineSame:true, nodes:8}`。
+  **验证**：11 例先红后绿、全量 **948/948（94 文件）**、TC=0、e2e E2E=0、预演新增 **step51** → **51/51**（v153，抖动=0）；
+  **变异 4 次全红**。step51 首跑红在夹具（预演项目的引用全指向章节 ⇒ 0 条边），按 R54 老办法自己造一条能成边的关系再测。
 - **时间线视图接入界面（第 68 轮，M4/T4-7 收口，本项勾选）**：`timeline-ops.ts` 读 `world/timeline.yaml` →
   引擎换算与冲突校验 → 只读通道 `timeline:view`（**历法切换只是显示参数，不产生任何写操作** ⇒ 走 `wrap`；
   四处对账锁加了这条通道自己的点名）。视图落在「世界观档案」底部，**把「年份（历法换算）」与

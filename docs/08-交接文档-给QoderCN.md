@@ -17,10 +17,10 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **936/936 全绿**（93 个测试文件）——`pnpm test`（R67 时间线引擎侧 +15 例、R68 +4 例：四处对账 1 + 真源锁 3） |
+| 单测 | **948/948 全绿**（94 个测试文件）——`pnpm test`（R69 关系图谱 +11 例、+1 例四处对账；R68 为 936/93） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
-| UI 预演 | **50/50 全绿**（最近一次新目录 **v151**，抖动=0、证据缺失=0；上一版 v147 为 49/49，`flakySteps:[]`、`screenshotFailures:[]`、证据缺失=0、抖动=0；R63 的 v142 为 47/47）——见 §6.3。**step21 的偶发抖动根因已于 R58 消掉**（`press()` 缓存了失效的 `.tiptap` 节点，改为每次按键重新查询）；**剩余遗留只有 step17**：快照内容寻址导致"重复点一次不产生新行"，**状态变更型步骤重试救不回来**，根因仍未定（docs/06 §七）。**另记一条证据口径**：`screenshotFailures:[]` 只说明图取到了，不说明图拍对了——R58 复看时发现规则页的 step41/43/44 截图只拍到页首，已给这几步补 `scrollIntoView` 再重跑（v135）。**两条"取证要取在被断言那段"的新例子**：step47（R63）在展开动画**中途 60ms 采样**高度（0 → 35/52 → 236 = 内容高），断言的是"存在中间态且终值等于内容高"而不是某个中间常量；step49（R66）在页面里**现场按真实章序造数据**再验看板（逾期外显、红鲱鱼+放弃带理由不被报缺陷、paid 无回收章报矛盾、面板内没有写回按钮）；step48（R64）读**真实 computed style**（`line-break` / `text-autospace` / `text-spacing-trim` / `font-variant-numeric` / 版心 px）与 `CSS.supports()` 三个布尔——把"这台机器的运行时支不支持"变成问出来的事实，不是查表猜的。 |
+| UI 预演 | **51/51 全绿**（最近一次新目录 **v153**，抖动=0、证据缺失=0；v151 为 50/50、v147 为 49/49，`flakySteps:[]`、`screenshotFailures:[]`、证据缺失=0、抖动=0；R63 的 v142 为 47/47）——见 §6.3。**step21 的偶发抖动根因已于 R58 消掉**（`press()` 缓存了失效的 `.tiptap` 节点，改为每次按键重新查询）；**剩余遗留只有 step17**：快照内容寻址导致"重复点一次不产生新行"，**状态变更型步骤重试救不回来**，根因仍未定（docs/06 §七）。**另记一条证据口径**：`screenshotFailures:[]` 只说明图取到了，不说明图拍对了——R58 复看时发现规则页的 step41/43/44 截图只拍到页首，已给这几步补 `scrollIntoView` 再重跑（v135）。**两条"取证要取在被断言那段"的新例子**：step47（R63）在展开动画**中途 60ms 采样**高度（0 → 35/52 → 236 = 内容高），断言的是"存在中间态且终值等于内容高"而不是某个中间常量；step49（R66）在页面里**现场按真实章序造数据**再验看板（逾期外显、红鲱鱼+放弃带理由不被报缺陷、paid 无回收章报矛盾、面板内没有写回按钮）；step48（R64）读**真实 computed style**（`line-break` / `text-autospace` / `text-spacing-trim` / `font-variant-numeric` / 版心 px）与 `CSS.supports()` 三个布尔——把"这台机器的运行时支不支持"变成问出来的事实，不是查表猜的。 |
 | 对外文档 | R63 起仓库根齐了 `README`（按 `docs/04` 实测改写，不再是"M2 已收口"的旧口径）/ `CONTRIBUTING` / `SECURITY` / `NOTICE` / `ROADMAP` / `CHANGELOG` 与 `.github/` issue+PR 模板。**仍缺 `CODE_OF_CONDUCT.md`、`GOVERNANCE.md`、SPDX 文件头、任何 CI 配置**（`docs/04` §11.6 前两条门槛据此保持未勾） |
 | 性能实测 | 10/10 达标（最近一次 R36 报告 `docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json`）；R40 未触热路径，本轮不适用 |
 | 版本 | `v0.2.0` tag **已在远端**（本文上一版记为"远端未推"，已过期更正） |
