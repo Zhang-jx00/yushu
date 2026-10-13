@@ -45,6 +45,27 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **规则参与表改数据驱动（第 74 轮，M4/T4-2 口径修正，本项仍不勾选）**：`@yushu/genre-engine` 新增
+  `collectVarReferences(expr)`（走表达式树收集 `var` 路径，去重 + 码点序；只走结构不求值），
+  `rule-findings.ts` **删掉手写名单** `POWER_PAIR_RULES = new Set(["power-no-regress"])`，改为
+  "先把战力相邻对一次拼好 → 每条规则逐个 `readPath` 比对 → **全取到才求值**，否则进 `notEvaluated`
+  并点名缺哪些具体路径"。旧名单有两个毛病：新增包规则要改调用点代码才会参与；
+  以及**它会把"项目里没有战力台账"说成"`power-no-regress` 参与求值了"**——伪造的是结论的覆盖面，
+  作者据此以为节奏查过了。调用点从此不认识任何规则 id。
+  **一条被测试逼出来的口径收紧**：改完后 `consistency-ops.test.ts` 的"未参与点名"用例当场红
+  （期望 `evaluated:["power-no-regress"]` 实得 `[]`）；先取证确认该夹具确实没有战力卡 ⇒
+  **旧断言编码的正是上面第二个毛病**，按新语义重写为"无数据 ⇒ `evaluated: []` + 六条各带具体原因"，
+  并在同一条用例补上另一半"数据齐时必须参与"。**改测试是因为测试测错了东西，不是为了让它绿**。
+  预演 step43 的断言同步从泛词"数据绑定"收紧为具体路径名 `scene.combat_power`（能区分
+  "给了个原因"和"给了个具体原因"）。
+  **明确不做并写理由**：语义八类里的视角 head-hopping 与信息可见性本轮不动——章节 `pov`
+  在模型与 schema 里都有，但 `grep apps/desktop` **零写入点**（与 R73 查实的 `scene_ids` 恒空同类：
+  **字段存在 ≠ 数据存在**）；没有视角标注就硬做越视角判定只能靠关键词猜，误报的代价是
+  作者学会忽略整块看板。伏笔回收链接入体检拆到 R75。
+  **验证**：`collectVarReferences` 6 例先红后绿、全量 **997/997（97 文件）**、TC=0、E2E=0
+  （夹具上仍是 `packEvaluated=power-no-regress / packSkipped:5`，未退化）、预演 **54/54**（v165，抖动=0）；
+  **变异 3 次全红**（能力判定恒通过 → 4 红、恒不通过 → 2 红、var 清单恒空 → 7 红），
+  还原后两个文件 sha 逐字一致。
 - **爽点与期待感·桌面侧（第 73 轮，M4/T4-10 收口勾选）**：只读通道 `satisfaction:board`（`wrap`，
   `ipc-four-way` 逐条点名）+ `satisfaction-ops.ts`（读 `world/satisfaction.yaml`、从三级大纲拿有序章清单；
   **台账读不了就出 note 不出结论**，不退回"空台账"）+ `SatisfactionPanel`（世界观档案第五张面板）。
