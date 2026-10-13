@@ -295,6 +295,17 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 - Electron 44 / Node 24（dev）；`node:sqlite` 用于索引（零原生依赖）；`loadExtension` 需要 `allowExtension`（旧运行时会自动回退——R36 已处理）。
 - LF/CRLF 警告是正常的（仓库未设 .gitattributes）。
 - `.git/git-data-push.mjs` 是推送兜底脚本，保留在 `.git/` 里（不入版本库）；如误删，可按 §6.2 要点重写。
+- **2026-10-13 推送出现一种新失败形态，别再当网络问题查一遍**：`git push` 返回
+  `remote: Permission to Zhang-jx00/yushu.git denied to Zhang-jx00`（403），而同一时刻 `api.github.com` 用
+  同一个 token 建 blob 返回 `403 {"message":"Resource not accessible by personal access token"}`
+  ⇒ **是凭据范围不够（fine-grained PAT 缺 `Contents: Read and write`），不是 `github.com:443` 被阻断**。
+  此时 §6.2 的兜底脚本同样无效（它走的正是 Git Data API）。判别顺序：先看 403 的 body 有没有
+  "Resource not accessible"，有就是范围问题，要用户侧重新授权；没有再按被墙重试。
+  本轮三条提交（`7b0f9d3` / `1b345d2` / `61d80cc`）因此**留在本地未推**，工作树干净、历史完整，
+  凭据修好后 `git push origin main` 即可续上。
+- 满载并行的墙钟敏感用例已有两处先例：`snapshot-ops.test.ts` 的环形保留快照（30s）与
+  `git-ops.test.ts` 的 init + 首次全量提交（20s，单跑实测 1.79s）。**只给那一条加预算、不改判据、
+  不全局调大 `testTimeout`**——全局放宽等于放弃挂死检测。
 - 大章/百万字性能夹具在 `D:\Temp\yushu-perf-synth1m`（幂等复用）；预演目录 `D:\Temp\yushu-walkthrough-v*` 可随意清理。
 
 ---
