@@ -105,6 +105,9 @@ contextBridge.exposeInMainWorld("yushu", {
   timeline: {
     view: (payload) => invoke("timeline:view", payload),
   },
+  graph: {
+    relation: (payload) => invoke("graph:relation", payload),
+  },
   export: {
     preview: () => invoke("export:preview"),
     run: (payload) => invoke("export:run", payload),

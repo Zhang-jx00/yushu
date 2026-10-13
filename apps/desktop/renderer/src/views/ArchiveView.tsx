@@ -3,6 +3,7 @@ import type { CardReadResult, CardSummary, ForeshadowBoardPayload, NamingKindPay
 import { api } from "../api";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 import { Disclosure } from "../components/Disclosure";
+import { RelationGraphPanel } from "../components/RelationGraphPanel";
 
 const NAMING_KINDS: { kind: NamingKindPayload; label: string }[] = [
   { kind: "character", label: "角色名" },
@@ -439,6 +440,8 @@ export function ArchiveView({
           </>
         )}
       </section>
+
+      <RelationGraphPanel />
     </div>
   );
 }

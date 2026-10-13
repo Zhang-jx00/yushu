@@ -29,6 +29,8 @@ import {
   type ForeshadowBoardPayload,
   type TimelineViewPayload,
   type TimelineViewRequestPayload,
+  type GraphViewPayload,
+  type GraphViewRequestPayload,
   type ProposalPayload,
   type ConsistencyReportPayload,
   type TextProofreadPayload,
@@ -130,6 +132,7 @@ import { markConsistencyStale, runConsistencyCheck } from "./consistency-ops.js"
 import { applyProposal, decideProposal, listProposals, previewPropagation, proposalPathOf } from "./propagation-ops.js";
 import { foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
+import { relationGraphView } from "./graph-ops.js";
 import type { ProposalFile } from "@yushu/world-engine";
 
 /** 提案文件 → IPC 载荷：未决策条数在这里算，面板只负责显示（不在渲染层长出第二套判断） */
@@ -559,6 +562,10 @@ export function registerIpcHandlers(): void {
   // 时间线视图（T4-7）：历法切换只是显示参数，不产生任何写操作 ⇒ 同样走 wrap
   ipcMain.handle(CHANNELS.timelineView, (_event, payload: TimelineViewRequestPayload) =>
     wrap<TimelineViewPayload>(() => timelineView(requireGateway(), payload ?? {})),
+  );
+  // 关系图谱（T4-9）：由真源行表投影，不写盘也不读索引 ⇒ wrap
+  ipcMain.handle(CHANNELS.graphRelation, (_event, payload: GraphViewRequestPayload) =>
+    wrap<GraphViewPayload>(() => relationGraphView(requireGateway(), payload ?? {})),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

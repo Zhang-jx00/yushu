@@ -115,4 +115,11 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(literals.invoke.has("timeline:view")).toBe(true);
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("timeline.view")).toBe(true);
   });
+
+  it("关系图谱通道在四处齐备（R69 新增）", () => {
+    expect(channels.get("graphRelation")).toBe("graph:relation");
+    expect(registered).toContain("graphRelation");
+    expect(literals.invoke.has("graph:relation")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("graph.relation")).toBe(true);
+  });
 });

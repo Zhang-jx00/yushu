@@ -22,6 +22,8 @@ import type {
   ForeshadowBoardPayload,
   TimelineViewPayload,
   TimelineViewRequestPayload,
+  GraphViewPayload,
+  GraphViewRequestPayload,
   ProposalPayload,
   AiCostPayload,
   AiStartResult,
@@ -187,6 +189,10 @@ export interface YushuApi {
   /** 时间线视图（M4/T4-7，R68）：只读；历法切换只影响显示，不写任何文件 */
   timeline: {
     view: (payload?: TimelineViewRequestPayload) => Promise<TimelineViewPayload>;
+  };
+  /** 关系图谱（M4/T4-9，R69）：只读真源行表投影，不碰索引库 */
+  graph: {
+    relation: (payload?: GraphViewRequestPayload) => Promise<GraphViewPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;

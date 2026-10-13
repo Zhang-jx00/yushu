@@ -2725,6 +2725,33 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       const { writeRecoveryJournal, clearRecoveryJournal } = await import("./recovery-ops.js");
       const { readChapterFile } = await import("@yushu/world-engine");
       const gateway = new ProjectGateway(dir);
+      // M4 验收 A5：图谱与时间线视图**由真源直算**，删掉索引库后必须逐字不变
+      // （先确保库存在，否则"删了个不存在的文件"会让这条探针变成永真）
+      const { rebuildProjectIndex } = await import("./index-ops.js");
+      const { relationGraphView } = await import("./graph-ops.js");
+      const { timelineView } = await import("./timeline-ops.js");
+      const { rm: rmFile } = await import("node:fs/promises");
+      const rebuilt = await rebuildProjectIndex(gateway);
+      const graphBefore = await relationGraphView(gateway, {});
+      const timelineBefore = await timelineView(gateway, {});
+      const indexDbPath = join(dir, rebuilt.path);
+      const dbExistedBefore = await import("node:fs/promises").then((fs2) =>
+        fs2.access(indexDbPath).then(() => true).catch(() => false),
+      );
+      await rmFile(indexDbPath, { force: true });
+      const graphAfter = await relationGraphView(gateway, {});
+      const timelineAfter = await timelineView(gateway, {});
+      const a5Probe = {
+        dbExistedBeforeDelete: dbExistedBefore,
+        graphSame: JSON.stringify(graphBefore) === JSON.stringify(graphAfter),
+        timelineSame: JSON.stringify(timelineBefore) === JSON.stringify(timelineAfter),
+        nodes: graphAfter.nodes.length,
+        edges: graphAfter.edges.length,
+        dangling: graphAfter.dangling.length,
+        timelineRows: timelineAfter.rows.length,
+      };
+      console.log("[e2e] A5 删索引库后视图逐字不变:", JSON.stringify(a5Probe));
+      (result as { a5?: typeof a5Probe }).a5 = a5Probe;
       const chapterNow = await readFile(join(dir, result.chapterPath), "utf8");
       const staleMarker = "失效条目验证：旧雪故人。";
       const staleBody = `${readChapterFile(chapterNow).body}\n\n${staleMarker}`;
@@ -3324,6 +3351,14 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       [`mergeProbe.ok`, mergeProbe.ok],
       [`closeFlush.ok`, closeFlush.ok],
       [`closeFlush.withinDebounce`, closeFlush.withinDebounce],
+      // M4 验收 A5（R69）：删索引库前后，图谱与时间线视图逐字不变——且必须真的删掉过一个库
+      [
+        `result.a5.dbExistedBeforeDelete`,
+        (result as { a5?: { dbExistedBeforeDelete: boolean } }).a5?.dbExistedBeforeDelete === true,
+      ],
+      [`result.a5.graphSame`, (result as { a5?: { graphSame: boolean } }).a5?.graphSame === true],
+      [`result.a5.timelineSame`, (result as { a5?: { timelineSame: boolean } }).a5?.timelineSame === true],
+      [`result.a5.nodes > 0`, (result as { a5?: { nodes: number } }).a5?.nodes ? (result as { a5?: { nodes: number } }).a5!.nodes > 0 : false],
     ];
     const unmet = unmetAssertions(assertions);
     const ok = unmet.length === 0;

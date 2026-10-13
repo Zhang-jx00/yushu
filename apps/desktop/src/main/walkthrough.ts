@@ -2766,6 +2766,63 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 51,
+    title: "世界观档案：关系图谱（真源直算 + 悬空与未归类外显 + 点击聚焦）（M4/T4-9，R69）",
+    file: "step51-graph.png",
+    body: String.raw`
+      // 先造一条**能成边**的关系：预演项目里的 3 条引用都指向章节（属 outOfScope，本来就不成边），
+      // 不自己造一条就只能验"空图不报错"，验不到"边真的画出来了"。造完再复原，不留脏数据。
+      const cards = await window.yushu.card.list();
+      const anchor = cards.find((c) => c.type === 'character') || cards[0];
+      if (!anchor) return { ok: false, note: '项目里一张卡都没有，造不出关系' };
+      await window.yushu.card.write({
+        card: {
+          id: 'char-graph-probe',
+          type: 'character',
+          name: '图谱探针',
+          layer: 'characters',
+          refs: [{ relation: 'rival_of', target: anchor.id }],
+        },
+        body: '临时卡：只为让关系图谱出现一条可画的边，步骤末尾删除。',
+      });
+      // 面板只在挂载时取数：先去别的页再回来，强制重挂载
+      await tab('规则');
+      await tab('世界观档案');
+      const svg = await waitFor(() => document.querySelector('.graph-panel .graph-svg') || null, 4000);
+      if (!svg) return { ok: false, note: '图谱 SVG 没渲染（通道未通或没有实体可画）' };
+      const circles = [...svg.querySelectorAll('.graph-node circle')];
+      const lines = [...svg.querySelectorAll('line')];
+      const summary = (document.querySelector('.graph-summary') || {}).textContent || '';
+      const legend = (document.querySelector('.graph-legend') || {}).textContent || '';
+      const legendOk = legend.indexOf('人物') >= 0 && legend.indexOf('势力') >= 0 && legend.indexOf('地点') >= 0;
+      // 悬空引用必须"未成边但被点名"：汇总里说有几条，就得有对应的提示块
+      const danglingMentioned = /悬空引用 (\d+) 条/.exec(summary);
+      const notices = [...document.querySelectorAll('.graph-notices')];
+      const danglingOk = danglingMentioned === null
+        ? true
+        : (Number(danglingMentioned[1]) > 0 ? notices.some((n) => (n.textContent || '').indexOf('悬空引用') >= 0) : true);
+      const edgesDrawn = lines.length > 0;
+      // 点节点 = 聚焦：汇总行应改成"聚焦「X」2 跳内"
+      const before = summary;
+      circles[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const focused = await waitFor(() => {
+        const now = (document.querySelector('.graph-summary') || {}).textContent || '';
+        return now.indexOf('聚焦') >= 0 && now !== before ? now : null;
+      }, 3000);
+      const panel = document.querySelector('.graph-panel');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: circles.length >= 3 && edgesDrawn && legendOk && danglingOk && focused !== null,
+        note: '临时卡 char-graph-probe 造 1 条边；节点=' + circles.length + '；边=' + lines.length +
+          '；汇总="' + before.slice(0, 72) + '"' +
+          '；图例三网=' + legendOk + '；悬空外显=' + danglingOk +
+          '（提到条数=' + (danglingMentioned ? danglingMentioned[1] : '无') + '，提示块=' + notices.length + '）' +
+          '；点击聚焦后="' + (focused === null ? '（未变）' : focused.slice(0, 46)) + '"',
+      };
+    `,
+  },
 ];
 
 /**
@@ -2893,7 +2950,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-50）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-51）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

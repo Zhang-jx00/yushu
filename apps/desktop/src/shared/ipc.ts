@@ -67,6 +67,8 @@ export const CHANNELS = {
   foreshadowBoard: "foreshadow:board",
   /** 时间线视图与冲突（M4/T4-7，R68）：**只读**；历法切换只影响显示，不写任何文件 */
   timelineView: "timeline:view",
+  /** 关系图谱（M4/T4-9，R69）：**只读真源**（entities/refs 直算，不碰 SQLite） */
+  graphRelation: "graph:relation",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -2099,4 +2101,44 @@ export interface TimelineViewPayload {
 export interface TimelineViewRequestPayload {
   /** 缺省 = 用各条时间线自己的历法 */
   calendar?: string;
+}
+
+/** 关系图谱（M4 / T4-9，R69）：由真源行表投影出来的节点与边 */
+export interface GraphNodePayload {
+  id: string;
+  name: string;
+  type: string;
+  layer: string;
+  filePath: string;
+  net: "characters" | "factions" | "geography" | "other";
+  degree: number;
+}
+
+export interface GraphEdgePayload {
+  from: string;
+  to: string;
+  relation: string;
+  net: "characters" | "factions" | "geography" | "other";
+  selfLoop: boolean;
+}
+
+export interface GraphViewPayload {
+  note: string;
+  focus: string | null;
+  maxDepth: number;
+  nodes: GraphNodePayload[];
+  edges: GraphEdgePayload[];
+  kinds: Record<string, { nodes: number; edges: number }>;
+  dangling: { referrer: string; relation: string; target: string }[];
+  unclassifiedRelations: string[];
+  isolated: string[];
+  duplicateEdges: number;
+  selfLoops: number;
+  focusMissing: boolean;
+  truncated: { frontier: string[]; count: number } | null;
+}
+
+export interface GraphViewRequestPayload {
+  focus?: string;
+  maxDepth?: number;
 }

@@ -2510,3 +2510,68 @@ table,
   font-size: 12.5px;
   line-height: 1.7;
 }
+
+/* ---------- R69：关系图谱面板（世界观档案底部） ---------- */
+
+.graph-summary {
+  margin: 4px 0 8px;
+}
+
+.graph-focus {
+  margin-left: 10px;
+  font-size: 12.5px;
+}
+
+.graph-svg {
+  width: 100%;
+  height: auto;
+  max-height: 320px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node text {
+  font-size: 11px;
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3px;
+}
+
+.graph-selfloop {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.2;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+}
+
+.graph-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+
+.graph-notices {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.graph-notices span {
+  margin-right: 10px;
+}
