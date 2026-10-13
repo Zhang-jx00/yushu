@@ -2945,9 +2945,9 @@ const STEPS: StepDef[] = [
       await tab('世界观档案');
       const boxes = await waitFor(() => {
         const list = [...document.querySelectorAll('.archive > *, .archive-analysis > *')];
-        return list.length >= 6 ? list : null;
+        return list.length >= 7 ? list : null;
       }, 8000);
-      if (!boxes) return { ok: false, note: '档案页顶层块不足 6 个：' + pageText() };
+      if (!boxes) return { ok: false, note: '档案页顶层块不足 7 个：' + pageText() };
       const rects = boxes.map((el) => {
         const r = el.getBoundingClientRect();
         const cs = getComputedStyle(el);
@@ -2986,6 +2986,87 @@ const STEPS: StepDef[] = [
           '；框框相交=' + (hits.length === 0 ? '无' : hits.join(' ')) +
           '；各块高=' + rects.map((b) => tag(b) + ':' + (b.bottom - b.top)).join(' ') +
           '；截图前 scrollTop=' + (scroller ? Math.round(scroller.scrollTop) : -1),
+      };
+    `,
+  },
+  {
+    step: 54,
+    title: "世界观档案：爽点与期待感看板（阈值不设就不判 + 推进率无声明 + 只读）（M4/T4-10，R73）",
+    file: "step54-satisfaction.png",
+    body: String.raw`
+      // 台账按本项目真实章序构造：一条逾期承诺、一条 dropped 无理由、一条 paid 无证据、
+      // 一个 advances 自相矛盾的场景、一段中间断档的曲线（断档那章必须被点名）
+      const outline = await window.yushu.outline.read();
+      const volumes = (outline.doc || {}).volumes || [];
+      const ids = [];
+      for (const volume of volumes) {
+        for (const chapter of volume.chapters || []) ids.push(chapter.chapter_id || chapter.id);
+      }
+      if (ids.length < 5) return { ok: false, note: '章清单只有 ' + ids.length + ' 条，构造不出断档样本' };
+      const YAML = [
+        'apiVersion: yushu.satisfaction/v1',
+        'hits:',
+        '  - {id: sh-wt-a, chapter: ' + ids[0] + ', type: upgrade, intensity: 4, beneficiary: 主角}',
+        '  - {id: sh-wt-b, chapter: ' + ids[1] + ', type: upgrade, intensity: 4, beneficiary: 主角}',
+        '  - {id: sh-wt-c, chapter: ' + ids[2] + ', type: upgrade, intensity: 4, beneficiary: 主角}',
+        'promises:',
+        '  - {id: pr-wt-open, promise: "三年之约", source: 简介, made_ch: ' + ids[0] + ', due_ch: ' + ids[1] + ', status: open}',
+        '  - {id: pr-wt-drop, promise: "废掉宗主之位", source: 台词, made_ch: ' + ids[0] + ', status: dropped}',
+        '  - {id: pr-wt-paid, promise: "救回妹妹", source: 核心梗, made_ch: ' + ids[0] + ', status: paid}',
+        'curve:',
+        '  - {phase: suppress, from_ch: ' + ids[0] + ', to_ch: ' + ids[1] + '}',
+        '  - {phase: release, from_ch: ' + ids[3] + ', to_ch: ' + ids[4] + '}',
+        'scenes:',
+        '  - {id: sc-wt-go, chapter: ' + ids[0] + ', advances: [main], outcome: "yes"}',
+        '  - {id: sc-wt-bad, chapter: ' + ids[1] + ', advances: [none, main], outcome: "yes"}',
+        '',
+      ].join('\n');
+      const current = await window.yushu.doc.read('world/satisfaction.yaml').catch(() => null);
+      if (current === null) await window.yushu.doc.write('world/satisfaction.yaml', YAML);
+      else await window.yushu.doc.write('world/satisfaction.yaml', YAML, current.hash);
+      const hashBefore = (await window.yushu.doc.read('world/satisfaction.yaml')).hash;
+      // 面板只在挂载时取数：先去别的页再回来强制重挂载（R68 的教训）
+      await tab('规则');
+      await tab('世界观档案');
+      const panel = await waitFor(() => {
+        const t = [...document.querySelectorAll('.panel-title')].find((x) => x.textContent.indexOf('爽点与期待感') >= 0);
+        return t ? t.closest('.panel') : null;
+      }, 12000);
+      if (!panel) return { ok: false, note: '未找到爽点与期待感面板：' + pageText() };
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(250);
+      const text = String(panel.innerText).replace(/\s+/g, ' ');
+      const readNote = text.indexOf('读不了') >= 0;
+      // ① 阈值全空 ⇒ 「没判的」必须成块出现并点名缺哪个旋钮（把没判显示成绿灯，比不显示更坏）
+      const ne = panel.querySelector('.satisfaction-not-evaluated');
+      const neText = ne === null ? '' : String(ne.textContent);
+      const neOk = neText.indexOf('sf-release-gap') >= 0 && neText.indexOf('release_interval_max') >= 0;
+      const findingsOk = ['sf-promise-overdue', 'sf-dropped-without-reason', 'sf-paid-without-evidence', 'sf-scene-contradiction']
+        .every((r) => text.indexOf(r) >= 0);
+      const gapOk = text.indexOf('不属于任何阶段') >= 0 && text.indexOf(ids[2]) >= 0;
+      const overdueOk = /逾期 \d+ 章/.test(text);
+      const noDeclareOk = text.indexOf('无声明') >= 0;
+      const writeButtons = [...panel.querySelectorAll('button')].length;
+      // ② 设一个阈值 ⇒ 该规则从「没判的」里**消失**并在结论里出现。
+      //    等的是「消失」这个变化，不是等节点存在——R71 那条「等一个已经为真的条件」的教训。
+      const inputs = [...panel.querySelectorAll('.satisfaction-threshold')];
+      if (inputs.length < 6) return { ok: false, note: '阈值输入框只有 ' + inputs.length + ' 个：' + pageText() };
+      setV(inputs[0], '2');
+      const afterSet = await waitFor(() => {
+        const neNow = panel.querySelector('.satisfaction-not-evaluated');
+        const now = neNow === null ? '' : String(neNow.textContent);
+        if (now.indexOf('sf-same-type-streak') >= 0) return null;
+        const body = String(panel.innerText).replace(/\s+/g, ' ');
+        return body.indexOf('sf-same-type-streak') >= 0 ? body : null;
+      }, 12000);
+      const streakOk = afterSet !== null;
+      const hashAfter = (await window.yushu.doc.read('world/satisfaction.yaml')).hash;
+      return {
+        ok: !readNote && neOk && findingsOk && gapOk && overdueOk && noDeclareOk && streakOk && writeButtons === 0 && hashAfter === hashBefore,
+        note: '结论四类齐=' + findingsOk + '；断档点名 ' + ids[2] + '=' + gapOk + '；逾期外显=' + overdueOk +
+          '；无声明显示=' + noDeclareOk + '；阈值未设进「没判的」=' + neOk + '；设阈值后改出结论=' + streakOk +
+          '；面板内写回按钮=' + writeButtons + '；真源 hash 未变=' + (hashAfter === hashBefore) +
+          (readNote ? '；台账被判读不了（严格解析拒了夹具）' : ''),
       };
     `,
   },
@@ -3116,7 +3197,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-53）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-54）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

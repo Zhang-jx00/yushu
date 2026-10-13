@@ -26,6 +26,8 @@ import type {
   GraphViewRequestPayload,
   ChronicleBookPayload,
   ChronicleBookRequestPayload,
+  SatisfactionBoardPayload,
+  SatisfactionBoardRequestPayload,
   ProposalPayload,
   AiCostPayload,
   AiStartResult,
@@ -199,6 +201,10 @@ export interface YushuApi {
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {
     book: (payload?: ChronicleBookRequestPayload) => Promise<ChronicleBookPayload>;
+  };
+  /** 爽点与期待感看板（M4/T4-10，R73）：只读；阈值不传则对应规则不判定 */
+  satisfaction: {
+    board: (payload?: SatisfactionBoardRequestPayload) => Promise<SatisfactionBoardPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;

@@ -5,6 +5,7 @@ import { cardTypeLabel, layerLabel } from "../card-labels";
 import { Disclosure } from "../components/Disclosure";
 import { RelationGraphPanel } from "../components/RelationGraphPanel";
 import { ChronologyPanel } from "../components/ChronologyPanel";
+import { SatisfactionPanel } from "../components/SatisfactionPanel";
 
 const NAMING_KINDS: { kind: NamingKindPayload; label: string }[] = [
   { kind: "character", label: "角色名" },
@@ -447,6 +448,7 @@ export function ArchiveView({
 
       <RelationGraphPanel />
       <ChronologyPanel />
+      <SatisfactionPanel />
       </div>
     </div>
   );

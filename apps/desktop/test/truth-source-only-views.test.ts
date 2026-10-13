@@ -16,6 +16,7 @@ const FILES = [
   { path: "src/main/foreshadow-ops.ts", why: "伏笔台账看板（T4-6）" },
   { path: "src/main/graph-ops.ts", why: "关系图谱（T4-9）" },
   { path: "src/main/chronicle-ops.ts", why: "编年史（T4-8）" },
+  { path: "src/main/satisfaction-ops.ts", why: "爽点与期待感看板（T4-10）" },
 ];
 
 /**

@@ -71,6 +71,8 @@ export const CHANNELS = {
   graphRelation: "graph:relation",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
+  /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
+  satisfactionBoard: "satisfaction:board",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -2177,4 +2179,53 @@ export interface ChronicleBookPayload {
 
 export interface ChronicleBookRequestPayload {
   calendar?: string;
+}
+
+/** 爽点阈值：全部可选，**不传就不判定**（引擎侧同口径，见 world-engine/satisfaction.ts） */
+export interface SatisfactionThresholdsPayload {
+  same_type_streak_max?: number;
+  release_interval_max?: number;
+  strong_intensity?: number;
+  suppress_streak_max?: number;
+  promise_open_max?: number;
+  no_advance_streak?: number;
+}
+
+export interface SatisfactionBoardRequestPayload {
+  thresholds?: SatisfactionThresholdsPayload;
+  currentChapter?: string;
+}
+
+export interface SatisfactionRowPayload {
+  chapter: string;
+  ordinal: number;
+  hits: { id: string; type: string; intensity: number; beneficiary: string }[];
+  promisesOpened: string[];
+  phase: string | null;
+  scenes: { total: number; advancing: number };
+  /** null = 这一章没有场景声明，不是"推进率 0" */
+  advanceRate: number | null;
+}
+
+export interface SatisfactionPromisePayload {
+  id: string;
+  promise: string;
+  status: string;
+  /** null = 章号认不出或没写到货期，不编 0 */
+  overdueBy: number | null;
+  evidence: "hit" | "foreshadow" | "none";
+}
+
+export interface SatisfactionBoardPayload {
+  path: string;
+  exists: boolean;
+  note: string;
+  chapterTotal: number;
+  currentChapter: string | null;
+  rows: SatisfactionRowPayload[];
+  promises: SatisfactionPromisePayload[];
+  findings: { id: string; severity: "error" | "warn" | "info"; rule: string; message: string }[];
+  /** 没判定的规则逐条列在这里：面板必须把"没判的"和"判过没问题"分开显示 */
+  notEvaluated: { rule: string; reason: string }[];
+  stats: { hits: number; scenes: number; advanceRate: number | null; openPromises: number; strongestStreak: number };
 }

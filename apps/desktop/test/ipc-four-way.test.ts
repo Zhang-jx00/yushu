@@ -129,4 +129,11 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(literals.invoke.has("chronicle:book")).toBe(true);
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("chronicle.book")).toBe(true);
   });
+
+  it("爽点看板通道在四处齐备（R73 新增）", () => {
+    expect(channels.get("satisfactionBoard")).toBe("satisfaction:board");
+    expect(registered).toContain("satisfactionBoard");
+    expect(literals.invoke.has("satisfaction:board")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("satisfaction.board")).toBe(true);
+  });
 });

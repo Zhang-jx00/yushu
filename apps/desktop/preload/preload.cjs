@@ -111,6 +111,9 @@ contextBridge.exposeInMainWorld("yushu", {
   chronicle: {
     book: (payload) => invoke("chronicle:book", payload),
   },
+  satisfaction: {
+    board: (payload) => invoke("satisfaction:board", payload),
+  },
   export: {
     preview: () => invoke("export:preview"),
     run: (payload) => invoke("export:run", payload),
