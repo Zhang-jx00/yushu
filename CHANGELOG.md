@@ -45,6 +45,27 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **编年史·桌面侧（第 71 轮，M4/T4-8 收口勾选）**：只读通道 `chronicle:book`（`ipc-four-way` 逐条点名）+
+  `src/main/chronicle-ops.ts`（读 `world/timeline.yaml` 与 era 设定卡的 `extensions.chronicle.{from,to}`；
+  **两端不齐的 era 进 `eraSkipped` 交给界面点名，不猜年代边界**；时间线读不动时返回说明文字，**不**按空年表出结论）+
+  `renderer/components/ChronologyPanel.tsx`（世界观档案第四张面板：时代 / 年份 / 刻度 / 事件 / 视角 / 记载，
+  `分歧 N` 与 `诸说一致` 两种徽标分开画，无视角显示「中性记载」，历法下拉只改显示不写文件）。
+  预演新增 **step52**（回执 `行数=5；同一事件分两行=true；分歧徽标=true；诸说一致徽标=true；中性记载=true；
+  时代列含未入段=true；年份与刻度分列=true；无区间 era 被点名=true`）。**同轮修掉两条"证据本身不成立"的账**：
+  ① step33 的两次红不是抖动——它 `waitFor` 的 `.assembly-preview` 在 step31 跑完后**已经在 DOM 里**，
+  等待一个已经为真的条件 ⇒ 读到旧回执、导出按钮还在合法禁用态，此前能过全靠 IPC 快过那 150ms 睡眠；
+  判据改成「本步特有的 `预算 32000` 文本 + 按钮转绿」，并把"点击前已有回执"印进证据行钉死机理（step31 同修）。
+  ② M4 验收 A5 的 e2e 探针原是半永真：夹具不成边（`edges:0`）、也没有年表文件（`timelineRows:0`），
+  `graphSame` / `timelineSame` 比的是两个空视图 ⇒ 改为先写一条真关系卡 + 三行年表、**写完再重建索引**
+  （让被删的库与真源一致）、比对后再清理，并新增 `result.a5.edges > 0`、`result.a5.timelineRows >= 3`
+  两条具名断言；**变异两次分别打红**（`refs: []` ⇒ edges 红；删第三条事件 ⇒ 行数红），修后回执
+  `nodes:9 / edges:1 / dangling:1 / timelineRows:3` 且两个 Same 仍为 true。**还有一个从 R66 就在的布局缺陷**：
+  四张分析面板与"卡片列表 + 编辑器"同属定高网格，`.panel { min-height: 0 }` 让 auto 行基准高变成 0、
+  行高被视口均分（实测每块 211px 而内容需 819/287/570/345px）⇒ 伏笔台账整块表格压在关系图谱的字上。
+  新增 **step53 布局回归锁**（量顶层块的内容高/框高与两两相交）先红后绿，改法为
+  `.archive-scroll` 整页滚 + `.archive` 工作区吃满一屏 + `.archive-analysis` 自适应列（`minmax(520px,1fr)`、
+  `align-items:start`）。**验证**：962/962（95 文件）、TC=0、e2e=0、预演 **53/53**（v162，57.2s，抖动 0）。
+  **边界**：era 区间仍需在设定卡 YAML 手写（面板只读）；把记载导出成史书文本属 M5 导出链路。
 - **编年史·引擎侧（第 70 轮，M4/T4-8 判定层，本项不勾选）**：新建 `world-engine/chronicle.ts`——
   `buildChronicle(doc, {calendar?, eras?})` **吃 T4-7 的 `TimelineFile`、年份一律走 `formatCalendarYear`，
   模块自己没有年表结构**（编年史一旦自带一套历法，同一件事就有两个年份，红线 1 的具体形态）。

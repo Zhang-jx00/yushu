@@ -11,10 +11,10 @@ Fixes #（没有对应 issue 请先开一个；纯文档改动可写「无」）
 
 | 命令 | 结果（抄真实输出里的数字） |
 |---|---|
-| `pnpm test` | 例：`Tests 892 passed (892)` / `Test Files 89 passed (89)` |
-| `pnpm typecheck` | 例：`TC=0`（11 包 + 2 应用） |
+| `pnpm test` | 例：`Tests 962 passed (962)` / `Test Files 95 passed (95)` |
+| `pnpm typecheck` | 例：`TC=0`（9 包 + 2 应用） |
 | `pnpm --filter @yushu/desktop e2e` | 例：`E2E=0`，关键探针字段：`{...}` |
-| `pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"` | 例：`ok=47 fail=0 抖动=0 证据缺失=0`，目录 `vNNN` |
+| `pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"` | 例：`ok=53 fail=0 抖动=0 证据缺失=0`，目录 `vNNN` |
 
 只改引擎包、没碰桌面端时，后两项可以标「不适用（未触调用点）」——**但不要标「通过」**。
 
