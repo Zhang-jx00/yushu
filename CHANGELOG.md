@@ -45,6 +45,24 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **爽点与期待感·引擎侧（第 72 轮，M4/T4-10 判定层，本项不勾选）**：新建 `world-engine/satisfaction.ts` 与
+  真源 `world/satisfaction.yaml`（`SATISFACTION_PATH`）——四张表并列：`hits`（爽点六类
+  `face_slap/upgrade/harvest/show/reveal/sweet` + `intensity -5~5` + `beneficiary` + 可选 `promise_id`）、
+  `promises`（承诺清单：`source` / `made_ch` / `due_ch` / 五态 / `drop_reason` / 可选 `foreshadow_id`）、
+  `curve`（期待感相位区间）、`scenes`（作者声明的推进标注）。15 条判定含
+  `sf-promise-dangling`、`sf-paid-without-evidence`、`sf-curve-gap`、`sf-scene-deletable`（info，只给建议）。
+  **两条划界**：与伏笔台账按 I03 §2.2「同构但载体不同」分开，同一件事用 `foreshadow_id` 交叉引用，
+  **不重做一套伏笔逾期判定**；与 T3-13 的注水检测划清——那边是字句级本地 lint，本模块**一个字节都不读**，
+  推进率只算作者声明的 `advances ≠ none ÷ 总场景数`（I04 §3.2）。三条不猜：无场景声明 ⇒ 推进率 `null`
+  且不判定；五个阈值旋钮**不设就不跑**并逐条进 `notEvaluated` 写明缺哪个（I03/I04 的 3 章 / 5 章 / 6 条
+  是"可按派系包覆写"的经验值，未经真实语料定标不默认生效）；章号认不出给 `null` 并点名 `sf-chapter-unknown`。
+  合法终态不报缺陷（`dropped` 带理由即通过、`deferred` 不报逾期但提示补新到期章）。
+  **27 例先红后绿**（首跑红在模块不存在）、全量 **989/989（96 文件）**、TC=0（strict 的
+  `noUncheckedIndexedAccess` 三处索引访问改成 `map` 迭代与 `prev` 累加器，**没有用 `as` 撬闸**）；
+  **变异 5 次各红 1 例**，还原后 sha 逐字一致。**一条被变异自己抓出来的漏测**：把**行级** `advanceRate`
+  写死成 1 第一次跑全绿——测试只断了全书均值，行级字段等于没人看着 ⇒ 补 `row.advanceRate` 与
+  "无场景章给 null"两条断言后重跑才红（**"字段存在但没被断言"就是死字段**，界面要用的那一层必须自带断言）。
+  **纯引擎轮：没碰桌面端 ⇒ 没跑 e2e 与 UI 预演**；通道 + 面板 + step54 在 R73，**T4-10 保持未勾**。
 - **编年史·桌面侧（第 71 轮，M4/T4-8 收口勾选）**：只读通道 `chronicle:book`（`ipc-four-way` 逐条点名）+
   `src/main/chronicle-ops.ts`（读 `world/timeline.yaml` 与 era 设定卡的 `extensions.chronicle.{from,to}`；
   **两端不齐的 era 进 `eraSkipped` 交给界面点名，不猜年代边界**；时间线读不动时返回说明文字，**不**按空年表出结论）+
