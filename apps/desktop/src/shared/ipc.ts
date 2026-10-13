@@ -65,6 +65,8 @@ export const CHANNELS = {
   proposalApply: "proposal:apply",
   /** 伏笔台账看板（M4/T4-6，R66）：**只读**——判定层纯函数，桌面端只负责读真源并画表 */
   foreshadowBoard: "foreshadow:board",
+  /** 时间线视图与冲突（M4/T4-7，R68）：**只读**；历法切换只影响显示，不写任何文件 */
+  timelineView: "timeline:view",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -2054,4 +2056,47 @@ export interface ForeshadowBoardPayload {
   rows: ForeshadowRowPayload[];
   findings: ForeshadowFindingPayload[];
   stats: Record<string, number>;
+}
+
+/** 时间线视图（M4 / T4-7，R68）：刻度是内部数字年，displayYear 只是历法换算 */
+export interface TimelineRowPayload {
+  id: string;
+  title: string;
+  /** 内部统一数字刻度（锚定事件 = 0） */
+  year: number;
+  timeline: string;
+  calendar: string;
+  /** 历法认不出时为 null（不退回 offset 0） */
+  displayYear: string | null;
+  kind: string | null;
+  location: string | null;
+}
+
+export interface TimelineFindingPayload {
+  id: string;
+  severity: "error" | "warn" | "info";
+  rule: string;
+  message: string;
+}
+
+export interface TimelineSkippedPayload {
+  rule: string;
+  reason: string;
+  ids: string[];
+}
+
+export interface TimelineViewPayload {
+  path: string;
+  exists: boolean;
+  note: string;
+  calendars: { id: string; label: string; offset: number }[];
+  activeCalendar: string | null;
+  rows: TimelineRowPayload[];
+  findings: TimelineFindingPayload[];
+  notEvaluated: TimelineSkippedPayload[];
+}
+
+export interface TimelineViewRequestPayload {
+  /** 缺省 = 用各条时间线自己的历法 */
+  calendar?: string;
 }

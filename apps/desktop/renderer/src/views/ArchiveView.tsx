@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { CardReadResult, CardSummary, ForeshadowBoardPayload, NamingKindPayload, NamingResultPayload } from "../../../src/shared/ipc";
+import type { CardReadResult, CardSummary, ForeshadowBoardPayload, NamingKindPayload, NamingResultPayload, TimelineViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 import { Disclosure } from "../components/Disclosure";
@@ -50,6 +50,25 @@ export function ArchiveView({
       alive = false;
     };
   }, []);
+
+  // 时间线（T4-7，R68）：历法下拉只换显示，不写文件——所以切换只是重新读一次视图
+  const [timeline, setTimeline] = useState<TimelineViewPayload | null>(null);
+  const [calendar, setCalendar] = useState("");
+  const [timelineError, setTimelineError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    api()
+      .timeline.view(calendar === "" ? {} : { calendar })
+      .then((result) => {
+        if (alive) setTimeline(result);
+      })
+      .catch((err: unknown) => {
+        if (alive) setTimelineError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [calendar]);
 
   const generateNames = async () => {
     try {
@@ -341,6 +360,81 @@ export function ArchiveView({
             <div className="muted">
               登记方式：直接编辑 <code>{board.path}</code>（真源）。引擎不替你写伏笔，只告诉你哪几条还欠读者一个兑现；
               红鲱鱼与"放弃 + 理由"是合法终态，不会被报成问题。
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="panel timeline-view">
+        <div className="panel-title">
+          时间线（只读 · 刻度统一，历法只是显示）
+          {timeline !== null && timeline.calendars.length > 0 && (
+            <select className="timeline-calendar" value={calendar} onChange={(event) => setCalendar(event.target.value)}>
+              <option value="">按各时间线自己的历法</option>
+              {timeline.calendars.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}（offset {item.offset}）
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        {timelineError !== "" && <div className="error-text">{timelineError}</div>}
+        {timeline !== null && timelineError === "" && (
+          <>
+            <div className="timeline-summary muted">
+              {timeline.note}
+              {timeline.activeCalendar !== null && timeline.exists ? `；当前显示按「${timeline.activeCalendar}」` : ""}
+            </div>
+            {timeline.findings.length > 0 && (
+              <ul className="timeline-findings">
+                {timeline.findings.map((finding, index) => (
+                  <li key={`${finding.id}-${finding.rule}-${index}`} className={`timeline-finding ${finding.severity}`}>
+                    <span className="timeline-sev">{finding.severity === "error" ? "冲突" : finding.severity === "warn" ? "存疑" : "提示"}</span>
+                    <span className="muted">{finding.rule}</span>
+                    <span>{finding.message}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {timeline.notEvaluated.length > 0 && (
+              <div className="timeline-skipped muted">
+                {timeline.notEvaluated.map((item) => (
+                  <div key={item.rule}>
+                    未判定 <code>{item.rule}</code>：{item.reason}
+                    {item.ids.length > 0 ? `（${item.ids.join("、")}）` : ""}
+                  </div>
+                ))}
+              </div>
+            )}
+            {timeline.rows.length > 0 && (
+              <table className="slot-table timeline-table">
+                <thead>
+                  <tr>
+                    <th>年份</th>
+                    <th>事件</th>
+                    <th>刻度</th>
+                    <th>角色</th>
+                    <th>地点</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {timeline.rows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.displayYear ?? "历法未识别"}</td>
+                      <td>
+                        {row.title} <span className="muted">{row.id}</span>
+                      </td>
+                      <td>{row.year}</td>
+                      <td>{row.kind ?? "—"}</td>
+                      <td>{row.location ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="muted">
+              真源 <code>{timeline.path}</code> 只存内部数字年（锚定事件 = 0）；上面的历法切换不写文件。
             </div>
           </>
         )}

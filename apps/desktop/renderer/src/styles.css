@@ -2458,3 +2458,55 @@ table,
   color: var(--muted);
   font-size: 11.5px;
 }
+
+/* ---------- R68：时间线视图（世界观档案底部） ---------- */
+
+.timeline-summary {
+  margin: 4px 0 8px;
+}
+
+.timeline-calendar {
+  margin-left: 10px;
+  font-size: 12.5px;
+}
+
+.timeline-findings {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timeline-finding {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.timeline-sev {
+  flex: none;
+  min-width: 44px;
+  font-weight: 600;
+}
+
+.timeline-finding.error .timeline-sev {
+  color: var(--bad);
+}
+
+.timeline-finding.warn .timeline-sev {
+  color: var(--warn);
+}
+
+.timeline-finding.info .timeline-sev {
+  color: var(--muted);
+}
+
+/* 没判定的整块摆出来：缺数据不是"没有问题"，得看得见 */
+.timeline-skipped {
+  margin: 6px 0 10px;
+  font-size: 12.5px;
+  line-height: 1.7;
+}

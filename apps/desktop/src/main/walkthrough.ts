@@ -2665,6 +2665,107 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 50,
+    title: "世界观档案：时间线视图（统一刻度 + 历法只换显示 + 冲突与未判定外显）（M4/T4-7，R68）",
+    file: "step50-timeline.png",
+    body: String.raw`
+      const YAML = [
+        'apiVersion: yushu.timeline/v1',
+        'anchor_event: ev-found',
+        'calendars:',
+        '  - id: imperial',
+        '    label: 帝国纪年',
+        '    offset: 1204',
+        '  - id: common',
+        '    label: 通纪',
+        '    offset: 0',
+        'timelines:',
+        '  - id: tl-main',
+        '    anchor_event: ev-found',
+        '    calendar: imperial',
+        '    scale: numeric',
+        '    events: [ev-found, ev-destroy, ev-born, ev-unknown]',
+        'events:',
+        '  - id: ev-found',
+        '    title: 建国',
+        '    year: 0',
+        '    timeline: tl-main',
+        '    participants: [char-1]',
+        '    location: geo-city',
+        '    kind: founding',
+        '    causes: []',
+        '    effects: [ev-destroy]',
+        '  - id: ev-destroy',
+        '    title: 城破',
+        '    year: 20',
+        '    timeline: tl-main',
+        '    participants: []',
+        '    location: geo-city',
+        '    kind: destruction',
+        '    causes: [ev-found]',
+        '    effects: []',
+        '  - id: ev-born',
+        '    title: 遗民生',
+        '    year: 25',
+        '    timeline: tl-main',
+        '    participants: [char-2]',
+        '    location: geo-city',
+        '    kind: birth',
+        '    causes: []',
+        '    effects: []',
+        '  - id: ev-unknown',
+        '    title: 无名集会',
+        '    year: 30',
+        '    timeline: tl-main',
+        '    participants: [char-1]',
+        '    causes: []',
+        '    effects: []',
+      ].join('\n') + '\n';
+      try {
+        await window.yushu.doc.write('world/timeline.yaml', YAML);
+      } catch (err) {
+        const current = await window.yushu.doc.read('world/timeline.yaml');
+        await window.yushu.doc.write('world/timeline.yaml', YAML, current.hash);
+      }
+      const hashBefore = (await window.yushu.doc.read('world/timeline.yaml')).hash;
+      // 上一步就停在「世界观档案」：面板只在挂载时取数，直接等就是"等一个早就成立的条件"。
+      // 先去别的页再回来，强制重挂载，才测得到"写完文件之后视图真的读到了"。
+      await tab('规则');
+      await tab('世界观档案');
+      const table = await waitFor(() => document.querySelector('.timeline-view .timeline-table') || null, 4000);
+      if (!table) return { ok: false, note: '时间线表没渲染出来（通道未通或视图没挂载）' };
+      const rowsOf = () => [...table.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => (td.textContent || '').trim()));
+      const first = rowsOf();
+      const ordered = first.length === 4 && first[0][0].indexOf('帝国纪年 1204 年') >= 0 && first[3][0].indexOf('帝国纪年 1234 年') >= 0;
+      const findingsText = [...document.querySelectorAll('.timeline-finding')].map((li) => li.textContent || '').join(' | ');
+      const conflictShown = findingsText.indexOf('tl-born-after-destruction') >= 0 && findingsText.indexOf('ev-born') >= 0;
+      const skippedText = (document.querySelector('.timeline-skipped') || {}).textContent || '';
+      const skippedShown = skippedText.indexOf('tl-kind-required') >= 0 && skippedText.indexOf('ev-unknown') >= 0;
+      // 切历法：只该换掉「年份」列，「刻度」列一个数字都不动
+      const select = document.querySelector('.timeline-calendar');
+      if (!select) return { ok: false, note: '找不到历法下拉（时间线里没有 calendars 或面板没渲染选择器）' };
+      select.value = 'common';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const after = await waitFor(() => {
+        const rows = rowsOf();
+        return rows.length === 4 && rows[0][0].indexOf('通纪 元年') >= 0 ? rows : null;
+      }, 3000);
+      if (!after) return { ok: false, note: '切换历法后年份列没变成通纪口径（当前=' + JSON.stringify(rowsOf()[0]) + '）' };
+      const scaleUntouched = first.every((row, i) => row[2] === after[i][2]);
+      const hashAfter = (await window.yushu.doc.read('world/timeline.yaml')).hash;
+      const panel = document.querySelector('.timeline-view');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: ordered && conflictShown && skippedShown && scaleUntouched && hashBefore === hashAfter,
+        note: '行=' + first.length + '；首行年份=' + first[0][0] + '；末行年份=' + first[3][0] +
+          '；冲突外显=' + conflictShown + '；未判定外显=' + skippedShown +
+          '；切历法后首行=' + after[0][0] + '；刻度列未动=' + scaleUntouched +
+          '；真源 hash 未变=' + (hashBefore === hashAfter),
+      };
+    `,
+  },
 ];
 
 /**
@@ -2792,7 +2893,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-49）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-50）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

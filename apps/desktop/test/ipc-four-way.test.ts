@@ -108,4 +108,11 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(literals.invoke.has("foreshadow:board")).toBe(true);
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("foreshadow.board")).toBe(true);
   });
+
+  it("时间线视图通道在四处齐备（R68 新增；带参只读通道同样要过这道闸）", () => {
+    expect(channels.get("timelineView")).toBe("timeline:view");
+    expect(registered).toContain("timelineView");
+    expect(literals.invoke.has("timeline:view")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("timeline.view")).toBe(true);
+  });
 });
