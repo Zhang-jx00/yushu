@@ -24,6 +24,8 @@ import type {
   TimelineViewRequestPayload,
   GraphViewPayload,
   GraphViewRequestPayload,
+  ChronicleBookPayload,
+  ChronicleBookRequestPayload,
   ProposalPayload,
   AiCostPayload,
   AiStartResult,
@@ -193,6 +195,10 @@ export interface YushuApi {
   /** 关系图谱（M4/T4-9，R69）：只读真源行表投影，不碰索引库 */
   graph: {
     relation: (payload?: GraphViewRequestPayload) => Promise<GraphViewPayload>;
+  };
+  /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
+  chronicle: {
+    book: (payload?: ChronicleBookRequestPayload) => Promise<ChronicleBookPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;

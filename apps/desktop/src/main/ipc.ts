@@ -31,6 +31,8 @@ import {
   type TimelineViewRequestPayload,
   type GraphViewPayload,
   type GraphViewRequestPayload,
+  type ChronicleBookPayload,
+  type ChronicleBookRequestPayload,
   type ProposalPayload,
   type ConsistencyReportPayload,
   type TextProofreadPayload,
@@ -133,6 +135,7 @@ import { applyProposal, decideProposal, listProposals, previewPropagation, propo
 import { foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
+import { chronicleBook } from "./chronicle-ops.js";
 import type { ProposalFile } from "@yushu/world-engine";
 
 /** 提案文件 → IPC 载荷：未决策条数在这里算，面板只负责显示（不在渲染层长出第二套判断） */
@@ -566,6 +569,10 @@ export function registerIpcHandlers(): void {
   // 关系图谱（T4-9）：由真源行表投影，不写盘也不读索引 ⇒ wrap
   ipcMain.handle(CHANNELS.graphRelation, (_event, payload: GraphViewRequestPayload) =>
     wrap<GraphViewPayload>(() => relationGraphView(requireGateway(), payload ?? {})),
+  );
+  // 编年史（T4-8）：复用时间线刻度，只读 ⇒ wrap
+  ipcMain.handle(CHANNELS.chronicleBook, (_event, payload: ChronicleBookRequestPayload) =>
+    wrap<ChronicleBookPayload>(() => chronicleBook(requireGateway(), payload ?? {})),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

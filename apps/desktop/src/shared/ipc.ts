@@ -69,6 +69,8 @@ export const CHANNELS = {
   timelineView: "timeline:view",
   /** 关系图谱（M4/T4-9，R69）：**只读真源**（entities/refs 直算，不碰 SQLite） */
   graphRelation: "graph:relation",
+  /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
+  chronicleBook: "chronicle:book",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -2141,4 +2143,38 @@ export interface GraphViewPayload {
 export interface GraphViewRequestPayload {
   focus?: string;
   maxDepth?: number;
+}
+
+/** 编年史（M4 / T4-8，R71）：大事年表 + 同一事件的多文化"伪史书" */
+export interface ChronicleEntryPayload {
+  eventId: string;
+  title: string;
+  year: number;
+  displayYear: string | null;
+  /** null = 该事件没有多文化版本（中性记载），不是"某个文化说了空话" */
+  culture: string | null;
+  account: string | null;
+  source: string | null;
+}
+
+export interface ChronicleBookPayload {
+  path: string;
+  exists: boolean;
+  note: string;
+  calendars: { id: string; label: string; offset: number }[];
+  activeCalendar: string | null;
+  entries: ChronicleEntryPayload[];
+  eras: { label: string; from: number; to: number; entries: number }[];
+  divergences: { eventId: string; title: string; cultures: string[]; differing: boolean; note: string }[];
+  withoutViewpoints: string[];
+  orphanEvents: string[];
+  uneraled: string[];
+  ambiguousEra: boolean;
+  /** era 卡上没写 `extensions.chronicle.{from,to}` 的那些：不猜年代边界，逐张点名 */
+  eraSkipped: string[];
+  stats: { events: number; entries: number; cultures: number };
+}
+
+export interface ChronicleBookRequestPayload {
+  calendar?: string;
 }

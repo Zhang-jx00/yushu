@@ -4,6 +4,7 @@ import { api } from "../api";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 import { Disclosure } from "../components/Disclosure";
 import { RelationGraphPanel } from "../components/RelationGraphPanel";
+import { ChronologyPanel } from "../components/ChronologyPanel";
 
 const NAMING_KINDS: { kind: NamingKindPayload; label: string }[] = [
   { kind: "character", label: "角色名" },
@@ -154,7 +155,8 @@ export function ArchiveView({
   };
 
   return (
-    <div className="archive">
+    <div className="archive-scroll">
+      <div className="archive">
       <aside>
         <section className="panel naming">
           <h3>
@@ -310,7 +312,9 @@ export function ArchiveView({
           </>
         )}
       </section>
+      </div>
 
+      <div className="archive-analysis">
       <section className="panel foreshadow-board">
         <div className="panel-title">伏笔台账（只读 · 判定在引擎）</div>
         {boardError !== "" && <div className="error-text">{boardError}</div>}
@@ -442,6 +446,8 @@ export function ArchiveView({
       </section>
 
       <RelationGraphPanel />
+      <ChronologyPanel />
+      </div>
     </div>
   );
 }

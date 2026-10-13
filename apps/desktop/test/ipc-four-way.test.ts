@@ -122,4 +122,11 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(literals.invoke.has("graph:relation")).toBe(true);
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("graph.relation")).toBe(true);
   });
+
+  it("编年史通道在四处齐备（R71 新增）", () => {
+    expect(channels.get("chronicleBook")).toBe("chronicle:book");
+    expect(registered).toContain("chronicleBook");
+    expect(literals.invoke.has("chronicle:book")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("chronicle.book")).toBe(true);
+  });
 });

@@ -14,16 +14,25 @@ import { describe, expect, it } from "vitest";
 const FILES = [
   { path: "src/main/timeline-ops.ts", why: "时间线视图（T4-7）" },
   { path: "src/main/foreshadow-ops.ts", why: "伏笔台账看板（T4-6）" },
+  { path: "src/main/graph-ops.ts", why: "关系图谱（T4-9）" },
+  { path: "src/main/chronicle-ops.ts", why: "编年史（T4-8）" },
 ];
 
-/** 索引层与派生库的入口：出现任何一个就说明视图开始依赖可删的派生物 */
+/**
+ * 索引层的入口：出现任何一个就说明视图开始依赖可删的派生物。
+ * 注意 `gatewayReader`（住在 index-ops.ts 里）**不在禁止之列**——它是 FileGateway 的真源读取适配器，
+ * 与 SQLite 无关；禁的是"打开索引库/查索引"这类动作，不是某个文件名。
+ */
 const FORBIDDEN = [
   "@yushu/search",
-  "./index-ops.js",
-  "./indexer.js",
-  "repo-worker.js",
-  "index.db",
   "openIndex",
+  "rebuildProjectIndex",
+  "searchProjectIndex",
+  "ragSearchIndex",
+  "readIndexStatus",
+  "resolveDbPath",
+  "index.db",
+  "repo-worker.js",
 ];
 
 describe("视图只读真源（A5 前半：不依赖索引库）", () => {
@@ -32,7 +41,9 @@ describe("视图只读真源（A5 前半：不依赖索引库）", () => {
       const source = readFileSync(new URL(`../${file.path}`, import.meta.url), "utf8");
       const hits = FORBIDDEN.filter((token) => source.includes(token));
       expect(hits).toEqual([]);
-      expect(source).toContain("gateway.readDoc(");
+      // 正面锚点：必须真的从 FileGateway 取字节。两种写法都算——直接 gateway.readDoc(，
+      // 或经 gatewayReader（它在 index-ops.ts 里就是 readDoc + listTree 的适配器，不碰库）。
+      expect(/gateway\.readDoc\(|gatewayReader\(/.test(source)).toBe(true);
     });
   }
 
