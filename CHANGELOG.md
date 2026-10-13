@@ -45,6 +45,22 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **爽点与期待感·桌面侧（第 73 轮，M4/T4-10 收口勾选）**：只读通道 `satisfaction:board`（`wrap`，
+  `ipc-four-way` 逐条点名）+ `satisfaction-ops.ts`（读 `world/satisfaction.yaml`、从三级大纲拿有序章清单；
+  **台账读不了就出 note 不出结论**，不退回"空台账"）+ `SatisfactionPanel`（世界观档案第五张面板）。
+  界面三条口径把"不骗作者"落到版式上：**结论块与「没判的」块分开**（虚线框 + 引擎回传的理由原样显示——
+  把没判显示成绿灯比不显示更坏）、**推进率三态**（`1 / 1（100%）`、`0 / 1（0%）`、**`无声明`**：
+  0% 是结论、"无声明"是事实）、六个阈值输入框**留空即不传**且占位符写"不判定"（不给默认值冒充定标）；
+  面板内没有任何写回按钮（断言 `按钮数=0`）。预演新增 **step54**：按项目真实章序造夹具（逾期承诺 /
+  `dropped` 无理由 / `paid` 无证据 / 场景 `advances` 自相矛盾 / 曲线中间断档），回执
+  `结论四类齐=true；断档点名 co-zpxusg=true；逾期外显=true；无声明显示=true；阈值未设进「没判的」=true；
+  设阈值后改出结论=true；面板内写回按钮=0；真源 hash 未变=true`。
+  **两条断言写法沿用 R71 的教训**：设阈值后等的是"该规则从『没判的』里**消失**"而非等节点存在；
+  改完阈值重新读真源比 hash ⇒ "阈值只是显示参数"成为每轮重跑的运行时事实（同 step50 的历法口径）。
+  **一条调研结论被代码复核纠正**：子代理报"章节 `scene_ids` 可作推进率数据源"，grep 确认该字段
+  在 schema 里有但**没有任何写入方**（F03 场景卡从未实现，实际恒为 `[]`）⇒ "字段存在"≠"数据存在"，
+  已写进面板底部说明。**验证**：991/991（96 文件）、TC=0、E2E=0、预演 **54/54**（v163，58.8s，抖动=0）。
+  **边界**：登记爽点与承诺仍是编辑真源 YAML（无表单录入）；引擎**不判断"这章读起来爽不爽"**，只做间隔与计数。
 - **爽点与期待感·引擎侧（第 72 轮，M4/T4-10 判定层，本项不勾选）**：新建 `world-engine/satisfaction.ts` 与
   真源 `world/satisfaction.yaml`（`SATISFACTION_PATH`）——四张表并列：`hits`（爽点六类
   `face_slap/upgrade/harvest/show/reveal/sweet` + `intensity -5~5` + `beneficiary` + 可选 `promise_id`）、
