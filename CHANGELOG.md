@@ -45,6 +45,24 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **时间线视图接入界面（第 68 轮，M4/T4-7 收口，本项勾选）**：`timeline-ops.ts` 读 `world/timeline.yaml` →
+  引擎换算与冲突校验 → 只读通道 `timeline:view`（**历法切换只是显示参数，不产生任何写操作** ⇒ 走 `wrap`；
+  四处对账锁加了这条通道自己的点名）。视图落在「世界观档案」底部，**把「年份（历法换算）」与
+  「刻度（内部数字年）」分成两列**（同一列混两种口径，迟早有人以为历法数字才是真值），
+  冲突清单与「未判定」整块外显（缺 `kind` 的事件逐条列出——"没判的"要看得见）。
+  预演新增 **step50**：`行=4；首行年份=帝国纪年 1204 年；末行年份=帝国纪年 1234 年；冲突外显=true；
+  未判定外显=true；切历法后首行=通纪 元年；刻度列未动=true；`**`真源 hash 未变=true`**——
+  最后一项让"历法只在渲染层"从注释里的承诺变成每轮重跑的运行时事实。
+  **Added（A5 前半的结构锁）** `truth-source-only-views.test.ts`（3 例）：`timeline-ops` / `foreshadow-ops`
+  出现 `@yushu/search` / `index-ops` / `openIndex` / `index.db` 任一 token 即红，且必须确实走 `gateway.readDoc(`；
+  引擎侧 `timeline.ts` 的 import 白名单只有 `@yushu/core` / `yaml` / `./power-log.js`。
+  **比"演一遍删库重建"更强**：删库只能证明这一次没坏，"不 import 索引层"是任何一次都不依赖。
+  **验证**：单测 +4 → **936/936（93 文件）**、TC=0、e2e E2E=0、预演 **50/50**（v151，抖动=0）。
+  **变异**：`buildTimelineView` 忽略 `options.calendar` ⇒ step50 红并点名「切换历法后年份列没变成通纪口径」；
+  还原后**重跑一次全新绿目录**当证据（预演每次覆盖 `docs/assets`，不能拿变异那次的脏图配绿账）。
+  **step50 首跑红在工装不在产品**：上一步就停在「世界观档案」，面板只在挂载时取数 ⇒ 等的是"早就成立的条件"，
+  改成先去「规则」再回来强制重挂载。**边界**：时间线登记仍是编辑真源 YAML（无表单）；
+  **M4 验收 A5 不勾**——要关系图谱与时间线两个视图都齐，图谱在 R69。
 - **时间线：统一数字刻度与冲突校验·引擎侧（第 67 轮，M4/T4-7 判定层，本项不勾选）**：新建
   `@yushu/world-engine/timeline.ts`，真源 `world/timeline.yaml`（`anchor_event` + `calendars[]` + `timelines[]` +
   `events[]`）**严格解析**（未知键 / 非法枚举 / 重复 id / `scale` 非 numeric / 事件引用不存在的 timeline 一律拒绝并点名）
