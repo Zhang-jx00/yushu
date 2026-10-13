@@ -43,6 +43,13 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 60 }).catch(() => undefined);
 });
 
+/**
+ * 这条测试单独跑实测 1.79s（`git init` + 首次全量提交），但在 92 文件并行满载下越过 5s 默认闸
+ * 而超时（2026-10-13 全量跑复现一次，单独跑 15/15 绿）。给它一个**显式且仍然有界**的墙钟预算：
+ * 改的是时间预算，不是任何判据——挂死仍会在 20s 处红。
+ */
+const GIT_HEAVY_TIMEOUT_MS = 20_000;
+
 describe("Git 版本管理（T2-7 切片 B）", () => {
   it("未初始化 → init（main 分支，仓库级作者兜底）→ 全部首次提交可见", async () => {
     const before = await gitState(gateway);
@@ -64,7 +71,7 @@ describe("Git 版本管理（T2-7 切片 B）", () => {
     expect(after.head).toBe(commit.shortOid);
     expect(after.log).toHaveLength(1);
     expect(after.log[0]).toMatchObject({ message: "首次提交", author: GIT_DEFAULT_AUTHOR.name });
-  });
+  }, GIT_HEAVY_TIMEOUT_MS);
 
   it("一次批量改动 = 一次提交：修改 + 新增一并入同一个提交；变更分类正确", async () => {
     await gitInit(gateway);
