@@ -130,7 +130,11 @@ describe("派系包规则求值（战力崩塌）", () => {
       "realm-gap-too-large",
       "realm-lifespan-missing",
     ]);
-    expect(run.notEvaluated[0]!.reason).toContain("数据绑定");
+    // R74：参与与否由数据回答，所以理由必须点名**具体取不到的路径**，而不是一句"没有数据绑定"
+    const ceiling = run.notEvaluated.find((item) => item.id === "power-ceiling-exceeded");
+    expect(ceiling?.reason).toContain("scene.combat_power");
+    expect(ceiling?.reason).toContain("realm.tier_next.ceiling");
+    for (const item of run.notEvaluated) expect(item.reason.length).toBeGreaterThan(10);
   });
 
   it("求值全程只读：跑完卡文件字节不变", async () => {

@@ -315,11 +315,22 @@ describe("体检报告并入派系包规则（R57）", () => {
     expect(cardText.slice(pack.span!.start, pack.span!.end)).toContain("combat_power: 80");
   });
 
-  it("没数据绑定的包规则在汇总里点名，不静默算通过", async () => {
+  it("没数据可跑的包规则在汇总里点名，不静默算通过（R74：参与与否由数据回答）", async () => {
+    // 这个夹具里**一张战力台账都没有** ⇒ 连 power-no-regress 自己也没真的跑过。
+    // R57 的旧口径按手写名单把它算成"参与"，那等于告诉作者"这条查过了、没问题"——
+    // R74 改成按表达式声明的 var 路径比对实际数据，取不到就进 notEvaluated 并写明原因。
     const report = await runConsistencyCheck(gateway, { timing: "manual" });
-    expect(report.pack.evaluated).toEqual(["power-no-regress"]);
-    expect(report.pack.notEvaluated).toHaveLength(5);
-    expect(report.pack.notEvaluated[0]!.reason).toContain("数据绑定");
+    expect(report.pack.evaluated).toEqual([]);
+    expect(report.pack.notEvaluated).toHaveLength(6);
+    for (const item of report.pack.notEvaluated) {
+      expect(item.reason).toContain("没有可比对的相邻战力数据");
+    }
+    // 另一半口径：数据齐了它就必须参与，且其余五条各自点名缺哪些路径
+    await powerCard("char-power", "林渊战力样本", REGRESS);
+    const withData = await runConsistencyCheck(gateway, { timing: "manual" });
+    expect(withData.pack.evaluated).toEqual(["power-no-regress"]);
+    expect(withData.pack.notEvaluated).toHaveLength(5);
+    expect(withData.pack.notEvaluated.map((item) => item.id)).not.toContain("power-no-regress");
   });
 
   it("豁免清单能豁免包规则：进 suppressed 带理由（knownIds 已放开到参与求值的集合）", async () => {

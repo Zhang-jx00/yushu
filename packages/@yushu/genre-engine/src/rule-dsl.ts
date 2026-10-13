@@ -117,6 +117,34 @@ export function collectExpressionIssues(expr: unknown): string[] {
   return issues;
 }
 
+/**
+ * 表达式里出现的全部取数路径（去重、码点序）。
+ *
+ * 这份清单让"规则要不要参与求值"变成**数据问题**：调用点拼好求值数据后逐个 `readPath`，
+ * 取不到的就是这条规则没跑的真正原因，点名到具体 var——不再需要维护"哪条规则跑"的手写名单。
+ * 只走结构、不求值，因此不受沙箱限制影响（深度上限在这里没有意义：再深也只是收集）。
+ */
+export function collectVarReferences(expr: unknown): string[] {
+  const found = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+    const record = node as Record<string, unknown>;
+    const keys = Object.keys(record);
+    if (keys.length === 1 && keys[0] === "var") {
+      const path = record.var;
+      if (typeof path === "string" && path.trim() !== "") found.add(path);
+      return;
+    }
+    for (const key of keys) walk(record[key]);
+  };
+  walk(expr);
+  return [...found].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
 function walkExpression(node: unknown, issues: string[], depth: number): void {
   if (depth > RULE_MAX_DEPTH) {
     issues.push(`嵌套超过 ${RULE_MAX_DEPTH} 层：求值会在加载期被拒，请改写或拆成多条规则`);

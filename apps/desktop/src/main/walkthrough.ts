@@ -2321,7 +2321,8 @@ const STEPS: StepDef[] = [
       await sleep(150);
       return {
         ok: packRow !== null && diskHasLog && packLine.includes('power-no-regress') && packLine.includes('未参与 5 条') &&
-          skippedText.includes('数据绑定') && errShown !== null && originText.includes('xuanhuan-xitong') &&
+          skippedText.includes('power-ceiling-exceeded') && skippedText.includes('scene.combat_power') &&
+          errShown !== null && originText.includes('xuanhuan-xitong') &&
           jumpInRow && jumped === true && backOk,
         note: '盘上含 power_log=' + diskHasLog + '；表行=' + rows.length + '；汇总="' + packLine.slice(0, 110) +
           '"；未参与段="' + skippedText.slice(0, 60) + '"；错误行="' + (errShown || '').slice(0, 70) +

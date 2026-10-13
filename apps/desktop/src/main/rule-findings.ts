@@ -1,4 +1,4 @@
-import { evaluateRule, loadRuleSets, type PackRuleSet } from "@yushu/genre-engine";
+import { collectVarReferences, evaluateRule, loadRuleSets, readPath, type PackRuleSet } from "@yushu/genre-engine";
 import {
   collectIndexInput,
   parsePowerLog,
@@ -50,13 +50,11 @@ export interface PackRuleRunResult {
 }
 
 /**
- * 数据绑定表：规则 id → 怎么给它拼求值数据。
- *
- * 只有列在这里的规则才会真的跑。新规则想参与求值，得先回答"它比的是什么数据、
- * 那数据在真源的哪个字段"——回答不了就留在 `notEvaluated` 里被看见，
- * 而不是写个空绑定让它静默通过。
+ * 数据绑定：**不再有"哪条规则参与求值"的手写名单**（R74）。每条规则表达式里的 `var` 路径
+ * 就是它自己声明的数据需求，桌面端拿拼好的求值数据逐个比对：全都取得到才求值，
+ * 否则进 `notEvaluated` 并点名缺哪些路径。新增包规则因此不需要改这里的代码——
+ * 它要么真的能拿到数据并参与，要么被具体原因点名，**不会静默通过，也不会被名单漏掉**。
  */
-const POWER_PAIR_RULES = new Set(["power-no-regress"]);
 
 function originOf(set: PackRuleSet): string {
   return `派系包 ${set.packId}（${set.file}）`;
@@ -88,48 +86,75 @@ export async function evaluatePackRules(
     return text;
   };
 
+  /** 战力相邻对：一次拼好，供所有规则比对（读卡失败进 errors，不静默跳过） */
+  const pairs: Array<{
+    entity: IndexEntityRow;
+    pair: ReturnType<typeof pairPowerLog>[number];
+    data: Record<string, unknown>;
+  }> = [];
+  for (const entity of entities) {
+    if (scope && !scope.has(entity.id)) continue;
+    const text = await readText(entity.filePath);
+    if (text === null) {
+      errors.push(`${entity.id}（${entity.filePath}）：设定卡读不到，战力台账无法求值`);
+      continue;
+    }
+    const log = parsePowerLog(text);
+    if (log.error) {
+      errors.push(`${entity.id}（${entity.filePath}）：${log.error}`);
+      continue;
+    }
+    for (const pair of pairPowerLog(log.entries)) pairs.push({ entity, pair, data: powerPairData(pair) });
+  }
+
   for (const set of sets) {
     if (set.error) {
       errors.push(`${originOf(set)}：${set.error}`);
       continue;
     }
     for (const rule of set.rules) {
-      if (!POWER_PAIR_RULES.has(rule.id)) {
-        notEvaluated.push({ id: rule.id, reason: "本轮没有该规则所需的数据绑定（没有数据可比对，这条没跑）" });
-        continue;
+      // 参与不参与**由数据决定**：把规则表达式里的 var 路径逐个拿去比对拼好的数据，
+      // 一个都取不到 ⇒ 这条没跑，并把缺哪些路径写进理由（R57 的手写名单在这里退场）。
+      const vars = collectVarReferences(rule.when);
+      const missing = new Set<string>();
+      let runnable = 0;
+      for (const item of pairs) {
+        const gaps = vars.filter((path) => readPath(item.data, path) === undefined);
+        if (gaps.length > 0) {
+          for (const gap of gaps) missing.add(gap);
+          continue;
+        }
+        runnable += 1;
+        const result = evaluateRule(rule, item.data);
+        if (!result.matched) continue;
+        findings.push({
+          rule: rule.id,
+          severity: rule.severity,
+          subject: item.entity.id,
+          related: item.pair.b.chapter,
+          message: result.message,
+          evidence:
+            `战力台账：${item.pair.a.chapter} 境界 ${item.pair.a.tier} / 战力 ${item.pair.a.combatPower}` +
+            ` → ${item.pair.b.chapter} 境界 ${item.pair.b.tier} / 战力 ${item.pair.b.combatPower}` +
+            `（设定卡 ${item.entity.filePath}）`,
+          fix:
+            `给 ${item.pair.b.chapter} 补一条能解释战力回落的事件（受伤 / 压制 / 道具失效），或下调该章的战斗表现；` +
+            `确认是刻意反转就写进 config/consistency.yaml 并记理由`,
+          origin: originOf(set),
+        });
       }
-      evaluated.push(rule.id);
-      for (const entity of entities) {
-        if (scope && !scope.has(entity.id)) continue;
-        const text = await readText(entity.filePath);
-        if (text === null) {
-          errors.push(`${entity.id}（${entity.filePath}）：设定卡读不到，战力台账无法求值`);
-          continue;
-        }
-        const log = parsePowerLog(text);
-        if (log.error) {
-          errors.push(`${entity.id}（${entity.filePath}）：${log.error}`);
-          continue;
-        }
-        for (const pair of pairPowerLog(log.entries)) {
-          const result = evaluateRule(rule, powerPairData(pair));
-          if (!result.matched) continue;
-          findings.push({
-            rule: rule.id,
-            severity: rule.severity,
-            subject: entity.id,
-            related: pair.b.chapter,
-            message: result.message,
-            evidence:
-              `战力台账：${pair.a.chapter} 境界 ${pair.a.tier} / 战力 ${pair.a.combatPower}` +
-              ` → ${pair.b.chapter} 境界 ${pair.b.tier} / 战力 ${pair.b.combatPower}` +
-              `（设定卡 ${entity.filePath}）`,
-            fix:
-              `给 ${pair.b.chapter} 补一条能解释战力回落的事件（受伤 / 压制 / 道具失效），或下调该章的战斗表现；` +
-              `确认是刻意反转就写进 config/consistency.yaml 并记理由`,
-            origin: originOf(set),
-          });
-        }
+      if (runnable === 0) {
+        notEvaluated.push({
+          id: rule.id,
+          reason:
+            pairs.length === 0
+              ? "项目里没有可比对的相邻战力数据（设定卡 extensions.power_log 少于两条），这条没跑"
+              : vars.length === 0
+                ? "表达式没有引用任何取数路径（常量条件），项目数据无从参与"
+                : `求值数据取不到这些路径：${[...missing].sort().join("、")}（当前只提供战力相邻对），这条没跑`,
+        });
+      } else {
+        evaluated.push(rule.id);
       }
     }
   }
