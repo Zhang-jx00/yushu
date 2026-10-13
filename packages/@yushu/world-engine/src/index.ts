@@ -15,3 +15,4 @@ export * from "./propagate.js";
 export * from "./proposal-file.js";
 export * from "./foreshadow.js";
 export * from "./timeline.js";
+export * from "./relation-graph.js";
