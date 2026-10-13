@@ -45,6 +45,23 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **时间线：统一数字刻度与冲突校验·引擎侧（第 67 轮，M4/T4-7 判定层，本项不勾选）**：新建
+  `@yushu/world-engine/timeline.ts`，真源 `world/timeline.yaml`（`anchor_event` + `calendars[]` + `timelines[]` +
+  `events[]`）**严格解析**（未知键 / 非法枚举 / 重复 id / `scale` 非 numeric / 事件引用不存在的 timeline 一律拒绝并点名）
+  + **手写键序序列化**（往返逐字相等）。`formatCalendarYear` 是**纯显示函数**（`display = year + offset`，0 读「元年」、
+  负数读「前 N 年」），序列化里没有它的位置——历法换算一旦能落盘就会长出第二套刻度。`checkTimelineConflicts` 覆盖
+  `tl-anchor-missing` / `tl-anchor-not-zero`（**只报不擅自平移**）/ `tl-cause-after-effect`（**按 year 比，不按数组顺序**）/
+  `tl-born-after-destruction`（「角色出身于已被灭亡的国度」的形态）/ `tl-participant-after-death` / 悬空引用；
+  缺 `kind` 的事件不参与角色相关判定但**逐条进 `notEvaluated` 点名**；历法 id 认不出 ⇒ 显示年 `null` 不退回 offset 0。
+  为此补 `Event.kind?` 枚举（founding/destruction/birth/death/battle/treaty/other），理由写进 `docs/03 §5.3`。
+  **Fixed（测试基建）** `git-ops.test.ts` 的"未初始化 → init → 全部首次提交可见"在 92 文件满载并行下越过 5s 默认闸
+  超时（单文件 15/15 绿、该条单跑实测 **1.79s**）⇒ 给**这一条**加 20s 显式且有界的墙钟预算并写下测量值；
+  **改的是时间预算，不是任何判据**，也不全局调大 `testTimeout`（那会放宽所有测试的挂死检测）。
+  **验证**：15 例先写先看它红（模块不存在 ⇒ 采集失败），实现后全量 **932/932（92 文件）**、TC=0；
+  **变异 5 次全部能红**（因果比较反向 / 去掉遗址出生判定 / 历法认不出退回 offset 0 / 锚点不为 0 时擅自平移 /
+  缺 kind 不点名）。第 5 个变异第一次 sed 跨行没生效而显示"没红"，换 `if (false) {` 重跑才拿到真结果——
+  **变异脚本没改到代码时的"全绿"是假绿**。**纯引擎轮：未碰桌面端 ⇒ 没跑 e2e 与 UI 预演**；
+  视图与冲突结论的接线在 R68，**T4-7 保持未勾**。
 - **伏笔台账接入界面（第 66 轮，M4/T4-6 收口，本项勾选）**：新增只读通道 `foreshadow:board`
   （`foreshadow-ops.ts` 读 `world/foreshadow.yaml` + 从三级大纲取**有序章清单**；走 `wrap`——真源没动就不刷索引、
   不置脏结论）。「世界观档案」底部新增**伏笔台账看板**：汇总行 + 按 error/warn/info 分色的结论清单 +
