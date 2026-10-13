@@ -34,6 +34,13 @@ export const FORESHADOW_PATH = `${WORLD_DIR}/foreshadow.yaml`;
 /** 时间线（M4 / T4-7，可选文件；内部统一数字刻度 + 锚定事件 = Year 0，docs/03 §5.3） */
 export const TIMELINE_PATH = `${WORLD_DIR}/timeline.yaml`;
 
+/**
+ * 爽点与期待感台账（M4 / T4-10，可选文件）。
+ * 与 `foreshadow.yaml` 并列但**载体不同**（I03 §2.2）：伏笔靠道具/对白/意象埋设，
+ * 这里的承诺多来自简介、核心梗与角色台词——所以两份账各记各的，靠 `foreshadow_id` 交叉引用，不双写。
+ */
+export const SATISFACTION_PATH = `${WORLD_DIR}/satisfaction.yaml`;
+
 /** 设定卡路径：world/cards/<type>/<id>.md */
 export function cardPath(type: string, id: string): string {
   return `${CARDS_DIR}/${type}/${id}.md`;

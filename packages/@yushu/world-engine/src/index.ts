@@ -17,3 +17,4 @@ export * from "./foreshadow.js";
 export * from "./timeline.js";
 export * from "./relation-graph.js";
 export * from "./chronicle.js";
+export * from "./satisfaction.js";
