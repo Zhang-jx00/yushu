@@ -31,6 +31,9 @@ export const CONSISTENCY_ALLOW_PATH = `${CONFIG_DIR}/consistency.yaml`;
 /** 伏笔台账（M4 / T4-6，可选文件；登记→埋设→回收→未回收看板的唯一真源，docs/03 §5.3） */
 export const FORESHADOW_PATH = `${WORLD_DIR}/foreshadow.yaml`;
 
+/** 时间线（M4 / T4-7，可选文件；内部统一数字刻度 + 锚定事件 = Year 0，docs/03 §5.3） */
+export const TIMELINE_PATH = `${WORLD_DIR}/timeline.yaml`;
+
 /** 设定卡路径：world/cards/<type>/<id>.md */
 export function cardPath(type: string, id: string): string {
   return `${CARDS_DIR}/${type}/${id}.md`;
