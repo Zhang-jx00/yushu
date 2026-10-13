@@ -1510,8 +1510,12 @@ const STEPS: StepDef[] = [
       const btn2 = findBtn();
       if (btn2) btn2.click();
       const dropped = await waitFor(() => {
+        const line = document.querySelector('.assembly-preview');
         const list = document.querySelector('.assembly-drop');
-        return list && list.innerText.includes('budget') ? list.innerText : null;
+        // 同样要区分"旧节点"：只有小预算这次的回执（预算 40）配上逐出清单才算数
+        if (!line || !list) return null;
+        if (!String(line.textContent).replace(/\s+/g, ' ').includes('预算 40')) return null;
+        return list.innerText.includes('budget') ? list.innerText : null;
       }, 12000);
       const smallLine = String((document.querySelector('.assembly-preview') || {}).textContent || '').replace(/\s+/g, ' ');
       const smallRows = [...document.querySelectorAll('.assembly-slot-row')];
@@ -1590,10 +1594,23 @@ const STEPS: StepDef[] = [
       setV(budgetInput, '32000');
       const asmBtn = [...panel.querySelectorAll('button')].find((b) => b.textContent.trim() === '组装预演');
       if (!asmBtn || asmBtn.disabled) return { ok: false, note: '组装预演按钮不可用：' + pageText() };
+      // 这里等的必须是「这一步的新结果」：step31 末尾用 40 token 预算跑过一次，
+      // 选择器 assembly-preview 此刻是**已在的旧节点**，只等"节点存在"会立刻返回、读到旧装配表，
+      // 而请求还在 in-flight（按钮禁用）。判据改成「文本含本步特有的 预算 32000」+「导出按钮转绿」两者齐备。
+      // 点击前 DOM 里那份回执是什么？（若是 step31 留下的"预算 40"，就证明旧节点确实存在、
+      // 只等"节点在"的写法会读到它）
+      const staleBefore = (() => {
+        const l = document.querySelector('.assembly-preview');
+        return l ? String(l.textContent).replace(/\s+/g, ' ').slice(0, 34) : '（无旧节点）';
+      })();
       asmBtn.click();
-      const previewLine = await waitFor(() => document.querySelector('.assembly-preview'), 12000);
-      if (!previewLine) return { ok: false, note: '组装预演未返回：' + pageText() };
-      await sleep(150);
+      const inFlight = !!document.querySelector('.context-export') && document.querySelector('.context-export').disabled === true;      const previewLine = await waitFor(() => {
+        const line = document.querySelector('.assembly-preview');
+        const btn = document.querySelector('.context-export');
+        if (!line || !btn || btn.disabled) return null;
+        return String(line.textContent).replace(/\s+/g, ' ').includes('预算 32000') ? line : null;
+      }, 12000);
+      if (!previewLine) return { ok: false, note: '组装预演新结果未到位（旧节点判据=预算 32000 + 按钮转绿）：' + pageText() };
       const rows = [...document.querySelectorAll('.context-item-row')];
       const rowText = rows.map((r) => String(r.innerText).replace(/\s+/g, ' ')).join(' | ');
       // 表头五列（槽位 / 来源 / Token 数 / 命中键 / 是否被截断）
@@ -1612,7 +1629,8 @@ const STEPS: StepDef[] = [
       await sleep(200);
       return {
         ok: rows.length >= 3 && headerOk && matchedKeys && snapOk,
-        note: '预览器条目=' + rows.length + '（表头五列=' + headerOk + '；命中键含「天启界」=' + matchedKeys + '）' +
+        note: '预览器条目=' + rows.length + '（表头五列=' + headerOk + '；命中键含「天启界」=' + matchedKeys +
+          '；点击前 DOM 已有回执="' + staleBefore + '"；点完即观察到请求 in-flight=' + inFlight + '）' +
           '；回执：' + snapText.slice(0, 150) +
           '；首行=' + (rowText.split(' | ')[0] || '').slice(0, 100),
       };
@@ -2823,6 +2841,154 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 52,
+    title: "世界观档案：编年史伪史书（多文化分行 + 分歧与诸说一致 + era 分段不猜）（M4/T4-8，R71）",
+    file: "step52-chronicle.png",
+    body: String.raw`
+      // 真源造三件事：一个有两个文化记载且说法不同的事件、一个说法一致的事件、一个没有多文化版本的事件；
+      // 外加两张 era 卡——一张写了年代区间、一张没写（后者必须进 eraSkipped，而不是被猜出边界）
+      const YAML = [
+        'apiVersion: yushu.timeline/v1',
+        'anchor_event: ev-war',
+        'calendars:',
+        '  - id: common',
+        '    label: 通纪',
+        '    offset: 0',
+        'timelines:',
+        '  - id: tl-main',
+        '    anchor_event: ev-war',
+        '    calendar: common',
+        '    scale: numeric',
+        '    events: [ev-war, ev-treaty, ev-market]',
+        'events:',
+        '  - id: ev-war',
+        '    title: 开国之役',
+        '    year: 0',
+        '    timeline: tl-main',
+        '    participants: []',
+        '    causes: []',
+        '    effects: []',
+        '    pov_viewpoints:',
+        '      - culture: 官修史',
+        '        account: 王师一战而定',
+        '        source: 起居注',
+        '      - culture: 边地谣',
+        '        account: 冻死过半才破城',
+        '        source: 采诗官',
+        '  - id: ev-treaty',
+        '    title: 十二城之盟',
+        '    year: 12',
+        '    timeline: tl-main',
+        '    participants: []',
+        '    causes: []',
+        '    effects: []',
+        '    pov_viewpoints:',
+        '      - culture: 官修史',
+        '        account: 诸城会盟定界',
+        '      - culture: 边地谣',
+        '        account: 诸城会盟定界',
+        '  - id: ev-market',
+        '    title: 开市',
+        '    year: 40',
+        '    timeline: tl-main',
+        '    participants: []',
+        '    causes: []',
+        '    effects: []',
+      ].join('\n') + '\n';
+      const current = await window.yushu.doc.read('world/timeline.yaml').catch(() => null);
+      if (current === null) await window.yushu.doc.write('world/timeline.yaml', YAML);
+      else await window.yushu.doc.write('world/timeline.yaml', YAML, current.hash);
+      const writeCardIdempotent = async (path, payload) => {
+        const existing = await window.yushu.card.read(path).catch(() => null);
+        if (existing === null) return window.yushu.card.write({ path, card: payload.card, body: payload.body });
+        return window.yushu.card.write({ path, card: payload.card, body: payload.body, baseHash: existing.hash });
+      };
+      await writeCardIdempotent('world/cards/era/era-founding.md', {
+        card: { id: 'era-founding', type: 'era', name: '建国时代', layer: 'eras', extensions: { chronicle: { from: -10, to: 30 } } },
+        body: '有年代区间的时代卡。',
+      });
+      await writeCardIdempotent('world/cards/era/era-no-range.md', {
+        card: { id: 'era-no-range', type: 'era', name: '无区间时代', layer: 'eras' },
+        body: '没写 chronicle 区间的时代卡：必须进 eraSkipped，而不是被猜出边界。',
+      });
+      await tab('规则');
+      await tab('世界观档案');
+      const table = await waitFor(() => document.querySelector('.chronology-panel .chronology-table') || null, 4000);
+      if (!table) return { ok: false, note: '编年史表没渲染（通道未通或视图没挂载）' };
+      const rows = [...table.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => (td.textContent || '').trim()));
+      const text = rows.map((r) => r.join('|')).join('\n');
+      const splitRows = rows.filter((r) => r[3].indexOf('开国之役') >= 0).length === 2;
+      const diffFlag = /开国之役[^\n]*分歧 2/.test(text);
+      const sameFlag = /十二城之盟[^\n]*诸说一致/.test(text);
+      const neutral = /开市[^\n]*中性记载/.test(text);
+      const eraColumn = rows.some((r) => r[0] === '建国时代') && rows.some((r) => r[0] === '—');
+      const yearVsScale = rows.some((r) => r[1].indexOf('通纪') >= 0 && r[2] !== r[1]);
+      const notices = [...document.querySelectorAll('.chronology-notices')].map((n) => n.textContent || '').join(' ');
+      const skippedOk = notices.indexOf('era-no-range') >= 0;
+      const panel = document.querySelector('.chronology-panel');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: rows.length === 5 && splitRows && diffFlag && sameFlag && neutral && eraColumn && yearVsScale && skippedOk,
+        note: '行数=' + rows.length + '；同一事件分两行=' + splitRows + '；分歧徽标=' + diffFlag +
+          '；诸说一致徽标=' + sameFlag + '；中性记载=' + neutral + '；时代列含未入段=' + eraColumn +
+          '；年份与刻度分列=' + yearVsScale + '；无区间 era 被点名=' + skippedOk,
+      };
+    `,
+  },
+  {
+    step: 53,
+    title: "世界观档案：分析面板各自成框（内容不得溢出框外压住相邻面板）（R71 布局回归锁）",
+    file: "step53-panel-boxes.png",
+    body: String.raw`
+      await tab('世界观档案');
+      const boxes = await waitFor(() => {
+        const list = [...document.querySelectorAll('.archive > *, .archive-analysis > *')];
+        return list.length >= 6 ? list : null;
+      }, 8000);
+      if (!boxes) return { ok: false, note: '档案页顶层块不足 6 个：' + pageText() };
+      const rects = boxes.map((el) => {
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        return {
+          cls: String(el.className),
+          top: Math.round(r.top), bottom: Math.round(r.bottom),
+          left: Math.round(r.left), right: Math.round(r.right),
+          clientH: el.clientHeight, scrollH: el.scrollHeight,
+          overflowY: cs.overflowY,
+        };
+      });
+      // ① 内容画到框外：滚动高明显大于盒子高、又没开滚动条——这些字会直接压在下一个面板上
+      const spilling = rects.filter((b) => b.scrollH > b.clientH + 4 && b.overflowY === 'visible');
+      // ② 两个顶层框真的相交（>8px 见方才算，1px 边框贴合不算）
+      const hits = [];
+      for (let i = 0; i < rects.length; i += 1) {
+        for (let j = i + 1; j < rects.length; j += 1) {
+          const a = rects[i];
+          const b = rects[j];
+          const ow = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const oh = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (ow > 8 && oh > 8) hits.push(a.cls + ' × ' + b.cls + '(' + ow + 'x' + oh + ')');
+        }
+      }
+      const tag = (b) => (String(b.cls).split(' ')[1] || String(b.cls) || '(无类名)');
+      // 截图要能看见"面板各自成框"：把分析区顶部对齐视口（step52 是把编年史居中，两帧必须不同画面，
+      // 否则截图守卫会报"与上一张相同"，那这一帧就不算证据）
+      const scroller = document.querySelector('.archive-scroll');
+      const analysis = document.querySelector('.archive-analysis');
+      if (scroller && analysis) scroller.scrollTop = analysis.offsetTop - 6;
+      await sleep(220);
+      return {
+        ok: spilling.length === 0 && hits.length === 0,
+        note: '顶层块=' + rects.length +
+          '；内容溢出框外=' + (spilling.length === 0 ? '无' : spilling.map((b) => tag(b) + '(框' + b.clientH + '<容' + b.scrollH + ')').join(' ')) +
+          '；框框相交=' + (hits.length === 0 ? '无' : hits.join(' ')) +
+          '；各块高=' + rects.map((b) => tag(b) + ':' + (b.bottom - b.top)).join(' ') +
+          '；截图前 scrollTop=' + (scroller ? Math.round(scroller.scrollTop) : -1),
+      };
+    `,
+  },
 ];
 
 /**
@@ -2950,7 +3116,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-51）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-53）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,

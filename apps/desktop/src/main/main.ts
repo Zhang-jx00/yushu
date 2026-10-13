@@ -2731,6 +2731,61 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       const { relationGraphView } = await import("./graph-ops.js");
       const { timelineView } = await import("./timeline-ops.js");
       const { rm: rmFile } = await import("node:fs/promises");
+      // 探针要"有东西可比"：夹具里 3 条引用全指向章节（不成边）、也没有 world/timeline.yaml，
+      // 空图与空年表比"逐字不变"是永真。先临时造一条真边 + 三行年表，验完即删。
+      const { createSettingCard, serializeCardFile, cardPath, TIMELINE_PATH } = await import("@yushu/world-engine");
+      const seed = await relationGraphView(gateway, {});
+      const anchorNode = seed.nodes.find((node) => node.type === "character");
+      if (!anchorNode) throw new Error("A5 探针造不出边：图谱里一张人物卡都没有");
+      const probeCard = createSettingCard({
+        type: "character",
+        id: "char-a5-probe",
+        name: "A5 关系探针",
+        refs: [{ relation: "rival_of", target: anchorNode.id }],
+      });
+      const a5CardPath = cardPath(probeCard.type, probeCard.id);
+      await gateway.writeDoc(a5CardPath, serializeCardFile(probeCard, "临时卡：只为让图谱出现一条真边，探针结束即删。"));
+      await gateway.writeDoc(
+        TIMELINE_PATH,
+        [
+          "apiVersion: yushu.timeline/v1",
+          "anchor_event: ev-a5",
+          "calendars:",
+          "  - id: common",
+          "    label: 通纪",
+          "    offset: 0",
+          "timelines:",
+          "  - id: tl-a5",
+          "    anchor_event: ev-a5",
+          "    calendar: common",
+          "    scale: numeric",
+          "    events: [ev-a5, ev-a5b, ev-a5c]",
+          "events:",
+          "  - id: ev-a5",
+          "    title: A5 锚点",
+          "    year: 0",
+          "    timeline: tl-a5",
+          "    participants: []",
+          "    causes: []",
+          "    effects: []",
+          "  - id: ev-a5b",
+          "    title: A5 第二事",
+          "    year: 5",
+          "    timeline: tl-a5",
+          "    participants: []",
+          "    causes: []",
+          "    effects: []",
+          "  - id: ev-a5c",
+          "    title: A5 第三事",
+          "    year: 9",
+          "    timeline: tl-a5",
+          "    participants: []",
+          "    causes: []",
+          "    effects: []",
+        ].join("\n") + "\n",
+      );
+      // 索引在夹具之后就重建一次：让"删掉的这个库"是**与真源一致**的库，
+      // 否则视图若真读了索引，也会在陈旧内容上一错到底而看不出差别。
       const rebuilt = await rebuildProjectIndex(gateway);
       const graphBefore = await relationGraphView(gateway, {});
       const timelineBefore = await timelineView(gateway, {});
@@ -2741,6 +2796,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       await rmFile(indexDbPath, { force: true });
       const graphAfter = await relationGraphView(gateway, {});
       const timelineAfter = await timelineView(gateway, {});
+      await rmFile(join(dir, a5CardPath), { force: true });
+      await rmFile(join(dir, TIMELINE_PATH), { force: true });
       const a5Probe = {
         dbExistedBeforeDelete: dbExistedBefore,
         graphSame: JSON.stringify(graphBefore) === JSON.stringify(graphAfter),
@@ -3359,6 +3416,17 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       [`result.a5.graphSame`, (result as { a5?: { graphSame: boolean } }).a5?.graphSame === true],
       [`result.a5.timelineSame`, (result as { a5?: { timelineSame: boolean } }).a5?.timelineSame === true],
       [`result.a5.nodes > 0`, (result as { a5?: { nodes: number } }).a5?.nodes ? (result as { a5?: { nodes: number } }).a5!.nodes > 0 : false],
+      // 非空性另一半：必须真有一条边、真有三行年表，否则"逐字不变"比的只是两个空对象
+      [
+        `result.a5.edges > 0`,
+        (result as { a5?: { edges: number } }).a5?.edges ? (result as { a5?: { edges: number } }).a5!.edges > 0 : false,
+      ],
+      [
+        `result.a5.timelineRows >= 3`,
+        (result as { a5?: { timelineRows: number } }).a5?.timelineRows
+          ? (result as { a5?: { timelineRows: number } }).a5!.timelineRows >= 3
+          : false,
+      ],
     ];
     const unmet = unmetAssertions(assertions);
     const ok = unmet.length === 0;
