@@ -45,6 +45,21 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **伏笔结论并入全书体检（第 75 轮，M4/T4-2 第三类语义规则，本项仍不勾选）**：`foreshadow-ops.ts` 新增
+  `foreshadowReportFindings`——把 `buildForeshadowBoard` 的结论**原样投影**成一致性报告条目（判定零重写，
+  避免长出第二套伏笔判定），原文区间由新的 `ledger-spans.ts` 按条目 id 在 `world/foreshadow.yaml` 里定位
+  （**定位不到就不给 span 键，不塞 0-0 的假区间**）；台账读不懂时报一条 `fs-ledger-unreadable` 而不是静默
+  贡献零结论（同 R74 的"没查 ≠ 没问题"）。豁免侧导出 `FORESHADOW_RULE_IDS` 并纳入 `knownRuleIds`，
+  配一条**覆盖锁**（扫源码里的 `fs-*` 字面量，新增规则不补进清单就红）——否则会"报得出来却豁免不掉"。
+  **自己的新测试抓到一个真缺陷**：夹具用作者的自然写法「第 1 章」，结果被判成 `fs-dangling-chapter`。
+  取证确认 `chapterIndex` 的数字回退只比"id 里带的数字"（`ch-012` 才认），而大纲生成的是随机后缀
+  `ch-q5wbog` ⇒ **人话写的章号永远定位不到**。补第二层回退：先认 id 内数字（老项目兼容），再认有序清单
+  第 N 位；超出长度仍返回 `null`（不夹到最后一章）。**先写测试看它红、再改绿**，没有把断言改成"只认随机 id"。
+  预演 step49 扩一段运行时证据（点「全书体检」后表里必须出现 `fs-` 那条且出处含"伏笔台账"，回执
+  `体检同表含伏笔结论=true`）。**变异**：把伏笔结论从同表里摘掉 ⇒ 三条新测试同红，还原后 sha 一致。
+  **验证**：全量 **1010/1010（98 文件）**、TC=0、E2E=0、预演 **54/54**（v167，59.2s，抖动=0、证据缺失=0）。
+  顺带给 `git-ops` 的"整体回滚"补显式 20s 墙钟预算（98 文件满载越过 5s 默认闸，单跑实测 945ms / 952ms；
+  **改时间预算不改判据，也不动全局 `testTimeout`**，沿用 R67 的处置）。
 - **规则参与表改数据驱动（第 74 轮，M4/T4-2 口径修正，本项仍不勾选）**：`@yushu/genre-engine` 新增
   `collectVarReferences(expr)`（走表达式树收集 `var` 路径，去重 + 码点序；只走结构不求值），
   `rule-findings.ts` **删掉手写名单** `POWER_PAIR_RULES = new Set(["power-no-regress"])`，改为

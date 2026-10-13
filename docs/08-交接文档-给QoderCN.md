@@ -17,10 +17,10 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **997/997 全绿**（97 个测试文件）——`pnpm test`（R74 参与表数据驱动 +6 例并收紧 2 条旧断言；R73 为 991/96） |
+| 单测 | **1010/1010 全绿**（98 个测试文件）——`pnpm test`（R75 伏笔并入体检 +13 例；R74 为 997/97、R73 为 991/96） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
-| UI 预演 | **54/54 全绿**（最近一次新目录 **v163**，58.8s，抖动=0、证据缺失=0；v162 为 53/53、v157 为 52/52、v153 为 51/51，`flakySteps:[]`、`screenshotFailures:[]`；R63 的 v142 为 47/47）——见 §6.3。**step21 的偶发抖动根因已于 R58 消掉**（`press()` 缓存了失效的 `.tiptap` 节点，改为每次按键重新查询）；**剩余遗留只有 step17**：快照内容寻址导致"重复点一次不产生新行"，**状态变更型步骤重试救不回来**，根因仍未定（docs/06 §七）。**另记一条证据口径**：`screenshotFailures:[]` 只说明图取到了，不说明图拍对了——R58 复看时发现规则页的 step41/43/44 截图只拍到页首，已给这几步补 `scrollIntoView` 再重跑（v135）。**两条"取证要取在被断言那段"的新例子**：step47（R63）在展开动画**中途 60ms 采样**高度（0 → 35/52 → 236 = 内容高），断言的是"存在中间态且终值等于内容高"而不是某个中间常量；step49（R66）在页面里**现场按真实章序造数据**再验看板（逾期外显、红鲱鱼+放弃带理由不被报缺陷、paid 无回收章报矛盾、面板内没有写回按钮）；step48（R64）读**真实 computed style**（`line-break` / `text-autospace` / `text-spacing-trim` / `font-variant-numeric` / 版心 px）与 `CSS.supports()` 三个布尔——把"这台机器的运行时支不支持"变成问出来的事实，不是查表猜的。**R71 再添两条同类账，都属"证据看着有、其实不成立"**：① step33 `waitFor('.assembly-preview')` 等的节点在上一步跑完后**已经在 DOM 里**（step31 末尾故意用小预算再跑一次），于是它立刻返回、读到旧回执，而按钮还在合法禁用态——此前绿是撞运气（IPC 快过 150ms 睡眠）；凡"点按钮 → 等结果节点"先问"这节点是不是已经在"，判据要带上**本步特有的内容**（本步的预算数字、按钮转绿）。② M4 验收 A5 的 e2e 探针比的是 `edges:0 / timelineRows:0` 的两个空视图 ⇒ 空对空当然"逐字不变"，已补夹具与 `edges > 0`、`timelineRows >= 3` 两条非空性断言并分别变异打红。**还有一条截图纪律**：新步骤若只量不改画面，`captureStep` 的滞后帧守卫会标"证据存疑"（v160/v161 的 step53 就是这样），要么把目标区域滚进视口、要么别指望那张图算证据。 |
+| UI 预演 | **54/54 全绿**（最近一次新目录 **v167**，59.2s，抖动=0、证据缺失=0；v162 为 53/53、v157 为 52/52、v153 为 51/51，`flakySteps:[]`、`screenshotFailures:[]`；R63 的 v142 为 47/47）——见 §6.3。**step21 的偶发抖动根因已于 R58 消掉**（`press()` 缓存了失效的 `.tiptap` 节点，改为每次按键重新查询）；**剩余遗留只有 step17**：快照内容寻址导致"重复点一次不产生新行"，**状态变更型步骤重试救不回来**，根因仍未定（docs/06 §七）。**另记一条证据口径**：`screenshotFailures:[]` 只说明图取到了，不说明图拍对了——R58 复看时发现规则页的 step41/43/44 截图只拍到页首，已给这几步补 `scrollIntoView` 再重跑（v135）。**两条"取证要取在被断言那段"的新例子**：step47（R63）在展开动画**中途 60ms 采样**高度（0 → 35/52 → 236 = 内容高），断言的是"存在中间态且终值等于内容高"而不是某个中间常量；step49（R66）在页面里**现场按真实章序造数据**再验看板（逾期外显、红鲱鱼+放弃带理由不被报缺陷、paid 无回收章报矛盾、面板内没有写回按钮）；step48（R64）读**真实 computed style**（`line-break` / `text-autospace` / `text-spacing-trim` / `font-variant-numeric` / 版心 px）与 `CSS.supports()` 三个布尔——把"这台机器的运行时支不支持"变成问出来的事实，不是查表猜的。**R71 再添两条同类账，都属"证据看着有、其实不成立"**：① step33 `waitFor('.assembly-preview')` 等的节点在上一步跑完后**已经在 DOM 里**（step31 末尾故意用小预算再跑一次），于是它立刻返回、读到旧回执，而按钮还在合法禁用态——此前绿是撞运气（IPC 快过 150ms 睡眠）；凡"点按钮 → 等结果节点"先问"这节点是不是已经在"，判据要带上**本步特有的内容**（本步的预算数字、按钮转绿）。② M4 验收 A5 的 e2e 探针比的是 `edges:0 / timelineRows:0` 的两个空视图 ⇒ 空对空当然"逐字不变"，已补夹具与 `edges > 0`、`timelineRows >= 3` 两条非空性断言并分别变异打红。**还有一条截图纪律**：新步骤若只量不改画面，`captureStep` 的滞后帧守卫会标"证据存疑"（v160/v161 的 step53 就是这样），要么把目标区域滚进视口、要么别指望那张图算证据。 |
 | 对外文档 | R63 起仓库根齐了 `README`（按 `docs/04` 实测改写，不再是"M2 已收口"的旧口径）/ `CONTRIBUTING` / `SECURITY` / `NOTICE` / `ROADMAP` / `CHANGELOG` 与 `.github/` issue+PR 模板。**仍缺 `CODE_OF_CONDUCT.md`、`GOVERNANCE.md`、SPDX 文件头、任何 CI 配置**（`docs/04` §11.6 前两条门槛据此保持未勾） |
 | 性能实测 | 10/10 达标（最近一次 R36 报告 `docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json`）；R40 未触热路径，本轮不适用 |
 | 版本 | `v0.2.0` tag **已在远端**（本文上一版记为"远端未推"，已过期更正） |
@@ -440,8 +440,14 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
     **明确不做并写理由**：视角 head-hopping 与信息可见性**当前无数据源**——章节 `pov` 在模型与 schema 里都有，
     但 `grep apps/desktop` 零写入点（与 R73 的 `scene_ids` 恒空同类：**字段存在 ≠ 数据存在**）；
     没有视角标注就硬做越视角判定只能靠关键词猜，误报会让作者学会忽略整块看板。
-12. **R75｜伏笔回收链接入全书体检**：把 `buildForeshadowBoard` 的结论投影进一致性报告同表
-    （带 `span` / `evidence` / `fix` 三件套与出处），**不重做判定**；面板与 e2e 各加一条"伏笔结论出现在体检里"的断言。
+12. **R75｜伏笔结论并入全书体检已完成，T4-2 仍不勾**：`foreshadowReportFindings` 把引擎结论**原样投影**成报告条目
+    （判定零重写）+ `ledger-spans.ts` 按条目 id 在 `world/foreshadow.yaml` 里定位原文（定位不到就不给 span 键）+
+    `FORESHADOW_RULE_IDS` 进 `knownRuleIds` 并配覆盖锁（漏一条就会"报得出来却豁免不掉"）。
+    **自己的新测试抓到一个真缺陷**：「第 1 章」这类自然章号被判悬空——`chapterIndex` 的数字回退只比
+    "id 里带的数字"，而大纲 id 是随机后缀 ⇒ 补第二层回退（先认 id 内数字，再认有序清单第 N 位；超界仍 null）。
+    先写测试看它红再改绿。step49 扩了运行时证据（`体检同表含伏笔结论=true`）；变异：摘掉同表 ⇒ 3 条新测试同红。
+    验证：1010/1010（98 文件）、TC=0、E2E=0、预演 54/54（v167）。顺带给 `git-ops` 的"整体回滚"补显式 20s 预算
+    （98 文件满载越 5s 闸；单跑实测 945/952ms，改预算不改判据、不动全局 testTimeout）。
 13. **R76｜治理与审计余账**：`CODE_OF_CONDUCT.md` + `GOVERNANCE.md`（docs/04 §11.2/§11.4）、SPDX 文件头批量添加
     （**单独一轮做**，配一条"抽样文件必带头"的能红断言）、CSS 令牌三层重构（primitive → semantic → component）、
     `audit` 任务登记进路由表并校验 `structured_output` 能力、`restoreDoc` 带 baseHash 拒并发、排除清单三向一致 +
