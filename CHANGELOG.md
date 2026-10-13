@@ -45,6 +45,18 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **编年史·引擎侧（第 70 轮，M4/T4-8 判定层，本项不勾选）**：新建 `world-engine/chronicle.ts`——
+  `buildChronicle(doc, {calendar?, eras?})` **吃 T4-7 的 `TimelineFile`、年份一律走 `formatCalendarYear`，
+  模块自己没有年表结构**（编年史一旦自带一套历法，同一件事就有两个年份，红线 1 的具体形态）。
+  三条不猜各钉一组测试：① 无 `pov_viewpoints` ⇒ `culture: null` 的中性记载，不替作者编视角；
+  ② 时代边界由调用方给（era 设定卡），引擎不猜年代，落不进任何时代 ⇒ `uneraled` 点名而**不塞进最后一段**；
+  ③ 多文化记载完全相同 ⇒ `differing: false` 且 note 写明"这本身是证据"（"几个文化一致"≠"只有一个说法"）。
+  另有 `orphanEvents`（事件写了合法 timeline 却没被任何时间线 `events[]` 列出）、`ambiguousEra`（时代区间重叠，
+  归段按给出顺序取第一段而不是静默二选一）。**一条被测试逼出来的定义修正**：原想让 orphanEvents 抓
+  "事件指向不存在的时间线"，但解析层在 R67 就拒绝了这种文档 ⇒ 那条断言永远不可能红，遂换成可证的形态
+  （**"实现写完了但测不到"的分支就是死分支**）。验证：11 例先红后绿、**变异 4 次全红**、
+  全量 **959/959（95 文件）**、TC=0（strict 两次报 possibly undefined，用局部变量 + undefined 判定解决，
+  **没有用 `as` 撬闸**）。**纯引擎轮：没碰桌面端 ⇒ 没跑 e2e 与 UI 预演**；界面在 R71，**T4-8 保持未勾**。
 - **关系图谱 + M4 验收 A5 取证（第 69 轮，T4-9 与 A5 同时勾选）**：新建 `world-engine/relation-graph.ts`
   ——`buildRelationGraph(entities, refs)` 吃的就是 T4-2 / T4-5 在用的两张真源行表，**图谱只是它们的一次投影：
   不长第二套图结构、也不落盘**。三张网按 relation 名分类（`relationKinds` 可覆盖）；认不出的归 `other` 并把名字
