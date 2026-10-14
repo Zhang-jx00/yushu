@@ -33,6 +33,10 @@ Fixes #（没有对应 issue 请先开一个；纯文档改动可写「无」）
 - [ ] 排序走码点序，没有 `localeCompare`；同输入同输出
 - [ ] 界面动效符合 DASHBOARD 上限（无 `infinite`、入场 ≤380ms、位移 ≤6px、缩放 ≥0.98；`prefers-reduced-motion` 关 transition 与 animation）
 
+## 行为准则
+
+- [ ] 我已阅读并同意遵守 [行为准则](https://github.com/Zhang-jx00/yushu/blob/main/CODE_OF_CONDUCT.md)；评审与维护按其中的四级阶梯执行
+
 ## 文档与账本
 
 - [ ] 对应 `docs/04` 勾选与注记已当场更新（勾一个 `[x]` 必须同时写证据：测试名 / 探针字段 / 预演步号）

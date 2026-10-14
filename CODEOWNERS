@@ -1,0 +1,50 @@
+# CODEOWNERS —— 按领域指派复审者（docs/04 §11.4）
+#
+# 现状说明（别把这份文件读成"已经有个团队在守着"）：御书当前是单人维护项目，
+# 四个领域的 owner 是同一个人。把它按领域拆开写，是为了**将来长出复审者时只改一行**，
+# 而不是到时候再从零决定"编辑器该谁看"。领域划分与 `GOVERNANCE.md` 的梯队表一致。
+#
+# 语法：GitHub 只认对仓库有写权限的账号；未注册的账号会让整行失效。
+
+# 兜底：任何没被下面命中的改动
+*                                    @Zhang-jx00
+
+# editor —— 编辑器与写作界面（双形态、自动保存、@ 提及、中文自查面板）
+/apps/desktop/renderer/              @Zhang-jx00
+/apps/desktop/src/main/chapter-ops.ts    @Zhang-jx00
+/apps/desktop/src/main/text-ops.ts       @Zhang-jx00
+
+# world-engine —— 世界模型与真源（设定卡、三级大纲、索引数据源、一致性/伏笔/时间线/编年史/爽点判定）
+/packages/@yushu/world-engine/       @Zhang-jx00
+/packages/@yushu/schema/             @Zhang-jx00
+/apps/desktop/src/main/consistency-ops.ts  @Zhang-jx00
+/apps/desktop/src/main/foreshadow-ops.ts   @Zhang-jx00
+/apps/desktop/src/main/timeline-ops.ts     @Zhang-jx00
+/apps/desktop/src/main/chronicle-ops.ts    @Zhang-jx00
+/apps/desktop/src/main/satisfaction-ops.ts @Zhang-jx00
+
+# memory —— 记忆与检索（五层记忆、注入控制、上下文组装、RAG、FTS5 索引）
+/packages/@yushu/memory/             @Zhang-jx00
+/packages/@yushu/search/             @Zhang-jx00
+/apps/desktop/src/main/memory-ops.ts       @Zhang-jx00
+/apps/desktop/src/main/index-ops.ts        @Zhang-jx00
+
+# pack-toolchain —— 派系包工具链与包内容（lint / 融合 / 规则 DSL；packs/ 是**数据**不是代码）
+/packages/@yushu/genre-engine/       @Zhang-jx00
+/packs/                              @Zhang-jx00
+
+# 安全与凭据（密钥信封、加密后端、明文阻断、导入侧剔除）
+/packages/@yushu/llm/src/secrets.ts  @Zhang-jx00
+/apps/desktop/src/main/secrets-ops.ts      @Zhang-jx00
+/SECURITY.md                         @Zhang-jx00
+
+# 导出与发布（TXT / 敏感词 / 剪贴板；EPUB 等管线属 M5 未办）
+/packages/@yushu/export/             @Zhang-jx00
+/apps/desktop/src/main/export-ops.ts       @Zhang-jx00
+
+# 台账与对外声称（勾一个 [x] 必须带证据；对外文档不得与账本矛盾）
+/docs/04-开发计划.md                 @Zhang-jx00
+/docs/06-M1验收与自查清单.md          @Zhang-jx00
+/README.md                           @Zhang-jx00
+/ROADMAP.md                          @Zhang-jx00
+/CHANGELOG.md                        @Zhang-jx00

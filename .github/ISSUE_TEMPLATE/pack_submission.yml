@@ -1,0 +1,89 @@
+name: 派系包投稿
+description: 提交一个流派/题材包（题材、写作技法、节拍、禁忌、规则 DSL），或申请收录进内置包目录
+labels: ["type/pack-submission", "status/triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        派系包在御书里是**内容数据**，不是代码：它随仓库分发、许可独立声明、可被 lint 机器校验。
+        因此这份表单只问三件事——**许可、来源、能不能被机器验过**。
+        先读 [`docs/05-流派总表.md`](docs/05-流派总表.md) 与 `packs/xuanhuan-xitong`（内置参考包）。
+  - type: input
+    id: pack_id
+    attributes:
+      label: 包 id（`metadata.id`）
+      description: 形如 `xuanhuan-xitong`：小写字母/数字/连字符，全局唯一
+      placeholder: urban-genvillain
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 这个包建模什么
+      description: 四维派系取值（题材频道 / 世界类型 / 写作技法 / 基调）、节拍结构、禁忌、规则 DSL 各自覆盖了什么
+      placeholder: |
+        channel: [男频]；world: [都市]；technique: [系统流]；tone: [黑暗]
+        规则：2 条（战力回落检测、金手指冷却）
+    validations:
+      required: true
+  - type: dropdown
+    id: license
+    attributes:
+      label: 许可（必须与包内 manifest 的 metadata.license 一致）
+      description: |
+        派系包是内容数据，许可**独立于内核的 Apache-2.0**。未声明许可的包不予收录；
+        强 copyleft 或"仅限非商业"的许可可以收录，但会在包目录里明确标注，供下游选择。
+      options:
+        - CC0-1.0
+        - CC-BY-4.0
+        - CC-BY-SA-4.0
+        - Apache-2.0
+        - MIT
+        - 其他（请在下面说明）
+    validations:
+      required: true
+  - type: textarea
+    id: provenance
+    attributes:
+      label: 来源与原创性声明
+      description: |
+        必填。写清内容从哪来：自己总结 / 参考了哪些公开资料（给链接）/ 是否含他人未发表文本。
+        **不得包含受版权保护的小说原文片段**；术语与公有领域的写作方法论不在此限。
+        如果你不是作者，请说明你有权分发。
+      placeholder: |
+        由本人根据公开写作教程与个人连载经验整理；未复制任何他人作品原文。
+        参考：…（链接）
+    validations:
+      required: true
+  - type: textarea
+    id: lint
+    attributes:
+      label: lint 结果
+      description: |
+        贴 `pnpm --filter @yushu/genre-engine exec node scripts/lint-pack.mjs <包目录>` 的输出
+        （若该脚本尚未提供，请写"未跑"——**不要写"应该能过"**）。
+        规则 DSL 部分需通过 `collectExpressionIssues`：未知操作符、一个对象塞两个条件键都会被点名。
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: rules_dsl
+    attributes:
+      label: 规则 DSL 说明（可选）
+      description: |
+        若包内带 `rules/*.yaml`：逐条说明每条规则比对什么数据、`var` 路径来自哪里。
+        注意御书的沙箱**禁循环、禁 IO、禁正则**，求值预算按节点计数——
+        不满足这些约束的规则不会被接受。
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交前自检
+      options:
+        - label: 我已阅读并同意遵守 [行为准则](https://github.com/Zhang-jx00/yushu/blob/main/CODE_OF_CONDUCT.md)
+          required: true
+        - label: 我已阅读 [CONTRIBUTING.md](https://github.com/Zhang-jx00/yushu/blob/main/CONTRIBUTING.md) 的提交约定
+          required: true
+        - label: 许可与来源声明真实，且我有权分发这些内容
+          required: true
+        - label: 包内不含受版权保护的小说原文片段，也不含任何 API Key 或个人路径
+          required: true

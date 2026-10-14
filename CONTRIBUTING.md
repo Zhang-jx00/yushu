@@ -1,7 +1,7 @@
 # 参与贡献
 
 先说清楚这个仓库的验收方式：**跑给我看数字**，不是「看起来对」。
-提 PR 前请把下面四连跑完，并在描述里带上实测输出里的真实数字（例：`Tests 962 passed (962)` / `ok=53 fail=0`）。
+提 PR 前请把下面四连跑完，并在描述里带上实测输出里的真实数字（例：`Tests 1096 passed (1096)` / `ok=56 fail=0`）。
 
 ## 四连门禁
 
@@ -17,6 +17,14 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"
 - 预演需要先构建渲染层：`pnpm --filter @yushu/desktop build:main && pnpm --filter @yushu/desktop build:renderer`。
   只构建主进程时，预演会报「找不到输入框」——那是构建缺失，不是产品缺陷。
 - 专项探针：`kill-test`（真实强杀进程不丢稿）、`perf-test`（synth-1m 百万字性能预算）。
+
+## 社区治理与行为准则
+
+- 参与前请先看 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)：适用范围、不可接受的行为，
+  以及被认定违规时的**四级处置阶梯**（督促 → 警告 → 临时封禁 → 永久开除）。
+- 谁能合并、决定怎么留记录、商业化边界承诺在哪，见 [GOVERNANCE.md](GOVERNANCE.md)。
+  一句话版本：**核心离线能力永久免费**，真源永远是仓库里的 Markdown/YAML。
+- 安全漏洞请按 [SECURITY.md](SECURITY.md) 走，那里写了支持版本范围与确认/修复时限。
 
 ## 提交约定
 
