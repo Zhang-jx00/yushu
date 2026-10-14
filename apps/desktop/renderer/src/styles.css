@@ -2715,3 +2715,156 @@ table,
 .satisfaction-advance {
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- R77：存量导入面板（稿件总览内，默认收起） ---------- */
+
+/* 滚动上限加在面板自己身上，不加在 .disclosure-body 上：
+   那一层要留着 overflow:hidden 才能做 0fr→1fr 的真实高度过渡，改成 auto 收起时就漏了。 */
+.library-import .import-panel {
+  max-height: 66vh;
+  overflow: auto;
+}
+
+.import-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0 10px;
+  font-size: 12.5px;
+}
+
+.import-file {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 编码探测：猜的要成横幅——和"探测通过"在视觉上必须一眼分得开 */
+.import-probe {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-size: 12.5px;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.import-probe.warn {
+  border-color: var(--warn);
+  background: #fdf6e9;
+}
+
+.import-probe-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.import-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11.5px;
+  margin-right: 4px;
+}
+
+.import-tag.danger {
+  background: #fbeae6;
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.import-tag.custom {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.import-block {
+  margin-bottom: 12px;
+}
+
+.import-block-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.import-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.import-table td {
+  line-break: strict;
+}
+
+.import-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.import-warn {
+  color: var(--warn);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.import-redacted {
+  margin: 6px 0;
+}
+
+.import-rules {
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.import-rule-editor {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.import-rule-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 360px;
+}
+
+.import-rule-note,
+.import-more,
+.import-volumes {
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 4px;
+}
+
+.import-note {
+  padding: 6px 10px;
+  border: 1px dashed var(--warn);
+  border-radius: 8px;
+  background: #fdf6e9;
+  margin-bottom: 6px;
+}
+
+/* 边界写在这儿而不是藏在注释里：这一版没有入库能力，界面就不该出现入库按钮 */
+.import-boundary {
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}

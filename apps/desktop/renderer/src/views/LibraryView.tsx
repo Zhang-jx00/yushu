@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LibraryViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { Disclosure } from "../components/Disclosure";
+import { ImportPanel } from "../components/ImportPanel";
 import { computeVirtualWindow } from "../virtual-list";
 
 /**
  * 稿件总览（M2 / T2-4 切片 A「全库视图 + 虚拟滚动」）：
  * 一行一章展示全书（含未建草稿），固定行高 + 虚拟滚动（只挂载视窗内行，数百章项目不卡顿）；
  * 「打开」跳转编辑器并选中该章（由 ProjectScreen 协调）。
+ *
+ * 存量导入面板（M5 / T5-7，R77）挂在总览里，默认收起：导完就能在这里看到进来的章，
+ * 收起状态不占列表高度（列表是 flex:1，展开时按真实高度让位）。
  */
 
 /** 行高（px；固定行高是虚拟滚动的前提） */
@@ -90,6 +95,9 @@ export function LibraryView({ onOpen }: { onOpen: (path: string) => void }) {
       <div className="library-hint muted">
         全库视图（虚拟滚动）：当前渲染 {visible.length} / {filtered.length} 行；「打开」进入编辑器（未建草稿的章节请先在「三级大纲」创建草稿章节）
       </div>
+      <Disclosure className="library-import" label="导入存量稿件（只预演 · 编码 / 清洗 / 分章三份报告）">
+        <ImportPanel />
+      </Disclosure>
       <div
         className="library-list"
         ref={listRef}
