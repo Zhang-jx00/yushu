@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow, app, dialog } from "electron";
 import { existsSync, promises as fs } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -60,6 +60,12 @@ interface StepDef {
   title: string;
   file: string;
   body: string;
+  /**
+   * 需要"操作系统那一层"夹具的步骤在这里声明（目前只有导入用的原生选文件对话框）。
+   * 桩只包住原生对话框，产品链路（IPC → 闸门 → 引擎 → 面板）全程真实执行，
+   * 且**每次 attempt 重新起一份**——重试不会接着上一次的调用次数往下走。
+   */
+  fixture?: "import-dialog";
 }
 
 const SCREENSHOT_REL_DIR = "docs/assets/m1-preview";
@@ -346,6 +352,76 @@ export function buildScript(body: string): string {
     }
   })()`;
 }
+
+/**
+ * 步骤 55 的夹具：只把**原生选文件对话框**换成返回固定夹具路径的桩。
+ *
+ * 为什么桩放在预演驱动里、而不是在产品代码里开一条"测试可传路径"的分支：
+ * `import:pick` 存在的全部理由就是"路径只能来自用户亲手点出来的对话框"，
+ * 产品代码里只要留一条能被程序喂路径的暗门，R77 那道闸门就白立了。
+ * 桩只在这一步的每次 attempt 期间存在，退出即还原、夹具文件当场删除。
+ *
+ * 给哪一份由渲染层的 `window.__yushuPick` 决定（utf8 / gbk / cancel），**不靠调用次数**：
+ * 失败重试时步骤会从中间重来，按次序发路径会让第二次 attempt 拿到上一次的进度，
+ * 于是"抖动"和"真回归"分不清（本轮就是这么撞上的）。
+ */
+async function openImportDialogFixture(win: BrowserWindow): Promise<{ dir: string; restore(): Promise<void> }> {
+  const dir = await fs.mkdtemp(join(tmpdir(), "yushu-import-ui-"));
+  const utf8Path = join(dir, "旧稿-预演.txt");
+  const gbkPath = join(dir, "旧稿-GBK.txt");
+  await fs.writeFile(utf8Path, IMPORT_UI_TEXT, "utf8");
+  await fs.writeFile(gbkPath, Buffer.from(IMPORT_UI_GBK));
+  const original = dialog.showOpenDialog;
+  dialog.showOpenDialog = (async () => {
+    const which = String(
+      await win.webContents.executeJavaScript("window.__yushuPick || ''").catch(() => ""),
+    );
+    const picked = which === "gbk" ? gbkPath : which === "utf8" ? utf8Path : undefined;
+    return picked === undefined ? { canceled: true, filePaths: [] } : { canceled: false, filePaths: [picked] };
+  }) as typeof dialog.showOpenDialog;
+  return {
+    dir,
+    restore: async () => {
+      dialog.showOpenDialog = original;
+      await win.webContents.executeJavaScript("delete window.__yushuPick;").catch(() => undefined);
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    },
+  };
+}
+
+/** 步骤 55 的两份夹具稿件：UTF-8 一份（含网址行 / 密钥行 / 多余空行 / 卷标题 / 楔子 / 三章）、GBK 一份（触发"这是猜的"分支） */
+const IMPORT_UI_TEXT = [
+  "作品简介：这是一部用来预演的测试稿。",
+  "",
+  "第一卷 风起",
+  "",
+  "",
+  "",
+  "第一章 起",
+  "夜色压下来。",
+  "",
+  "",
+  "",
+  "",
+  "https://www.example-site.com/read/12345",
+  "调用 openai 用 sk-abcdefghijklmnopqrstuvwx",
+  "",
+  "第二章 承",
+  "林渊拔剑而起。",
+  "",
+  "第三章 转",
+  "剑光落下，风声停了。",
+].join("\r\n");
+
+/** 真 GBK 字节（`第一章 起 / 夜色压下来。/ 第二章 承 / 林渊拔剑而起。`，CRLF 行尾） */
+const IMPORT_UI_GBK = new Uint8Array([
+  0xb5, 0xda, 0xd2, 0xbb, 0xd5, 0xc2, 0x20, 0xc6, 0xf0, 0x0d, 0x0a, 0xd2,
+  0xb9, 0xc9, 0xab, 0xd1, 0xb9, 0xcf, 0xc2, 0xc0, 0xb4, 0xa1, 0xa3, 0x0d,
+  0x0a, 0xb5, 0xda, 0xb6, 0xfe, 0xd5, 0xc2, 0x20, 0xb3, 0xd0, 0x0d, 0x0a,
+  0xc1, 0xd6, 0xd4, 0xa8, 0xb0, 0xce, 0xbd, 0xa3, 0xb6, 0xf8, 0xc6, 0xf0,
+  0xa1, 0xa3, 0x0d, 0x0a,
+]);
+
 
 const STEPS: StepDef[] = [
   {
@@ -1036,12 +1112,23 @@ const STEPS: StepDef[] = [
         const el = document.querySelector('.mention-menu');
         return { ok: false, note: '输入「@测试」后候选数异常（菜单' + (el ? lines(el) : '已消失') + '）：' + pageText() };
       }
+      // 高亮起点**不假定是第 1 项**：真鼠标若正停在候选区上，mouseenter 会把 active 挪到悬停那一项
+      // （本机实测撞过：连续两轮 ↓ 后高亮落在第 5 项，而组件语义 (active+1)%n 完全正确）。
+      // 所以这里断言的是产品契约——「↓ 让高亮移动一格，回车插入的正是移动后那一格」，
+      // 而不是「高亮必须在第 2 项」这个鼠标位置的巧合。
+      const menuLis = () => [...document.querySelectorAll('.mention-menu li')];
+      const activeOf = () => menuLis().findIndex((li) => li.className.includes('on'));
+      const beforeIdx = activeOf();
       press('ArrowDown');
       await sleep(150);
-      const activeIdx = [...document.querySelectorAll('.mention-menu li')].findIndex((li) => li.className.includes('on'));
+      const itemCount = menuLis().length;
+      const activeIdx = activeOf();
+      const movedOk = itemCount >= 5 && beforeIdx >= 0 && activeIdx === (beforeIdx + 1) % itemCount;
+      const pickedName = activeIdx >= 0 ? String((menuLis()[activeIdx].querySelector('strong') || {}).textContent || '') : '';
       press('Enter');
       const keyboardInserted = await waitFor(
-        () => (fullCount() === fullBefore + 1 && atCount() === fullCount() && document.querySelector('.mention-menu') === null ? true : null),
+        () => (fullCount() === fullBefore + 1 && atCount() === fullCount() && document.querySelector('.mention-menu') === null
+          && pickedName !== '' && String(tiptap.textContent).indexOf('@' + pickedName) >= 0 ? true : null),
         4000,
       );
       // 4) 点击路径：输入「 @测试」（空格分隔——@ 前一字符若为 ASCII 数字/字母属邮箱防误触场景，不触发候选）→ 点「测试设定5」
@@ -1075,10 +1162,10 @@ const STEPS: StepDef[] = [
       const menuShot = (await waitFor(() => (document.querySelector('.mention-menu') ? true : null), 4000)) === true;
       return {
         ok:
-          allCount >= 5 && escClosed === true && cleaned && fiveItems !== null && activeIdx === 1 &&
+          allCount >= 5 && escClosed === true && cleaned && fiveItems !== null && movedOk &&
           keyboardInserted === true && clickInserted === true && cmHasNew && panelSynced && decorated >= 2 && menuShot,
         note:
-          '空查询候选=' + allCount + '；Esc 关闭=' + escClosed + '；键盘路径（↓ 高亮第 ' + (activeIdx + 1) + ' 项后回车）插入=' + (keyboardInserted === true) +
+          '空查询候选=' + allCount + '；Esc 关闭=' + escClosed + '；键盘路径（↓ 把高亮从第 ' + (beforeIdx + 1) + ' 项移到第 ' + (activeIdx + 1) + ' 项，回车插入「@' + pickedName + '」）=' + (keyboardInserted === true) +
           '；点击「测试设定5」插入=' + (clickInserted === true) + '；切源码后文档含新提及=' + cmHasNew +
           '；提及面板同步=' + panelSynced + '；源码形态装饰数=' + decorated +
           '；截图时菜单开启=' + menuShot,
@@ -3085,6 +3172,136 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 55,
+    title: "稿件总览：导入存量稿件只预演不写盘（编码猜的要说出来 / 清洗留报告 / 切不开要认）（M5/T5-7，R77）",
+    file: "step55-import-preview.png",
+    fixture: "import-dialog",
+    body: String.raw`
+      // 原生选文件对话框无法自动化：夹具只替换"操作系统那一层"（见 openImportDialogFixture），
+      // 面板点击 → import:pick → 闸门登记 → import:preview → 引擎探测清洗分章 → 面板渲染全程真实。
+      const info = window.__yushuImportFixture ? JSON.parse(window.__yushuImportFixture) : null;
+      if (info === null) return { ok: false, note: '导入夹具未注入（主进程 harness 没跑？）' };
+      // 真源目录快照（派生区 .yushu/ 与 .git/ 排除：快照循环与心跳会写那儿，与导入无关）
+      const truthTree = async () => {
+        const tree = await window.yushu.project.tree();
+        return JSON.stringify(tree.filter((e) => /^(chapters|world|outline|config)\//.test(e.path)));
+      };
+      const before = await truthTree();
+      await tab('稿件总览');
+      const toggle = await waitFor(() => {
+        const t = [...document.querySelectorAll('.disclosure-toggle')].find((x) => String(x.textContent).indexOf('导入存量稿件') >= 0);
+        return t || null;
+      }, 8000);
+      if (toggle === null) return { ok: false, note: '总览页没有导入折叠区：' + pageText() };
+      toggle.click();
+      await sleep(320);
+      const opened = String(toggle.closest('.disclosure').className).indexOf('open') >= 0;
+      const panel = await waitFor(() => document.querySelector('.import-panel'), 4000);
+      if (panel === null) return { ok: false, note: '展开后没有导入面板' };
+      const btn = (label) => [...panel.querySelectorAll('button')].find((b) => String(b.textContent).indexOf(label) >= 0);
+      const pickBtn = btn('选择文件');
+      if (pickBtn === undefined) return { ok: false, note: '面板里没有「选择文件…」按钮：' + lines(panel) };
+      const read = () => String(panel.innerText).replace(/\s+/g, ' ');
+      // 选哪份稿件由主进程桩读 window.__yushuPick 决定（不靠点击次序）
+      const setPick = (which) => { window.__yushuPick = which; };
+
+      // ⓪ 失败重试会带着上一次的面板状态重进（自定义规则还在），先清回基线再验 ①
+      setPick('utf8');
+      pickBtn.click();
+      await waitFor(() => (read().indexOf('编码探测') >= 0 ? true : null), 12000);
+      const staleClear = btn('清空自定义');
+      if (staleClear !== undefined) {
+        staleClear.click();
+        await waitFor(() => (read().indexOf('custom-') < 0 && read().indexOf('分章预演：3 章') >= 0 ? true : null), 12000);
+      }
+
+      // ① UTF-8 稿件：报告三项 + 密钥就地替换 + 面板里读不到绝对路径
+      const first = await waitFor(() => {
+        const t = read();
+        return t.indexOf('编码探测') >= 0 && t.indexOf('utf-8') >= 0 && t.indexOf('分章预演：3 章') >= 0 ? t : null;
+      }, 12000);
+      if (first === null) return { ok: false, note: '第一次预演没出完整报告：' + read().slice(0, 300) };
+      const urlRemoved = first.indexOf('pure-url') >= 0;
+      const keyRedacted = first.indexOf('abcdefghijklmnopqrstuvwx') < 0 && first.indexOf('已剔除疑似密钥') >= 0;
+      const chaptersOk = ['第一章 起', '第二章 承', '第三章 转'].every((t) => first.indexOf(t) >= 0);
+      const volumeOk = first.indexOf('第一卷 风起') >= 0;
+      const preambleOk = first.indexOf('首章之前另有') >= 0;
+      const notGuessed = first.indexOf('这是猜的') < 0;
+      const noPath = first.indexOf(info.dir) < 0;
+      const boundaryOk = first.indexOf('这一版只到') >= 0;
+
+      // ② 追加一条自定义正则删掉三个章标题 ⇒ 必须显式承认"没切开"（可配正则不是摆设）
+      const input = panel.querySelector('.import-rule-input');
+      if (input === null) return { ok: false, note: '没有自定义规则输入框' };
+      setV(input, '^第[一二三]章');
+      await sleep(120);
+      const addBtn = btn('追加');
+      if (addBtn === undefined) return { ok: false, note: '没有「追加」按钮' };
+      addBtn.click();
+      const second = await waitFor(() => {
+        const t = read();
+        return t.indexOf('没找到章节标题') >= 0 && t.indexOf('分章预演：1 章') >= 0 ? t : null;
+      }, 12000);
+      const hardSplitOk = second !== null;
+
+      // ③ 清空自定义 ⇒ 回到三章（规则参与的是同一份字节，不是另起一版）
+      const clearBtn = btn('清空自定义');
+      if (clearBtn !== undefined) clearBtn.click();
+      const cleared = clearBtn === undefined ? null : await waitFor(() => {
+        const t = read();
+        return t.indexOf('分章预演：3 章') >= 0 && t.indexOf('没找到章节标题') < 0 ? t : null;
+      }, 12000);
+      const clearedOk = cleared !== null;
+
+      // ④ 改选 GBK 稿件 ⇒ 「这是猜的」必须成横幅
+      setPick('gbk');
+      pickBtn.click();
+      const gbk = await waitFor(() => {
+        const t = read();
+        return t.indexOf('gb18030') >= 0 && t.indexOf('这是猜的') >= 0 ? t : null;
+      }, 12000);
+      const assumedOk = gbk !== null;
+
+      // ⑤ 第三次点选是"用户取消" ⇒ 面板回到初始态，不留一份悬空的报告
+      setPick('cancel');
+      pickBtn.click();
+      const cancelled = await waitFor(() => {
+        const t = read();
+        return t.indexOf('编码探测') < 0 && t.indexOf('路径不进渲染层') >= 0 ? t : null;
+      }, 8000);
+      const cancelOk = cancelled !== null;
+
+      const writeButtons = [...panel.querySelectorAll('button')]
+        .filter((b) => /入库|写入|确认导入/.test(String(b.textContent))).length;
+      // ⑥ 截图前把 UTF-8 报告再放回来：⑤ 之后面板是空态，空态截图证明不了任何一份报告被显示过
+      setPick('utf8');
+      pickBtn.click();
+      const finalView = await waitFor(() => {
+        const t = read();
+        return t.indexOf('分章预演：3 章') >= 0 && t.indexOf('pure-url') >= 0 ? t : null;
+      }, 12000);
+      const finalOk = finalView !== null;
+      // 零写入的对照覆盖整步（含 ⑥），所以取在最后一次预演之后
+      const after = await truthTree();
+      panel.scrollIntoView({ block: 'center' });
+      // 面板内部滚到底：分章表与边界说明要和清洗报告进同一帧（面板自身有滚动上限，不撑没下面的列表）
+      panel.scrollTop = panel.scrollHeight;
+      await sleep(240);
+      return {
+        ok: opened && urlRemoved && keyRedacted && chaptersOk && volumeOk && preambleOk && notGuessed &&
+          noPath && boundaryOk && hardSplitOk && clearedOk && assumedOk && cancelOk && finalOk &&
+          writeButtons === 0 && after === before,
+        note: '折叠区展开=' + opened + '；删行规则外显=' + urlRemoved + '；密钥就地替换=' + keyRedacted +
+          '；三章列出=' + chaptersOk + '；卷标题不当章=' + volumeOk + '；楔子单独安置=' + preambleOk +
+          '；UTF-8 不标猜测=' + notGuessed + '；面板无绝对路径=' + noPath + '；边界说明=' + boundaryOk +
+          '；自定义正则改出「没切开」=' + hardSplitOk + '；清空后复原=' + clearedOk +
+          '；GBK 标「这是猜的」=' + assumedOk + '；取消回初始态=' + cancelOk +
+          '；截图前报告复位=' + finalOk +
+          '；入库按钮=' + writeButtons + '；真源目录未变=' + (after === before),
+      };
+    `,
+  },
 ];
 
 /**
@@ -3164,6 +3381,13 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
     // 两次都失败仍算失败。真正一次过的步骤 attempts=1、flaky=false，不会被误标。
     const attempts: StepAttempt[] = [];
     while (attempts.length < MAX_STEP_ATTEMPTS) {
+      // 需要夹具的步骤：每次 attempt 起一份新的（对话框桩的调用计数复位），跑完立刻还原并删文件
+      const fixture = def.fixture === "import-dialog" ? await openImportDialogFixture(win) : null;
+      if (fixture) {
+        await win.webContents.executeJavaScript(
+          `window.__yushuImportFixture = ${JSON.stringify(JSON.stringify({ dir: fixture.dir }))};`,
+        );
+      }
       try {
         const res = (await win.webContents.executeJavaScript(buildScript(def.body))) as
           | { ok?: boolean; note?: string }
@@ -3171,6 +3395,11 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
         attempts.push({ ok: Boolean(res && res.ok), detail: String(res && res.note ? res.note : "(脚本无返回)") });
       } catch (err) {
         attempts.push({ ok: false, detail: `执行失败：${err instanceof Error ? err.message : String(err)}` });
+      } finally {
+        if (fixture) {
+          await fixture.restore();
+          await win.webContents.executeJavaScript("delete window.__yushuImportFixture;").catch(() => undefined);
+        }
       }
       const last = attempts.at(-1) ?? { ok: false, detail: "(无执行记录)" };
       if (last.ok || attempts.length >= MAX_STEP_ATTEMPTS) break;
@@ -3212,7 +3441,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-54）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-55）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,
@@ -3230,6 +3459,10 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
       "步骤 12 / 16：经 __yushuDebug 暴露的编辑器调试句柄 await reload()（等价于点击已选中章节的强制重载）作为同步点；其后全部经真实 CodeMirror 事务输入与产品 IPC 断言落盘（step16 进一步断言保存后索引自动刷新，全程未点重建按钮）",
       "步骤 22：外部改动经 window.yushu.chapter.write 模拟（等价于外部工具改文件）；三方合并本身走编辑器自动保存的真实冲突管线（无人工干预）",
       "步骤 42：前置数据（带悬空引用的卡）经 window.yushu.card.write 造出——被验的对象是「点真实按钮采纳之后副驾自己长出的轻校验面板」，造数不走 UI 不影响该断言",
+      "步骤 55：原生「选文件」对话框无法自动化——只在主进程把 dialog.showOpenDialog 换成返回固定夹具路径的桩（每次 attempt 重起、跑完还原并删文件；" +
+        "选哪份由渲染层 window.__yushuPick 指定，不靠点击次序，重试不串台）。" +
+        "产品代码里没有测试分支：面板点击 → import:pick → 闸门登记 → import:preview → 引擎探测/清洗/分章 → 面板渲染全程真实执行；" +
+        "被绕过的只有『用户点击对话框』这一层，它由 test/import-ops.test.ts 用注入的假对话框覆盖",
     ],
     notes: [
       "步骤 9 的「林渊」在本预演项目中不存在（第 2 步卡名为占位「测试设定N」），故追加「测试设定」关键词证明检索链路有命中",
