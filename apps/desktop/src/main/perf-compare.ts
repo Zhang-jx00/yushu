@@ -70,3 +70,54 @@ export function comparePerfMetrics(
     regressions,
   };
 }
+
+export interface PerfGateExclusion {
+  name: string;
+  reason: string;
+}
+
+export interface PerfGateResult {
+  /** **只看绝对预算**：参与门禁的检查项全部达标 */
+  ok: boolean;
+  /** 未达预算的项名（按传入键序，排除项不计入） */
+  failedBudgets: string[];
+  /** 相对基线回退超阈的指标名——只报告，不翻红 */
+  regressions: string[];
+  /** 本轮不参与门禁的项与理由（原样带出，不静默丢弃） */
+  excluded: PerfGateExclusion[];
+}
+
+/**
+ * 把「逐项预算是否达标」与「相对基线是否回退」汇总成一个**能红的门禁结论**（R83）。
+ *
+ * 为什么要单独抽这个函数：实测撞到 `checks.cold_to_editable:false`、终端也打了 ❌，
+ * 探针却仍 `app.exit(0)`——结论算出来了但没人消费它，等于一条永远不会红的门禁。
+ * 一条不会红的断言比没有更危险：它让"这轮跑过 perf 了"听起来覆盖了性能回退。
+ *
+ * 三条刻意的口径（都有本轮实测支撑，不是为了让门禁变绿）：
+ * ① **绝对预算翻红、相对回退不翻红**：同一份构建连跑两遍，`cold_to_editable` 3160→1434ms、
+ *    `keystroke_mega_p95` 2.8→3.6ms（+28.6%）、`chapter_write_ms` 13→16ms（+23.1%）。
+ *    个位数毫秒上的相对波动没有含义，拿 20% 阈值翻退出码就是造一台假红机器；
+ *    但回退项必须原样列出，让人看得见（只是不当结论）。
+ * ② **非 `true` 一律算未达标**：`undefined` / `null` / 真值 1 都不放行——"缺一条检查"
+ *    不能冒充"这条过了"。
+ * ③ **排除项必须带理由并原样外显**：写错名字（不存在的检查项）也照样列出，不静默丢弃。
+ *    "没判的"永远不许看起来像"没问题"。
+ */
+export function summarizePerfGate(
+  checks: Record<string, boolean>,
+  comparison: { regressions: readonly { metric: string }[] },
+  options: { excluded?: readonly PerfGateExclusion[] } = {},
+): PerfGateResult {
+  const excluded: PerfGateExclusion[] = (options.excluded ?? []).map((item) => ({ ...item }));
+  const skipped = new Set(excluded.map((item) => item.name));
+  const failedBudgets = Object.entries(checks)
+    .filter(([name, passed]) => passed !== true && !skipped.has(name))
+    .map(([name]) => name);
+  return {
+    ok: failedBudgets.length === 0,
+    failedBudgets,
+    regressions: comparison.regressions.map((row) => row.metric),
+    excluded,
+  };
+}

@@ -24,6 +24,12 @@ runners: [ci-low-spec, ci-mid-spec, local-dev]
 # 回归对比（T2-10 遗留）：perf runner 自动读取夹具目录上一次报告逐项对比——
 # 变差超过 threshold_ratio 的指标标记 ⚠ 回退（rebuild_cpm 为吞吐、越高越好，方向取反；无基线跳过）
 regression: {threshold_ratio: 0.2}
+# 门禁口径（R83 补，与 apps/desktop/src/main/perf-budgets.ts + perf-compare.ts:summarizePerfGate 同步）：
+#   - **绝对预算未达标 ⇒ 探针退出码 1**（此前恒 0：❌ 打出来了、调用方仍看到"跑通了"）
+#   - 相对回退只报告不翻红：同机同构建两遍实测 cold_to_editable 3160→1434ms、
+#     keystroke_mega 2.8→3.6ms（+28.6%）、chapter_write 13→16ms（+23.1%）——个位数毫秒的波动不配当结论
+#   - 唯一排除项：夹具刚生成那一次的 cold_to_editable（冷读盘不可比），理由随报告 gate.excluded 外显
+#   - 本文件与探针内 BUDGETS 由 apps/desktop/test/perf-budget-sync.test.ts 双向对账（改一处不改另一处会红）
 
 # ---------- 实测记录（由 `pnpm --filter @yushu/desktop perf-test` 产出；数字随硬件差异显著） ----------
 measurements:
@@ -172,3 +178,23 @@ measurements:
       idle_rss_mb: 437                 # ≤600
       million_chars_rss_mb: 764        # ≤1200
     report: docs/assets/perf/perf-report-local-dev-20261007-r36-rag.json
+  - date: 2026-10-14
+    runner: local-dev          # 第 83 轮：性能门禁首次进退出码 + 新增首屏两项指标（module_exec / fcp）
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,108,163 字 + 100k 大章靶子（夹具已就位，reused=true）
+    result: pass_10_of_10      # 门禁 ok=true；报告里另列 1 项相对回退（keystroke_mega_p95）只报不翻红——同机两遍可差 2 倍
+    metrics:
+      cold_to_editable_ms: 1445        # ≤2000（**热盘口径**；同构建冷盘首跑实测 3160，故该次不参与门禁）
+      module_exec_ms: 136              # 新增、暂不设预算：首屏脚本解析+执行（占 cold_to_editable 的 ≈9.4% ⇒ 拆包收益上限就这么点）
+      fcp_ms: 200                      # 新增、暂不设预算：首次内容绘制（渲染层导航起点为 0）
+      hot_to_editable_ms: 560          # ≤800
+      project_open_ms: 191             # ≤3000
+      keystroke_p95_ms: 1.2            # ≤16
+      keystroke_mega_p95_ms: 3.6       # ≤16
+      save_to_indexed_ms: 433          # ≤500
+      query_p95_ms: 12.4               # ≤80
+      rebuild_cpm: 34847425            # ≥20000
+      idle_rss_mb: 442                 # ≤600
+      million_chars_rss_mb: 742        # ≤1200
+    report: docs/assets/perf/perf-report-local-dev-20261014-r83-perf-gate.json
+    # 对照 R36 同夹具同机（1,885ms）：本轮热盘 1,445ms ⇒ 冷启动没有回退。
+    # "包体长到 1.5 MB 所以启动变慢"这个开场假设被实测否证，拆包这件事据此取消。

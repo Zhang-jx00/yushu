@@ -4,7 +4,9 @@ import { cpus, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
 import { app, type BrowserWindow } from "electron";
 import { attachProject } from "./ipc.js";
-import { comparePerfMetrics } from "./perf-compare.js";
+import { comparePerfMetrics, summarizePerfGate } from "./perf-compare.js";
+import { summarizeRendererBoot, type RendererTimingRaw } from "./perf-boot.js";
+import { BUDGETS } from "./perf-budgets.js";
 import { ensureSynthFixture } from "./perf-fixture.js";
 
 /**
@@ -12,6 +14,10 @@ import { ensureSynthFixture } from "./perf-fixture.js";
  * 在真实 Electron 里对 synth-1m 百万字夹具跑一遍性能预算指标（perf-budget.yaml），
  * 输出 PERF_RESULT JSON（终端 + 夹具目录 `.yushu/perf-report.json`）；
  * 报告内含与「上一次同夹具报告」的逐项回归对比（T2-10 遗留：diff 防退化，超阈值标记 ⚠）。
+ *
+ * **退出码即门禁（R83 补）**：预算全部达标且无超阈回退 ⇒ 0；否则 1 并在终端点名
+ * `未达预算=[…] 超阈回退=[…]`。此前这里恒 `exit(0)`——`checks` 算得出 false、❌ 也打得出来，
+ * 但调用方拿到的仍是"跑通了"，等于一条不会红的门禁（同族教训见 docs/06 §八 第 59、81 轮）。
  *
  * 口径（首版基线，如实标注）：
  * - cold_to_editable_ms：探针进程入口（模块加载时间戳）→ 编辑器可输入（首章挂载完成）；
@@ -33,20 +39,28 @@ export interface PerfProbeDeps {
   createWindow: () => BrowserWindow;
 }
 
-/** 门禁值（与仓库根 perf-budget.yaml 保持一致；T2-10 基线；大章按键门禁为 T2-4 切片 B 纳入） */
-const BUDGETS = {
-  cold_to_editable_ms: 2000,
-  hot_to_editable_ms: 800,
-  project_open_ms: 3000,
-  keystroke_p95_ms: 16,
-  keystroke_mega_p95_ms: 16,
-  save_to_indexed_ms: 500,
-  query_p95_ms: 80,
-  rebuild_cpm_min: 20000,
-  idle_rss_mb: 600,
-  million_chars_rss_mb: 1200,
-} as const;
+/**
+ * 渲染层首屏计时（R83）：在页面里读 Performance API 的 navigation / paint 条目。
+ * 口径起点是**渲染进程自己的导航起点**（不是探针进程入口），所以它和 cold_to_editable_ms
+ * 不能相加、也不能互相替换——两条轴各自独立看。
+ */
+const BOOT_TIMING_SCRIPT = `(() => {
+  const nav = performance.getEntriesByType('navigation')[0];
+  const paints = performance.getEntriesByType('paint');
+  const findPaint = (name) => {
+    const hit = paints.find((entry) => entry.name === name);
+    return hit ? hit.startTime : null;
+  };
+  return {
+    hasNavigation: Boolean(nav),
+    responseEnd: nav ? nav.responseEnd : 0,
+    domContentLoadedStart: nav ? nav.domContentLoadedEventStart : 0,
+    firstPaint: findPaint('first-paint'),
+    firstContentfulPaint: findPaint('first-contentful-paint')
+  };
+})()`;
 
+/** 门禁值：住在 `perf-budgets.ts`（R83 搬出，配 perf-budget-sync.test.ts 与 perf-budget.yaml 双向对账） */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -158,6 +172,20 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
   await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
   await win.webContents.executeJavaScript("window.__yushuDebug = true;");
   await waitForJs(win, "document.querySelectorAll('.tab').length > 0", 30_000);
+  // R83：首屏的"脚本执行"与"首次内容绘制"单独取出来——这是判断"要不要按标签页拆包"的依据，
+  // 必须在**点进编辑器之前**读（否则量到的是切页后的重绘，不是首屏）。
+  const bootRaw = (await win.webContents
+    .executeJavaScript(BOOT_TIMING_SCRIPT)
+    .catch(() => null)) as RendererTimingRaw | null;
+  const boot = summarizeRendererBoot(
+    bootRaw ?? {
+      hasNavigation: false,
+      responseEnd: 0,
+      domContentLoadedStart: 0,
+      firstPaint: null,
+      firstContentfulPaint: null,
+    },
+  );
   await clickTab(win, "编辑器");
   await waitForJs(win, "window.__yushuCmView && window.__yushuCmView.state.doc.length > 0", 30_000);
   const coldToEditableMs = Date.now() - PERF_PROCESS_T0;
@@ -232,6 +260,11 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
   // ⑦ 结果组装（对照预算）
   const metrics = {
     cold_to_editable_ms: coldToEditableMs,
+    // R83 新增（**先记录、暂不进门禁**）：首屏脚本执行与首次内容绘制。
+    // 本轮就是要用这两个数回答"1.5 MB 单包要不要拆"，所以它们进报告、进台账；
+    // 预算值等这两个数在多台机器上有几个样本之后再定——现在就定，等于拿一次实测当契约。
+    module_exec_ms: boot.module_exec_ms,
+    fcp_ms: boot.fcp_ms,
     hot_to_editable_ms: hotToEditableMs,
     project_open_ms: projectOpenMs,
     // 门禁口径 = 输入处理延迟（sync，不含 vsync 帧调度；60Hz 下 frame 口径本底即 ~16.7ms）
@@ -272,6 +305,15 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
     /* 首次运行：无基线 */
   }
   const comparison = comparePerfMetrics(previousReport, { metrics });
+  // R83：门禁结论必须在**这一处**被消费掉——此前 checks 算出来了、❌ 也打了，探针仍 exit(0)，
+  // 于是"这轮跑过 perf 了"这句话并不保证性能没回退。现在绝对预算未达标 ⇒ 退出码 1。
+  // 唯一排除项：夹具本轮刚生成时（冷盘首跑）的 cold_to_editable——同一份构建两遍实测
+  // 3160ms（刚生成）vs 1434ms（已就位），冷读盘让这一项不可比；理由随报告外显，不静默跳过。
+  const gate = summarizePerfGate(checks, comparison, {
+    excluded: fixture.reused
+      ? []
+      : [{ name: "cold_to_editable", reason: "夹具本轮刚生成（冷盘首跑），该指标与就位后的运行不可比" }],
+  });
   const report = {
     kind: "yushu-perf-probe/v1",
     date: new Date().toISOString(),
@@ -295,6 +337,10 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
     metrics,
     budgets: BUDGETS,
     checks,
+    // R83：首屏两项"只记录不门禁"，取不到时的原因必须随报告一起留档
+    boot_notes: boot.notes,
+    // R83：门禁结论随报告一起留档（退出码是它的搬运，留档里没有结论就等于"当时红过但没人知道"）
+    gate,
     // T2-10 遗留：与「上一次同夹具报告」逐项对比（>阈值标记回退；无基线如实标注）
     comparison,
     indexFiles: index.files,
@@ -308,6 +354,10 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
   console.log(`PERF_RESULT ${JSON.stringify(report)}`);
   console.log(`[perf] 报告已写入：${reportPath}`);
   console.log(`[perf] 达标情况：${Object.entries(checks).map(([k, v]) => `${k}=${v ? "✅" : "❌"}`).join("  ")}`);
+  console.log(
+    `[perf] 首屏（只记录，暂不进门禁）：module_exec=${String(boot.module_exec_ms ?? "未测")}ms ` +
+      `fcp=${String(boot.fcp_ms ?? "未测")}ms${boot.notes.length > 0 ? `（${boot.notes.join("；")}）` : ""}`,
+  );
   if (comparison.baselineDate) {
     const summary = comparison.rows
       .map(
@@ -327,5 +377,21 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
   } else {
     console.log("[perf] 回归对比：无基线报告（首次运行），跳过");
   }
-  app.exit(0);
+  // 退出码 = 绝对预算结论（R83）。此前恒为 0：预算超了、回退标了，调用方（脚本 / 将来的 CI /
+  // 每轮四连的记账）看到的仍是"跑通了"。
+  for (const item of gate.excluded) {
+    console.log(`[perf] 本轮不参与门禁：${item.name} —— ${item.reason}`);
+  }
+  if (gate.regressions.length > 0) {
+    console.log(
+      `[perf] ⚠ 相对基线回退（不翻退出码：同机两遍可差 2 倍，见 perf-compare.ts 口径）：${gate.regressions.join(", ")}`,
+    );
+  }
+  if (gate.ok) {
+    console.log("[perf] 门禁：✅ 参与门禁的绝对预算全部达标 ⇒ 退出码 0");
+    app.exit(0);
+    return;
+  }
+  console.log(`[perf] 门禁：❌ 未达预算=[${gate.failedBudgets.join(", ")}] ⇒ 退出码 1`);
+  app.exit(1);
 }
