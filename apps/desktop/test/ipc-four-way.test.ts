@@ -148,4 +148,11 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(typed.has("import.pick")).toBe(true);
     expect(typed.has("import.preview")).toBe(true);
   });
+
+  it("入库通道在四处齐备（R79 新增：这条是真源写，与上面两条只读的不是一类）", () => {
+    expect(channels.get("importApply")).toBe("import:apply");
+    expect(registered).toContain("importApply");
+    expect(literals.invoke.has("import:apply")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("import.apply")).toBe(true);
+  });
 });

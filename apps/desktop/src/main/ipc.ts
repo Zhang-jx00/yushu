@@ -63,6 +63,8 @@ import {
   type IndexRebuildResultPayload,
   type IndexSearchResultPayload,
   type IndexStatusPayload,
+  type ImportApplyPayload,
+  type ImportApplyResultPayload,
   type ImportPickPayload,
   type ImportPreviewPayload,
   type ImportPreviewRequestPayload,
@@ -142,7 +144,7 @@ import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
-import { pickImportSource, previewImport } from "./import-ops.js";
+import { applyImport, pickImportSource, previewImport } from "./import-ops.js";
 import type { ProposalFile } from "@yushu/world-engine";
 
 /** 提案文件 → IPC 载荷：未决策条数在这里算，面板只负责显示（不在渲染层长出第二套判断） */
@@ -606,11 +608,23 @@ export function registerIpcHandlers(): void {
   );
 
   // 预演：凭票读字节算编码 / 清洗 / 分章三份报告，**零写入** ⇒ 只读 wrap
-  // （`ipc-write-wrappers.test.ts` 的 NON_WRITE 清单点名了这两条；建卷建章的 import:apply 在 R78，那时必须换清单）
+  // （`ipc-write-wrappers.test.ts` 的 NON_WRITE 清单点名了这两条；会写盘的是下面这条 import:apply）
   ipcMain.handle(CHANNELS.importPreview, (_event, payload: ImportPreviewRequestPayload) =>
     wrap<ImportPreviewPayload>(() =>
-      previewImport(payload.ticket, payload.rules ? { rules: payload.rules } : {}),
+      previewImport(
+        payload.ticket,
+        payload.rules ? { rules: payload.rules, gateway: requireGateway() } : { gateway: requireGateway() },
+      ),
     ),
+  );
+
+  /**
+   * 入库（R79）：建一卷 + 建章纲 + 写章节草稿，**真源写** ⇒ 必须走 wrapWrite（索引刷新与一致性置脏都挂在它上面）。
+   * 载荷里没有正文：主进程凭同一张票重新算一遍，所以"渲染层改改正文再提交"在数据结构上就不成立；
+   * 失败时票据不作废（作者可原地重试），成功即作废（同一部稿子不能被导两遍）。
+   */
+  ipcMain.handle(CHANNELS.importApply, (_event, payload: ImportApplyPayload) =>
+    wrapWrite<ImportApplyResultPayload>(() => applyImport(requireGateway(), payload)),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

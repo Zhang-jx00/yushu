@@ -77,6 +77,8 @@ export const CHANNELS = {
   importPick: "import:pick",
   /** 存量导入·预演（M5/T5-7，R77）：**只读**——凭票读字节算编码/清洗/分章报告，零写入 */
   importPreview: "import:preview",
+  /** 存量导入·入库（M5/T5-7，R79）：**真源写操作**，走 wrapWrite；建卷 + 建章纲 + 写草稿 + 逐章对账 */
+  importApply: "import:apply",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -2288,6 +2290,12 @@ export interface ImportChapterPreviewPayload {
 export interface ImportPreviewPayload {
   name: string;
   bytes: number;
+  /**
+   * 预演时 `outline/outline.yaml` 的 hash（项目还没有大纲时为 null）。
+   * 入库要把它带回去做并发检测——作者看报告这几秒里别人改了大纲，就不能覆盖。
+   * 由主进程读：渲染层不该自己持有真源路径字符串。
+   */
+  outlineHash: string | null;
   encoding: ImportEncodingPayload;
   clean: ImportCleanPayload;
   rules: ImportRulePayload[];
@@ -2308,4 +2316,51 @@ export interface ImportPreviewPayload {
 export interface ImportPreviewRequestPayload {
   ticket: string;
   rules?: { id: string; pattern: string }[];
+}
+
+/**
+ * 入库请求（R79）。**载荷里没有正文**：入库方凭同一张票重新读出、重新清洗、重新分章，
+ * 所以"渲染层改一下正文再提交"这种篡改在数据结构上就不成立；
+ * `rules` 必须与预演时同一套，否则对账比的是两个不同算法的结果。
+ */
+export interface ImportApplyPayload {
+  ticket: string;
+  rules?: { id: string; pattern: string }[];
+  /** 卷名，默认「导入·<文件名>」 */
+  volumeTitle?: string;
+  /** 归属的幕（总纲 acts 的 name）；不传用第一幕；传了又不认识 ⇒ 报错并列出可选 */
+  act?: string;
+  /** 没切开（整篇作一章）时的显式确认 */
+  confirmSingleChapter?: boolean;
+  /** 确认时读到的 outline.yaml hash；不一致即拒（不覆盖别人的改动） */
+  baseHash?: string;
+}
+
+/** 一章的入库结果：预演字数与落盘字数并排放，对不上就是 `reconciled: false` */
+export interface ImportAppliedChapterPayload {
+  outlineId: string;
+  chapterId: string;
+  path: string;
+  title: string;
+  expectedChars: number;
+  writtenWords: number;
+  reconciled: boolean;
+}
+
+export interface ImportApplyResultPayload {
+  volumeId: string;
+  volumeTitle: string;
+  act: string;
+  outlinePath: string;
+  outlineHash: string;
+  /** 入库前的破坏前快照 id（撤销窗口；拿不到快照时根本走不到写入那一步） */
+  snapshotId: string | null;
+  created: ImportAppliedChapterPayload[];
+  /** 对账不上的章（含两边字数），空数组才算全部对上 */
+  mismatched: string[];
+  /** 首章之前的内容：**不入库**，只把字数与摘录交还给作者决定挪去哪儿 */
+  preamble: { chars: number; excerpt: string } | null;
+  totalExpectedChars: number;
+  totalWrittenWords: number;
+  note: string;
 }

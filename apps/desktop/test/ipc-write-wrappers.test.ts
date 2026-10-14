@@ -39,6 +39,9 @@ const WRITE_CHANNELS = [
   "memoryDeleteFact",
   "extractAdopt",
   "proposalApply",
+  // R79 存量导入·入库：建卷 + 建章纲 + 写章节草稿，全是真源写 ⇒ 必须与上面同一类
+  // （R78 那条注记说的"import:apply 落地时必须换进写清单"，换的就是这一行）
+  "importApply",
 ] as const;
 
 /** 写盘但不写真源（派生物 / 索引器排除文件 / .git 内部）——走只读包装器是有意的 */

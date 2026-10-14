@@ -5,6 +5,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { countWords } from "@yushu/core";
 import { ImportGate } from "../src/main/import-gate.js";
 import { DEFAULT_IMPORT_CLEAN_RULES, pickImportSource, previewImport } from "../src/main/import-ops.js";
+import { ProjectGateway } from "../src/main/file-gateway.js";
+
+/** 一份最小可用的大纲（只为造出"项目已有大纲"这个前提，断言里不比它的内容） */
+const OUTLINE_TEXT = [
+  "apiVersion: yushu.outline/v1",
+  "format_version: 1",
+  "id: outline-main",
+  "master:",
+  "  title: 测试书",
+  "  logline: ''",
+  "  theme: ''",
+  "  notes: ''",
+  "  acts:",
+  "    - {name: 起, desc: ''}",
+  "volumes: []",
+  "",
+].join("\n");
 
 /**
  * 存量导入的桌面侧第二段（M5 / T5-7，R77）：**挑一个文件 → 看一眼预演报告**，全程零写入。
@@ -257,5 +274,44 @@ describe("载荷体量与零写入", () => {
     const a = await previewImport(picked!.ticket, { gate });
     const b = await previewImport(picked!.ticket, { gate });
     expect(b).toEqual(a);
+  });
+});
+
+describe("预演顺带回报大纲 hash（入库要拿它对并发），但读大纲不等于写大纲", () => {
+  it("项目已有大纲 ⇒ 回报它的 hash，供确认入库时带回做并发检测", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "yushu-import-proj-"));
+    try {
+      const gw = new ProjectGateway(projectDir);
+      const written = await gw.writeDoc("outline/outline.yaml", OUTLINE_TEXT);
+      const file = await write("o.txt", "第一章 起\n夜色压下来。\n");
+      const picked = await pickImportSource(dialogReturning([file]), gate);
+      const view = await previewImport(picked!.ticket, { gate, gateway: gw });
+      expect(view.outlineHash).toBe(written.hash);
+      // 读一遍大纲不产生任何新文件（预演仍零写入）
+      expect(await listAll(projectDir)).toEqual(["/outline/", "/outline/outline.yaml"]);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("项目还没有大纲 ⇒ outlineHash 为 null，不编一个假 hash 交回去", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "yushu-import-proj-"));
+    try {
+      const gw = new ProjectGateway(projectDir);
+      const file = await write("n2.txt", "第一章 起\n夜色压下来。\n");
+      const picked = await pickImportSource(dialogReturning([file]), gate);
+      const view = await previewImport(picked!.ticket, { gate, gateway: gw });
+      expect(view.outlineHash).toBeNull();
+      expect(await listAll(projectDir)).toEqual([]);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("不传 gateway（纯算报告的调用点）⇒ outlineHash 为 null 且不报错", async () => {
+    const file = await write("g2.txt", "第一章 起\n夜色压下来。\n");
+    const picked = await pickImportSource(dialogReturning([file]), gate);
+    const view = await previewImport(picked!.ticket, { gate });
+    expect(view.outlineHash).toBeNull();
   });
 });

@@ -31,6 +31,8 @@ import type {
   ImportPickPayload,
   ImportPreviewPayload,
   ImportPreviewRequestPayload,
+  ImportApplyPayload,
+  ImportApplyResultPayload,
   ProposalPayload,
   AiCostPayload,
   AiStartResult,
@@ -210,12 +212,14 @@ export interface YushuApi {
     board: (payload?: SatisfactionBoardRequestPayload) => Promise<SatisfactionBoardPayload>;
   };
   /**
-   * 存量导入（M5/T5-7，R77）：`pick` 弹原生对话框并只回票据，`preview` 凭票算三份报告。
-   * 两个方法都不会写盘——渲染层自始至终拿不到、也不用传文件路径（入库在 R78）。
+   * 存量导入（M5/T5-7，R77–R79）：`pick` 弹原生对话框并只回票据，`preview` 凭票算三份报告（只读），
+   * `apply` 凭同一张票建卷建章（**真源写**，带破坏前快照与逐章字数对账）。
+   * 三个方法都不接受路径参数，`apply` 也不接受正文——渲染层改不了要写什么。
    */
   import: {
     pick: () => Promise<ImportPickPayload | null>;
     preview: (payload: ImportPreviewRequestPayload) => Promise<ImportPreviewPayload>;
+    apply: (payload: ImportApplyPayload) => Promise<ImportApplyResultPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;
