@@ -4,9 +4,15 @@ import {
   checkStructureFromSources,
   parseConsistencyAllowList,
   CONSISTENCY_ALLOW_PATH,
+  computeRuleNoise,
+  noiseRowsFromEntries,
+  parseRuleThresholds,
+  CONSISTENCY_THRESHOLDS_PATH,
+  DEFAULT_MIN_SAMPLES,
   type ConsistencyAllowList,
   type ConsistencyEntry,
   type IndexEntityRow,
+  type RuleThresholds,
   type SuppressedEntry,
 } from "@yushu/world-engine";
 import { mentionedEntityIds } from "@yushu/memory";
@@ -179,6 +185,22 @@ async function computeReport(
     }
   }
 
+  // 阈值配置（R84 / T4-11）：**可选文件**，不存在 = 不判（只给率、不下结论）。
+  // 与豁免清单同一条 fail-safe：读不了就**不判**并把原因摊开——静默按默认走，
+  // 等于让护栏以为"作者配的阈值生效了"，那比没配更糟。
+  let thresholds: RuleThresholds = {};
+  let thresholdsExists = false;
+  let thresholdsError: string | null = null;
+  const thresholdsSnap = await gateway.readDoc(CONSISTENCY_THRESHOLDS_PATH).catch(() => null);
+  if (thresholdsSnap) {
+    thresholdsExists = true;
+    try {
+      thresholds = parseRuleThresholds(thresholdsSnap.content);
+    } catch (err) {
+      thresholdsError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   // 只为"确实要跳过去"的文件读原文，别为一张空项目读遍全库
   const cardTexts: Record<string, string> = {};
   const filePathById = new Map(structure.entities.map((entity) => [entity.id, entity.filePath]));
@@ -238,6 +260,17 @@ async function computeReport(
       suppressed: report.suppressed.length,
       filteredOut,
     },
+    // 豁免率的口径：用**本次真正呈现给作者的那些条目**（含范围过滤后的 entries）配 suppressed。
+    // 轻校验（post-generate）带范围时样本天然偏少，此时 verdict 多半落在 insufficient-sample——
+    // 那是诚实的结果，不是 bug。
+    thresholds: {
+      path: CONSISTENCY_THRESHOLDS_PATH,
+      exists: thresholdsExists,
+      error: thresholdsError,
+      rate: thresholds.suppression_rate ?? null,
+      minSamples: thresholds.min_samples ?? DEFAULT_MIN_SAMPLES,
+    },
+    noise: computeRuleNoise(noiseRowsFromEntries(entries, report.suppressed), thresholds),
   };
 }
 

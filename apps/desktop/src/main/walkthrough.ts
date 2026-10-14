@@ -2209,7 +2209,7 @@ const STEPS: StepDef[] = [
   },
   {
     step: 41,
-    title: "规则页：一致性体检三态（全书体检 / 缓存复用 / 坏豁免清单不静默放行）（M4/T4-4，R54）",
+    title: "规则页：一致性体检三态 + 规则豁免率视图（坏清单不静默放行 / 没判的不显示成没问题）（M4/T4-4、T4-11，R54·R84）",
     file: "step41-consistency.png",
     body: String.raw`
       await tab('规则');
@@ -2218,10 +2218,13 @@ const STEPS: StepDef[] = [
       const manualBtn = document.querySelector('.consistency-manual');
       if (!manualBtn) return { ok: false, note: '找不到「全书体检」按钮：' + pageText() };
       // 造一条悬空引用：不这么做，"每条发现能跳回原文"这条验收就永远是空跑（结论 0 也算通过）
-      await window.yushu.card.write({
-        card: { type: 'character', name: '体检目标', layer: 'characters', refs: [{ relation: '师从', target: 'fac-ghost-step41' }] },
-        body: '为一致性体检造的卡。',
-      });
+      // 带固定 id 是为了后面能按 subject 把它豁免掉（豁免率那一段要用）；try/catch 让有界重试不撞已存在的卡
+      try {
+        await window.yushu.card.write({
+          card: { id: 'char-cons-step41', type: 'character', name: '体检目标', layer: 'characters', refs: [{ relation: '师从', target: 'fac-ghost-step41' }] },
+          body: '为一致性体检造的卡。',
+        });
+      } catch (e) { /* 重试时已存在就用现成的 */ }
       manualBtn.click();
       const summaryLine = await waitFor(() => {
         const el = document.querySelector('.consistency-summary');
@@ -2275,19 +2278,63 @@ const STEPS: StepDef[] = [
         const text = el ? String(el.textContent).replace(/\s+/g, ' ') : '';
         return text.includes('时机 manual') && text.includes('已重算') && !document.querySelector('.consistency-allow-error') ? text : null;
       }, 20000);
+      // —— 规则豁免率（T4-11 / R84）：面板必须把「判了」与「没判」分开显示 ——
+      const noiseHead = await waitFor(() => {
+        const el = document.querySelector('.consistency-noise-head');
+        const text = el ? String(el.textContent).replace(/\s+/g, ' ') : '';
+        return text.includes('规则豁免率') ? text : null;
+      }, 5000);
+      const neutralRow = [...document.querySelectorAll('.consistency-noise-table tbody tr')]
+        .find((tr) => String(tr.querySelector('code')?.textContent).includes('ref-dangling'));
+      // 没配阈值时这一格必须是"不判"字样，不许留空、也不许显示成"没问题"
+      const neutralText = neutralRow ? String(neutralRow.textContent).replace(/\s+/g, ' ') : '(无该行)';
+      const showsNotJudged = neutralText.includes('不判');
+      // 配上阈值并把这条豁免掉 ⇒ 同一规则应翻成「偏吵」（报了却被作者全数打折）
+      // 写盘一律"先读再写"：产品侧对已存在的文件拒绝无 baseHash 的盲写（E_DOC_CONFLICT），
+      // 而有界重试的第二遍里这些文件已经存在了——这是脚本的前置状态没归零，不是产品问题
+      const writeDocSafe = async (path, text) => {
+        const cur = await window.yushu.doc.read(path).catch(() => null);
+        return cur === null
+          ? window.yushu.doc.write(path, text)
+          : window.yushu.doc.write(path, text, cur.hash);
+      };
+      await writeDocSafe('config/consistency-thresholds.yaml',
+        'apiVersion: yushu.consistency-thresholds/v1\nsuppression_rate: 0.1\nmin_samples: 1\n');
+      await writeDocSafe('config/consistency.yaml',
+        'apiVersion: yushu.consistency-allow/v1\nentries:\n  - rule: ref-dangling\n    subject: char-cons-step41\n    related: fac-ghost-step41\n    reason: 第二部再揭晓\n');
+      document.querySelector('.consistency-manual').click();
+      const noisyRow = await waitFor(() => {
+        const hit = [...document.querySelectorAll('.consistency-noise-table tbody tr')]
+          .find((tr) => String(tr.querySelector('code')?.textContent).includes('ref-dangling'));
+        return hit && hit.className.includes('noisy') ? String(hit.textContent).replace(/\s+/g, ' ') : null;
+      }, 20000);
+      // 复原成中性状态（空豁免 + 只写 apiVersion 的阈值文件），别把判定状态漏给后续步骤
+      await writeDocSafe('config/consistency.yaml',
+        'apiVersion: yushu.consistency-allow/v1\nentries: []\n');
+      await writeDocSafe('config/consistency-thresholds.yaml',
+        'apiVersion: yushu.consistency-thresholds/v1\n');
+      document.querySelector('.consistency-manual').click();
+      const backToNeutral = await waitFor(() => {
+        const el = document.querySelector('.consistency-noise-head');
+        const text = el ? String(el.textContent).replace(/\s+/g, ' ') : '';
+        return text.includes('未配置') ? text : null;
+      }, 20000);
       // 截图取证：把体检结论表滚进视口（规则页很长，不滚只拍到页首的规则目录）
       const consPanel = document.querySelector('.consistency-summary');
       if (consPanel) consPanel.scrollIntoView({ block: 'start' });
       await sleep(150);
       return {
         ok: summaryLine !== null && cachedLine !== null && allowErrorLine !== null && restoredLine !== null &&
-          countedOk && afterBroken === before && countsParsed && jumped === true && backAgain,
+          countedOk && afterBroken === before && countsParsed && jumped === true && backAgain &&
+          noiseHead !== null && showsNotJudged && noisyRow !== null && backToNeutral !== null,
         note: '汇总="' + summaryLine.slice(0, 120) + '"；表行=' + rows + '；空态=' + clean +
           '；跳转生效=' + (jumped === true) + '；跳回规则页=' + backAgain +
           '；结论=' + findings + '；豁免=' + suppressedCount + '；未纳入范围=' + outOfScopeCount +
           '；跳转按钮=' + spanButtons + '；缓存复用=' + (cachedLine !== null) +
           '；坏清单报错="' + (allowErrorLine || '').slice(0, 70) + '"；坏清单后结论=' + afterBroken +
-          '；复原=' + (restoredLine !== null),
+          '；复原=' + (restoredLine !== null) +
+          '；豁免率表=' + (noiseHead !== null) + '；未配阈值显示="' + neutralText.slice(0, 60) +
+          '"；配阈值+豁免后="' + (noisyRow || '').slice(0, 70) + '"；复原中性=' + (backToNeutral !== null),
       };
     `,
   },

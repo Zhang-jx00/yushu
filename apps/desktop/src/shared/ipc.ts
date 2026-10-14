@@ -1041,6 +1041,36 @@ export interface ConsistencyReportPayload {
     errors: string[];
   };
   counted: { findings: number; entries: number; suppressed: number; filteredOut: number };
+  /**
+   * 阈值配置的实际状态（R84 / T4-11「误报率纳入可校准阈值」）。
+   *
+   * `exists=false` 与 `error≠null` 是两种不同的"没在判"，都必须看得见：
+   * 前者是作者还没配（给默认），后者是**配了但读不懂**（不判，且把原因摊开）——
+   * 静默按默认走会让护栏以为"阈值生效了"。
+   */
+  thresholds: {
+    path: string;
+    exists: boolean;
+    error: string | null;
+    /** 实际生效的豁免率上限；null = 未配置（只给数据不下结论） */
+    rate: number | null;
+    /** 实际生效的最小样本数 */
+    minSamples: number;
+  };
+  /**
+   * 逐条规则的**豁免率**（= 被豁免条数 / 本次该规则条数）。
+   *
+   * 名字要诚实：这不是误报率。产品拿得到的是"作者豁免了哪些结论"（A6 审计入口），
+   * 而豁免既可能是"报错了"也可能是"确有问题但选择留白"。等真有标注语料再谈误报率。
+   */
+  noise: Array<{
+    rule: string;
+    reported: number;
+    suppressed: number;
+    /** 分母为 0 时为 null（不编造 0%） */
+    rate: number | null;
+    verdict: "noisy" | "ok" | "insufficient-sample" | "not-configured";
+  }>;
 }
 
 /* ---------- 中文自查（T3-13，J14；结构与 @yushu/text 同形——本文件保持零依赖，故用结构类型镜像） ---------- */

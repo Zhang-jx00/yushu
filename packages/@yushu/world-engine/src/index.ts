@@ -19,3 +19,4 @@ export * from "./timeline.js";
 export * from "./relation-graph.js";
 export * from "./chronicle.js";
 export * from "./satisfaction.js";
+export * from "./rule-stats.js";

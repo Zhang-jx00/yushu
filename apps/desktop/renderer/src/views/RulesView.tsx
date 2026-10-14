@@ -434,6 +434,65 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
                 用不上的豁免（可能已失效，建议清理）：{consistency.unusedAllow.join("、")}
               </p>
             )}
+            {/* 规则豁免率（T4-11 / R84）：阈值可配，但**没判的一律显式标出来**，
+                不许因为"没配阈值 / 样本不够"就在表里显示成"没问题" */}
+            <div className="consistency-noise">
+              <p className="muted consistency-noise-head">
+                规则豁免率（= 被豁免条数 ÷ 本次该规则条数）· 阈值{" "}
+                {consistency.thresholds.rate === null
+                  ? "未配置（只给率，不下结论）"
+                  : `≤ ${(consistency.thresholds.rate * 100).toFixed(0)}%`}{" "}
+                · 最小样本 {consistency.thresholds.minSamples}
+              </p>
+              {consistency.thresholds.error !== null && (
+                <p className="error-text consistency-noise-error">
+                  阈值文件读不了，本次「不判噪音」（不静默按默认走）：{consistency.thresholds.error}
+                </p>
+              )}
+              <p className="muted consistency-noise-note">
+                豁免率<strong>不等于</strong>误报率：作者豁免一条结论，可能是报错了，
+                也可能是确有问题但选择留白。要的是"哪条规则总在被打折"这个信号，不是准确率。
+              </p>
+              {consistency.noise.length === 0 ? (
+                <p className="muted consistency-noise-empty">
+                  本次没有任何规则报出或被豁免（<strong>空表不代表规则健康</strong>）。
+                </p>
+              ) : (
+                <table className="slot-table consistency-noise-table">
+                  <thead>
+                    <tr>
+                      <th>规则</th>
+                      <th>报出</th>
+                      <th>被豁免</th>
+                      <th>豁免率</th>
+                      <th>判定</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {consistency.noise.map((row) => (
+                      <tr key={`noise-${row.rule}`} className={`noise-${row.verdict}`}>
+                        <td>
+                          <code>{row.rule}</code>
+                        </td>
+                        <td>{row.reported}</td>
+                        <td>{row.suppressed}</td>
+                        <td>{row.rate === null ? "—" : `${(row.rate * 100).toFixed(0)}%`}</td>
+                        <td>
+                          {
+                            {
+                              noisy: "偏吵：值得收紧判定或改规则",
+                              ok: "可接受",
+                              "insufficient-sample": "样本不足，不判",
+                              "not-configured": "未配阈值，不判",
+                            }[row.verdict]
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </>
         )}
       </section>

@@ -2349,6 +2349,34 @@ section.panel,
   animation: yushu-settle var(--motion-base) var(--ease-enter) both;
 }
 
+/* 规则豁免率（T4-11 / R84）：只有真判成「偏吵」的那几行才上底色。
+   「未配阈值」「样本不足」保持中性——用颜色暗示"没问题"是最坏的一种谎。 */
+.consistency-noise {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.consistency-noise-head,
+.consistency-noise-note,
+.consistency-noise-empty {
+  font-size: 12.5px;
+  margin: 0 0 4px;
+}
+
+.consistency-noise-note strong,
+.consistency-noise-empty strong {
+  color: var(--ink);
+}
+
+.consistency-noise-table td {
+  font-size: 12.5px;
+}
+
+.consistency-noise-table tr.noisy td {
+  background: var(--bad-tint-bg);
+}
+
 /* 表格行只换底色、不动尺寸：行高抖动比没有反馈更难受 */
 .slot-table tbody tr {
   transition: background var(--motion-quick) linear;
