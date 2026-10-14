@@ -95,7 +95,7 @@ export function LibraryView({ onOpen }: { onOpen: (path: string) => void }) {
       <div className="library-hint muted">
         全库视图（虚拟滚动）：当前渲染 {visible.length} / {filtered.length} 行；「打开」进入编辑器（未建草稿的章节请先在「三级大纲」创建草稿章节）
       </div>
-      <Disclosure className="library-import" label="导入存量稿件（只预演 · 编码 / 清洗 / 分章三份报告）">
+      <Disclosure className="library-import" label="导入存量稿件（先出三份报告，确认后才建卷建章）">
         <ImportPanel />
       </Disclosure>
       <div

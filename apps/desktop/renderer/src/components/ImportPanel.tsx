@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import type { ImportPickPayload, ImportPreviewPayload } from "../../../src/shared/ipc";
+import type {
+  ImportApplyResultPayload,
+  ImportPickPayload,
+  ImportPreviewPayload,
+} from "../../../src/shared/ipc";
 import { api } from "../api";
 
 /**
@@ -29,6 +33,10 @@ export function ImportPanel() {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [volumeTitle, setVolumeTitle] = useState("");
+  const [confirmSingle, setConfirmSingle] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [result, setResult] = useState<ImportApplyResultPayload | null>(null);
 
   useEffect(() => {
     if (picked === null) return;
@@ -57,17 +65,51 @@ export function ImportPanel() {
   const choose = async () => {
     try {
       setError("");
-      const result = await api().import.pick();
-      if (result === null) {
+      const got = await api().import.pick();
+      if (got === null) {
+        // 取消：清掉上一次的条件与报告（票据已作废，留着报告会让人以为还能入库）
         setPicked(null);
         setView(null);
+        setConfirmSingle(false);
         return;
       }
-      setPicked(result);
+      setConfirmSingle(false);
+      setResult(null);
+      setPicked(got);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   };
+
+  /**
+   * 入库：载荷里**没有正文**，只有票据与"用哪几条规则"——主进程凭同一张票重新算一遍，
+   * 所以界面这边改不了要写进去的内容。baseHash 取自预演回报，挡"看报告这几秒有人改了大纲"。
+   */
+  const apply = async () => {
+    if (picked === null || view === null) return;
+    try {
+      setError("");
+      setApplying(true);
+      const done = await api().import.apply({
+        ticket: picked.ticket,
+        ...(rules.length > 0 ? { rules } : {}),
+        ...(volumeTitle.trim() !== "" ? { volumeTitle: volumeTitle.trim() } : {}),
+        ...(view.split.hardSplit ? {} : { confirmSingleChapter: true }),
+        ...(view.outlineHash === null ? {} : { baseHash: view.outlineHash }),
+      });
+      setResult(done);
+      setPicked(null);
+      setView(null);
+      setConfirmSingle(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const needsConfirm = view !== null && !view.split.hardSplit;
+  const canApply = view !== null && !busy && !applying && (!needsConfirm || confirmSingle);
 
   const addRule = () => {
     const pattern = draft.trim();
@@ -78,7 +120,7 @@ export function ImportPanel() {
 
   return (
     <section className="panel import-panel">
-      <div className="panel-title">导入存量稿件（只预演 · 编码 / 清洗 / 分章三份报告，不写盘）</div>
+      <div className="panel-title">导入存量稿件（先出三份报告，确认后才建卷建章）</div>
 
       <div className="import-actions">
         <button type="button" className="primary" onClick={() => void choose()} disabled={busy}>
@@ -229,10 +271,68 @@ export function ImportPanel() {
             )}
           </div>
 
+          <div className="import-block import-apply-block">
+            <div className="import-block-title">确认入库</div>
+            <div className="import-apply-row">
+              <input
+                type="text"
+                className="import-volume-input"
+                placeholder={`卷名（留空 = 导入·${view.name.replace(/\.[^.]+$/, "")}）`}
+                value={volumeTitle}
+                onChange={(event) => setVolumeTitle(event.target.value)}
+              />
+              {needsConfirm && (
+                <label className="import-confirm">
+                  <input
+                    type="checkbox"
+                    className="import-confirm-box"
+                    checked={confirmSingle}
+                    onChange={(event) => setConfirmSingle(event.target.checked)}
+                  />
+                  整篇作为一章入库（没认出章节标题，我不指望工具替我切）
+                </label>
+              )}
+              <button type="button" className="primary import-apply-btn" disabled={!canApply} onClick={() => void apply()}>
+                {applying ? "正在建卷建章…" : "确认入库"}
+              </button>
+            </div>
+            <div className="muted import-rule-note">
+              入库写的是真源：新建一卷 + 每章一条章纲 + 每章一个草稿文件，写之前强制留一份可撤销的快照。
+              章纲的细项（谁 / 何地 / 目标 / 障碍 / 转折 / 结果 / 钩子）一律留空——那是作者的创作决策，工具不替猜。
+            </div>
+          </div>
+
           <div className="import-boundary">
-            这一版只到「看清报告」为止：建卷建章、逐章字数对账与冲突检测在下一轮，所以这里没有「确认入库」按钮。
+            导入这条线还没做完的部分：AI 二次筛选切章、误切校正、实体抽取候选、可中断续跑
+            （对账已经做了，逐章比对预演字数与落盘字数）。
           </div>
         </>
+      )}
+
+      {result !== null && (
+        <div className="import-result">
+          <div className="import-block-title">
+            已入库：{result.volumeTitle}（{String(result.created.length)} 章 · {String(result.totalWrittenWords)} 字）
+          </div>
+          <div className="muted">{result.note}</div>
+          {result.mismatched.length > 0 && (
+            <ul className="import-mismatched">
+              {result.mismatched.map((row) => (
+                <li key={row}>{row}</li>
+              ))}
+            </ul>
+          )}
+          {result.preamble !== null && (
+            <div className="import-warn">
+              首章之前还有 {String(result.preamble.chars)} 字未入库（源文件没动，请自己决定挪去哪儿）：
+              {result.preamble.excerpt}
+            </div>
+          )}
+          <div className="muted import-result-foot">
+            撤销窗口：{result.snapshotId ?? "（无快照 id）"}；要回退到入库前，去「项目文件 → 本地快照」整体回退。
+            票据已作废——同一张票不能把同一部稿子导两遍。
+          </div>
+        </div>
       )}
     </section>
   );

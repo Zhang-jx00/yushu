@@ -2868,3 +2868,54 @@ table,
   font-size: 12px;
   line-height: 1.7;
 }
+
+/* ---------- R79：导入入库那一格（确认后才写真源） ---------- */
+
+.import-apply-block {
+  padding-top: 4px;
+}
+
+.import-apply-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.import-volume-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 280px;
+}
+
+.import-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--warn);
+}
+
+.import-confirm-box {
+  flex: none;
+}
+
+.import-result {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.import-mismatched {
+  margin: 6px 0;
+  padding-left: 18px;
+  color: var(--bad);
+}
+
+.import-result-foot {
+  margin-top: 6px;
+}
