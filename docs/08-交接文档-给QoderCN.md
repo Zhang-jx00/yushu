@@ -314,7 +314,24 @@ pnpm --filter @yushu/desktop perf-test  # R83 起退出码=门禁：绝对预算
   - **yushu 的处置**：`git config --local credential.https://github.com.useHttpPath true` + 写路径键条目 `git:https://github.com/Zhang-jx00/yushu`。**只动本仓库**，主机键那条原封不动（用户机器上还有多个项目在推，开全局会让它们下次推送全部重新要一次凭据）。
   - **403 先分清原因**：`x-accepted-github-permissions: contents=write` 且 `POST /git/blobs` 返 403 ⇒ 权限不够；`Could not resolve host` ⇒ 网络。别把权限问题报成网络问题。改凭据前先 `cmdkey /list` 列条目并复述影响面。
   - **不改凭据库时的一次性推送**：token 只进子进程环境变量 + 一个临时 helper 脚本（先 `-c credential.helper=` 清空链，否则 manager 抢先答），用完立刻删脚本；密钥不回显、不落盘。
-- **全局 `http.sslverify false`**（在 `~/.gitconfig`）：实测 `git -c http.sslVerify=true ls-remote origin` 正常 ⇒ 对 GitHub 并不必要，却把所有 HTTPS 仓库的证书校验关掉了（PAT 可被中间人截走）。**只在 yushu 本地**开了 `http.https://github.com.sslVerify true`，全局未动；是否全机恢复由用户决定。
+- **~~全局 `http.sslverify false`~~ 已于 2026-10-14 恢复为默认（校验开启）**。原状：`~/.gitconfig` 里
+  `http.sslVerify=false`，把所有 HTTPS 仓库的证书校验都关掉了（PAT 可被中间人截走），
+  而 yushu 只在本地开了 `http.https://github.com.sslVerify true` 自救。
+  **动手前取的证据**（用户授权"你自己解决"之后逐项核过，不是推测）：
+  ① 本机 `find` 到 40 个仓库，带 origin 的只有 **3 个 github.com + 1 个 gitee.com + 1 个本地裸库**；
+  ② `git -c http.sslVerify=true ls-remote origin` 对 GitHub **成功**（退出码 0）；
+  ③ 那个 gitee 仓库开/关校验**行为完全一致**（都是 `404 not found` + 退出码 128，
+     差异只有服务端回显的 session id）⇒ 它的问题是仓库改名/私有或凭据不对，**与 sslVerify 无关**，
+     所以恢复校验不会改变它的推送结果。
+  **动作**：先备份 `~/.gitconfig` 到 `D:\Temp\gitconfig.bak-before-sslverify-restore`，
+  再 `git config --global --unset http.sslVerify`（回到 git 默认 = 校验开启）。
+  **复验**：`git ls-remote` 退出码 0、`git push --dry-run` 输出 `Everything up-to-date` 退出码 0。
+  **回退只需一行**：`git config --global http.sslVerify false`（或还原那份备份）。
+  **今后若某个项目真的撞上自签证书**：给它单独配
+  `git config --local --change... http.<该主机>.sslVerify false`，**不要再全机关校验**。
+  另记：`core.autocrlf=true` 来自 **system 级**（`git config --system`，Git for Windows 装的默认），
+  本仓库无 `.gitattributes` ⇒ `git diff` 会逐文件打印 "LF will be replaced by CRLF"；
+  这个**没动**（动 system 配置会波及这台机器上其他项目），补 `.gitattributes` + renormalize 已登记为单开一轮。
 - 大章/百万字性能夹具在 `D:\Temp\yushu-perf-synth1m`（幂等复用）；预演目录 `D:\Temp\yushu-walkthrough-v*` 可随意清理。
 
 ---
