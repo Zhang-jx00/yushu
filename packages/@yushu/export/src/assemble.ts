@@ -15,7 +15,8 @@ import { stripInternalMarkers } from "./clean.js";
  * 顺序以三级大纲为准（作者重排大纲后导出顺序随之变化），而不是文件系统顺序。
  */
 
-function byOutlineOrder(a: ExportChapter, b: ExportChapter): number {
+/** 大纲序（卷序 → 卷内序号 → 章 id）；导出侧只认这一把尺（TXT / Markdown 共用） */
+export function byOutlineOrder(a: ExportChapter, b: ExportChapter): number {
   return (
     a.volumeIndex - b.volumeIndex || a.idx - b.idx || a.chapterId.localeCompare(b.chapterId)
   );
@@ -97,20 +98,24 @@ export function buildBody(chapters: ExportChapter[], stripMarkers: boolean): str
 
 /** 构建完整 TXT（头部元信息 + 可选目录 + 正文） */
 export function buildTxt(chapters: ExportChapter[], options: BuildTxtOptions): string {
+  // 顺序在这里就定死，不指望调用方记得先排序：`assembleExport` 排过一遍，
+  // 但 `buildTxt` 是导出的出口，出口自己认得"卷序 → 卷内序号"这把尺，
+  // Markdown 出口（R89 `buildMarkdown`）用的也是同一把——两边不会因输入顺序不同而分叉。
+  const ordered = [...chapters].sort(byOutlineOrder);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
-  const total = chapters.reduce((sum, chapter) => sum + countWords(chapter.body), 0);
+  const total = ordered.reduce((sum, chapter) => sum + countWords(chapter.body), 0);
   const head = [
     `《${options.bookTitle}》`,
     `导出时间：${generatedAt.replace("T", " ").slice(0, 19)}`,
-    `共 ${chapters.length} 章 · ${total} 字（去空白字符数）`,
+    `共 ${ordered.length} 章 · ${total} 字（去空白字符数）`,
     "",
   ].join("\n");
 
   const sections = [head];
   if (options.includeToc) {
-    sections.push("═ 目录 ═", "", buildToc(chapters), "", "");
+    sections.push("═ 目录 ═", "", buildToc(ordered), "", "");
   }
-  sections.push("═ 正文 ═", "", buildBody(chapters, options.stripMarkers ?? true));
+  sections.push("═ 正文 ═", "", buildBody(ordered, options.stripMarkers ?? true));
   return `${sections.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
 }
 
