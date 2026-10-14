@@ -8,6 +8,7 @@ import {
   parseProposalFile,
   propagate,
   serializeProposal,
+  type PropagateChange,
   type Proposal,
   type ProposalDecision,
   type ProposalFile,
@@ -51,7 +52,12 @@ const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 
 /** 跑一次反向传播并把提案写进派生区。同一改动重复预览不堆文件（提案 id 由内容决定） */
 export async function previewPropagation(
   gateway: ProjectGateway,
-  change: { entity: string; field: string },
+  /**
+   * 用引擎的 `PropagateChange` 而不是就地写 `{ entity, field }`：后者把 `to`（改名的新 id）
+   * 从类型上抹掉了，而写回那一步**只认这一种机械可确定的编辑**——第 88 轮把 test/ 纳入
+   * typecheck 时才被夹具的多余属性检查暴露出来。
+   */
+  change: PropagateChange,
   options: { maxDepth?: number; weights?: Record<string, number>; now?: () => Date } = {},
 ): Promise<{ path: string; proposal: Proposal; file: ProposalFile }> {
   const structure = await checkStructureFromSources(gatewayReader(gateway));

@@ -5,7 +5,7 @@
  * - filterMentionCandidates：按名称/别名过滤设定卡（前缀优先 → 包含次之 → 同分短名在前），最多 limit 条。
  * 说明：候选纯逻辑与 UI 解耦——插入结果始终是 `@名称` 纯文本，与源码形态解析（entity-mentions.findMentions）同口径。
  */
-import type { EntityIndexEntry } from "./entity-mentions";
+import type { EntityIndexEntry } from "./entity-mentions.js";
 
 export interface MentionQuery {
   /** 查询词（`@` 之后、光标之前的文本；可为空串 = 刚敲下 @） */

@@ -349,8 +349,9 @@ describe("checkCacheOrchestration：稳定前缀置头与断点对齐（T3-12 �
     expect(audit.belowMinTokens).toBe(false);
     // 稳定前缀 2000 token：全价 0.004，命中价 0.1× → 单次节省 0.0036
     expect(audit.saving!.perCall).toBeCloseTo(0.0036, 12);
-    // 累计需要「同一前缀被复用了几次」的真实计数——记录里并没有，因此不提供 total / calls
-    expect(audit.saving!.total).toBeUndefined();
+    // 累计需要「同一前缀被复用了几次」的真实计数——记录里并没有，因此**不提供** total / calls：
+    // 断言"这个投影就只有这两个字段"，比断言 total===undefined 更硬（将来谁偷偷加个 total 会当场红）
+    expect(Object.keys(audit.saving!).sort()).toEqual(["currency", "perCall"]);
     expect(audit.saving!.currency).toBe("CNY");
   });
 

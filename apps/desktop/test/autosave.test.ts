@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it, vi } from "vitest";
-import { createAutosaveScheduler, type AutosaveState } from "../renderer/src/autosave";
+import { createAutosaveScheduler, type AutosaveState } from "../renderer/src/autosave.js";
 
 describe("自动保存调度器（T2-6 切片）", () => {
   it("防抖 800ms：连续输入只保存一次，且发生在最后一次输入之后", async () => {
@@ -64,7 +64,9 @@ describe("自动保存调度器（T2-6 切片）", () => {
   it("保存失败进入冻结态：不自动重试，schedule 被忽略", async () => {
     vi.useFakeTimers();
     try {
-      const save = vi.fn(async () => {
+      // 显式标返回类型：不标的话"只会抛错"的实现被推成 Promise<never>，
+      // 后面 mockImplementation 换成正常保存就报"不可赋值"
+      const save = vi.fn(async (): Promise<void> => {
         throw new Error("E_DOC_CONFLICT");
       });
       const states: AutosaveState[] = [];
@@ -102,7 +104,9 @@ describe("自动保存调度器（T2-6 切片）", () => {
   it("cancel 可解除冻结：冲突后重新载入（磁盘态）恢复自动保存", async () => {
     vi.useFakeTimers();
     try {
-      const save = vi.fn(async () => {
+      // 显式标返回类型：不标的话"只会抛错"的实现被推成 Promise<never>，
+      // 后面 mockImplementation 换成正常保存就报"不可赋值"
+      const save = vi.fn(async (): Promise<void> => {
         throw new Error("E_DOC_CONFLICT");
       });
       const scheduler = createAutosaveScheduler({ save });

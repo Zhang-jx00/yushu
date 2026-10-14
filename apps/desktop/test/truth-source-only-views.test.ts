@@ -52,7 +52,9 @@ describe("视图只读真源（A5 前半：不依赖索引库）", () => {
   it("时间线引擎侧的判定输入是真源解析结果，不是索引行表", () => {
     const source = readFileSync(new URL("../../../packages/@yushu/world-engine/src/timeline.ts", import.meta.url), "utf8");
     // 只允许 yaml / core 两个运行时依赖：一旦开始 import 索引包，"删库视图就塌"就成真了
-    const imports = [...source.matchAll(/^import .*from "([^"]+)";$/gm)].map((m) => m[1]);
+    const imports = [...source.matchAll(/^import .*from "([^"]+)";$/gm)]
+      .map((m) => m[1])
+      .filter((spec): spec is string => spec !== undefined);
     expect(imports.every((spec) => ["@yushu/core", "yaml", "./power-log.js"].includes(spec))).toBe(true);
   });
 });

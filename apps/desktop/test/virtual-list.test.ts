@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
-import { computeVirtualWindow } from "../renderer/src/virtual-list";
+import { computeVirtualWindow } from "../renderer/src/virtual-list.js";
 
 describe("虚拟滚动窗口（T2-4 切片 A）", () => {
   it("空列表 / 非法行高 → 空窗口", () => {

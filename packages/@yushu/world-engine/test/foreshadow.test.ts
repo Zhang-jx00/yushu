@@ -179,7 +179,7 @@ describe("buildForeshadowBoard（看板与审计）", () => {
       { ...base, id: "fs-3", state: "abandoned", abandon_reason: "删线" },
     ], { currentChapter: "ch-020" });
     expect(out.stats.total).toBe(3);
-    expect(out.stats.open + out.stats.closed).toBe(3);
+    expect((out.stats.open ?? 0) + (out.stats.closed ?? 0)).toBe(3);
     expect(out.stats.paid).toBe(1);
     expect(out.stats.abandoned).toBe(1);
   });

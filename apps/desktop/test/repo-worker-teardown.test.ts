@@ -22,6 +22,6 @@ describe("utility 进程收尾（repo-worker）", () => {
     expect(main).toContain("stopRepoWorker()");
     const handler = /app\.on\("window-all-closed",[\s\S]*?\n\}\);/.exec(main);
     expect(handler, "找不到 window-all-closed 处理器").not.toBeNull();
-    expect(handler[0]).toContain("stopRepoWorker()");
+    expect(handler?.[0] ?? "").toContain("stopRepoWorker()");
   });
 });

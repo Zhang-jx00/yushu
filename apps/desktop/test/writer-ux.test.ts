@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
-import { diffSentences, mergeSelected, splitSentences } from "../renderer/src/candidate-diff";
-import { TypewriterBuffer } from "../renderer/src/typewriter-buffer";
+import { diffSentences, mergeSelected, splitSentences } from "../renderer/src/candidate-diff.js";
+import { TypewriterBuffer } from "../renderer/src/typewriter-buffer.js";
 
 /**
  * T3-11 写作 UX 纯逻辑：

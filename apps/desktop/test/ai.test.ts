@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { countWords } from "@yushu/core";
 import { readChapterFile } from "@yushu/world-engine";
-import type { AiStreamEvent } from "../src/shared/ipc.js";
+import type { AiProviderPayload, AiStreamEvent } from "../src/shared/ipc.js";
 import { detectPlaintextSecrets } from "@yushu/llm";
 import {
   adoptDraft,
@@ -224,8 +224,10 @@ describe("AI 使用记录（T1-17）", () => {
   });
 });
 
-/** v2 provider 载荷（T3-1：mock 为本地 openai_chat 端点） */
-function v2Providers(baseUrl: string) {
+/** v2 provider 载荷（T3-1：mock 为本地 openai_chat 端点）。
+ *  返回类型写成 `AiProviderPayload[]` 而不是让字面量自己推：`kind`/`protocol`/`tier` 都是联合类型，
+ *  不标注就会被推成 `string`，将来枚举改名这类漂移测试一个都发现不了（R88 把 test/ 纳入 typecheck 才暴露）。 */
+function v2Providers(baseUrl: string): AiProviderPayload[] {
   return [
     {
       id: "mock",
@@ -233,7 +235,22 @@ function v2Providers(baseUrl: string) {
       protocol: "openai_chat",
       base_url: baseUrl,
       models: [
-        { name: "mock-model", tier: "flagship", limits: { context: 32768, max_output: 2048 } },
+        {
+          name: "mock-model",
+          tier: "flagship",
+          // 载荷类型要求声明能力矩阵。这里写死的正是"未声明 ⇒ 合并保守默认"算出来的那一份
+          // （stream / usage 为 true，其余 false），所以补上它不改变任何运行时行为。
+          capabilities: {
+            tools: false,
+            structured_output: false,
+            stream: true,
+            usage: true,
+            reasoning: false,
+            vision: false,
+            batch: false,
+          },
+          limits: { context: 32768, max_output: 2048 },
+        },
       ],
     },
   ];

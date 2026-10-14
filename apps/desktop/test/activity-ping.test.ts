@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
-import { ACTIVITY_PING_INTERVAL_MS, createActivityPing } from "../renderer/src/activity-ping";
+import { ACTIVITY_PING_INTERVAL_MS, createActivityPing } from "../renderer/src/activity-ping.js";
 
 describe("写作活动心跳节流（T2-9 切片 C）", () => {
   it("首次输入立即发送；间隔内忽略；超过间隔再次发送", () => {

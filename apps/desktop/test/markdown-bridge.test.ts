@@ -4,7 +4,7 @@ import {
   findUnsupportedSyntax,
   htmlToMd,
   mdToHtml,
-} from "../renderer/src/markdown-bridge";
+} from "../renderer/src/markdown-bridge.js";
 
 describe("Markdown ⇄ 富文本桥（T2-1 切片 B）", () => {
   it("md → HTML：标题 / 粗斜体 / 引用 / 列表 / 分隔线", () => {

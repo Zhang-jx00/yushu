@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMentionThrottle } from "../renderer/src/mention-throttle";
+import { createMentionThrottle } from "../renderer/src/mention-throttle.js";
 
 afterEach(() => {
   vi.useRealTimers();

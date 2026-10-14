@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
+import type { LayerKey } from "@yushu/core";
 import {
   checkStructure,
   checkStructureFromSources,
@@ -252,7 +253,11 @@ describe("layer-order-violation 层级倒置", () => {
 });
 
 describe("从真源直接校验（不依赖索引库）", () => {
-  const cardText = (name: string, refs: Array<{ relation: string; target: string }>, layer = "characters") =>
+  const cardText = (
+    name: string,
+    refs: Array<{ relation: string; target: string }>,
+    layer: LayerKey = "characters",
+  ) =>
     createSettingCard({ type: "character", name, layer, aliases: [], refs });
 
   it("卡文件里的悬空引用被检出，实体与引用计数来自真源", async () => {

@@ -34,9 +34,10 @@ function taskBlocks(milestone: string): Array<{ id: string; checked: boolean; bo
   const section = ledgerSection(milestone);
   const heads = [...section.matchAll(/^- \[([ x])\] (T\d+-\d+)/gm)];
   return heads.map((head, index) => ({
-    id: head[2],
+    // 正则里 `(T\d+-\d+)` 是必选组，匹配成功就一定有值
+    id: head[2] ?? "",
     checked: head[1] === "x",
-    body: section.slice(head.index, index + 1 < heads.length ? heads[index + 1].index : section.length),
+    body: section.slice(head.index ?? 0, index + 1 < heads.length ? (heads[index + 1]?.index ?? section.length) : section.length),
   }));
 }
 
@@ -203,6 +204,6 @@ describe("反漂移：账本里已动过的里程碑，对外文档不许写「�
     expect(`${claim?.[1]}/${claim?.[2]}`, `docs/04 实况是 ${ticked.length}/${ticked.length + open.length}`).toBe(
       `${ticked.length}/${ticked.length + open.length}`,
     );
-    expect(claim?.[3].split("、").map((id) => id.trim()).sort()).toEqual(open.slice().sort());
+    expect((claim?.[3] ?? "").split("、").map((id) => id.trim()).sort()).toEqual(open.slice().sort());
   });
 });

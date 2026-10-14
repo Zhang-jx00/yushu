@@ -7,6 +7,7 @@ import {
   parseConsistencyAllowList,
   serializeConsistencyAllowList,
   type ConsistencyAllowList,
+  type ReportFinding,
 } from "../src/consistency-report.js";
 import { checkStructure, type IndexEntityRow } from "@yushu/world-engine";
 
@@ -293,7 +294,7 @@ describe("豁免应用", () => {
 const LF = String.fromCharCode(10);
 
 describe("派系包规则的豁免与出处（R57）", () => {
-  const allowText = (rule) =>
+  const allowText = (rule: string) =>
     ["apiVersion: yushu.consistency-allow/v1", "entries:", "  - rule: " + rule, "    subject: char-linyuan", "    reason: 作者确认这段是刻意反转", ""].join(LF);
 
   it("默认只认内置三条：包规则 id 不在已知集合里仍然拒载", () => {
@@ -387,7 +388,7 @@ describe("派系包结论并入同一份报告（R57）", () => {
     "",
   ].join(LF);
 
-  const packFinding = {
+  const packFinding: ReportFinding = {
     rule: "power-no-regress",
     severity: "error",
     subject: "char-linyuan",

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
+import type { LayerKey } from "@yushu/core";
 import {
   STRUCTURE_RULE_IDS,
   cardPath,
@@ -31,11 +32,23 @@ function readerOf(files: Record<string, string>): IndexSourceReader {
   };
 }
 
-const card = (id: string, type: string, layer: string, refs: Array<{ relation: string; target: string }> = []) =>
-  serializeCardFile(createSettingCard({ id, type, name: id, layer, aliases: [], refs }), `${id} 的正文。`);
+const card = (
+  id: string,
+  type: string,
+  layer: LayerKey,
+  refs: Array<{ relation: string; target: string }> = [],
+) => serializeCardFile(createSettingCard({ id, type, name: id, layer, aliases: [], refs }), `${id} 的正文。`);
+
+/** 夹具里的一张卡；显式声明类型，别让 `typeof CLEAN` 把"能带 refs 的卡"锁死成那四条字面量 */
+interface CardFixture {
+  id: string;
+  type: string;
+  layer: LayerKey;
+  refs?: Array<{ relation: string; target: string }>;
+}
 
 /** 把卡按权威路径铺成内存语料（路径写错会让 collectIndexInput 认不出类型，夹具就白搭） */
-function corpus(cards: Array<{ id: string; type: string; layer: string; refs?: Array<{ relation: string; target: string }> }>): Record<string, string> {
+function corpus(cards: CardFixture[]): Record<string, string> {
   const files: Record<string, string> = {};
   for (const c of cards) files[cardPath(c.type, c.id)] = card(c.id, c.type, c.layer, c.refs ?? []);
   return files;
@@ -45,18 +58,18 @@ function corpus(cards: Array<{ id: string; type: string; layer: string; refs?: A
  * 干净语料：依赖一律**指向更上游的层**（characters→geography→laws），无环、无悬空。
  * 层序口径见 docs/03：LAYER_KEYS 靠前者是上游，上游引用下游才是倒置。
  */
-const CLEAN = [
-  { id: "law-qi", type: "skill", layer: "laws" as const },
-  { id: "geo-city", type: "location", layer: "geography" as const, refs: [{ relation: "受制于", target: "law-qi" }] },
-  { id: "char-linyuan", type: "character", layer: "characters" as const, refs: [{ relation: "生于", target: "geo-city" }] },
-  { id: "evt-duel", type: "event", layer: "events" as const, refs: [{ relation: "涉及", target: "char-linyuan" }] },
+const CLEAN: CardFixture[] = [
+  { id: "law-qi", type: "skill", layer: "laws" },
+  { id: "geo-city", type: "location", layer: "geography", refs: [{ relation: "受制于", target: "law-qi" }] },
+  { id: "char-linyuan", type: "character", layer: "characters", refs: [{ relation: "生于", target: "geo-city" }] },
+  { id: "evt-duel", type: "event", layer: "events", refs: [{ relation: "涉及", target: "char-linyuan" }] },
 ];
 
 interface FaultCase {
   name: string;
   /** 期望且仅期望出现的规则（顺序无关） */
   expect: StructureRuleId[];
-  cards: typeof CLEAN;
+  cards: CardFixture[];
 }
 
 const FAULT_CASES: FaultCase[] = [

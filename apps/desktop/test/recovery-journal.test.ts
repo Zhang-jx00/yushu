@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it, vi } from "vitest";
-import { createRecoveryJournalScheduler } from "../renderer/src/recovery-journal";
+import { createRecoveryJournalScheduler } from "../renderer/src/recovery-journal.js";
 
 /** 编辑日志调度器（T2-8 切片 A）：固定间隔快照 / 合并 / 重试 / cancel 语义 */
 describe("编辑日志调度器（T2-8 切片 A）", () => {

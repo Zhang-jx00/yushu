@@ -76,10 +76,10 @@ function wrappersByChannel(): Map<string, "write" | "read" | "none"> {
   for (;;) {
     const found = head.exec(SOURCE);
     if (!found) break;
-    starts.push({ at: found.index, name: found[1] });
+    starts.push({ at: found.index, name: found[1] ?? "" });
   }
   starts.forEach((entry, index) => {
-    const end = index + 1 < starts.length ? starts[index + 1].at : SOURCE.length;
+    const end = index + 1 < starts.length ? (starts[index + 1]?.at ?? SOURCE.length) : SOURCE.length;
     const block = SOURCE.slice(entry.at, end);
     out.set(entry.name, block.includes("wrapWrite<") ? "write" : block.includes("wrap<") ? "read" : "none");
   });

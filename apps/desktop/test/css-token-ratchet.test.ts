@@ -64,13 +64,14 @@ const masked = maskComments(lines);
 function rootRanges(): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
   for (let i = 0; i < masked.length; i += 1) {
-    const trimmed = masked[i].trim();
+    const trimmed = (masked[i] ?? "").trim();
     if (!trimmed.includes(":root") || !trimmed.includes("{")) continue;
     let depth = 0;
     let end = i;
     for (let j = i; j < masked.length; j += 1) {
-      depth += (masked[j].match(/\{/g) ?? []).length;
-      depth -= (masked[j].match(/\}/g) ?? []).length;
+      const row = masked[j] ?? "";
+      depth += (row.match(/\{/g) ?? []).length;
+      depth -= (row.match(/\}/g) ?? []).length;
       if (depth <= 0) {
         end = j;
         break;
@@ -91,7 +92,7 @@ const DURATION = /\b\d+(?:\.\d+)?m?s\b/g;
 function literalsOutsideRoot(pattern: RegExp): string[] {
   const hits: string[] = [];
   for (let i = 0; i < masked.length; i += 1) {
-    const trimmed = masked[i].trim();
+    const trimmed = (masked[i] ?? "").trim();
     if (trimmed === "" || insideRoot(i + 1)) continue;
     for (const match of trimmed.match(pattern) ?? []) {
       hits.push(`${String(i + 1)}:${match.replace(/\s+/g, "")}`);
@@ -105,7 +106,7 @@ function declaredTokens(): string[] {
   const names: string[] = [];
   for (const [start, end] of RANGES) {
     for (let i = start - 1; i < end; i += 1) {
-      for (const match of masked[i].matchAll(/(--[a-z0-9-]+)\s*:/g)) names.push(match[1] as string);
+      for (const match of (masked[i] ?? "").matchAll(/(--[a-z0-9-]+)\s*:/g)) names.push(match[1] as string);
     }
   }
   return [...new Set(names)];

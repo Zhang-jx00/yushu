@@ -85,7 +85,8 @@ describe("lintPack", () => {
 
   it("缺 11 件套被打回", () => {
     const pack = makePack();
-    delete (pack.manifest.content as Record<string, unknown>)["taboos"];
+    // 这里**就是要**造一个不合法的包：11 件套少一件。绕过类型系统的正当写法是先转 unknown 再转索引签名
+    delete (pack.manifest.content as unknown as Record<string, unknown>)["taboos"];
     const report = lintPack(pack);
     expect(report.ok).toBe(false);
     expect(report.issues.some((i) => i.rule === "pack-eleven-piece")).toBe(true);

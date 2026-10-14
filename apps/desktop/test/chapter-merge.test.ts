@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
-import { diffLines, merge3 } from "../renderer/src/chapter-merge";
+import { diffLines, merge3 } from "../renderer/src/chapter-merge.js";
 
 describe("行级 diff（Myers，T2-6 三方合并内置）", () => {
   it("相同文本无差异块", () => {

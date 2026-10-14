@@ -4,7 +4,7 @@ import {
   collectMentionedEntities,
   findMentions,
   type EntityIndexEntry,
-} from "../renderer/src/entity-mentions";
+} from "../renderer/src/entity-mentions.js";
 
 const linyuan: EntityIndexEntry = {
   id: "char-linyuan",

@@ -5,6 +5,7 @@ import {
   buildSatisfactionBoard,
   parseSatisfactionFile,
   serializeSatisfactionFile,
+  type SatisfactionHitType,
   type SatisfactionLedger,
 } from "../src/satisfaction.js";
 
@@ -29,7 +30,7 @@ function ledger(over: Partial<SatisfactionLedger> = {}): SatisfactionLedger {
   };
 }
 
-const hit = (id: string, chapter: string, type: "upgrade" | "face_slap" | "sweet", intensity: number, extra = {}) => ({
+const hit = (id: string, chapter: string, type: SatisfactionHitType, intensity: number, extra = {}) => ({
   id,
   chapter,
   type,

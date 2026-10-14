@@ -29,21 +29,30 @@ function channelMap(): Map<string, string> {
   const block = /export const CHANNELS = \{([\s\S]*?)\} as const;/.exec(shared);
   if (!block) throw new Error("找不到 CHANNELS 块（改了结构就要同步改这条锁）");
   const out = new Map<string, string>();
-  for (const [, name, value] of block[1].matchAll(/^\s*(\w+):\s*"([^"]+)",/gm)) out.set(name, value);
+  for (const [, name, value] of (block[1] ?? "").matchAll(/^\s*(\w+):\s*"([^"]+)",/gm)) {
+    if (name === undefined || value === undefined) continue;
+    out.set(name, value);
+  }
   return out;
 }
 
 /** ② 主进程注册了哪些 CHANNELS.x */
 function registeredNames(): string[] {
-  return [...mainIpc.matchAll(/ipcMain\.handle\(\s*CHANNELS\.(\w+)/g)].map((m) => m[1]);
+  return [...mainIpc.matchAll(/ipcMain\.handle\(\s*CHANNELS\.(\w+)/g)]
+    .map((m) => m[1])
+    .filter((n): n is string => n !== undefined);
 }
 
 /** ③ preload 白名单里的字面量（invoke 与单向 on 都算暴露面） */
 function preloadLiterals(): { invoke: Set<string>; events: Set<string> } {
   const invoke = new Set<string>();
-  for (const m of preload.matchAll(/invoke\(\s*"([^"]+)"/g)) invoke.add(m[1]);
+  for (const m of preload.matchAll(/invoke\(\s*"([^"]+)"/g)) {
+    if (m[1] !== undefined) invoke.add(m[1]);
+  }
   const events = new Set<string>();
-  for (const m of preload.matchAll(/(?:on|once)\(\s*"([^"]+)"/g)) events.add(m[1]);
+  for (const m of preload.matchAll(/(?:on|once)\(\s*"([^"]+)"/g)) {
+    if (m[1] !== undefined) events.add(m[1]);
+  }
   return { invoke, events };
 }
 
@@ -59,11 +68,11 @@ function memberPaths(source: string, startRe: RegExp): Set<string> {
   for (const line of source.slice(start.index).split("\n")) {
     const opened = /^\s{2}(\w+):\s*\{/.exec(line) || /^\s{4}(\w+):\s*\{/.exec(line);
     if (opened) {
-      group = opened[1];
+      group = opened[1] ?? "";
       continue;
     }
     const method = /^\s+(?:readonly\s+)?(\w+)\s*[:(]/.exec(line);
-    if (method && group !== "" && !NOT_A_METHOD.has(method[1])) {
+    if (method && method[1] !== undefined && group !== "" && !NOT_A_METHOD.has(method[1])) {
       out.add(`${group}.${method[1]}`);
       continue;
     }
