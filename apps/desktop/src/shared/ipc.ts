@@ -1039,6 +1039,26 @@ export interface ConsistencyReportPayload {
     evaluated: string[];
     notEvaluated: Array<{ id: string; reason: string }>;
     errors: string[];
+    /**
+     * 跨包同 id 的合并情况（T4-12 / R85）。
+     *
+     * `overrides` 是"高版本盖掉了谁"，`ambiguous` 是"版本并列、引擎只按确定性次序取一个，
+     * 裁定权在你"。两者都必须外显——docs/03 §8.3 的底线是禁止静默覆盖，
+     * 而"合并后只报一条结论"看起来与"本来就只有一条规则"完全一样。
+     */
+    merge: {
+      overrides: Array<{
+        id: string;
+        winner: string;
+        winnerVersion: string | null;
+        loser: string;
+        loserVersion: string | null;
+        reason: string;
+      }>;
+      ambiguous: Array<{ id: string; versions: Array<string | null>; packs: string[]; note: string }>;
+      /** 生效期到底判没判：skipped 时不能看起来像"所有规则都在有效期内" */
+      dateCheck: "applied" | "skipped";
+    };
   };
   counted: { findings: number; entries: number; suppressed: number; filteredOut: number };
   /**

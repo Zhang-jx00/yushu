@@ -95,6 +95,19 @@ export interface ConsistencyRule {
   message: string;
   /** 融合冲突消解排序用（G06 §5：同目标矛盾时按 severity + priority 排序并弹确认）；未写即参与排序时按 0 */
   priority?: number;
+  /**
+   * 规则版本号（T4-12 / docs/03 §8.3「高版本胜出」）。
+   *
+   * 形状是**点分数值段**（`1` / `2.1` / `2.1.0` / `2026.10`），比较按段取数不取字典序——
+   * 字典序会把 `1.10` 判成比 `1.9` 旧，而"上个月刚把阈值放宽到 1.10"正是最常见的翻车点。
+   * **可以没有**：现存两份内置包件都没写版本，强制要求等于把既有包全判死；
+   * 缺省按最旧参与比较（见 `compareRuleVersions`）。
+   */
+  version?: string;
+  /** 生效起始日（ISO `YYYY-MM-DD`）。只在调用方显式给了 `asOf` 时才判——引擎内不读墙钟 */
+  effective_from?: string;
+  /** 生效截止日（含当日）。同上 */
+  effective_until?: string;
   /** 出处（规则件信封带来：集 id / 标题 / 调研来源）；单条 `rule:` 形状没有 */
   origin?: RuleOrigin;
 }
@@ -184,7 +197,61 @@ export interface RuleEvaluation {
   evidence: Record<string, string>;
 }
 
-const RULE_KEYS = ["id", "severity", "scope", "when", "message", "priority"] as const;
+const RULE_KEYS = [
+  "id",
+  "severity",
+  "scope",
+  "when",
+  "message",
+  "priority",
+  // T4-12（R85）：平台规则包要"带来源、带生效日期与版本号"，这三个字段是它的前置——
+  // 白名单不收 version 时，任何写了版本的规则件都会整件被判 E_RULE_PARSE（docs/09 原话：
+  // "不先扩这个字段，版本合并永远做不了"）
+  "version",
+  "effective_from",
+  "effective_until",
+] as const;
+
+/** 规则版本号形状：点分数值段，不接受 `v` 前缀、预发布后缀（`-beta`）与日期混写 */
+const RULE_VERSION_PATTERN = /^\d+(\.\d+)*$/;
+/** 生效日期形状：ISO 日历日（比较时按字符串码点序即可，定长同格式与数值序等价） */
+const RULE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 校验版本号；返回规范化后的字符串（去首尾空白） */
+function parseRuleVersion(value: unknown, where: string): string {
+  if (typeof value === "number") {
+    // 不"顺手"把数字转成字符串：YAML 会把 `version: 1.10` 读成浮点 1.1（尾零直接丢），
+    // 而 1.1 与 1.10 在版本比较里是两回事。静默接受等于让包作者写的版本号悄悄变成另一个值。
+    throw new RuleDslError(
+      "E_RULE_PARSE",
+      `${where}.version 不要写成裸数字（YAML 会把 1.10 读成 1.1，尾零丢失）；请加引号写成 "1.10"`,
+    );
+  }
+  if (typeof value !== "string" || !RULE_VERSION_PATTERN.test(value.trim())) {
+    throw new RuleDslError(
+      "E_RULE_PARSE",
+      `${where}.version 应为点分数值版本（如 "1" / "2.1" / "2026.10"，要带引号），实际 ${JSON.stringify(value)}`,
+    );
+  }
+  return value.trim();
+}
+
+/** 校验生效日期：格式 + **日历上真的存在**（2026-02-30 这种必须拒，不能等到比较才发现） */
+function parseRuleDate(value: unknown, where: string, field: string): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!RULE_DATE_PATTERN.test(text)) {
+    throw new RuleDslError(
+      "E_RULE_PARSE",
+      `${where}.${field} 应为 ISO 日期 YYYY-MM-DD，实际 ${JSON.stringify(value)}`,
+    );
+  }
+  const [year, month, day] = text.split("-").map((part) => Number(part));
+  const daysInMonth = new Date(Date.UTC(year as number, month as number, 0)).getUTCDate();
+  if ((month as number) < 1 || (month as number) > 12 || (day as number) < 1 || (day as number) > daysInMonth) {
+    throw new RuleDslError("E_RULE_PARSE", `${where}.${field} 不是日历上存在的日期：${text}`);
+  }
+  return text;
+}
 
 /** 规则件的信封版本（与 llm / routing / budget 同一套「版本必填、未知键拒绝」约定） */
 export const RULE_SET_API_VERSION = "yushu.rules/v1";
@@ -313,6 +380,19 @@ function parseOneRule(value: unknown, where = "rule"): ConsistencyRule {
   if (priorityValue !== undefined && (!Number.isInteger(priorityValue) || (priorityValue as number) < 0)) {
     throw new RuleDslError("E_RULE_PARSE", `${where}.priority 应为非负整数`);
   }
+  const versionValue = record["version"];
+  const version = versionValue === undefined ? undefined : parseRuleVersion(versionValue, where);
+  const fromValue = record["effective_from"];
+  const untilValue = record["effective_until"];
+  const effectiveFrom = fromValue === undefined ? undefined : parseRuleDate(fromValue, where, "effective_from");
+  const effectiveUntil = untilValue === undefined ? undefined : parseRuleDate(untilValue, where, "effective_until");
+  if (effectiveFrom !== undefined && effectiveUntil !== undefined && effectiveFrom > effectiveUntil) {
+    // 反过来写基本是手误，而它会让这条规则"永远不生效"——加载期就报，不等求值期猜
+    throw new RuleDslError(
+      "E_RULE_PARSE",
+      `${where} 的生效区间反了：effective_from ${effectiveFrom} 晚于 effective_until ${effectiveUntil}`,
+    );
+  }
   const depth = measureDepth(when, 1);
   if (depth > RULE_MAX_DEPTH) {
     throw new RuleDslError(
@@ -327,6 +407,9 @@ function parseOneRule(value: unknown, where = "rule"): ConsistencyRule {
     when,
     message,
     ...(priorityValue === undefined ? {} : { priority: priorityValue as number }),
+    ...(version === undefined ? {} : { version }),
+    ...(effectiveFrom === undefined ? {} : { effective_from: effectiveFrom }),
+    ...(effectiveUntil === undefined ? {} : { effective_until: effectiveUntil }),
   };
 }
 
@@ -608,4 +691,198 @@ function readPathSafe(root: unknown, path: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/* ---------------- 跨包同名规则合并（T4-12 / docs-03 8.3「高版本胜出」，R85） ---------------- */
+
+/** 一个规则集分组：来自哪个包、哪个文件、解析出的规则 */
+export interface RuleSetGroup {
+  packId: string;
+  file: string;
+  rules: readonly ConsistencyRule[];
+}
+
+/** 胜出者的摘要（面板列要用；不含 when，比较与展示都只看身份字段） */
+export interface RuleWinner {
+  id: string;
+  packId: string;
+  file: string;
+  version: string | null;
+  severity: RuleSeverity;
+  priority: number;
+}
+
+/** 一条"谁被谁盖掉了"的记录——冲突必须显式，禁止静默覆盖 */
+export interface RuleOverride {
+  id: string;
+  winner: string;
+  winnerVersion: string | null;
+  loser: string;
+  loserVersion: string | null;
+  reason: string;
+}
+
+/** 同版本并列：引擎只能按确定性次序取一个，**裁定权在用户** */
+export interface RuleAmbiguity {
+  id: string;
+  versions: Array<string | null>;
+  packs: string[];
+  note: string;
+}
+
+/** 因生效日期没参与本轮求值的规则（只在给了 asOf 时才会出现） */
+export interface RuleOutOfDate {
+  id: string;
+  packId: string;
+  reason: string;
+}
+
+export interface RuleMergeResult {
+  /** 本轮真正参与求值的规则（每个 id 只剩胜出且生效的那条），按 id 码点序 */
+  rules: ConsistencyRule[];
+  winners: RuleWinner[];
+  overrides: RuleOverride[];
+  ambiguous: RuleAmbiguity[];
+  outOfDate: RuleOutOfDate[];
+  /** 生效期到底判没判：没判就要写出来，不许看起来像"所有规则都在生效期内" */
+  dateCheck: "applied" | "skipped";
+}
+
+const SEVERITY_RANK: Record<RuleSeverity, number> = { error: 2, warn: 1, info: 0 };
+
+/**
+ * 版本比较：按**数值段**逐段比，缺的段按 0（`2.1` == `2.1.0`）。
+ * 不这么做的后果很具体：字典序里 "1.10" < "1.9"，于是刚放宽阈值的新版会被判成旧版而落选。
+ * 缺 version 排最旧（返回 -1 / 1 与有版本的一方比），因为老包没写版本、新包写了就该新的胜出。
+ */
+export function compareRuleVersions(a: string | undefined, b: string | undefined): number {
+  if (a === undefined && b === undefined) return 0;
+  if (a === undefined) return -1;
+  if (b === undefined) return 1;
+  const left = a.split(".").map((part) => Number(part));
+  const right = b.split(".").map((part) => Number(part));
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const l = left[index] ?? 0;
+    const r = right[index] ?? 0;
+    if (l !== r) return l < r ? -1 : 1;
+  }
+  return 0;
+}
+
+function codePointCompare(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/**
+ * 合并多个包的规则集：同 id 高版本胜出，同版本并列点名交用户，生效期按调用方给的 asOf 判。
+ *
+ * 三条不可让的口径：
+ * ① **不静默覆盖**——每一次"这条被那条盖掉了"都进 `overrides` 并写明理由；
+ * ② **不猜**——同版本并列时 `ambiguous` 点名，胜出者只是"先按确定性次序取一个"，不是"引擎裁定了对错"；
+ * ③ **引擎内不读墙钟**——`asOf` 没给就完全不判日期（`dateCheck: "skipped"`），
+ *    给了才按 ISO 串比较（定长同格式，串序 == 日序）。
+ */
+export function mergeRuleSets(
+  groups: readonly RuleSetGroup[],
+  options: { asOf?: string } = {},
+): RuleMergeResult {
+  const asOf = options.asOf;
+  const byId = new Map<string, Array<RuleSetGroup & { rule: ConsistencyRule }>>();
+  for (const group of groups) {
+    for (const rule of group.rules) {
+      const bucket = byId.get(rule.id);
+      if (bucket) {
+        bucket.push({ ...group, rule });
+      } else {
+        byId.set(rule.id, [{ ...group, rule }]);
+      }
+    }
+  }
+
+  const winners: RuleWinner[] = [];
+  const rules: ConsistencyRule[] = [];
+  const overrides: RuleOverride[] = [];
+  const ambiguous: RuleAmbiguity[] = [];
+  const outOfDate: RuleOutOfDate[] = [];
+
+  for (const id of [...byId.keys()].sort(codePointCompare)) {
+    const candidates = byId.get(id) ?? [];
+    const ordered = [...candidates].sort((a, b) => {
+      const version = compareRuleVersions(a.rule.version, b.rule.version);
+      if (version !== 0) return -version; // 高版本在前
+      const severity = SEVERITY_RANK[a.rule.severity] - SEVERITY_RANK[b.rule.severity];
+      if (severity !== 0) return -severity; // 并列时取更严的（宁可多报也不漏报）
+      const priority = (a.rule.priority ?? 0) - (b.rule.priority ?? 0);
+      if (priority !== 0) return -priority;
+      const pack = codePointCompare(a.packId, b.packId);
+      if (pack !== 0) return pack;
+      return codePointCompare(a.file, b.file);
+    });
+    const top = ordered[0]!;
+    winners.push({
+      id,
+      packId: top.packId,
+      file: top.file,
+      version: top.rule.version ?? null,
+      severity: top.rule.severity,
+      priority: top.rule.priority ?? 0,
+    });
+
+    if (ordered.length > 1) {
+      const rest = ordered.slice(1);
+      const tied = rest.filter((item) => compareRuleVersions(item.rule.version, top.rule.version) === 0);
+      for (const loser of rest) {
+        if (compareRuleVersions(loser.rule.version, top.rule.version) === 0) continue;
+        overrides.push({
+          id,
+          winner: top.packId,
+          winnerVersion: top.rule.version ?? null,
+          loser: loser.packId,
+          loserVersion: loser.rule.version ?? null,
+          reason: "更高版本胜出",
+        });
+      }
+      if (tied.length > 0) {
+        ambiguous.push({
+          id,
+          versions: [top, ...tied].map((item) => item.rule.version ?? null),
+          packs: [top, ...tied].map((item) => item.packId).sort(codePointCompare),
+          note: "版本并列，引擎只按包 id 码点序取一个；两份包各自维护同一条规则本身就是漂移，请人工裁定",
+        });
+      }
+    }
+
+    if (asOf === undefined) {
+      rules.push(top.rule);
+      continue;
+    }
+    if (top.rule.effective_from !== undefined && asOf < top.rule.effective_from) {
+      outOfDate.push({
+        id,
+        packId: top.packId,
+        reason: `未到生效日期（${top.rule.effective_from} 起才生效，本次按 ${asOf} 判）`,
+      });
+      continue;
+    }
+    if (top.rule.effective_until !== undefined && asOf > top.rule.effective_until) {
+      outOfDate.push({
+        id,
+        packId: top.packId,
+        reason: `已过生效期（至 ${top.rule.effective_until}，本次按 ${asOf} 判）`,
+      });
+      continue;
+    }
+    rules.push(top.rule);
+  }
+
+  return {
+    rules,
+    winners,
+    overrides,
+    ambiguous,
+    outOfDate,
+    dateCheck: asOf === undefined ? "skipped" : "applied",
+  };
 }

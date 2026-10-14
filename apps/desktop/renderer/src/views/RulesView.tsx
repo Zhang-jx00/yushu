@@ -363,6 +363,28 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
             {consistency.pack.errors.length > 0 && (
               <p className="warn consistency-pack-errors">{consistency.pack.errors.join("；")}</p>
             )}
+            {/* 跨包同 id 的合并结果（T4-12 / R85）：合并后只剩一条结论，看起来与"本来就只有一条"
+                一模一样——所以谁盖掉谁、谁还没裁定，必须写出来（docs/03 §8.3：禁止静默覆盖） */}
+            {(consistency.pack.merge.overrides.length > 0 || consistency.pack.merge.ambiguous.length > 0) && (
+              <p className="muted consistency-pack-merge">
+                同名规则合并：
+                {consistency.pack.merge.overrides.map(
+                  (item) =>
+                    `${item.id} 取 ${item.winner}（版本 ${item.winnerVersion ?? "—"}），盖掉 ${item.loser}（版本 ${item.loserVersion ?? "—"}）`,
+                ).join("；")}
+                {consistency.pack.merge.ambiguous.length > 0
+                  ? `${consistency.pack.merge.overrides.length > 0 ? " ｜ " : ""}版本并列待裁定：${consistency.pack.merge.ambiguous
+                      .map((item) => `${item.id}（${item.packs.join("、")}）`)
+                      .join("；")}`
+                  : ""}
+              </p>
+            )}
+            {consistency.pack.merge.dateCheck === "skipped" && (
+              <p className="muted consistency-pack-datecheck">
+                本轮<strong>未判</strong>规则生效期（调用方没给判定日期）——带 effective_from / until 的规则
+                一律照常参与，这不等于"它们都在有效期内"。
+              </p>
+            )}
             {/* AI 采样这次跑没跑、跑成什么样子，必须写在明面上 */}
             <p className="muted consistency-ai-line">
               AI 采样：

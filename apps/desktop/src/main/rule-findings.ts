@@ -1,5 +1,16 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { collectVarReferences, evaluateRule, loadRuleSets, readPath, type PackRuleSet } from "@yushu/genre-engine";
+import {
+  collectVarReferences,
+  evaluateRule,
+  loadRuleSets,
+  mergeRuleSets,
+  readPath,
+  type PackRuleSet,
+  type RuleAmbiguity,
+  type RuleOutOfDate,
+  type RuleOverride,
+  type RuleSetGroup,
+} from "@yushu/genre-engine";
 import {
   collectIndexInput,
   parsePowerLog,
@@ -48,6 +59,17 @@ export interface PackRuleRunResult {
   notEvaluated: Array<{ id: string; reason: string }>;
   /** 数据装配失败（卡与原因逐条点名） */
   errors: string[];
+  /**
+   * 跨包同 id 的合并情况（T4-12 / R85）。
+   *
+   * `overrides` 与 `ambiguous` 都必须外显：docs/03 §8.3 的底线是"一切冲突显式提示，
+   * 禁止静默覆盖"。`dateCheck` 说明生效期到底判没判——没判不能看起来像"都在有效期内"。
+   */
+  merge: {
+    overrides: RuleOverride[];
+    ambiguous: RuleAmbiguity[];
+    dateCheck: "applied" | "skipped";
+  };
 }
 
 /**
@@ -57,8 +79,79 @@ export interface PackRuleRunResult {
  * 它要么真的能拿到数据并参与，要么被具体原因点名，**不会静默通过，也不会被名单漏掉**。
  */
 
+/** 规则文件出处的统一写法（面板与 errors 都用它，别在两处各拼一遍字符串） */
+export function packOriginLabel(packId: string, file: string): string {
+  return `派系包 ${packId}（${file}）`;
+}
+
 function originOf(set: PackRuleSet): string {
-  return `派系包 ${set.packId}（${set.file}）`;
+  return packOriginLabel(set.packId, set.file);
+}
+
+/** 合并后的可求值视图：规则 + 它真正的出处 */
+export interface RuleMergeView {
+  runnable: Array<{ rule: PackRuleSet["rules"][number]; origin: string }>;
+  /** 整件读不了的文件（原样列出，不进合并） */
+  failed: Array<{ packId: string; file: string; error: string }>;
+  /**
+   * 给面板与 `errors` 用的成品文案。
+   *
+   * 拼装留在这里而不是调用方：调用方只剩"并进 errors"一步，
+   * 于是"到底有没有外显"这件事由本函数持有的断言管得到
+   * （R82 第 7 条：变异点名的文件必须自己持有那条断言）。
+   */
+  errorLines: string[];
+  overrides: RuleOverride[];
+  ambiguous: RuleAmbiguity[];
+  outOfDate: RuleOutOfDate[];
+  dateCheck: "applied" | "skipped";
+}
+
+/**
+ * 把多个规则文件合并成"本轮真正参与求值的那些规则"（T4-12 / R85）。
+ *
+ * 引擎侧 `mergeRuleSets` 管"谁胜出"，这里管**出处跟着走**：结论行要写
+ * "派系包 X（rules/y.yaml）"，合并时若把胜出者的 packId/file 丢了，
+ * 面板就会指着错误的包说"这条是你该改的"——算法对了、指认错了，一样是坏证据。
+ *
+ * 解析失败的文件**不进合并**（它们一条规则都没有），但必须原样出现在 `failed` 里：
+ * 悄悄丢掉等于"这个包没有规则"，而真相是"这个文件读不了"。
+ */
+export function applyRuleMerge(
+  sets: readonly PackRuleSet[],
+  options: { asOf?: string } = {},
+): RuleMergeView {
+  const failed = sets
+    .filter((set) => set.error !== null)
+    .map((set) => ({ packId: set.packId, file: set.file, error: set.error as string }));
+  const groups: RuleSetGroup[] = sets
+    .filter((set) => set.error === null)
+    .map((set) => ({ packId: set.packId, file: set.file, rules: set.rules }));
+  const merged = mergeRuleSets(groups, options);
+  const originByKey = new Map(sets.map((set) => [`${set.packId}::${set.file}`, originOf(set)]));
+  // 按"胜出者所在的那一件文件"取规则本体——用全局 id→rule 表会取到**第一个**同 id 规则，
+  // 于是出处写着新包、求值的却是旧包那条：正是本轮这条函数要防的事（测试当场抓到过一次）
+  const rulesByKey = new Map(groups.map((group) => [`${group.packId}::${group.file}`, group.rules]));
+  const runnable = merged.winners
+    .filter((winner) => !merged.outOfDate.some((item) => item.id === winner.id))
+    .map((winner) => {
+      const key = `${winner.packId}::${winner.file}`;
+      const rule = (rulesByKey.get(key) ?? []).find((candidate) => candidate.id === winner.id);
+      return {
+        rule: rule as PackRuleSet["rules"][number],
+        origin: originByKey.get(key) ?? `派系包 ${winner.packId}（${winner.file}）`,
+      };
+    })
+    .filter((item) => item.rule !== undefined);
+  return {
+    runnable,
+    failed,
+    errorLines: failed.map((item) => `${packOriginLabel(item.packId, item.file)}：${item.error}`),
+    overrides: merged.overrides,
+    ambiguous: merged.ambiguous,
+    outOfDate: merged.outOfDate,
+    dateCheck: merged.dateCheck,
+  };
 }
 
 async function cardEntities(gateway: ProjectGateway, entities?: IndexEntityRow[]): Promise<IndexEntityRow[]> {
@@ -68,7 +161,7 @@ async function cardEntities(gateway: ProjectGateway, entities?: IndexEntityRow[]
 
 export async function evaluatePackRules(
   gateway: ProjectGateway,
-  options: { packIds: string[]; entities?: IndexEntityRow[]; entityIds?: string[] },
+  options: { packIds: string[]; entities?: IndexEntityRow[]; entityIds?: string[]; asOf?: string },
 ): Promise<PackRuleRunResult> {
   const findings: PackRuleFinding[] = [];
   const evaluated: string[] = [];
@@ -108,55 +201,57 @@ export async function evaluatePackRules(
     for (const pair of pairPowerLog(log.entries)) pairs.push({ entity, pair, data: powerPairData(pair) });
   }
 
-  for (const set of sets) {
-    if (set.error) {
-      errors.push(`${originOf(set)}：${set.error}`);
-      continue;
+  // T4-12（R85）：跨包同 id 先合并再求值——不合并的话同一条规则会被两个包各报一遍，
+  // 而面板上两条结论的出处互相指认，作者学到的是"红色可以忽略"。
+  const merge = applyRuleMerge(sets, options.asOf === undefined ? {} : { asOf: options.asOf });
+  errors.push(...merge.errorLines);
+  for (const item of merge.outOfDate) {
+    notEvaluated.push({ id: item.id, reason: item.reason });
+  }
+
+  for (const { rule, origin: originLabel } of merge.runnable) {
+    // 参与不参与**由数据决定**：把规则表达式里的 var 路径逐个拿去比对拼好的数据，
+    // 一个都取不到 ⇒ 这条没跑，并把缺哪些路径写进理由（R57 的手写名单在这里退场）。
+    const vars = collectVarReferences(rule.when);
+    const missing = new Set<string>();
+    let runnable = 0;
+    for (const item of pairs) {
+      const gaps = vars.filter((path) => readPath(item.data, path) === undefined);
+      if (gaps.length > 0) {
+        for (const gap of gaps) missing.add(gap);
+        continue;
+      }
+      runnable += 1;
+      const result = evaluateRule(rule, item.data);
+      if (!result.matched) continue;
+      findings.push({
+        rule: rule.id,
+        severity: rule.severity,
+        subject: item.entity.id,
+        related: item.pair.b.chapter,
+        message: result.message,
+        evidence:
+          `战力台账：${item.pair.a.chapter} 境界 ${item.pair.a.tier} / 战力 ${item.pair.a.combatPower}` +
+          ` → ${item.pair.b.chapter} 境界 ${item.pair.b.tier} / 战力 ${item.pair.b.combatPower}` +
+          `（设定卡 ${item.entity.filePath}）`,
+        fix:
+          `给 ${item.pair.b.chapter} 补一条能解释战力回落的事件（受伤 / 压制 / 道具失效），或下调该章的战斗表现；` +
+          `确认是刻意反转就写进 config/consistency.yaml 并记理由`,
+        origin: originLabel,
+      });
     }
-    for (const rule of set.rules) {
-      // 参与不参与**由数据决定**：把规则表达式里的 var 路径逐个拿去比对拼好的数据，
-      // 一个都取不到 ⇒ 这条没跑，并把缺哪些路径写进理由（R57 的手写名单在这里退场）。
-      const vars = collectVarReferences(rule.when);
-      const missing = new Set<string>();
-      let runnable = 0;
-      for (const item of pairs) {
-        const gaps = vars.filter((path) => readPath(item.data, path) === undefined);
-        if (gaps.length > 0) {
-          for (const gap of gaps) missing.add(gap);
-          continue;
-        }
-        runnable += 1;
-        const result = evaluateRule(rule, item.data);
-        if (!result.matched) continue;
-        findings.push({
-          rule: rule.id,
-          severity: rule.severity,
-          subject: item.entity.id,
-          related: item.pair.b.chapter,
-          message: result.message,
-          evidence:
-            `战力台账：${item.pair.a.chapter} 境界 ${item.pair.a.tier} / 战力 ${item.pair.a.combatPower}` +
-            ` → ${item.pair.b.chapter} 境界 ${item.pair.b.tier} / 战力 ${item.pair.b.combatPower}` +
-            `（设定卡 ${item.entity.filePath}）`,
-          fix:
-            `给 ${item.pair.b.chapter} 补一条能解释战力回落的事件（受伤 / 压制 / 道具失效），或下调该章的战斗表现；` +
-            `确认是刻意反转就写进 config/consistency.yaml 并记理由`,
-          origin: originOf(set),
-        });
-      }
-      if (runnable === 0) {
-        notEvaluated.push({
-          id: rule.id,
-          reason:
-            pairs.length === 0
-              ? "项目里没有可比对的相邻战力数据（设定卡 extensions.power_log 少于两条），这条没跑"
-              : vars.length === 0
-                ? "表达式没有引用任何取数路径（常量条件），项目数据无从参与"
-                : `求值数据取不到这些路径：${[...missing].sort().join("、")}（当前只提供战力相邻对），这条没跑`,
-        });
-      } else {
-        evaluated.push(rule.id);
-      }
+    if (runnable === 0) {
+      notEvaluated.push({
+        id: rule.id,
+        reason:
+          pairs.length === 0
+            ? "项目里没有可比对的相邻战力数据（设定卡 extensions.power_log 少于两条），这条没跑"
+            : vars.length === 0
+              ? "表达式没有引用任何取数路径（常量条件），项目数据无从参与"
+              : `求值数据取不到这些路径：${[...missing].sort().join("、")}（当前只提供战力相邻对），这条没跑`,
+      });
+    } else {
+      evaluated.push(rule.id);
     }
   }
 
@@ -165,5 +260,11 @@ export async function evaluatePackRules(
     if (a.subject !== b.subject) return a.subject < b.subject ? -1 : 1;
     return (a.related ?? "") < (b.related ?? "") ? -1 : (a.related ?? "") > (b.related ?? "") ? 1 : 0;
   });
-  return { findings, evaluated: [...new Set(evaluated)].sort(), notEvaluated, errors: errors.sort() };
+  return {
+    findings,
+    evaluated: [...new Set(evaluated)].sort(),
+    notEvaluated,
+    errors: errors.sort(),
+    merge: { overrides: merge.overrides, ambiguous: merge.ambiguous, dateCheck: merge.dateCheck },
+  };
 }

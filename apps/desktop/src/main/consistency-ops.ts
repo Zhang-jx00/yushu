@@ -141,6 +141,11 @@ async function computeReport(
   const packRun = await evaluatePackRules(gateway, {
     packIds: await projectPackIds(gateway),
     entities: structure.entities,
+    // 生效日期的判定日期由**调用方**给：引擎内不许读墙钟（确定性红线，同输入同输出），
+    // 但产品必须在"今天"判——否则 effective_from / effective_until 就只是解析了没人消费的字段
+    // （R59 批评 `priority` "解析了却没有消费者"的同一件事）。
+    // 取 UTC 日界：跨时区协作时"今天生效"要有唯一答案，本地时区会让同一次体检在两地给出不同结论。
+    asOf: new Date().toISOString().slice(0, 10),
     ...(timing === "post-generate" && scope.scoped ? { entityIds: scope.ids } : {}),
   });
   const packFindings = packRun.findings.map((finding) => ({
@@ -245,7 +250,12 @@ async function computeReport(
     unusedAllow: report.unusedAllow,
     outOfScope: structure.outOfScope.map((item) => ({ ...item })),
     skipped: { ...structure.skipped },
-    pack: { evaluated: packRun.evaluated, notEvaluated: packRun.notEvaluated, errors: packRun.errors },
+    pack: {
+      evaluated: packRun.evaluated,
+      notEvaluated: packRun.notEvaluated,
+      errors: packRun.errors,
+      merge: packRun.merge,
+    },
     aiAudit: {
       ran: aiAudit.ran,
       reason: aiAudit.reason,

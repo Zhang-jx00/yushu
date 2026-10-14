@@ -497,4 +497,13 @@ describe("伏笔结论并入体检同表（R75）", () => {
     expect(report.suppressed.map((item) => item.rule)).toContain("fs-finale-unpaid");
     expect(report.suppressed.find((item) => item.rule === "fs-finale-unpaid")!.reason).toContain("卷末");
   });
+
+  it("包规则的生效期真的被判定（主进程给日期，引擎不读墙钟）——T4-12 / R85", async () => {
+    const report = await runConsistencyCheck(gateway, { timing: "manual" });
+    // 这条断言防的是"字段解析了但没人消费"：dateCheck 若恒为 skipped，
+    // 生效日期就只是包件里一段没人看的注释，而面板上看起来像"规则都在有效期内"
+    expect(report.pack.merge.dateCheck).toBe("applied");
+    expect(Array.isArray(report.pack.merge.overrides)).toBe(true);
+    expect(Array.isArray(report.pack.merge.ambiguous)).toBe(true);
+  });
 });
