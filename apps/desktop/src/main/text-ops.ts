@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { readChapterFile } from "@yushu/world-engine";
 import { YushuError } from "@yushu/core";
 import { applyFixes, proofreadText, type ProofreadFinding } from "@yushu/text";

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { LAYER_KEYS } from "@yushu/core";
 import { collectIndexInput, type IndexEntityRow, type IndexRefRow, type IndexSourceReader } from "./index-input.js";
 import { parseWorldConfig } from "./world-config.js";

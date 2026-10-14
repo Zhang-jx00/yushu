@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import type { FusionPreview } from "../../../src/shared/ipc";
 
 /** 融合预演报告视图：新增 / 覆盖 / 冲突 三类 + ready 门禁（docs/03 §8.3） */

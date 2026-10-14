@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { YushuError } from "@yushu/core";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 

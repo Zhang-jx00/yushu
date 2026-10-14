@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 自动保存调度器（M2 / T2-6 切片）：
  * - 防抖 800ms 落盘；连续输入超过 5s 强制保存一次（docs/04 T2-6 的口径）；

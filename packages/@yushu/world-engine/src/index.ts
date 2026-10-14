@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 export * from "./layout.js";
 export * from "./world-config.js";
 export * from "./cards.js";

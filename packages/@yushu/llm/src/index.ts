@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 御书 LLM 接入（M1 最小版 T1-15；M3 升级为 Provider 能力矩阵与协议分发）：
  * - 两动词：`chat()`（非流式）与 `stream()`（流式 + AbortController 停止）；

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
 import { diffSentences, mergeSelected, splitSentences } from "../renderer/src/candidate-diff";
 import { TypewriterBuffer } from "../renderer/src/typewriter-buffer";

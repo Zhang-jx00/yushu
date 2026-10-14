@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { formatCalendarYear, type Calendar, type TimelineEvent, type TimelineFile } from "./timeline.js";
 
 /**

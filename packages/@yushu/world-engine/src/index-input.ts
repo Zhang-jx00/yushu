@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { createHash } from "node:crypto";
 import { parseOutline } from "./outline.js";
 import { readCardFile } from "./cards.js";

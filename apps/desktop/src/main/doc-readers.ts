@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import {
   OUTLINE_PATH,
   WORLD_CONFIG_PATH,

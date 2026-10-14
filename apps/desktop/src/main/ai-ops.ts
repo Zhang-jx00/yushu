@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { YushuError, countWords } from "@yushu/core";
 import {
   LLM_API_VERSION,

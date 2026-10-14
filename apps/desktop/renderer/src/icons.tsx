@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 标签页图标：Lucide（**ISC**）v1.55.0 的 11 个图标。
  *

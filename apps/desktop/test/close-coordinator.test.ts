@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it, vi } from "vitest";
 import { CloseCoordinator, type CloseFlowEvent } from "../src/main/close-coordinator.js";
 

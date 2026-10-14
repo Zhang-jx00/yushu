@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import type { LayerKey } from "@yushu/core";
 import { SchemaRegistry, createRegistry, type JsonSchemaObject } from "@yushu/schema";
 import { TYPE_PREFIXES, type CreateCardInput } from "./cards.js";

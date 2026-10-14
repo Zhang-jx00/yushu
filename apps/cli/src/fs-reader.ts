@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { promises as fs } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import type { IndexSourceFile, IndexSourceReader } from "@yushu/world-engine";

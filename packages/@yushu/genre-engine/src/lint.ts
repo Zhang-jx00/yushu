@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { ROMANCE_MODES, WORDLIST } from "./wordlist.js";
 import { duplicateRuleIds, loadPackRuleSets } from "./rules.js";
 import {

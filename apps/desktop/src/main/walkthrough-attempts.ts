@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { Script } from "node:vm";
 
 /** 一次步骤执行的结果（ok + 可审计的说明） */

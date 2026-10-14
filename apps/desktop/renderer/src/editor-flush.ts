@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 编辑器 flush 注册表（M2 / T2-6 完整版·关闭前 flush）：
  * 编辑器视图挂载时注册「把待发改动立即落盘」的异步函数；

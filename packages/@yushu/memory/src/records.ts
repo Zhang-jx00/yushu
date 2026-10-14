@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { parseFrontmatter, serializeCard } from "@yushu/core";
 import { MemoryError } from "./errors.js";
 import { parseInjectionConfig } from "./injection.js";

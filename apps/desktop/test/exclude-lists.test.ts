@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
 import { GIT_EXCLUDES } from "../src/main/git-ops.js";
 import { WALK_EXCLUDES } from "../src/main/file-gateway.js";

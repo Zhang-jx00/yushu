@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { countWords } from "@yushu/core";

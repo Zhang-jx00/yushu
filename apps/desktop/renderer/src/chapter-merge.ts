@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 章节三方合并（M2 / T2-6 完整版）：
  * base（上次已知磁盘内容）× local（编辑器当前）× remote（磁盘最新）→ 行级 diff3。

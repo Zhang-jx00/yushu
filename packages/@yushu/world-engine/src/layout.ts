@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 项目文件布局（K03 真源布局约定）。
  * 一切路径均为项目根目录下的相对路径（POSIX 分隔符）。

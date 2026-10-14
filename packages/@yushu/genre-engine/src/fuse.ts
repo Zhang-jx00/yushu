@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { basename, extname, relative } from "node:path";
 import type { GenreAxes } from "@yushu/core";
 import { ELEVEN_PIECE_KEYS, type LoadedPack } from "./types.js";

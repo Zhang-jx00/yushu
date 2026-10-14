@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { callAnthropicMessages, callAnthropicMessagesStream } from "./anthropic.js";
 import { callGeminiGenerate, callGeminiGenerateStream } from "./gemini.js";
 import { callChatCompletion, callChatCompletionStream } from "./openai.js";

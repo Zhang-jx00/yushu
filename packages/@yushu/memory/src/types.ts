@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 五层记忆的类型（docs/03 §10.1；T3-5）：
  * world_core（世界核心设定卡，常驻——由既有设定卡层提供）→ volume_summary（卷摘要）→

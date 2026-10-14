@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 编辑日志调度器（M2 / T2-8 切片 A）：
  *

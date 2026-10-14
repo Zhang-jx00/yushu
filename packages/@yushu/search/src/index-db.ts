@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { existsSync, mkdirSync, promises as fs } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";

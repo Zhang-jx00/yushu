@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 性能回归对比（M2 / T2-10 遗留：报告 diff 防退化）：
  * 把本次 PERF_RESULT 指标与「上一次同夹具报告」逐项对比——变差超过阈值（默认 20%）标记回退，

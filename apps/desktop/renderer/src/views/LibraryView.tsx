@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LibraryViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";

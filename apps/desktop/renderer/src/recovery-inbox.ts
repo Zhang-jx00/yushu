@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 恢复收件箱（M2 / T2-8 切片 A）：
  * ProjectScreen 的恢复面板把「崩溃前未保存正文」投入收件箱（按章节路径），

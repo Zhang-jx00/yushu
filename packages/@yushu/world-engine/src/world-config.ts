@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import {
   LAYER_KEYS,
   WORLD_API_VERSION,

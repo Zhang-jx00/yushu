@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { parse as parseYaml } from "yaml";
 import { YushuError } from "@yushu/core";
 

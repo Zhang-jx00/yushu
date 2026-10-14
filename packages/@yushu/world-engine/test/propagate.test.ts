@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
 import { propagate } from "@yushu/world-engine";
 import type { IndexEntityRow, IndexRefRow } from "@yushu/world-engine";

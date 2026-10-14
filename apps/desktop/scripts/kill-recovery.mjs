@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 杀进程不丢稿实测（M2 门禁 §5.5 A1；T2-8 切片 B）：
  * 用**真实强杀**（Windows: taskkill /F；其他平台 SIGKILL）验证「编辑日志是崩溃时唯一幸存者」——

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { LAYER_KEYS, type LayerKey } from "@yushu/core";
 import { loadPackTaboos } from "@yushu/genre-engine";
 import type { ChatMessage } from "@yushu/llm";

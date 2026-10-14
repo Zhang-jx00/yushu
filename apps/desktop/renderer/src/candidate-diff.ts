@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 多候选对比与局部采纳（T3-11，J15 实践 5）：
  * - `splitSentences`：中文句级切分（。！？；…… 与换行；保留分隔符，丢弃空白句）；

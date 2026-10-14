@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 写作活动心跳节流（M2 / T2-9 切片 C「写作会话与真实速度」）：
  * 编辑器每次输入都上报太频（IPC + stats.json 读改写），这里按固定间隔合并——

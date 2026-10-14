@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * `@yushu/text`——中文文本处理（M3 / T3-13，依据 J14）。
  *

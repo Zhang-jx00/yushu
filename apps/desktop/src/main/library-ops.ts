@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { countWords } from "@yushu/core";
 import { OUTLINE_PATH, chapterPath, parseOutline, readChapterFile } from "@yushu/world-engine";
 import type { LibraryViewPayload } from "../shared/ipc.js";

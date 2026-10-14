@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
 import { unmetAssertions, type E2eAssertion } from "../src/main/e2e-assertions.js";
 

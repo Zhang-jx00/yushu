@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useState } from "react";
 import type { GraphViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";

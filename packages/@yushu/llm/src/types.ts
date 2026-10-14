@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * LLM 接入的跨包类型（docs/03 §9 / J01）。
  *

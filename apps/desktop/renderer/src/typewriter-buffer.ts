@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 打字机缓冲（T3-11，J08 实践 3 / 6）：token 缓冲 + rAF 每帧 flush。
  * - 生成视图用单一"待渲染缓冲"：每个 delta 只 push（不触发渲染），每帧由 rAF 驱动 flush 一次

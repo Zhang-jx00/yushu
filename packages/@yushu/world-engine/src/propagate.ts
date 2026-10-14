@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { createHash } from "node:crypto";
 import { YushuError } from "@yushu/core";
 import type { IndexEntityRow, IndexRefRow } from "./index-input.js";

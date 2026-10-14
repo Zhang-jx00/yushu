@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { parseDocument } from "yaml";
 import { YushuError } from "@yushu/core";
 import type { ImpactRow, Proposal } from "./propagate.js";

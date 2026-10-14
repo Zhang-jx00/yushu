@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import type { GenreAxes } from "@yushu/core";
 
 /** 派系包格式版本（G06 §5.4 为唯一输入，不得另起格式） */

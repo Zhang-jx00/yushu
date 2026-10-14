@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /** 御书异常基类：所有错误携带稳定错误码，便于上层分支处理与提示。 */
 export class YushuError extends Error {
   readonly code: string;

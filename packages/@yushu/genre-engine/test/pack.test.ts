@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {

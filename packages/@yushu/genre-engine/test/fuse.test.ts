@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
 import { fuse } from "@yushu/genre-engine";
 import { makePack } from "./pack.test.js";

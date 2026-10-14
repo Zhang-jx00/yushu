@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { getNamingRules, makeNames, namingRulesForWorld } from "@yushu/world-engine";
 import type { NamingGeneratePayload, NamingResultPayload } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";

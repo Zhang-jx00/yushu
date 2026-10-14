@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 // 御书 preload：仅经 contextBridge 暴露白名单 API（一消息一方法），不做业务逻辑。
 // 通道清单与 apps/desktop/src/shared/ipc.ts 保持一致（以该文件为唯一事实源）。
 const { contextBridge, ipcRenderer } = require("electron");

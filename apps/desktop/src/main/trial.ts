@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { app, session, type BrowserWindow } from "electron";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";

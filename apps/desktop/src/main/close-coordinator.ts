@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 关闭窗口前 flush 协调器（M2 / T2-6 完整版）：
  *

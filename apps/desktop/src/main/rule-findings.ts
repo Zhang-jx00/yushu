@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { collectVarReferences, evaluateRule, loadRuleSets, readPath, type PackRuleSet } from "@yushu/genre-engine";
 import {
   collectIndexInput,

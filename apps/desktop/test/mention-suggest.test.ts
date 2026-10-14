@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
 import { findMentions, type EntityIndexEntry } from "../renderer/src/entity-mentions";
 import { detectMentionQuery, filterMentionCandidates, nextMentionActive } from "../renderer/src/mention-suggest";

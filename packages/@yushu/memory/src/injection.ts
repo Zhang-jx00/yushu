@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { MemoryError } from "./errors.js";
 import { trackMentions } from "./mentions.js";
 

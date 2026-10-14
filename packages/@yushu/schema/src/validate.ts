@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
 import { YushuError } from "@yushu/core";
 import {

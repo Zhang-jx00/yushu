@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /** 导出管线类型（M1 TXT 最小版；EPUB/DOCX/PDF 与 EPUBCheck 留待 M5） */
 
 /** 装配输入：一章（由项目数据层读出，正文已剥离 frontmatter） */

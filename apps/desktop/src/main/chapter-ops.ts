@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { countWords } from "@yushu/core";
 import { readChapterFile, serializeChapterFile } from "@yushu/world-engine";
 import type {

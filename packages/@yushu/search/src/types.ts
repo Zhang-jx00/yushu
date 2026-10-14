@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 索引输入结构（生产侧声明：@yushu/world-engine 的 collectIndexInput 产出本结构；
  * @yushu/search 消费同形结构——两边各自声明、结构兼容，避免引擎包互相依赖）。

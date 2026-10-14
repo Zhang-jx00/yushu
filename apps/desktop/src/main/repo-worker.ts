@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { app, utilityProcess, type UtilityProcess } from "electron";
 import { fileURLToPath } from "node:url";
 import type { IndexFileRow, IndexInput, IndexSourceFile } from "@yushu/world-engine";

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /** 轻量类型化事件总线：引擎包之间解耦通信（core 内零依赖）。 */
 
 export type EventMap = Record<string, unknown>;

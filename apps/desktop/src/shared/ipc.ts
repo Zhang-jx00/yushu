@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * IPC 契约（docs/03 §3）：一消息一方法；渲染层只能经 preload 白名单调用。
  * 本文件是通道名与载荷类型的唯一事实源（preload.cjs 中的通道名需与之保持一致）。

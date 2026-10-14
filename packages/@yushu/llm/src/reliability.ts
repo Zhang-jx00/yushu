@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { LlmAbortError, LlmError } from "./config.js";
 import type { FailureKindName, ReliabilityConfig, RetryRule } from "./routing.js";
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { checkConversion } from "./conversion.js";
 import { checkPunctuation } from "./punctuation.js";
 import { checkRepetition, type RepetitionOptions } from "./repetition.js";

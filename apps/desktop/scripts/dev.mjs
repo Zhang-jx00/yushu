@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 // 御书 renderer 开发脚本：启动 Vite dev server，并拉起 Electron 指向该地址。
 // 用法：pnpm --filter @yushu/desktop dev（会先编译主进程，再执行本脚本）
 import { spawn } from "node:child_process";

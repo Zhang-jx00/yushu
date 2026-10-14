@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { app, clipboard, dialog, ipcMain, safeStorage } from "electron";

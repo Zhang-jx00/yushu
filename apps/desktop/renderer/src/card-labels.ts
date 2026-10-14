@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { GENESIS_STEPS } from "./genesis-steps";
 
 /**

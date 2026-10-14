@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { buildRelationGraph, checkStructureFromSources } from "@yushu/world-engine";
 import type { GraphViewPayload, GraphViewRequestPayload } from "../shared/ipc.js";
 import { gatewayReader } from "./index-ops.js";

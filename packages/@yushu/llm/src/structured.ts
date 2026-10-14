@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { chat } from "./chat.js";
 import { accumulateUsage } from "./cost.js";
 import { extractJson, JSON_CONSTRAINT_SUFFIX } from "./downgrade.js";

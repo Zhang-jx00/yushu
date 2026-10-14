@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { PRICING_UNIT_TOKENS, DEFAULT_CURRENCY } from "./cost.js";
 import type { ModelCacheCapability, ModelPricing } from "./types.js";
 

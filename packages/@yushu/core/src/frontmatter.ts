@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { FrontmatterError } from "./errors.js";
 

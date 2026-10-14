@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 御书检索索引（M1 最小版 T1-21；M3/T3-8 增补 RAG 混合检索）：
  * - SQLite（Node 内置 `node:sqlite`，零原生依赖）+ FTS5 external content；

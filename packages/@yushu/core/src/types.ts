@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 御书核心类型（docs/03 §5 数据模型的 TypeScript 落地）。
  * 原则：所有实体 ID 采用稳定命名空间形式，引用一律写 ID、不写显示名。

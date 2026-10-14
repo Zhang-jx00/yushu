@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 御书记忆系统（M3 / T3-5）：五层记忆的数据层。
  * - world_core：世界核心设定卡（常驻）——由既有设定卡层提供（@yushu/world-engine + 上下文组装）；

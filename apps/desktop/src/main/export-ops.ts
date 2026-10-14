@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { promises as fs } from "node:fs";
 import { basename, join } from "node:path";
 import { YushuError, countWords } from "@yushu/core";

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { YushuError } from "@yushu/core";
 import type { Event as WorldEvent, Timeline } from "@yushu/core";
 import { parseDocument } from "yaml";

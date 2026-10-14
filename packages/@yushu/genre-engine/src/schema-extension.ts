@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { PackLoadError } from "./load.js";

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 全书体检的 AI 采样器（M4 / T4-4 的"重规则 + AI 采样"，R58）。
  *

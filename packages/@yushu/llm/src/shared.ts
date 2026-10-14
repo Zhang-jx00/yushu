@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { LlmAbortError, LlmError, resolveApiKey } from "./config.js";
 import { redactSecretsInText } from "./secrets.js";
 import type { LlmCallOptions, LlmProviderSpec } from "./types.js";

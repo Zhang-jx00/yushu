@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { YushuError } from "@yushu/core";
 import { parseDocument } from "yaml";
 import { powerLogChapterNo } from "./power-log.js";

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 四维词表（docs/05 §1，lint 强校验词表一致性）。
  * 词表是派系包 genre_axes 的合法取值来源；新增词须经 docs/05 §6 收录流程。

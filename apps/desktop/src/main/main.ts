@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { BrowserWindow, app } from "electron";
 import { join } from "node:path";
 import { CHANNELS } from "../shared/ipc.js";

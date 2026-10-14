@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { callProtocolChat } from "./dispatch.js";
 import { LlmAbortError, LlmError } from "./config.js";
 import { retryWithPolicy } from "./reliability.js";

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import type { DatabaseSync } from "node:sqlite";
 import { buildMatchQuery, chunkHitFromRow, unspaceCjk } from "./index-db.js";
 import type { ChunkHit } from "./types.js";

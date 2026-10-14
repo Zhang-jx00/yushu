@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 中文文本处理的公共类型（T3-13 / J14）。
  *

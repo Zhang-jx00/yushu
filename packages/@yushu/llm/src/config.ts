@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { YushuError } from "@yushu/core";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { detectPlaintextSecrets } from "./secrets.js";

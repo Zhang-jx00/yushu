@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /**
  * 富文本形态 @ 提及候选（M2 / T2-2 富文本形态）：
  * - detectMentionQuery：从「光标前、所在段落内」的文本探测「@ + 查询词」触发态（纯函数，供 TipTap 与单测共用）；

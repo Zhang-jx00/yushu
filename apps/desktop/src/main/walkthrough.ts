@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { BrowserWindow, app, dialog } from "electron";
 import { existsSync, promises as fs } from "node:fs";
 import { createServer, type Server } from "node:http";
