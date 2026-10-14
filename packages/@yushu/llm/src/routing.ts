@@ -79,6 +79,10 @@ export const DEFAULT_TASK_ROUTES: Readonly<Record<string, TaskRoute>> = Object.f
   review: { prefer: ["reasoning"] },
   summarize: { prefer: ["small"] },
   extract: { prefer: ["small"], require: ["structured_output"] },
+  // R58 的全书体检 AI 采样核验（`ai-audit.ts` 用 task="audit" 走 resolveRoute）此前**不在默认表里**：
+  // 路由看不见它 ⇒ 档位偏好落到 provider 原顺序（可能把每次抽查派到旗舰档），require 为空 ⇒
+  // 端点不支持结构化输出时也不标 unmet。抽查是"照契约指认"的便宜活，与 extract 同类。
+  audit: { prefer: ["small"], require: ["structured_output"] },
 });
 
 export function defaultRoutingConfig(): RoutingConfig {

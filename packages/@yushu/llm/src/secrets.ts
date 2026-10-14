@@ -53,6 +53,45 @@ export function maskSecret(value: string): string {
   return `${value.slice(0, keep)}…(len=${value.length})`;
 }
 
+/**
+ * 自由文本（**外部来的**，如 provider 的错误回显体）里的密钥脱敏。
+ *
+ * 与 `detectPlaintextSecrets` 的分工：那个是"这行配置像不像明文密钥"⇒ 判定并阻断；
+ * 这个是"这段文字里可能有密钥"⇒ 就地换掉后保留其余内容。两者共用同一批高置信形态。
+ *
+ * 取舍写清楚：**对回显体宁可多脱敏**。一段 32 位十六进制在诊断上多半没价值，而一个漏出去的 Key
+ * 是不可回收的——所以 32+ hex 也换。可诊断性由"字段名保留、非密钥文字原样、状态码与 provider id
+ * 由调用方拼在消息里"兜住，不是把整条消息抹成不可读。
+ */
+const REDACT_SHAPES: readonly { readonly kind: string; readonly re: RegExp }[] = [
+  { kind: "sk-", re: /\bsk-[A-Za-z0-9_\-]{8,}/g },
+  { kind: "AIza", re: /\bAIza[0-9A-Za-z_\-]{20,}/g },
+  { kind: "github PAT", re: /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g },
+  { kind: "slack", re: /\bxox[baprs]-[A-Za-z0-9\-]{10,}/g },
+  { kind: "Bearer", re: /\bBearer\s+[A-Za-z0-9._~+\/\-]{12,}=*/gi },
+  { kind: "长随机串", re: /\b[0-9a-fA-F]{32,}\b/g },
+];
+
+/** 字段名 + 分隔符留下、值换掉：作者看到 `api_key: [已脱敏]` 才知道是哪一个字段在回显 */
+const FIELD_RE =
+  /\b(api_key|apikey|secret_key|access_key|x-api-key|authorization|token|password)\b(["']?\s*[:=]\s*)["']?[^\s,"']{12,}["']?/gi;
+
+export function redactSecretsInText(text: string): string {
+  if (text === "") return "";
+  let out = text;
+  for (const shape of REDACT_SHAPES) {
+    // 每条模式各带自己的 global 正则；lastIndex 归零后才用，避免多次调用互相污染
+    shape.re.lastIndex = 0;
+    out = out.replace(shape.re, `[已脱敏:${shape.kind}]`);
+  }
+  FIELD_RE.lastIndex = 0;
+  out = out.replace(
+    FIELD_RE,
+    (_matched, name: string, separator: string) => `${name}${separator}"[已脱敏:密钥字段字面值]"`,
+  );
+  return out;
+}
+
 /** 解析一行 `key: value`（YAML 简形；带引号与缩进都剥掉） */
 function parseLine(line: string): { key: string; value: string } | null {
   const match = /^\s*-?\s*([A-Za-z_][A-Za-z0-9_\-]*)\s*:\s*(.*)$/.exec(line);

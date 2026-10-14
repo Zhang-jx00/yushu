@@ -104,8 +104,9 @@ describe("routing 配置解析（T3-2）", () => {
     ).toThrowError(/global/);
   });
 
-  it("DEFAULT_TASK_ROUTES 覆盖 docs/03 §9 的五个任务 + summarize（T3-5）+ extract（T3-10）", () => {
+  it("DEFAULT_TASK_ROUTES 覆盖 docs/03 §9 的五个任务 + summarize（T3-5）+ extract（T3-10）+ audit（R58 采样核验，R80 登记）", () => {
     expect(Object.keys(DEFAULT_TASK_ROUTES).sort()).toEqual([
+      "audit",
       "drafting",
       "extract",
       "naming",
@@ -117,6 +118,9 @@ describe("routing 配置解析（T3-2）", () => {
     expect(DEFAULT_TASK_ROUTES["summarize"]?.prefer).toEqual(["small"]);
     expect(DEFAULT_TASK_ROUTES["extract"]?.prefer).toEqual(["small"]);
     expect(DEFAULT_TASK_ROUTES["extract"]?.require).toEqual(["structured_output"]);
+    // audit 与 extract 同类（照契约指认、要结构化输出），此前不在表里 ⇒ 路由看不见它
+    expect(DEFAULT_TASK_ROUTES["audit"]?.prefer).toEqual(["small"]);
+    expect(DEFAULT_TASK_ROUTES["audit"]?.require).toEqual(["structured_output"]);
   });
 });
 

@@ -1,4 +1,5 @@
 import { LlmAbortError, LlmError, resolveApiKey } from "./config.js";
+import { redactSecretsInText } from "./secrets.js";
 import type { LlmCallOptions, LlmProviderSpec } from "./types.js";
 
 /**
@@ -51,7 +52,9 @@ export async function postJson(
       ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
-      const snippet = (await response.text().catch(() => "")).slice(0, 300);
+      // 回显体是**外部文本**：有些网关会把收到的请求头原样贴进 401 的 body，那正好带着 Authorization
+      // 与 x-api-key。这条消息会进 UI、进 usage 日志、进截图，所以先脱敏再拼（R80）。
+      const snippet = redactSecretsInText(await response.text().catch(() => "")).slice(0, 300);
       throw new LlmError(
         "E_LLM_HTTP",
         `provider「${provider.id}」返回 HTTP ${response.status}${snippet ? `：${snippet}` : ""}`,
