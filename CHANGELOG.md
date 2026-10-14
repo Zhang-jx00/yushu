@@ -45,6 +45,31 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **导出能力矩阵：把"这台机器能不能出这个格式"变成测出来的事实（第 87 轮，M5/T5-4 第一段）**：
+  新建 `@yushu/export/src/formats.ts`（纯判定）与 `apps/desktop/src/main/export-tooling.ts`（可注入的外部命令层），
+  导出预览与「导出与自查」页新增能力面板，预演新增 step57。七条口径：① **pandoc 认得 `pdf` 这个输出格式
+  ≠ 本机出得了 PDF**——还要七个 PDF 引擎之一在位；本机实测 pandoc 2.10 的格式表里有 `pdf` 而
+  **引擎一个都没装** ⇒ PDF 判「暂不可」，EPUB 3.3 / DOCX 判可产出，TXT 由御书自己装配（不经 Pandoc）。
+  ② EPUB 显式 `--to epub3`（不带参数时 pandoc 可能给 epub2，而目标是 3.3）。③ **产不出的格式直接拒，
+  一条命令都不下发**：用户要 EPUB、结果拿到一个改了名的 `.txt`，比报错坏，因为它看起来成功了。
+  ④ **EPUBCheck 未就位 ⇒ 门禁结论是"未校验"而不是"通过"**；jar 位置走 `YUSHU_EPUBCHECK_JAR`，
+  jar 不在就连 `java` 都不探测。⑤ 探测由串行改**并发**（本机实测 1853ms → 565ms），并把 `spawnSync`
+  换成非阻塞 `spawn`——七次同步 `where` 会把主进程事件循环按住约 1.3 秒；结果进程内缓存，
+  **失败的探测不进缓存**（一次抖动永久报"探测失败"比慢更难查）。⑥ 预览返回 `capabilities` +
+  `capabilitiesNote`：探测抛错时矩阵**留空**并写明"探测失败"，不拿"看起来合理"的结论顶替，
+  也不连带把整页预览打死（章数、字数、敏感词命中照常给）。⑦ step57 只钉**与机器无关**的断言
+  （顺序 txt/epub/docx/pdf、判定只用两档、每条依据要具体、TXT 必可用、措辞如实），换台机器不会假红。
+  **顺带修掉一条被 step57 撞出来的真竞态**：`previewExport` 首帧变慢后，「我已核对…」复选框会在
+  用户勾完、预览才回来时被 `setReviewed(false)` 静默冲掉（v188 的 step7 因此抖了一次，`flaky:[7]`）——
+  这不是测试问题，作者会亲眼看见自己勾上又灭。改法是**摘要没回来之前复选框 disabled**
+  （没看见数字就不许确认），step7 相应改成"先等摘要 → 再要求可用"，把顺序固定下来。
+  **验证（收口实跑）**：`pnpm test` **1214/1214（116 文件）**、`pnpm typecheck` TC=0、
+  `pnpm --filter @yushu/desktop e2e` E2E=0、UI 预演**全新目录 v190** **57/57**（抖动=0、证据缺失=0、
+  `screenshotFailures:[]`）；8 条变异全部能红并逐条还原复验。
+  **T5-4 不勾选**：Markdown 源装配喂 pandoc、`runExport` 的 format 参数与真实产出、EPUBCheck 门禁接线、
+  平台章节格式适配（K11）都还没做；PDF 与 EPUB 质检还各卡一条外部条件（本机装 LaTeX/typst/weasyprint
+  之一、备 EPUBCheck jar）。
+
 - **R76–R85 十轮总复核（第 86 轮，文档与锁；未触运行时代码）**：做法是**不重述结论，只把每条结论
   指回一个可运行的锚点**（测试文件名 + runner 报的例数 / e2e 探针字段 / 预演步号）。
   ① **三条勾选逐条复看全部成立**：§11.6 的「LICENSE+NOTICE+SPDX」（`spdx-headers.test.ts` 4 例）与
