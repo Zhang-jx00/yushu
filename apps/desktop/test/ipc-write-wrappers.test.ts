@@ -56,6 +56,11 @@ const NON_WRITE_CHANNELS = [
   "propagatePreview",
   "proposalDecide",
   "proposalList",
+  // R77 存量导入·第一段可达的部分：pick 只把原生对话框结果登记进闸门（写的是进程内票据表，
+  // 不是文件），preview 只读外部字节算报告——**一个字节都不落盘**，所以不该刷索引也不该置脏结论。
+  // 真正会建卷建章的 `import:apply`（R78）必须进 WRITE_CHANNELS，别拿这两条的口径替它说话。
+  "importPick",
+  "importPreview",
 ] as const;
 
 /** 解析每个 `ipcMain.handle(CHANNELS.x, …)` 块，返回通道 → 所用包装器 */

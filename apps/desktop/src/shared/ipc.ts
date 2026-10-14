@@ -73,6 +73,10 @@ export const CHANNELS = {
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
   satisfactionBoard: "satisfaction:board",
+  /** 存量导入·挑文件（M5/T5-7，R77）：主进程原生对话框结果登记进闸门，**只回票据不回路径** */
+  importPick: "import:pick",
+  /** 存量导入·预演（M5/T5-7，R77）：**只读**——凭票读字节算编码/清洗/分章报告，零写入 */
+  importPreview: "import:preview",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -2228,4 +2232,80 @@ export interface SatisfactionBoardPayload {
   /** 没判定的规则逐条列在这里：面板必须把"没判的"和"判过没问题"分开显示 */
   notEvaluated: { rule: string; reason: string }[];
   stats: { hits: number; scenes: number; advanceRate: number | null; openPromises: number; strongestStreak: number };
+}
+
+/**
+ * 存量导入（M5 / T5-7，R77）——挑选闸门与预演的载荷。
+ *
+ * 三个"看着奇怪"的形状都是刻意的：
+ * - `ImportPickPayload` **没有 path**：路径只留在主进程的闸门登记表里，渲染层拿到的只有票据；
+ * - `ImportPreviewPayload` **没有正文全文**：32MB 的稿子不整篇过 IPC，界面要的是字数与摘录；
+ * - `encoding.assumed` 与 `split.hardSplit` 必须一路带到面板：编码是猜的、章没切开，
+ *   都是作者入库前必须知道的事，藏在主进程等于没说。
+ */
+
+export interface ImportPickPayload {
+  /** 闸门票据（10 分钟 TTL）：此后预览与入库都只认它 */
+  ticket: string;
+  /** 只给文件名（basename），不是路径 */
+  name: string;
+  bytes: number;
+}
+
+/** 一条清洗规则及其来源：作者要看得见"用了哪些规则"才知道报告在说什么 */
+export interface ImportRulePayload {
+  id: string;
+  pattern: string;
+  source: "builtin" | "custom";
+}
+
+export interface ImportCleanPayload {
+  lineEndingNormalized: number;
+  blankLinesCollapsed: number;
+  removed: { rule: string; count: number; sample: string }[];
+  redacted: { kind: string; count: number }[];
+}
+
+export interface ImportEncodingPayload {
+  encoding: string;
+  bom: string | null;
+  /** true = GB18030 兜底，是猜的；面板必须把这句说出来 */
+  assumed: boolean;
+  /** false = 连猜都不猜（空文件） */
+  ok: boolean;
+  note: string;
+}
+
+export interface ImportChapterPreviewPayload {
+  index: number;
+  title: string;
+  /** 与编辑器 / 导出同一个 countWords 口径 */
+  chars: number;
+  /** 摘录（≤80 字符，空白折成单空格）；不是正文全文 */
+  excerpt: string;
+}
+
+export interface ImportPreviewPayload {
+  name: string;
+  bytes: number;
+  encoding: ImportEncodingPayload;
+  clean: ImportCleanPayload;
+  rules: ImportRulePayload[];
+  split: {
+    /** false = 没按标题切开（整篇当一章） */
+    hardSplit: boolean;
+    note: string | null;
+    chapterCount: number;
+    volumeHints: string[];
+    hasPreamble: boolean;
+    preambleChars: number;
+  };
+  chapters: ImportChapterPreviewPayload[];
+  totalChars: number;
+}
+
+/** 预演请求：票据必填；规则是**追加**在默认规则之后的自定义正则 */
+export interface ImportPreviewRequestPayload {
+  ticket: string;
+  rules?: { id: string; pattern: string }[];
 }

@@ -63,6 +63,9 @@ import {
   type IndexRebuildResultPayload,
   type IndexSearchResultPayload,
   type IndexStatusPayload,
+  type ImportPickPayload,
+  type ImportPreviewPayload,
+  type ImportPreviewRequestPayload,
   type LibraryViewPayload,
   type IpcResult,
   type MemoryDeleteFactPayload,
@@ -139,6 +142,7 @@ import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
+import { pickImportSource, previewImport } from "./import-ops.js";
 import type { ProposalFile } from "@yushu/world-engine";
 
 /** 提案文件 → IPC 载荷：未决策条数在这里算，面板只负责显示（不在渲染层长出第二套判断） */
@@ -580,6 +584,33 @@ export function registerIpcHandlers(): void {
   // 爽点与期待感看板（T4-10）：判定在引擎，阈值不传就不跑 ⇒ 只读 wrap
   ipcMain.handle(CHANNELS.satisfactionBoard, (_event, payload: SatisfactionBoardRequestPayload) =>
     wrap<SatisfactionBoardPayload>(() => satisfactionBoard(requireGateway(), payload ?? {})),
+  );
+
+  /* ---------- 存量导入（M5 / T5-7，R77：挑文件 + 预演） ---------- */
+
+  /**
+   * 全仓库**唯一**让外部绝对路径进入程序的地方：原生对话框的用户点击。
+   * 结果交给闸门登记，返回渲染层的只有票据与文件名——因此这条通道不接受任何路径参数，
+   * 渲染层也没有"传路径"这个能力（护栏见 `import-gate.ts` 与 test/import-gate.test.ts）。
+   */
+  ipcMain.handle(CHANNELS.importPick, () =>
+    wrap<ImportPickPayload | null>(() =>
+      pickImportSource(() =>
+        dialog.showOpenDialog({
+          title: "选择要导入的稿件（单个文本文件）",
+          properties: ["openFile"],
+          filters: [{ name: "文本稿件", extensions: ["txt", "md", "markdown"] }],
+        }),
+      ),
+    ),
+  );
+
+  // 预演：凭票读字节算编码 / 清洗 / 分章三份报告，**零写入** ⇒ 只读 wrap
+  // （`ipc-write-wrappers.test.ts` 的 NON_WRITE 清单点名了这两条；建卷建章的 import:apply 在 R78，那时必须换清单）
+  ipcMain.handle(CHANNELS.importPreview, (_event, payload: ImportPreviewRequestPayload) =>
+    wrap<ImportPreviewPayload>(() =>
+      previewImport(payload.ticket, payload.rules ? { rules: payload.rules } : {}),
+    ),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

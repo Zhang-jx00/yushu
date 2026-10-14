@@ -114,6 +114,10 @@ contextBridge.exposeInMainWorld("yushu", {
   satisfaction: {
     board: (payload) => invoke("satisfaction:board", payload),
   },
+  import: {
+    pick: () => invoke("import:pick"),
+    preview: (payload) => invoke("import:preview", payload),
+  },
   export: {
     preview: () => invoke("export:preview"),
     run: (payload) => invoke("export:run", payload),

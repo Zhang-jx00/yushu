@@ -28,6 +28,9 @@ import type {
   ChronicleBookRequestPayload,
   SatisfactionBoardPayload,
   SatisfactionBoardRequestPayload,
+  ImportPickPayload,
+  ImportPreviewPayload,
+  ImportPreviewRequestPayload,
   ProposalPayload,
   AiCostPayload,
   AiStartResult,
@@ -205,6 +208,14 @@ export interface YushuApi {
   /** 爽点与期待感看板（M4/T4-10，R73）：只读；阈值不传则对应规则不判定 */
   satisfaction: {
     board: (payload?: SatisfactionBoardRequestPayload) => Promise<SatisfactionBoardPayload>;
+  };
+  /**
+   * 存量导入（M5/T5-7，R77）：`pick` 弹原生对话框并只回票据，`preview` 凭票算三份报告。
+   * 两个方法都不会写盘——渲染层自始至终拿不到、也不用传文件路径（入库在 R78）。
+   */
+  import: {
+    pick: () => Promise<ImportPickPayload | null>;
+    preview: (payload: ImportPreviewRequestPayload) => Promise<ImportPreviewPayload>;
   };
   export: {
     preview: () => Promise<ExportPreviewPayload>;

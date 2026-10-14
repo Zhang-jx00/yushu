@@ -136,4 +136,16 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(literals.invoke.has("satisfaction:board")).toBe(true);
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("satisfaction.board")).toBe(true);
   });
+
+  it("存量导入两条通道在四处齐备（R77 新增：pick 只回票据、preview 只读）", () => {
+    expect(channels.get("importPick")).toBe("import:pick");
+    expect(channels.get("importPreview")).toBe("import:preview");
+    expect(registered).toContain("importPick");
+    expect(registered).toContain("importPreview");
+    expect(literals.invoke.has("import:pick")).toBe(true);
+    expect(literals.invoke.has("import:preview")).toBe(true);
+    const typed = memberPaths(apiTs, /export interface YushuApi \{/);
+    expect(typed.has("import.pick")).toBe(true);
+    expect(typed.has("import.preview")).toBe(true);
+  });
 });
