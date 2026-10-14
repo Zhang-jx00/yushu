@@ -17,7 +17,7 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **1010/1010 全绿**（98 个测试文件）——`pnpm test`（R75 伏笔并入体检 +13 例；R74 为 997/97、R73 为 991/96） |
+| 单测 | **1028/1028 全绿**（99 个测试文件）——`pnpm test`（R76 存量导入·引擎侧 +18 例；R75 为 1010/98） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
 | UI 预演 | **54/54 全绿**（最近一次新目录 **v167**，59.2s，抖动=0、证据缺失=0；v162 为 53/53、v157 为 52/52、v153 为 51/51，`flakySteps:[]`、`screenshotFailures:[]`；R63 的 v142 为 47/47）——见 §6.3。**step21 的偶发抖动根因已于 R58 消掉**（`press()` 缓存了失效的 `.tiptap` 节点，改为每次按键重新查询）；**剩余遗留只有 step17**：快照内容寻址导致"重复点一次不产生新行"，**状态变更型步骤重试救不回来**，根因仍未定（docs/06 §七）。**另记一条证据口径**：`screenshotFailures:[]` 只说明图取到了，不说明图拍对了——R58 复看时发现规则页的 step41/43/44 截图只拍到页首，已给这几步补 `scrollIntoView` 再重跑（v135）。**两条"取证要取在被断言那段"的新例子**：step47（R63）在展开动画**中途 60ms 采样**高度（0 → 35/52 → 236 = 内容高），断言的是"存在中间态且终值等于内容高"而不是某个中间常量；step49（R66）在页面里**现场按真实章序造数据**再验看板（逾期外显、红鲱鱼+放弃带理由不被报缺陷、paid 无回收章报矛盾、面板内没有写回按钮）；step48（R64）读**真实 computed style**（`line-break` / `text-autospace` / `text-spacing-trim` / `font-variant-numeric` / 版心 px）与 `CSS.supports()` 三个布尔——把"这台机器的运行时支不支持"变成问出来的事实，不是查表猜的。**R71 再添两条同类账，都属"证据看着有、其实不成立"**：① step33 `waitFor('.assembly-preview')` 等的节点在上一步跑完后**已经在 DOM 里**（step31 末尾故意用小预算再跑一次），于是它立刻返回、读到旧回执，而按钮还在合法禁用态——此前绿是撞运气（IPC 快过 150ms 睡眠）；凡"点按钮 → 等结果节点"先问"这节点是不是已经在"，判据要带上**本步特有的内容**（本步的预算数字、按钮转绿）。② M4 验收 A5 的 e2e 探针比的是 `edges:0 / timelineRows:0` 的两个空视图 ⇒ 空对空当然"逐字不变"，已补夹具与 `edges > 0`、`timelineRows >= 3` 两条非空性断言并分别变异打红。**还有一条截图纪律**：新步骤若只量不改画面，`captureStep` 的滞后帧守卫会标"证据存疑"（v160/v161 的 step53 就是这样），要么把目标区域滚进视口、要么别指望那张图算证据。 |
@@ -309,6 +309,11 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
 - 满载并行的墙钟敏感用例已有两处先例：`snapshot-ops.test.ts` 的环形保留快照（30s）与
   `git-ops.test.ts` 的 init + 首次全量提交（20s，单跑实测 1.79s）。**只给那一条加预算、不改判据、
   不全局调大 `testTimeout`**——全局放宽等于放弃挂死检测。
+- **git 凭据按「主机」只存一条，不按仓库**（2026-10-13 实测）：helper 是 `manager`，`credential.useHttpPath` 默认未设 ⇒ 整个 github.com 共用 `git:https://github.com` 那一条。库里另有 `git:https://gitee.com`，说明不是「只能存一个」，而是**查找键不带仓库路径**。曾因此推送一直 403「denied to Zhang-jx00」，而手上那枚 token 本身是好的（存进去的是另一枚对本仓库无 Contents 写权限的）。
+  - **yushu 的处置**：`git config --local credential.https://github.com.useHttpPath true` + 写路径键条目 `git:https://github.com/Zhang-jx00/yushu`。**只动本仓库**，主机键那条原封不动（用户机器上还有多个项目在推，开全局会让它们下次推送全部重新要一次凭据）。
+  - **403 先分清原因**：`x-accepted-github-permissions: contents=write` 且 `POST /git/blobs` 返 403 ⇒ 权限不够；`Could not resolve host` ⇒ 网络。别把权限问题报成网络问题。改凭据前先 `cmdkey /list` 列条目并复述影响面。
+  - **不改凭据库时的一次性推送**：token 只进子进程环境变量 + 一个临时 helper 脚本（先 `-c credential.helper=` 清空链，否则 manager 抢先答），用完立刻删脚本；密钥不回显、不落盘。
+- **全局 `http.sslverify false`**（在 `~/.gitconfig`）：实测 `git -c http.sslVerify=true ls-remote origin` 正常 ⇒ 对 GitHub 并不必要，却把所有 HTTPS 仓库的证书校验关掉了（PAT 可被中间人截走）。**只在 yushu 本地**开了 `http.https://github.com.sslVerify true`，全局未动；是否全机恢复由用户决定。
 - 大章/百万字性能夹具在 `D:\Temp\yushu-perf-synth1m`（幂等复用）；预演目录 `D:\Temp\yushu-walkthrough-v*` 可随意清理。
 
 ---
@@ -448,14 +453,22 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
     先写测试看它红再改绿。step49 扩了运行时证据（`体检同表含伏笔结论=true`）；变异：摘掉同表 ⇒ 3 条新测试同红。
     验证：1010/1010（98 文件）、TC=0、E2E=0、预演 54/54（v167）。顺带给 `git-ops` 的"整体回滚"补显式 20s 预算
     （98 文件满载越 5s 闸；单跑实测 945/952ms，改预算不改判据、不动全局 testTimeout）。
-13. **R76｜治理与审计余账**：`CODE_OF_CONDUCT.md` + `GOVERNANCE.md`（docs/04 §11.2/§11.4）、SPDX 文件头批量添加
+13. **R76｜T5-7 存量导入·引擎侧第一段已完成，T5-7 未勾**：`@yushu/text/import.ts` 四个纯函数——
+    编码探测（BOM → 严格 UTF-8 → GB18030 兜底，兜底时 `assumed:true` 明写「这是猜的」；空字节连猜都不猜）、
+    清洗（行尾归一 / 规则删行留样例与计数 / **疑似密钥剔除单独计数** / 空行折叠；坏正则抛错不静默跳过）、
+    规则海选分章（认「第 N 章/节/回/Chapter N」才切，认不出整篇一章并说明；第一章前进 `preamble`、
+    卷标题进 `volumeHints`）。**只覆盖任务文本前三步**：AI 筛选、误切校正、字数对账、实体抽取候选、
+    可中断续跑**一步都没做**。18 例先红后绿、全量 1028/1028（99 文件）、TC=0、**变异 5 次各红 1 例**；
+    **纯引擎轮 ⇒ 没跑 e2e 与 UI 预演**。夹具教训：`Buffer.from(s, "gb18030")` 在 Node 里直接抛
+    `ERR_UNKNOWN_ENCODING`（Buffer 不支持 GB18030 编码方向，只有 TextDecoder 能解）⇒ 改用 iconv 真字节。
+14. **R77｜治理与审计余账**：`CODE_OF_CONDUCT.md` + `GOVERNANCE.md`（docs/04 §11.2/§11.4）、SPDX 文件头批量添加
     （**单独一轮做**，配一条"抽样文件必带头"的能红断言）、CSS 令牌三层重构（primitive → semantic → component）、
     `audit` 任务登记进路由表并校验 `structured_output` 能力、`restoreDoc` 带 baseHash 拒并发、排除清单三向一致 +
     双向单测锁、LLM 错误回显掩码、renderer 包体（1.5 MB / gzip 498 kB）要不要按标签页 code-split——
     **本地 file:// 加载下分包未必更快，先测冷启动与常驻再决定**。
-14. **R77｜M5 开局：T5-7 存量稿件导入**——编码探测（BOM → UTF-8 → GB18030 兜底）→ 正文清洗 → 建卷建章；
+15. **R78｜M5 桌面侧：导入建卷建章 + 清洗报告界面（接 R76 引擎侧）**——编码探测（BOM → UTF-8 → GB18030 兜底）→ 正文清洗 → 建卷建章；
     **顺带收掉 T3-14 那条唯一遗留**（导入外部项目时剥掉字面值密钥与 `.yushu/secrets.json`），勾上它 M3 的 T3-14 才算收口。
-15. **R78｜批次收口**：T4-11 误报率阈值做成可校准项（联动项目级白名单，勾 T4-11）+ T4-12 平台规则包机制就绪
+16. **R79｜批次收口**：T4-11 误报率阈值做成可校准项（联动项目级白名单，勾 T4-11）+ T4-12 平台规则包机制就绪
     （规则外置、带来源与生效日期；**`RULE_KEYS` 要能容纳 `version`**，否则 docs/03 §8.3 的版本合并永远做不了）
     + **本批十轮总复核**（每个 `[x]` 指到测试名 / 探针字段 / 预演步号；并复看留档截图是否真拍到被断言那段）。
 

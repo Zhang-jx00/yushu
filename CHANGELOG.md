@@ -45,6 +45,25 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **存量稿件导入·引擎侧第一段（第 76 轮，M5/T5-7，本项不勾选）**：新建 `@yushu/text/import.ts` 四个纯函数
+  （字节进、结构出，不碰磁盘）：`detectSourceEncoding`（BOM → 严格 UTF-8（`TextDecoder fatal` 证伪）→
+  GB18030 兜底；走到兜底时 `assumed: true` 且 note 明写"这是猜的，请抽查"，空字节串连猜都不猜 `ok: false`）、
+  `decodeImportedText`（BOM 不留在正文里）、`cleanImportedText`（行尾归一计数、按规则删行**留条数与样例**、
+  **疑似密钥剔除单独计数**（`sk-` / `gh[pousr]_` / `github_pat_` / `Bearer`——红线 3 的导入侧落点）、
+  连续 3 行以上空行压成 1 行；**规则里的正则读不懂就抛错**，不静默跳过）、
+  `splitImportedChapters`（认「第 N 章/节/回/Chapter N」才切；认不出整篇作一章并 `hardSplit: false`，
+  **绝不按字数硬切在句子里**；第一章之前进 `preamble`，卷标题进 `volumeHints`）。
+  **只覆盖任务文本的前三步**——AI 筛选、误切校正、字数对账、实体抽取候选、可中断续跑**一步都没做**。
+  **一条被自己的测试抓出来的环境事实**：夹具写 `Buffer.from(s, "gb18030")` 直接抛 `ERR_UNKNOWN_ENCODING`
+  —— **Node 的 Buffer 不支持 GB18030 编码方向，只有 `TextDecoder` 能解**；改用 iconv 生成的真 GBK 字节
+  内嵌测试才测到真路径（并证实那串字节按 UTF-8 严格解码确实抛错）。零新增依赖的前提当场量：
+  本机 `process.versions.icu = 78.2`。**验证**：18 例先红后绿、全量 **1028/1028（99 文件）**、TC=0、
+  **变异 5 次各红 1 例**（兜底不承认是猜 / 空字节硬猜 / 坏正则静默跳过 / 不剔除密钥 / 认不出标题也说切开），
+  还原后 sha 逐字一致。其中一次变异因缩进没命中，脚本如实报"不算证据"，改正后重跑才红。
+  **纯引擎轮：没碰桌面端 ⇒ 没跑 e2e 与 UI 预演**；建卷建章与导入界面在 R77，**T5-7 保持未勾**。
+  同轮机务：本机 git 凭据按主机只存一条导致推送 403，改为**只在 yushu** 按仓库路径取凭据
+  （`--local credential.https://github.com.useHttpPath true` + 路径键条目，主机键原条目未动）；
+  另发现全局 `http.sslverify false`，实测 GitHub 校验可用 ⇒ **只在本仓库**开回校验，全局未动（细节见 docs/08 §9）。
 - **伏笔结论并入全书体检（第 75 轮，M4/T4-2 第三类语义规则，本项仍不勾选）**：`foreshadow-ops.ts` 新增
   `foreshadowReportFindings`——把 `buildForeshadowBoard` 的结论**原样投影**成一致性报告条目（判定零重写，
   避免长出第二套伏笔判定），原文区间由新的 `ledger-spans.ts` 按条目 id 在 `world/foreshadow.yaml` 里定位
