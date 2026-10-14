@@ -156,4 +156,53 @@ describe("反漂移：账本里已动过的里程碑，对外文档不许写「�
       }
     }
   });
+
+  it("README 引用的测试数与交接文档 §1 的基线数是同一个（防对外数字烂在两处）", () => {
+    /**
+     * R86 总复核实抓到：README 的 `pnpm test` 注释停在 R83 的「1153 例 / 110 文件」，
+     * 而 R84、R85 各加了一批测试后交接文档已经写到 1186/114。
+     * 这类漂移不会让任何东西变红，只会让**读者拿到的数字是假的**——
+     * 而对外文档里的数字恰恰是别人判断"这仓库靠不靠谱"的依据。
+     */
+    const readme = read("README.md");
+    const handover = read("docs/08-交接文档-给QoderCN.md");
+    const readmeCount = /(\d+) 例 \/ (\d+) 文件/.exec(readme);
+    const handoverCount = /\*\*(\d+)\/\1 全绿\*\*（(\d+) 个测试文件）/.exec(handover);
+    expect(readmeCount, "README 里找不到「N 例 / M 文件」这句（被删了？那就连带把这条锁改掉）").not.toBeNull();
+    expect(handoverCount, "交接文档 §1 里找不到基线数那行").not.toBeNull();
+    expect(
+      `${readmeCount?.[1]} / ${readmeCount?.[2]}`,
+      `README 写 ${readmeCount?.[1]} 例 / ${readmeCount?.[2]} 文件，交接文档写 ${handoverCount?.[1]} / ${handoverCount?.[2]}`,
+    ).toBe(`${handoverCount?.[1]} / ${handoverCount?.[2]}`);
+    // 同一份交接文档里 §7 的"期望 N/N（M 文件）"也必须与 §1 一致——
+    // R86 复核就是抓到 §7 停在 R84 的 1166/112 而 §1 已经走到 1186/114（一轮之内两处不同步）。
+    const baseline = `${handoverCount?.[1]}/${handoverCount?.[2]}`;
+    const stale = [...handover.matchAll(/期望 (\d+)\/\1（(\d+) 文件/g)]
+      .map((match) => `${match[1]}/${match[2]}`)
+      .filter((value) => value !== baseline);
+    expect(stale, `交接文档 §7 的期望值与 §1 基线不一致：${stale.join("、")}（基线 ${baseline}）`).toEqual([]);
+  });
+
+  it("交接文档 §1 的 M4 进度计数与 docs/04 §7.3 的勾选实况一致", () => {
+    /**
+     * R86 总复核实抓到：`docs/08` §1 那句"当前进度"还停在 R58 的口径
+     * （"T4-1 / T4-3 / T4-4 已勾选；T4-2 / T4-11 已落地但验收未齐"），
+     * 而 `docs/04` §7.3 实际已经勾到 T4-1..T4-10 + T4-12。
+     * 开头一段是读者与后来接手的人**唯一会先读的那一句**，它落后的方式是"少报进度"——
+     * 不会骗人做多，但会让人以为前面没做，于是重复劳动。
+     * 所以这里不校对散文，只校对一个**机器可读的计数标记**。
+     */
+    const plan = read("docs/04-开发计划.md");
+    const ticked = [...plan.matchAll(/^- \[x\] (T4-\d+)/gm)].map((match) => match[1] as string);
+    const open = [...plan.matchAll(/^- \[ \] (T4-\d+)/gm)].map((match) => match[1] as string);
+    // 绝对下限：M4 一共 12 条任务，解析不出来就是正则坏了，不能让"零命中"冒充一致
+    expect(ticked.length + open.length).toBe(12);
+    const handover = read("docs/08-交接文档-给QoderCN.md");
+    const claim = /M4 进度：已勾 (\d+)\/(\d+)（未勾：([^）]*)）/.exec(handover);
+    expect(claim, "交接文档 §1 缺『M4 进度：已勾 N/M（未勾：…）』这个机器可读标记").not.toBeNull();
+    expect(`${claim?.[1]}/${claim?.[2]}`, `docs/04 实况是 ${ticked.length}/${ticked.length + open.length}`).toBe(
+      `${ticked.length}/${ticked.length + open.length}`,
+    );
+    expect(claim?.[3].split("、").map((id) => id.trim()).sort()).toEqual(open.slice().sort());
+  });
 });
