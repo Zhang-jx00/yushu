@@ -45,6 +45,40 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **SPDX 文件头批量 + 流式错误出口复核（第 82 轮）**：① `packages/` 与 `apps/` 下 **295 个既有源文件**逐文件加首行
+  `/* SPDX-License-Identifier: Apache-2.0 */`（`apps/cli/src/cli.ts` 与 `apps/desktop/scripts/kill-recovery.mjs`
+  两个 shebang 入口落第二行），`docs/04` §11.6「`LICENSE` + `NOTICE` + SPDX 标识」门槛**据此勾选**——
+  此前只有根目录两份许可文件，**单个文件被复制走（片段复用 / fork / 打包抽取）时许可信息会丢**。
+  锁 `apps/desktop/test/spdx-headers.test.ts` 4 例：扫描范围下限（≥290 文件 + 三个具体路径抽查，
+  防"扫描器自己把目录写错 ⇒ 零命中全绿"）、逐文件头部比对、shebang 例外名单锁死为那 2 个
+  （防有人拿 shebang 当免检牌）、头里的许可与根目录 `LICENSE`/`NOTICE` 同源（防"头写 Apache、根目录换 MIT"）。
+  ② 复核第 80 轮"错误回显要脱敏"时顺着 SSE 这条路往下查，**查出两件比泄漏更常发生的真缺陷**：
+  `openai.ts` 与 `gemini.ts` 的流式读取器**把 provider 在流里回的 `{"error": …}` 事件当心跳丢掉**——
+  不报错、不标记、`ok` 为真，调用方拿到一段被截断的文本，于是**半截稿子被当成完整候选显示、甚至被采纳进正文**；
+  静默截断比明确失败坏得多（作者不知道少了什么，日志里一切正常）。两处改为抛 `E_LLM_STREAM`
+  （详情先过 `redactSecretsInText` 再截 300 字），openai 的 `catch` 补 `if (err instanceof LlmError) throw err;`
+  ——否则主动抛的流错误会被外层改写成"网络中断"，那是两件不同的事；三条网络兜底消息
+  （openai / gemini / anthropic）原先用裸 `String(err)`，一并过脱敏；**错误事件之后到达的增量不再计入正文**。
+  新锁 `packages/@yushu/llm/test/stream-error.test.ts` 8 例。**`usage` 日志那条出口查过**：
+  落盘的是结构化字段而非拼好的错误串，本轮判为不需要额外脱敏（若将来把原始响应体写进日志要重开这条）。
+  ③ **本轮最大的收获在变异环节：变异脚本两次伪装成"锁失效"，两次都不是锁的问题**——
+  (a) 脚本用 `"\n"` 拼多行模式而 `packages/@yushu/llm/src/*.ts` 全是 **CRLF**：探测 `includes` 时试了两种行尾
+  所以报"命中"，真正替换的 `split(from).join(to)` 却只用 LF ⇒ **静默没替换**，测试自然全绿、输出打印成"无汇总"，
+  看着像锁不红。与第 63 轮"清扫脚本根目录写错 = 等于没扫"同族：**检查器的 bug 会表现成"被测代码没问题"**。
+  修成按每文件真实行尾拼接 + 显式打印 `命中=TRUE/FALSE`（FALSE 即"不算证据"）。
+  (b) 另一版 gemini 变异删了 `if (…) {` 的行首却留下右括号 ⇒ 文件编译不过，
+  **"把源码改到语法不合法"不能证明锁防的是语义退化**；换成恒假条件后立刻红。
+  最终 6 次变异全部退出码 1：openai 错误判断改恒假→**2 红**（抛错那条 + "错误之后的增量不计入"那条）、
+  openai 消息不脱敏→1 红、catch 不再原样抛 `LlmError`→1 红、gemini 错误事件不响→1 红
+  （`promise resolved "{ text: '夜色', … }" instead of rejecting`）、anthropic 不脱敏→1 红、
+  网络中断消息不脱敏→1 红；每次跑完即还原并复验逐字节一致。
+  **SPDX 锁当轮真的红过一次，抓的是我自己**：批量加头之后新建的 `stream-error.test.ts` 忘了带头，
+  全量跑点名 `missing=["packages/@yushu/llm/test/stream-error.test.ts"]`，补上才绿。
+  **验证**：`pnpm test` **1129/1129（107 文件）**（较第 81 轮 +12 例 / +2 文件）、`pnpm typecheck` TC=0、
+  `e2e` 退出码 0（全链路成功）、UI 预演**全新目录 v179** **56/56**（61.9s，抖动=0、证据缺失=0，
+  预演前重建 `build:main` + `build:renderer`；按"留档要复看"打开 `step55-import-preview.png` 确认区块在画面里）。
+  四个一次性变异脚本用完即删，删后未跟踪项只剩本轮两个新测试文件。
+
 - **社区健康文件补齐（第 81 轮）**：新增 `CODE_OF_CONDUCT.md`、`GOVERNANCE.md`、`CODEOWNERS` 与
   `.github/ISSUE_TEMPLATE/pack_submission.yml`，缺陷 / 功能 / 投稿三份 issue 模板与 PR 模板都补上
   行为准则勾选项，`SECURITY.md` 增补**支持版本范围**与**确认 7 天 / 高危修复 30 天 / 一般不超 90 天**的时限承诺。

@@ -66,7 +66,7 @@ pnpm --filter @yushu/desktop dev      # Electron + Vite 热更新
 ## 怎么验（四连门禁，缺一项不算完成）
 
 ```bash
-pnpm test                # 单元/集成测试：1096 例 / 103 文件
+pnpm test                # 单元/集成测试：1129 例 / 107 文件
 pnpm typecheck           # 9 个包 + 2 个应用零错误（内含全量构建）
 pnpm --filter @yushu/desktop e2e     # 离线 mock LLM 的端到端全链路，逐条具名断言
 pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 56 步 UI 预演 + 逐步截图取证
@@ -90,7 +90,7 @@ docs/             需求总纲 / 竞品分析 / 技术架构 / 开发计划与�
 
 ## 技术基线
 
-Electron 44 + React 19 + TypeScript（严格模式）+ TipTap / CodeMirror 6，pnpm workspace（11 包 + 2 应用）；
+Electron 44 + React 19 + TypeScript（严格模式）+ TipTap / CodeMirror 6，pnpm workspace（9 包 + 2 应用，共 11 个 workspace）；
 Markdown 正文 + YAML 设定卡为真源，SQLite（FTS5 中文检索 + 向量表）为可重建派生索引；
 OpenAI 兼容多模型接入主干（DeepSeek / 智谱 / Kimi / 百炼 / Ollama 等），全程可离线、无遥测、无账号体系；
 EPUB / DOCX / PDF 导出管线（T5-4）与平台规则包（T4-12）尚未开始。
@@ -104,6 +104,13 @@ EPUB / DOCX / PDF 导出管线（T5-4）与平台规则包（T4-12）尚未开�
 5. **确定性优先**：排序走码点序（不用 `localeCompare`），同输入必得同输出。
 
 贡献前请读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全相关的实际实现与已知边界见 [SECURITY.md](SECURITY.md)。
+
+## 许可
+
+代码 **Apache-2.0**（见 [LICENSE](LICENSE)）；`packages/` 与 `apps/` 下每个源文件头部带
+`/* SPDX-License-Identifier: Apache-2.0 */`，所以单个文件被复制走时许可信息不丢（仓库里有一条锁会拦住漏加的文件）。
+内置派系包（世界观设定数据）与占位词库的许可**与代码分开**，三份口径列在 [NOTICE](NOTICE)。
+治理与行为准则见 [GOVERNANCE.md](GOVERNANCE.md) 与 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 
 ---
 
