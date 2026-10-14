@@ -365,18 +365,24 @@ export function buildScript(body: string): string {
  * 失败重试时步骤会从中间重来，按次序发路径会让第二次 attempt 拿到上一次的进度，
  * 于是"抖动"和"真回归"分不清（本轮就是这么撞上的）。
  */
+/** 没有章节标题的一份稿子：走"没切开 ⇒ 必须显式确认才允许整篇入库"那条分支 */
+const IMPORT_UI_FLAT = ["这是一段没有标题的正文。", "还是没标题，一直到最后。", "第三行也没有。"].join("\r\n");
+
 async function openImportDialogFixture(win: BrowserWindow): Promise<{ dir: string; restore(): Promise<void> }> {
   const dir = await fs.mkdtemp(join(tmpdir(), "yushu-import-ui-"));
   const utf8Path = join(dir, "旧稿-预演.txt");
   const gbkPath = join(dir, "旧稿-GBK.txt");
+  const flatPath = join(dir, "旧稿-没标题.txt");
   await fs.writeFile(utf8Path, IMPORT_UI_TEXT, "utf8");
   await fs.writeFile(gbkPath, Buffer.from(IMPORT_UI_GBK));
+  await fs.writeFile(flatPath, IMPORT_UI_FLAT, "utf8");
   const original = dialog.showOpenDialog;
   dialog.showOpenDialog = (async () => {
     const which = String(
       await win.webContents.executeJavaScript("window.__yushuPick || ''").catch(() => ""),
     );
-    const picked = which === "gbk" ? gbkPath : which === "utf8" ? utf8Path : undefined;
+    const picked =
+      which === "gbk" ? gbkPath : which === "utf8" ? utf8Path : which === "flat" ? flatPath : undefined;
     return picked === undefined ? { canceled: true, filePaths: [] } : { canceled: false, filePaths: [picked] };
   }) as typeof dialog.showOpenDialog;
   return {
@@ -3194,9 +3200,11 @@ const STEPS: StepDef[] = [
         return t || null;
       }, 8000);
       if (toggle === null) return { ok: false, note: '总览页没有导入折叠区：' + pageText() };
-      toggle.click();
+      // 折叠态要幂等：失败重试时上一轮可能已经展开了，再点一次就把它**关掉**（v175 的第二次 attempt 就这么红的）
+      const isOpen = () => String(toggle.closest('.disclosure').className).indexOf('open') >= 0;
+      if (!isOpen()) toggle.click();
       await sleep(320);
-      const opened = String(toggle.closest('.disclosure').className).indexOf('open') >= 0;
+      const opened = isOpen();
       const panel = await waitFor(() => document.querySelector('.import-panel'), 4000);
       if (panel === null) return { ok: false, note: '展开后没有导入面板' };
       const btn = (label) => [...panel.querySelectorAll('button')].find((b) => String(b.textContent).indexOf(label) >= 0);
@@ -3229,7 +3237,7 @@ const STEPS: StepDef[] = [
       const preambleOk = first.indexOf('首章之前另有') >= 0;
       const notGuessed = first.indexOf('这是猜的') < 0;
       const noPath = first.indexOf(info.dir) < 0;
-      const boundaryOk = first.indexOf('这一版只到') >= 0;
+      const boundaryOk = first.indexOf('导入这条线还没做完') >= 0;
 
       // ② 追加一条自定义正则删掉三个章标题 ⇒ 必须显式承认"没切开"（可配正则不是摆设）
       const input = panel.querySelector('.import-rule-input');
@@ -3272,8 +3280,6 @@ const STEPS: StepDef[] = [
       }, 8000);
       const cancelOk = cancelled !== null;
 
-      const writeButtons = [...panel.querySelectorAll('button')]
-        .filter((b) => /入库|写入|确认导入/.test(String(b.textContent))).length;
       // ⑥ 截图前把 UTF-8 报告再放回来：⑤ 之后面板是空态，空态截图证明不了任何一份报告被显示过
       setPick('utf8');
       pickBtn.click();
@@ -3282,6 +3288,11 @@ const STEPS: StepDef[] = [
         return t.indexOf('分章预演：3 章') >= 0 && t.indexOf('pure-url') >= 0 ? t : null;
       }, 12000);
       const finalOk = finalView !== null;
+      // 「确认入库」按钮**在**（step56 才点它）：本步的零写入不靠"没有按钮"来证明，
+      // 靠的是真源目录树逐字未变——把按钮数当零写入的证据是假证据（按钮可以藏、可以改名）。
+      // 取在 ⑥ 之后：空态下面板根本没有这个按钮，取早了量到的是 0（v175 就这么红过一次）。
+      const applyButtons = [...panel.querySelectorAll('button')]
+        .filter((b) => /确认入库/.test(String(b.textContent))).length;
       // 零写入的对照覆盖整步（含 ⑥），所以取在最后一次预演之后
       const after = await truthTree();
       panel.scrollIntoView({ block: 'center' });
@@ -3291,14 +3302,129 @@ const STEPS: StepDef[] = [
       return {
         ok: opened && urlRemoved && keyRedacted && chaptersOk && volumeOk && preambleOk && notGuessed &&
           noPath && boundaryOk && hardSplitOk && clearedOk && assumedOk && cancelOk && finalOk &&
-          writeButtons === 0 && after === before,
+          applyButtons === 1 && after === before,
         note: '折叠区展开=' + opened + '；删行规则外显=' + urlRemoved + '；密钥就地替换=' + keyRedacted +
           '；三章列出=' + chaptersOk + '；卷标题不当章=' + volumeOk + '；楔子单独安置=' + preambleOk +
           '；UTF-8 不标猜测=' + notGuessed + '；面板无绝对路径=' + noPath + '；边界说明=' + boundaryOk +
           '；自定义正则改出「没切开」=' + hardSplitOk + '；清空后复原=' + clearedOk +
           '；GBK 标「这是猜的」=' + assumedOk + '；取消回初始态=' + cancelOk +
           '；截图前报告复位=' + finalOk +
-          '；入库按钮=' + writeButtons + '；真源目录未变=' + (after === before),
+          '；入库按钮在场未点=' + applyButtons + '；真源目录未变=' + (after === before),
+      };
+    `,
+  },
+  {
+    step: 56,
+    title: "稿件总览：确认入库——建卷建章 + 逐章字数对账 + 票据一次性（M5/T5-7，R79）",
+    file: "step56-import-apply.png",
+    fixture: "import-dialog",
+    body: String.raw`
+      // 与 step55 同一套夹具（原生对话框桩由驱动侧提供，产品代码零测试分支）。
+      // 这一步开始**写真源**，所以断言从"报告对不对"换成"写下去的东西对得上吗"。
+      const info = window.__yushuImportFixture ? JSON.parse(window.__yushuImportFixture) : null;
+      if (info === null) return { ok: false, note: '导入夹具未注入' };
+      const truthTree = async () => {
+        const tree = await window.yushu.project.tree();
+        // 只数文件：新建一卷会连带建一个 chapters/vol-xxx/ 目录，按条目数会多算（v175 实测 6 而非 4）
+        return tree.filter((e) => e.type === 'file' && /^(chapters|world|outline)\//.test(e.path));
+      };
+      const sliceOf = (list, prefix) => JSON.stringify(list.filter((e) => e.path.indexOf(prefix) === 0));
+      const before = await truthTree();
+      const beforeChapters = before.filter((e) => e.path.indexOf('chapters/') === 0).length;
+      const beforeOutline = sliceOf(before, 'outline/');
+      await tab('规则');
+      await tab('稿件总览'); // 强制重挂载：面板状态不该从上一次预演里继承
+      const toggle = await waitFor(() => {
+        const t = [...document.querySelectorAll('.disclosure-toggle')].find((x) => String(x.textContent).indexOf('导入存量稿件') >= 0);
+        return t || null;
+      }, 8000);
+      if (toggle === null) return { ok: false, note: '没有导入折叠区：' + pageText() };
+      // 折叠态幂等：重试时上一轮可能已经展开，再点一次就把它关掉
+      const isOpen = () => String(toggle.closest('.disclosure').className).indexOf('open') >= 0;
+      if (!isOpen()) toggle.click();
+      await sleep(320);
+      const panel = await waitFor(() => document.querySelector('.import-panel'), 4000);
+      if (panel === null) return { ok: false, note: '展开后没有导入面板' };
+      const btn = (label) => [...panel.querySelectorAll('button')].find((b) => String(b.textContent).indexOf(label) >= 0);
+      const read = () => String(panel.innerText).replace(/\s+/g, ' ');
+      const setPick = (which) => { window.__yushuPick = which; };
+      const resultText = () => {
+        const el = document.querySelector('.import-result');
+        return el === null ? '' : String(el.innerText).replace(/\s+/g, ' ');
+      };
+
+      // ① 没切开的稿子：不勾确认框 ⇒ 入库按钮必须是禁用的（不是"点了再说"）
+      setPick('flat');
+      btn('选择文件').click();
+      const flatView = await waitFor(() => (read().indexOf('没找到章节标题') >= 0 ? true : null), 12000);
+      if (flatView === null) return { ok: false, note: '没切开的稿子没给出说明：' + read().slice(0, 200) };
+      const applyBtn = btn('确认入库');
+      if (applyBtn === undefined) return { ok: false, note: '没有「确认入库」按钮：' + read().slice(0, 200) };
+      const gatedBefore = applyBtn.disabled === true;
+      const box = panel.querySelector('.import-confirm-box');
+      if (box === null) return { ok: false, note: '没切开时没出现「整篇作为一章」确认框' };
+      box.click();
+      await sleep(160);
+      const gatedAfter = btn('确认入库').disabled === false;
+
+      // ② 勾了之后入库：卷名自己起，回执必须点名"1 章 / 对账 / 撤销窗口 / 票据作废"
+      const nameInput = panel.querySelector('.import-volume-input');
+      if (nameInput === null) return { ok: false, note: '没有卷名输入框' };
+      setV(nameInput, '作者命名的一卷');
+      await sleep(120);
+      btn('确认入库').click();
+      const done1 = await waitFor(() => {
+        const t = resultText();
+        return t.indexOf('作者命名的一卷') >= 0 && t.indexOf('1 章') >= 0 ? t : null;
+      }, 20000);
+      const appliedFlat = done1 !== null;
+      const undoShown = appliedFlat && done1.indexOf('撤销窗口') >= 0 && done1.indexOf('票据已作废') >= 0;
+      const reconciled1 = appliedFlat && done1.indexOf('对账通过') >= 0;
+
+      // ③ 写进真源的东西要在稿件总览里看得见（大纲驱动，看不见等于没导进去）。
+      //    列表是虚拟滚动的，新卷排在最后 30 多行之外——不靠过滤框收窄，DOM 里根本没有那一行（v175 实测）。
+      const refresh = [...document.querySelectorAll('button')].find((b) => String(b.textContent).trim() === '刷新');
+      if (refresh !== undefined) refresh.click();
+      await sleep(300);
+      const filterInput = document.querySelector('.library-tools input');
+      if (filterInput === null) return { ok: false, note: '没有章节过滤框，无法在虚拟列表里定位新章' };
+      setV(filterInput, '作者命名的一卷');
+      const rowShown = await waitFor(() => {
+        const rows = [...document.querySelectorAll('.library-row')];
+        const hit = rows.find((r) => String(r.textContent).indexOf('作者命名的一卷') >= 0);
+        return hit !== undefined && /\d+ 字/.test(String(hit.textContent)) ? true : null;
+      }, 10000);
+      const listed = rowShown !== null;
+      setV(filterInput, ''); // 清回全量，别把过滤态带给后面的步骤
+
+      // ④ 再来一份三章的：不勾确认框也能直接入库（切开了），且楔子只点名不入库
+      setPick('utf8');
+      btn('选择文件').click();
+      const v3 = await waitFor(() => (read().indexOf('分章预演：3 章') >= 0 ? true : null), 12000);
+      const previewed3 = v3 !== null;
+      btn('确认入库').click();
+      const done2 = await waitFor(() => {
+        const t = resultText();
+        return t.indexOf('3 章') >= 0 && t.indexOf('未入库') >= 0 ? t : null;
+      }, 20000);
+      const applied3 = done2 !== null;
+      const preambleKept = done2 !== null && done2.indexOf('未入库') >= 0;
+      const noSecret = done2 !== null && done2.indexOf('abcdefghijklmnopqrstuvwx') < 0;
+
+      const after = await truthTree();
+      const addedChapters = after.filter((e) => e.path.indexOf('chapters/') === 0).length - beforeChapters;
+      const outlineChanged = sliceOf(after, 'outline/') !== beforeOutline;
+      const result2 = document.querySelector('.import-result');
+      if (result2 !== null) result2.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: gatedBefore && gatedAfter && appliedFlat && undoShown && reconciled1 && listed &&
+          previewed3 && applied3 && preambleKept && noSecret && addedChapters === 4 && outlineChanged,
+        note: '未确认时禁用=' + gatedBefore + '；勾了才可点=' + gatedAfter + '；整篇一章入库=' + appliedFlat +
+          '；回执带撤销窗口与票据作废=' + undoShown + '；逐章对账通过=' + reconciled1 +
+          '；总览看得见新章=' + listed + '；三章预演=' + previewed3 + '；三章入库=' + applied3 +
+          '；楔子只点名不入库=' + preambleKept + '；密钥不进回执=' + noSecret +
+          '；新增草稿文件=' + addedChapters + '（期望 4）；大纲已变=' + outlineChanged,
       };
     `,
   },
@@ -3441,7 +3567,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   const failures = results.filter((item) => !item.ok);
   const report = {
     mode: "--ui-walkthrough",
-    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-55）",
+    scene: "docs/06-M1验收与自查清单.md §二（9 步）+ M2 编辑器与索引 / M3 AI 与记忆扩展（步骤 10-56）",
     startedAt,
     finishedAt,
     totalMs: Date.now() - t0,
@@ -3459,7 +3585,7 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
       "步骤 12 / 16：经 __yushuDebug 暴露的编辑器调试句柄 await reload()（等价于点击已选中章节的强制重载）作为同步点；其后全部经真实 CodeMirror 事务输入与产品 IPC 断言落盘（step16 进一步断言保存后索引自动刷新，全程未点重建按钮）",
       "步骤 22：外部改动经 window.yushu.chapter.write 模拟（等价于外部工具改文件）；三方合并本身走编辑器自动保存的真实冲突管线（无人工干预）",
       "步骤 42：前置数据（带悬空引用的卡）经 window.yushu.card.write 造出——被验的对象是「点真实按钮采纳之后副驾自己长出的轻校验面板」，造数不走 UI 不影响该断言",
-      "步骤 55：原生「选文件」对话框无法自动化——只在主进程把 dialog.showOpenDialog 换成返回固定夹具路径的桩（每次 attempt 重起、跑完还原并删文件；" +
+      "步骤 55 / 56：原生「选文件」对话框无法自动化——只在主进程把 dialog.showOpenDialog 换成返回固定夹具路径的桩（每次 attempt 重起、跑完还原并删文件；" +
         "选哪份由渲染层 window.__yushuPick 指定，不靠点击次序，重试不串台）。" +
         "产品代码里没有测试分支：面板点击 → import:pick → 闸门登记 → import:preview → 引擎探测/清洗/分章 → 面板渲染全程真实执行；" +
         "被绕过的只有『用户点击对话框』这一层，它由 test/import-ops.test.ts 用注入的假对话框覆盖",
