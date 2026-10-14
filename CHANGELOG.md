@@ -45,6 +45,23 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **Pandoc 源装配：把「导出用的 Markdown」做成一份不重排、不重复、不读墙钟的产物（第 89 轮，M5/T5-4 第二段）**：
+  新增 `@yushu/export/src/markdown.ts`——`buildMarkdown` / `buildPandocMetadata` / `yamlScalar`（12 例单测）。
+  三条"不做"就是这一层的价值：① **不重排正文**（真源本来就是 Markdown，导出层再加工一遍等于把作者的排版换掉）；
+  ② **不手搓目录**（目录交给 pandoc 的 `--toc`，这里再写一份就会产出两份目录）；③ **不读墙钟**（日期由调用方给，
+  同输入必得同输出）。标题层级有意选：卷 `#` + 章 `##` 对上"卷—章"两级，EPUB / DOCX 阅读器按标题切章与建目录，
+  书名走元数据不占标题位。`yamlScalar` 用 `JSON.stringify` 是因为 **JSON 的双引号字符串本身就是合法 YAML 标量**——
+  书名里带 `:` 或 `#` 会把元数据块撑坏，那属于"平时不出错、换个书名就废"的缺陷。
+  **顺带收口一把尺**：`buildTxt` 过去把排序责任推给调用方（只有 `assembleExport` 排过一遍），
+  现在出口自己按 `byOutlineOrder` 排（比较器一并导出，TXT 与 Markdown 共用），并加了一条跨产物断言
+  钉住"两份产物的章序与内部标记剥离口径一致"。
+  **第 88 轮扩面的门禁当场兑现一次**：本轮自己写的新测试被 `pnpm typecheck` 判出 `TS18048`
+  （`test/` 以前从来不被检查，这类错会一路静默）；顺手把那条断言改硬——原来的
+  `a2<b2 && b2<c2` 与 `a1<b1 && b1<c1` 相等在"两边都乱序"时也会绿，改成"两侧位置都必须递增"。
+  **7 条变异全部红且红得对位**（逐条还原逐字校验）：YAML 不加引号 / author 无条件输出 / Markdown 不排序 /
+  stripMarkers 默认反转 / 每章重复卷标题 / 章标题降到一级 / TXT 出口不排序（只有那条跨产物断言会红）。
+  **本段仍无消费者**（下一轮接进 `runExport`），T5-4 继续不勾。
+
 - **`test/` 纳入类型检查：门禁那条看不见的边（第 88 轮）**：第 87 轮一处夹具漏了必填字段 `title` 而
   `pnpm typecheck` 一路 Done，查下去发现**全仓 11 份 tsconfig 的 `include` 都只有 `src`**——约 120 个测试文件
   从来没被类型检查。先量存量：**75 条**（apps/desktop 62、world-engine 11、genre-engine 1、llm 1，其余 7 包 0；
