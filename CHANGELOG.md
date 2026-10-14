@@ -45,6 +45,50 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **性能门禁与包体实测（第 83 轮）**：① **修掉一条永远不会红的门禁**——`perf-runner` 逐项算出
+  `checks`、终端也打印 ❌，最后一行却是无条件 `app.exit(0)`：预算超没超，调用方拿到的都是"跑通了"
+  （与第 59 轮"抖动不进退出码"、第 81 轮"自己写的假锁"同族）。抽纯函数 `summarizePerfGate`（12 例）
+  按它给退出码，`gate` 与 `boot_notes` 一并写进报告留档；**能不能红拿真探针校过**：
+  把 `cold_to_editable_ms` 预算 2000→1ms ⇒ **退出码 1** 且打印 `未达预算=[cold_to_editable]`，还原后逐字一致。
+  ② **门禁口径三条**：绝对预算翻红 / **相对回退只报告不翻红** / 不参与判定的项必须带理由外显。
+  依据是同一份构建连跑两遍的实测：`cold_to_editable` **3160 → 1434ms**（夹具刚生成 vs 已就位）、
+  `keystroke_mega_p95` 2.8→3.6ms（+28.6%）、`chapter_write_ms` 13→16ms（+23.1%）——
+  个位数毫秒上的 20% 相对阈值不配当结论（第 27 轮就把一项 +21.4% 判成运行间波动，这是第二次证据）。
+  ③ **本轮否证了自己的开场假设**："包体长到 1.5 MB ⇒ 冷启动必然回退"。对照 R36 同夹具同机的热盘
+  **1885ms**，本轮热盘 **1445ms** ⇒ 不但没回退还更快，"修冷启动"这件事当场取消。
+  ④ **新增两项首屏指标（只记录、暂不设预算）**：`module_exec_ms`（首屏脚本解析+执行）**136–139ms**、
+  `fcp_ms`（首次内容绘制）**200ms**，由纯函数 `summarizeRendererBoot` 归一（6 例：条目缺失 / 非有限值 /
+  算出非正 ⇒ 一律 `null` + 原因，**不猜 0**）。⑤ **裁决：不做按标签页 code-split**——首屏脚本执行
+  只占 `cold_to_editable` 的 **≈9.4%**，拆到极限也就省这些，代价是 11 个视图各加一个异步边界与加载态。
+  包体构成（一次性 sourcemap 构建，129 条 sources / 4,044,437 原始字节、**未归类 0**）：
+  CodeMirror 系 ≈32.7% + TipTap/ProseMirror 系 ≈20.9% + `react-dom` 15.7%，
+  **自己的渲染层代码只占 10.9%**（单包 1,533,293 B / gzip 497,110 B）。
+  ⑥ **CSS 三层重构同样判不做**：普查 `styles.css` 2939 行、1442 条声明、`var()` 已用 **246 次**，
+  `:root` 之外只剩 26 处字面量（其中 6 处还是高对比模式里合法的令牌定义）⇒ 为 20 来处做全表改写，
+  收益抵不上风险。实际做的是收口 18 处 + 新增 10 个语义令牌（`--ink-on-accent` / `--bad-soft-bg` /
+  `--bad-tint-bg` / `--good-soft-bg` / `--warn-soft-bg` / `--warn-tint-bg` / `--bad-soft-border` /
+  `--heat-l1..l3`）+ **棘轮锁** `css-token-ratchet.test.ts` 5 例（字面颜色上限 1、三处字面时长
+  **逐条登记**、新令牌必须被用到、高对比覆盖须对应 `:root` 已有令牌）。
+  **深浅不同的两种浅底刻意不合并**（`#fbeae6` vs `#fdf0ee`、`#fdf7e8` vs `#fdf6e9`）——合并会改变画面。
+  变异实测：把 `.heat-cell.l1` 的 `var(--heat-l1)` 改回字面量 ⇒ **2 条同时红**（上限、死令牌）。
+  ⑦ **加指标之前先把地基弄平**：`perf-budget.yaml` 自称唯一事实源、探针里另抄一份 `BUDGETS`，
+  两边靠一句注释维系且没有锁。`BUDGETS` 搬进新模块 `perf-budgets.ts`（数据不住在依赖 electron 的文件里），
+  配 `perf-budget-sync.test.ts` 4 例双向对账（yaml 改了探针没跟 / yaml 新增项没登记 / 映射指向不存在的路径
+  都会红）。**实测当前两边一致、无既存漂移**；变异 `query_p95_ms: 80→81` 立刻点名
+  "探针用 81，yaml 写 80"。
+  ⑧ **一条自查脚本自己的 bug**：第一版普查按行剥注释时 `continue` 跳过整块注释 ⇒
+  注释之后**所有行号整体前移十几行**，报出来的"第 2430 行"根本不在那儿（计数没错、定位是错的）。
+  改成"注释换成等长空格、不删行"后行号才与文件逐字对齐，棘轮锁沿用的就是这一版——
+  **检查器给出的位置信息也要能被复核**。
+  **验证**：`pnpm test` **1153/1153（110 文件）**（+24 例 / +3 文件）、`pnpm typecheck` TC=0、`e2e` 退出码 0、
+  UI 预演**全新目录 v180** **56/56**（62.3s，抖动=0、证据缺失=0，预演前重建 main + renderer）；
+  CSS 属视觉改动 ⇒ 把 `step18-stats.png` 与 HEAD 那版**逐块对照**（版式与色底一致，
+  右下角棕色长条两版都在，是单日数据下 30 天柱状的既有画法）；`perf-probe` 另跑 3 次取数。
+  报告留档 `docs/assets/perf/perf-report-local-dev-20261014-r83-perf-gate.json`，
+  数字与门禁口径同时写进 `perf-budget.yaml` 的 measurements 与注释段。
+  **边界如实标注**：`module_exec_ms` / `fcp_ms` 未设预算（等多机样本，现在定等于拿一次实测当契约）；
+  T2-10 仍不勾选——任务原文要求"被 CI 与本地共用"，CI 至今没有。
+
 - **SPDX 文件头批量 + 流式错误出口复核（第 82 轮）**：① `packages/` 与 `apps/` 下 **295 个既有源文件**逐文件加首行
   `/* SPDX-License-Identifier: Apache-2.0 */`（`apps/cli/src/cli.ts` 与 `apps/desktop/scripts/kill-recovery.mjs`
   两个 shebang 入口落第二行），`docs/04` §11.6「`LICENSE` + `NOTICE` + SPDX 标识」门槛**据此勾选**——

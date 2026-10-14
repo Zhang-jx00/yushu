@@ -66,13 +66,16 @@ pnpm --filter @yushu/desktop dev      # Electron + Vite 热更新
 ## 怎么验（四连门禁，缺一项不算完成）
 
 ```bash
-pnpm test                # 单元/集成测试：1129 例 / 107 文件
+pnpm test                # 单元/集成测试：1153 例 / 110 文件
 pnpm typecheck           # 9 个包 + 2 个应用零错误（内含全量构建）
 pnpm --filter @yushu/desktop e2e     # 离线 mock LLM 的端到端全链路，逐条具名断言
 pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 56 步 UI 预演 + 逐步截图取证
 ```
 
 另有 `kill-test`（强杀进程不丢稿实测）与 `perf-test`（百万字性能实测）两个专项探针。
+`perf-test` 的**退出码就是性能门禁**（R83 起）：绝对预算未达标 ⇒ 1；相对基线的回退只在报告里点名、
+不翻退出码——同一份构建连跑两遍的实测差可达一倍（`cold_to_editable` 3160ms vs 1434ms），
+拿个位数毫秒的 ±20% 当结论只会造出一台假红机器。
 
 > **关于 CI**：本仓库**目前没有 CI 流水线**。上述四项每轮在本地实跑，数字与结论写进 `docs/06`。
 > M4 的退出条件里包含「规则回归集进 CI」，所以这条空缺是**已知未办**、不是被忽略——
