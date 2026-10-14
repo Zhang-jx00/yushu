@@ -66,7 +66,7 @@ pnpm --filter @yushu/desktop dev      # Electron + Vite 热更新
 ## 怎么验（四连门禁，缺一项不算完成）
 
 ```bash
-pnpm test                # 单元/集成测试：1214 例 / 116 文件
+pnpm test                # 单元/集成测试：1237 例 / 117 文件
 pnpm typecheck           # 9 个包 + 2 个应用零错误（内含全量构建）
 pnpm --filter @yushu/desktop e2e     # 离线 mock LLM 的端到端全链路，逐条具名断言
 pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 57 步 UI 预演 + 逐步截图取证

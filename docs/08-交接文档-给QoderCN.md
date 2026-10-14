@@ -17,8 +17,8 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **1214/1214 全绿**（116 个测试文件）——`pnpm test`（R87 新增导出能力判定/探测/预览三组锁；R86 为 1188/114） |
-| 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
+| 单测 | **1237/1237 全绿**（117 个测试文件）——`pnpm test`（R88 新增 `typecheck-coverage.test.ts` 23 例并把 75 条存量测试类型错误清零；R87 为 1214/116） |
+| 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物）。**R88 起这份"零错误"覆盖 `src` 与 `test` 两面**：每个有测试的包多一份 `tsconfig.test.json`（`noEmit`）并接进该包脚本；此前 11 份配置的 `include` 都只有 `src`，约 120 个测试文件从来没被类型检查（锁：`typecheck-coverage.test.ts` 23 例） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
 | UI 预演 | **57/57 全绿**（最近一次新目录 **v190**，抖动=0、证据缺失=0；**步数从 56 增到 57 是 R87 新增 step57（导出能力矩阵）**。v188 是一次**有价值的抖动**：step7 重试后通过（`flaky:[7]`），归因不是噪声而是 R87 让首帧预览变慢后「我已核对…」复选框会被 `setReviewed(false)` 静默冲掉——改成"摘要未回前不许勾"之后 v189/v190 均 `attempts=1`、`flaky:[]`；**v186 是一次未复现的静默中止**：退出码 1、日志停在 `step34 OK`、既无"执行中断"行也无 `DONE` 行，紧接着的 v187 一次过——按"连续两轮同样红才追根因"的口径本轮未追，日志留在 `D:\Temp\r85-walk3.log` 与 `D:\Temp\yushu-walkthrough-v186` 备查；v183/v180/v179/v178/v177 均为 56/56、v174 为 55/55、v167 为 54/54、v153 为 51/51，`flakySteps:[]`、`screenshotFailures:[]`；R63 的 v142 为 47/47）——见 §6.3。**step21 的抖动根因分两层，R58 消掉第一层、R78 消掉第二层**：① `press()` 缓存了失效的 `.tiptap` 节点（改为每次按键重新查询）；② 断言写死"↓ 一次后高亮必须在第 2 项"，而**真鼠标停在候选菜单上时 `onMouseEnter` 会先把 active 挪走**——组件的 `(active+1)%n` 是对的，错的是把鼠标位置当契约。现断言"↓ 让高亮移动一格 + 回车插入的正是那一格"，并把实际起止项与插入的卡名打进证据行。**教训：连续两轮同样红就不是抖动**，先取证据再改测试。剩余遗留只有 step17：快照内容寻址导致"重复点一次不产生新行"，**状态变更型步骤重试救不回来**，根因仍未定（docs/06 §七）。**另记一条证据口径**：`screenshotFailures:[]` 只说明图取到了，不说明图拍对了——R58 复看时发现规则页的 step41/43/44 截图只拍到页首，已给这几步补 `scrollIntoView` 再重跑（v135）；R78 的 step55 同理，最后一步是"取消"会让面板回到空态，于是截图前把 UTF-8 报告再放回来（空态截图证明不了报告显示过任何一份报告）。**两条"取证要取在被断言那段"的新例子**：step47（R63）在展开动画**中途 60ms 采样**高度（0 → 35/52 → 236 = 内容高），断言的是"存在中间态且终值等于内容高"而不是某个中间常量；step49（R66）在页面里**现场按真实章序造数据**再验看板（逾期外显、红鲱鱼+放弃带理由不被报缺陷、paid 无回收章报矛盾、面板内没有写回按钮）；step48（R64）读**真实 computed style**（`line-break` / `text-autospace` / `text-spacing-trim` / `font-variant-numeric` / 版心 px）与 `CSS.supports()` 三个布尔——把"这台机器的运行时支不支持"变成问出来的事实，不是查表猜的。**R71 再添两条同类账，都属"证据看着有、其实不成立"**：① step33 `waitFor('.assembly-preview')` 等的节点在上一步跑完后**已经在 DOM 里**（step31 末尾故意用小预算再跑一次），于是它立刻返回、读到旧回执，而按钮还在合法禁用态——此前绿是撞运气（IPC 快过 150ms 睡眠）；凡"点按钮 → 等结果节点"先问"这节点是不是已经在"，判据要带上**本步特有的内容**（本步的预算数字、按钮转绿）。② M4 验收 A5 的 e2e 探针比的是 `edges:0 / timelineRows:0` 的两个空视图 ⇒ 空对空当然"逐字不变"，已补夹具与 `edges > 0`、`timelineRows >= 3` 两条非空性断言并分别变异打红。**还有一条截图纪律**：新步骤若只量不改画面，`captureStep` 的滞后帧守卫会标"证据存疑"（v160/v161 的 step53 就是这样），要么把目标区域滚进视口、要么别指望那张图算证据。**夹具别靠调用次序给数据**（R78 step55）：桩按"第 1/2/3 次点击"返回不同文件时，失败重试的第二次 attempt 会继承上一次的进度，把抖动与真回归搅在一起；改成由渲染层全局变量指名要哪一份。 |
 | 对外文档 | R81 起四份社区健康文件**齐备**：`README` / `CONTRIBUTING` / `SECURITY`（含支持版本范围与确认 7 天、高危修复 30 天时限）/ `CODE_OF_CONDUCT`（四级处置阶梯，自写执行版本而非复制 Covenant 全文）/ `GOVERNANCE`（四级梯队 + 独立 moderation + 「核心离线能力永久免费」边界承诺，第一句就写明当前是单人维护）/ `CODEOWNERS`（按领域拆）/ `NOTICE` / `ROADMAP` / `CHANGELOG`，`.github/` 三份 issue 模板（含 `pack_submission`）与 PR 模板都带行为准则勾选项。docs/04 §11.6「健康文件齐备」门槛**已勾**（锁：`governance-docs.test.ts` 21 例，含一条「账本已动过的里程碑不许写未开始」的反漂移断言）。R82 起 **295 个既有源文件逐文件 SPDX 头已落**（扫描范围实测 297 个文件，`/* SPDX-License-Identifier: Apache-2.0 */`，shebang 入口落第二行），§11.6「LICENSE + NOTICE + SPDX」门槛**已勾**（锁：`spdx-headers.test.ts` 4 例，含扫描范围下限与 shebang 例外名单）。**仍缺任何 CI 配置**，§11.6 据此保持其余未勾 |
@@ -280,14 +280,18 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 ```bash
 pnpm install
-pnpm test          # 期望 1214/1214（116 文件，第 87 轮口径）
-pnpm typecheck     # 期望 11 个包/应用 Done
+pnpm test          # 期望 1237/1237（117 文件，第 88 轮口径）
+pnpm typecheck     # 期望 11 个包/应用 Done（R88 起每包跑两份配置：src 与 test）
 pnpm --filter @yushu/desktop e2e      # 期望末行 [e2e] 通过：…（含 T3-12 成本与 T3-14 密钥安全探针）
 pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-walkthrough-<新编号>"   # 期望 DONE ok=57 fail=0 证据缺失=0（退出码把「证据缺失」也算失败）
 pnpm --filter @yushu/desktop perf-test  # R83 起退出码=门禁：绝对预算未达标 ⇒ 1（热盘跑法：夹具已在 D:\Temp\yushu-perf-synth1m 时 reused=true）
 ```
 
-验收基线数字（截至 R87）：单测 **1214/1214（116 文件）**、typecheck 11 包全绿、e2e 全链路通过（含 RAG / 快照 / 抽取 / 写作 UX / 成本 / **密钥安全** / **中文自查** 探针）、walkthrough **57/57**（v190，`screenshotFailures:[]`、`flakySteps:[]`）、perf **10/10 达标且退出码 0**（**最近一次实跑是 R83 的报告**，R84–R87 未复跑；R87 只改了导出预览与视图，未触碰启动/索引路径）。
+验收基线数字：**单测 1237/1237（117 文件）与 typecheck 11 包全绿是 R88 收口实跑**（R88 起 typecheck 含 `src` 与 `test`
+两面）；**e2e 与 UI 预演最近一次实跑是 R87**——e2e 全链路通过（含 RAG / 快照 / 抽取 / 写作 UX / 成本 / **密钥安全** /
+**中文自查** 探针）、walkthrough **57/57**（v190，`screenshotFailures:[]`、`flakySteps:[]`）；R88 改动面只有测试文件、
+tsconfig 与脚本、一条编译期即擦除的 `import type`，运行时路径零改动，故未复跑这两项（不声称跑过）。
+**perf 最近一次实跑是 R83**：10/10 达标且退出码 0，R84–R88 未复跑。
 
 ---
 
@@ -681,7 +685,11 @@ pnpm --filter @yushu/desktop perf-test  # R83 起退出码=门禁：绝对预算
     其中并发那条是**收紧后**才红得下来的（原写 ≥ 4，把两条 pandoc 串起来照样绿）。
     验证：全量 **1214/1214（116 文件）**、TC=0、E2E=0、预演**全新 v190** **57/57**（抖动 0、证据缺失 0）。
 25. **R88–R97 十轮台账（R87 收口时排定，按实际工作量滚动重排）**：
-    R88 `test/` 纳入 typecheck（先量存量错误数，再定一次修干净还是"只减不增"棘轮）；
+    R88 `test/` 纳入 typecheck **已完成（本轮）**：实测存量 75 条（desktop 62 / world-engine 11 / genre-engine 1 /
+    llm 1，其余 7 包 0），逐条修完（其中三条是**源码或助手的类型在说谎**：`previewPropagation` 少写 `to`、
+    `hit()` 助手把六选能力写成三选、`rule-regression` 用 `typeof CLEAN` 锁死夹具）；11 个包各加
+    `tsconfig.test.json`（noEmit）接进 `typecheck` 脚本；新锁 `typecheck-coverage.test.ts` 23 例 + 3 条变异全红。
+    详见 docs/06 §八 第 88 轮。
     R89 T5-4 第二段——导出源装配（把已装配章节写成 pandoc 可消费的 Markdown + metadata，纯函数 + 单测）；
     R90 T5-4 第三段——`runExport` 的 format 参数与真实 EPUB/DOCX 产出 + 门禁接线（EPUBCheck 未就位 ⇒ 回执明写"未校验"）
     + 导出页格式选择 + 预演 step58；R91 T5-4 第四段——PDF 路径与"装引擎前后"的口径 + K11 平台章节格式适配起手；

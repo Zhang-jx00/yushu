@@ -45,6 +45,25 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **`test/` 纳入类型检查：门禁那条看不见的边（第 88 轮）**：第 87 轮一处夹具漏了必填字段 `title` 而
+  `pnpm typecheck` 一路 Done，查下去发现**全仓 11 份 tsconfig 的 `include` 都只有 `src`**——约 120 个测试文件
+  从来没被类型检查。先量存量：**75 条**（apps/desktop 62、world-engine 11、genre-engine 1、llm 1，其余 7 包 0；
+  renderer 没有 test 目录）。逐条修完，其中三条是**类型在说谎**而不是测试写得糙：
+  ① `previewPropagation` 的入参写成 `{ entity, field }`，而引擎的 `PropagateChange` 还有 `to`（改名后的新 id）——
+  **少写的是源码类型**，只删夹具里的 `to` 就等于把 T4-5 改名写回的入口在类型上堵死；
+  ② `satisfaction.test.ts` 的 `hit()` 助手把六选能力写成三选，于是用 `"harvest"` 的用例一直类型不通——
+  **撒谎的是助手**，参数改成 `SatisfactionHitType`；
+  ③ `rule-regression.test.ts` 拿 `typeof CLEAN` 当卡类型，把"能带 refs 的卡"锁死成那四条字面量 ⇒ 抽成 `CardFixture`。
+  另把 `cost.test.ts` 的 `saving.total === undefined` 换成 `Object.keys(saving)` 断言（**更硬**：偷偷加字段会当场红）。
+  **配置**：11 个有测试的包各加 `tsconfig.test.json`（`noEmit`，`include: [src, test]`）并接进该包 `typecheck` 脚本；
+  **新锁** `apps/desktop/test/typecheck-coverage.test.ts`（23 例）判"有 test 目录 ⇒ 有 test 配置 + 脚本真的跑它 +
+  那份配置不许 emit"，带"有测试的包 ≥ 11"防空跑下限；3 条变异（脚本退回只查 src / include 改回只剩 src /
+  去掉 noEmit）全部能红并逐字还原。**验证**：`pnpm test` **1237/1237（117 文件）**、`pnpm typecheck` TC=0
+  （22 条 Done）、`build:main` 与 `build:renderer` 均通过；**e2e 与 UI 预演本轮未复跑**——改动面只有测试文件、
+  tsconfig、脚本与一条编译期即擦除的 `import type`，运行时路径零改动，不声称跑过。
+  **取证教训**：复核脚本里去 ANSI 的正则写成 `[ESC\[[0-9;]*m` 会连正文的 `m` 一起吃掉，打印出
+  `packages/@yushu/ll/...` 这种不存在的路径——**贴证据之前先确认它不是自己的工具改出来的**。
+
 - **导出能力矩阵：把"这台机器能不能出这个格式"变成测出来的事实（第 87 轮，M5/T5-4 第一段）**：
   新建 `@yushu/export/src/formats.ts`（纯判定）与 `apps/desktop/src/main/export-tooling.ts`（可注入的外部命令层），
   导出预览与「导出与自查」页新增能力面板，预演新增 step57。七条口径：① **pandoc 认得 `pdf` 这个输出格式

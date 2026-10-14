@@ -14,6 +14,11 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"
 ```
 
 - 退出码要**直接取**，不要经管道看（`| tail` 会把失败变成 0）。
+- `pnpm typecheck` 覆盖 **`src` 与 `test` 两处**：每个有测试的包都有一份 `tsconfig.test.json`
+  （`noEmit`，只查不产出），并接在该包的 `typecheck` 脚本里。这条本身由
+  `apps/desktop/test/typecheck-coverage.test.ts` 钉住——把脚本改回只查 `src` 会当场红。
+  写测试夹具时请标注真实载荷类型（`AiProviderPayload[]` / `ReportFinding` 这类），
+  不标注会被推成 `string`，枚举与必填字段漂移就查不出来。
 - 预演需要先构建渲染层：`pnpm --filter @yushu/desktop build:main && pnpm --filter @yushu/desktop build:renderer`。
   只构建主进程时，预演会报「找不到输入框」——那是构建缺失，不是产品缺陷。
 - 专项探针：`kill-test`（真实强杀进程不丢稿）、`perf-test`（synth-1m 百万字性能预算）。
