@@ -45,6 +45,29 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **安全与审计余账·第一批（第 80 轮）**：① **provider 错误回显不再带出密钥**——`postJson` 把响应体前 300
+  字符拼进 `E_LLM_HTTP` 消息，而这条消息会进 UI、进 `.yushu/ai-usage.jsonl`、进日志、进截图；部分网关 /
+  反代会把**收到的请求头**原样贴回 401 正文，那正好带着 `Authorization: Bearer sk-…` 与 `x-api-key`。
+  新增 `redactSecretsInText`（与 `detectPlaintextSecrets` 共用同一批高置信形态：`sk-` / `AIza` /
+  `gh[pousr]_` / `github_pat_` / `xox*` / `Bearer` / 32+ 位十六进制 / 密钥字段字面值）在唯一收口处套用：
+  **字段名与分隔符留下、值换掉、非密钥文字与状态码原样保留**——安全不以把错误信息变成不可读为代价。
+  取舍写进注释：对回显体宁可多脱敏，漏出去的 Key 不可回收。② **`audit` 登记进默认路由表**——
+  R58 的全书体检 AI 采样核验一直在传 `task="audit"`，但表里没这一项 ⇒ 档位偏好落到 provider 原顺序
+  （每次抽查可能被派到旗舰档）、`require` 为空 ⇒ 端点不支持结构化输出时也不标 `unmet`；
+  补成与 `extract` 同类（便宜档 + `structured_output`）。③ **排除清单三向一致锁**——
+  "哪些目录不算作者内容"在仓库里写了三份（`GIT_EXCLUDES` / `DEFAULT_INDEX_EXCLUDES` / `WALK_EXCLUDES`），
+  漂移的真实代价是同一份派生物在一处被当作者内容、另一处被当垃圾（例：只给 git 加 `imports/` 忘了给索引加
+  ⇒ 导入作业状态被当成正文片段检索出来）。三条断言各挡一种漂，其中 `exports/` 的**反向不对称是刻意的**
+  （导出件要在文件树里看得见、但不进 Git 不进索引），所以不能笼统要求三者相同。
+  ④ **`restoreDoc` 带 baseHash：裁决为不做并落档理由**——`restoreSnapshotLocked` 在任何写之前已强制
+  `pre_restore` 快照（拿不到即整条中断），被覆盖内容全部在那份快照里取得回；再叠一层 baseHash 只会让
+  "撤销"在最常见场景（改了几轮再退回）里失败。**登记为不做而不是从清单擦掉**，下次审计再提时有结论可引。
+  **验证**：11 + 4 例先红后绿（首跑 9 红 / 2 绿，那 2 条是"不含密钥的诊断文本原样保留"这类负例，
+  本来就该绿，用来防过度脱敏）；全量 **1096/1096（103 文件）**、TC=0、e2e ✅、预演 **56/56**（v178，
+  抖动 0、证据缺失 0）；**变异 5 次全能红**（摘掉 redact 调用 / 把 audit 从表里删掉（4 红，含那条
+  "任务清单逐字相等"的旧锁当场点名）/ git 清单少 `exports/` / 只给 git 加 `imports/` 而索引不跟上 /
+  树遍历不再跳过 `.yushu/`）。还原后 sha 逐字一致。**本轮不动功能台账**。
+
 - **存量稿件导入·桌面侧第三段（第 79 轮，M5/T5-7，本项不勾选）**：`import:apply` —— 这条线的**第一条真源写
   通道**（走 `wrapWrite`，写清单点名）。点「确认入库」后：新建一卷 + 每章一条章纲（回填 `chapter_id`，
   与草稿双向对上）+ 每章一个章节草稿文件。**章纲六项（谁/何地/目标/障碍/转折/结果/钩子）一律留空**——

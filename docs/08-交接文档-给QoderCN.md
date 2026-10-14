@@ -17,7 +17,7 @@
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
 | 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
-| 单测 | **1081/1081 全绿**（102 个测试文件）——`pnpm test`（R79 导入入库 +15 例 + 预演回报大纲 hash +3 例；R78 为 1061/101） |
+| 单测 | **1096/1096 全绿**（103 个测试文件）——`pnpm test`（R80 错误回显脱敏 11 例 + 排除清单锁 4 例；R79 为 1081/102） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
 | UI 预演 | **56/56 全绿**（最近一次新目录 **v177**，61.5s，抖动=0、证据缺失=0；v174 为 55/55、v167 为 54/54、v153 为 51/51，`flakySteps:[]`、`screenshotFailures:[]`；R63 的 v142 为 47/47）——见 §6.3。**step21 的抖动根因分两层，R58 消掉第一层、R78 消掉第二层**：① `press()` 缓存了失效的 `.tiptap` 节点（改为每次按键重新查询）；② 断言写死"↓ 一次后高亮必须在第 2 项"，而**真鼠标停在候选菜单上时 `onMouseEnter` 会先把 active 挪走**——组件的 `(active+1)%n` 是对的，错的是把鼠标位置当契约。现断言"↓ 让高亮移动一格 + 回车插入的正是那一格"，并把实际起止项与插入的卡名打进证据行。**教训：连续两轮同样红就不是抖动**，先取证据再改测试。剩余遗留只有 step17：快照内容寻址导致"重复点一次不产生新行"，**状态变更型步骤重试救不回来**，根因仍未定（docs/06 §七）。**另记一条证据口径**：`screenshotFailures:[]` 只说明图取到了，不说明图拍对了——R58 复看时发现规则页的 step41/43/44 截图只拍到页首，已给这几步补 `scrollIntoView` 再重跑（v135）；R78 的 step55 同理，最后一步是"取消"会让面板回到空态，于是截图前把 UTF-8 报告再放回来（空态截图证明不了报告显示过任何一份报告）。**两条"取证要取在被断言那段"的新例子**：step47（R63）在展开动画**中途 60ms 采样**高度（0 → 35/52 → 236 = 内容高），断言的是"存在中间态且终值等于内容高"而不是某个中间常量；step49（R66）在页面里**现场按真实章序造数据**再验看板（逾期外显、红鲱鱼+放弃带理由不被报缺陷、paid 无回收章报矛盾、面板内没有写回按钮）；step48（R64）读**真实 computed style**（`line-break` / `text-autospace` / `text-spacing-trim` / `font-variant-numeric` / 版心 px）与 `CSS.supports()` 三个布尔——把"这台机器的运行时支不支持"变成问出来的事实，不是查表猜的。**R71 再添两条同类账，都属"证据看着有、其实不成立"**：① step33 `waitFor('.assembly-preview')` 等的节点在上一步跑完后**已经在 DOM 里**（step31 末尾故意用小预算再跑一次），于是它立刻返回、读到旧回执，而按钮还在合法禁用态——此前绿是撞运气（IPC 快过 150ms 睡眠）；凡"点按钮 → 等结果节点"先问"这节点是不是已经在"，判据要带上**本步特有的内容**（本步的预算数字、按钮转绿）。② M4 验收 A5 的 e2e 探针比的是 `edges:0 / timelineRows:0` 的两个空视图 ⇒ 空对空当然"逐字不变"，已补夹具与 `edges > 0`、`timelineRows >= 3` 两条非空性断言并分别变异打红。**还有一条截图纪律**：新步骤若只量不改画面，`captureStep` 的滞后帧守卫会标"证据存疑"（v160/v161 的 step53 就是这样），要么把目标区域滚进视口、要么别指望那张图算证据。**夹具别靠调用次序给数据**（R78 step55）：桩按"第 1/2/3 次点击"返回不同文件时，失败重试的第二次 attempt 会继承上一次的进度，把抖动与真回归搅在一起；改成由渲染层全局变量指名要哪一份。 |
@@ -280,13 +280,13 @@ pnpm --filter @yushu/desktop kill-test            # 强杀恢复实测（只在�
 
 ```bash
 pnpm install
-pnpm test          # 期望 1081/1081（102 文件，第 79 轮口径）
+pnpm test          # 期望 1096/1096（103 文件，第 80 轮口径）
 pnpm typecheck     # 期望 11 个包/应用 Done
 pnpm --filter @yushu/desktop e2e      # 期望末行 [e2e] 通过：…（含 T3-12 成本与 T3-14 密钥安全探针）
 pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-walkthrough-<新编号>"   # 期望 DONE ok=56 fail=0 证据缺失=0（退出码把「证据缺失」也算失败）
 ```
 
-验收基线数字（截至 R79）：单测 **1081/1081（102 文件）**、typecheck 11 包全绿、e2e 全链路通过（含 RAG / 快照 / 抽取 / 写作 UX / 成本 / **密钥安全** / **中文自查** 探针）、walkthrough **56/56**（v177，总耗时 ~62s，`screenshotFailures:[]`、`flakySteps:[]`）、perf 10/10（R36 报告，其后各轮未触热路径）。
+验收基线数字（截至 R80）：单测 **1096/1096（103 文件）**、typecheck 11 包全绿、e2e 全链路通过（含 RAG / 快照 / 抽取 / 写作 UX / 成本 / **密钥安全** / **中文自查** 探针）、walkthrough **56/56**（v177，总耗时 ~62s，`screenshotFailures:[]`、`flakySteps:[]`）、perf 10/10（R36 报告，其后各轮未触热路径）。
 
 ---
 
@@ -493,12 +493,26 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=D:\Temp\yushu-wal
     "**导入或导出项目**时自动剔除密钥"，指的是**项目打包 / 迁移**（等 T5-4 导出链路与备份通道才有调用点）；
     稿件导入里的密钥剔除属清洗阶段就地替换（R76 起），两件事不是一回事，别拿后者勾掉前者。
     **T5-7 仍不勾**：AI 二次筛选切章、误切校正、实体抽取候选、可中断续跑状态机都没做。
-17. **R80｜治理与审计余账**：`CODE_OF_CONDUCT.md` + `GOVERNANCE.md`（docs/04 §11.2/§11.4）、SPDX 文件头批量添加
-    （**单独一轮做**，配一条"抽样文件必带头"的能红断言）、CSS 令牌三层重构（primitive → semantic → component）、
-    `audit` 任务登记进路由表并校验 `structured_output` 能力、`restoreDoc` 带 baseHash 拒并发、排除清单三向一致 +
-    双向单测锁、LLM 错误回显掩码、renderer 包体（1.5 MB / gzip 506 kB）要不要按标签页 code-split——
+17. **R80｜治理与安全余账·第一批已完成**：① **provider 错误回显脱敏**——`postJson` 把响应体前 300 字
+    拼进 `E_LLM_HTTP` 消息，而有些网关会把收到的请求头原样贴回 401 body（正好带着 `Bearer sk-…` /
+    `x-api-key`）。新增 `redactSecretsInText`（与 `detectPlaintextSecrets` 同一批高置信形态）在唯一
+    收口处套用：字段名留下、值换掉、非密钥文字与状态码原样保留。② **`audit` 登记进默认路由**
+    （R58 的采样核验一直在传这个 task id，但表里没有 ⇒ 档位落到 provider 原顺序、`require` 空 ⇒
+    不支持结构化输出也不标 unmet）；补成与 `extract` 同类。③ **排除清单三向一致锁**
+    （`GIT_EXCLUDES` ≡ `DEFAULT_INDEX_EXCLUDES` 逐字等集、`WALK_EXCLUDES` 是其子集、
+    `exports/` 的反向不对称是**刻意的**并在测试注释里写明）。
+    **④ `restoreDoc` 带 baseHash：裁决为不做**——`restoreSnapshotLocked` 在任何写之前已强制
+    `pre_restore` 快照（拿不到即中断），被覆盖内容全部取得回；再叠 baseHash 只会让"撤销"在最常见
+    场景（改了几轮再退回）里失败。**登记为不做而不是从清单擦掉**，下次审计再提时有结论可引。
+    验证：11 + 4 例先红后绿、全量 **1096/1096（103 文件）**、TC=0、E2E=0、预演 **56/56**（v178）、
+    **变异 5 次全能红**（含"只给 git 加 `imports/` 而索引不跟上"这个真实漂移场景）。详见 docs/06 §八 第 80 轮。
+18. **R81｜治理余账第二批**：`CODE_OF_CONDUCT.md` + `GOVERNANCE.md`（docs/04 §11.2/§11.4）、SPDX 文件头批量添加
+    （**单独一轮做**，配一条"抽样文件必带头"的能红断言）、LLM 错误回显的其余出口复核（SSE 错误事件、
+    降级提示、usage 日志里是否还有未脱敏的外部文本）。
+19. **R82｜界面与包体测量**：CSS 令牌三层重构（primitive → semantic → component）、`audit` 之外的路由表
+    可编辑性、renderer 包体（1.5 MB / gzip 506 kB）要不要按标签页 code-split——
     **本地 file:// 加载下分包未必更快，先测冷启动与常驻再决定**。
-18. **R81｜批次收口**：T4-11 误报率阈值做成可校准项（联动项目级白名单，勾 T4-11）+ T4-12 平台规则包机制就绪
+20. **R83｜批次收口**：T4-11 误报率阈值做成可校准项（联动项目级白名单，勾 T4-11）+ T4-12 平台规则包机制就绪
     （规则外置、带来源与生效日期；**`RULE_KEYS` 要能容纳 `version`**，否则 docs/03 §8.3 的版本合并永远做不了）
     + **本批十轮总复核**（每个 `[x]` 指到测试名 / 探针字段 / 预演步号；并复看留档截图是否真拍到被断言那段）。
 
