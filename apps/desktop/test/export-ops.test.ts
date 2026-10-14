@@ -227,3 +227,60 @@ describe("干净剪贴板（T1-20）", () => {
     expect(result.preview.length).toBeLessThanOrEqual(161);
   });
 });
+
+/**
+ * 导出能力矩阵进预览（M5 / T5-4 第一段，R87）。
+ *
+ * 断言刻意**不写死"本机有哪几个格式"**——那会让测试换台机器就红，或者更糟：
+ * 换台机器后大家把测试改成"跟着机器走"，锁就废了。
+ * 这里比的是**预览里的结论 == 现场探测 + 判定的结论**（同一套代码、同一次事实），
+ * 外加三条与机器无关的口径：TXT 永远可用、每项都要有原因、顺序固定。
+ */
+describe("导出预览的能力矩阵（T5-4）", () => {
+  it("预览带 capability 列表，且与现场探测 + 判定结果一致", async () => {
+    const fixture = await setupProject();
+    const { probeExportTooling, realToolDeps } = await import("../src/main/export-tooling.js");
+    const { assessExportFormats } = await import("@yushu/export");
+    const preview = await previewExport(fixture.gateway);
+    const expected = assessExportFormats(await probeExportTooling(realToolDeps()));
+    expect(preview.capabilities.map((item) => item.format)).toEqual(["txt", "epub", "docx", "pdf"]);
+    expect(preview.capabilities).toEqual(expected);
+    // 与机器无关的三条
+    expect(preview.capabilities.find((item) => item.format === "txt")!.available).toBe(true);
+    for (const item of preview.capabilities) {
+      expect(item.reason, `${item.format} 必须给出原因（可用要说靠什么，不可用要说缺什么）`).not.toBe("");
+    }
+  });
+
+  it("能力探测不污染真源，也不写盘（预览全程只读）", async () => {
+    const fixture = await setupProject();
+    const before = await fixture.gateway.readDoc(fixture.chapterPath);
+    await previewExport(fixture.gateway);
+    const after = await fixture.gateway.readDoc(fixture.chapterPath);
+    expect(after.hash).toBe(before.hash);
+  });
+
+  it("探测本身抛错 ⇒ 预览照常出，能力矩阵留空并写明「探测失败」（不拿假结论顶替）", async () => {
+    const fixture = await setupProject();
+    const prose = "天启界的夜色压下来。";
+    await adoptDraft(fixture.gateway, {
+      usageId: "test-usage",
+      volumeId: fixture.volumeId,
+      chapterId: fixture.chapterId,
+      text: prose,
+      mode: "replace",
+    });
+
+    const preview = await previewExport(fixture.gateway, {
+      probeTooling: async () => {
+        throw new Error("spawn ENOENT 模拟");
+      },
+    });
+    expect(preview.capabilities).toEqual([]);
+    expect(preview.capabilitiesNote).toContain("探测失败");
+    expect(preview.capabilitiesNote).toContain("spawn ENOENT 模拟");
+    // 探测失败不许连带把导出预览本身打死：章数、字数、命中照常
+    expect(preview.chapters).toBe(1);
+    expect(preview.totalWords).toBe(countWords(prose));
+  });
+});

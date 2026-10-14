@@ -26,6 +26,7 @@ export function ExportView() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    setBusy(true);
     try {
       setError(null);
       const state = await api().export.preview();
@@ -39,6 +40,8 @@ export function ExportView() {
       }
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setBusy(false);
     }
   }, []);
 
@@ -118,9 +121,16 @@ export function ExportView() {
             <span>去除内部标记（HTML/Markdown 注释）</span>
           </label>
           <label className="checkbox confirm-check">
-            <input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={reviewed}
+              disabled={preview === null || busy}
+              onChange={(event) => setReviewed(event.target.checked)}
+            />
             <span>
-              我已核对以上章数、字数与敏感词命中（防手滑：导出将写入项目 <code>exports/</code> 目录）
+              {preview === null
+                ? "正在核对章数、字数与敏感词命中……核对完成前不能确认（防手滑：没看见数字就不许勾）"
+                : "我已核对以上章数、字数与敏感词命中（防手滑：导出将写入项目 exports/ 目录）"}
             </span>
           </label>
           <div className="outline-actions">
@@ -167,6 +177,42 @@ export function ExportView() {
               <pre className="clip-preview">{clipResult.preview}…</pre>
             </>
           )}
+        </section>
+
+        <section className="panel export-capabilities">
+          <h3>
+            导出格式能力 <span className="muted">T5-4：按本机实测，不按猜测</span>
+          </h3>
+          {preview === null ? (
+            <p className="muted">正在探测本机工具链…</p>
+          ) : preview.capabilities.length === 0 ? (
+            <p className="warn">{preview.capabilitiesNote ?? "本轮未探测到本机工具链，暂不给结论。"}</p>
+          ) : (
+            <table className="slot-table">
+              <thead>
+                <tr>
+                  <th>格式</th>
+                  <th>本机可否产出</th>
+                  <th>依据</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.capabilities.map((capability) => (
+                  <tr key={capability.format}>
+                    <td>{capability.format.toUpperCase()}</td>
+                    <td className={capability.available ? "" : "warn"}>
+                      {capability.available ? "可产出" : "暂不可"}
+                    </td>
+                    <td className="muted">{capability.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="muted">
+            探测只做只读命令（<code>--version</code> / <code>--list-output-formats</code> / 查可执行文件是否存在），
+            不写入任何文件；缺少引擎时这里会说清缺什么，而不是等导出失败才发现。
+          </p>
         </section>
 
         <section className="panel">

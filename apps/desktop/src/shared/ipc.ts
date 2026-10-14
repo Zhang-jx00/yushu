@@ -1224,6 +1224,22 @@ export interface ExportPreviewPayload {
   /** 合并后参与扫描的词条数（同词条后者覆盖前者） */
   wordEntryCount: number;
   skippedWordlists: SkippedWordlistPayload[];
+  /**
+   * 本机导出能力矩阵（R87 / T5-4）。**现场探测 + 判定**，不是写死的清单：
+   * pandoc 认得 pdf 与"这台机器能出 PDF"是两件事（后者还要外部引擎）。
+   * 每一项都带原因——可用要说靠什么产出，不可用要点名缺什么，
+   * 这样作者点下去之前就知道结果，也不会收到一个"改了名的 TXT"。
+   */
+  capabilities: Array<{
+    format: "txt" | "epub" | "docx" | "pdf";
+    available: boolean;
+    reason: string;
+  }>;
+  /**
+   * 探测本身失败时的实话（比如外部命令抛错）。null = 探测成功。
+   * 此时 `capabilities` 是空数组——空着比编一份"看起来合理"的矩阵诚实。
+   */
+  capabilitiesNote: string | null;
   /** 词库扫描目录（外置可更新：仓库内置 + 项目内覆盖） */
   wordlistDirs: string[];
 }

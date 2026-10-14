@@ -4,12 +4,14 @@ import { basename, join } from "node:path";
 import { YushuError, countWords } from "@yushu/core";
 import {
   assembleExport,
+  assessExportFormats,
   buildClipboardText,
   buildTxt,
   mergeWordlists,
   parseWordlist,
   scanSensitive,
   type ExportChapter,
+  type ExportTooling,
   type MergedWordlistEntry,
   type Wordlist,
 } from "@yushu/export";
@@ -29,6 +31,7 @@ import type {
   SkippedWordlistPayload,
 } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
+import { onceTooling, probeExportTooling, realToolDeps } from "./export-tooling.js";
 import { repoRoot } from "./paths.js";
 
 /**
@@ -151,8 +154,16 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** 导出预览：统计 + 字数对账 + 敏感词命中 + 词库信息（T1-18/19） */
-export async function previewExport(gateway: ProjectGateway): Promise<ExportPreviewPayload> {
+/** 导出预览的可选注入（默认走现场探测；测试用它把"探测失败"变成可复现场景） */
+export interface ExportPreviewOptions {
+  probeTooling?: () => Promise<ExportTooling>;
+}
+
+/** 导出预览：统计 + 字数对账 + 敏感词命中 + 词库信息 + 本机能力矩阵（T1-18/19、T5-4） */
+export async function previewExport(
+  gateway: ProjectGateway,
+  options: ExportPreviewOptions = {},
+): Promise<ExportPreviewPayload> {
   const { chapters, missingDrafts, bookTitle } = await collectChapters(gateway);
   const assembled = assembleExport({ chapters });
   const { entries, skipped, dirs } = await loadWordlists(gateway);
@@ -165,6 +176,16 @@ export async function previewExport(gateway: ProjectGateway): Promise<ExportPrev
     })),
     entries,
   );
+
+  // 探测失败只让能力矩阵留空，不把整页预览打死：作者依然能看到章数、字数与敏感词命中。
+  // 留空 + 一句"探测失败"比硬凑一份"看起来合理"的矩阵诚实——后者会让人以为本机没有/有某能力。
+  let capabilities: ExportPreviewPayload["capabilities"] = [];
+  let capabilitiesNote: string | null = null;
+  try {
+    capabilities = assessExportFormats(await (options.probeTooling ?? probeTooling)());
+  } catch (err) {
+    capabilitiesNote = `本机工具链探测失败：${messageOf(err)}；能力矩阵本轮不给结论（这不等于这些格式都不能用）`;
+  }
 
   return {
     bookTitle,
@@ -179,9 +200,20 @@ export async function previewExport(gateway: ProjectGateway): Promise<ExportPrev
     wordlists: scan.summary.wordlists,
     wordEntryCount: scan.summary.wordCount,
     skippedWordlists: skipped,
+    capabilities,
+    capabilitiesNote,
     wordlistDirs: dirs,
   };
 }
+
+/**
+ * 工具链探测的进程内缓存（R87）。
+ *
+ * 探测要 spawn 十条外部命令（pandoc --version / --list-output-formats / 七个引擎存在性 / jar），
+ * 每次预览都跑一遍会把"打开导出页"变成一件慢事；工具链在一次会话里不会变，所以只探一次。
+ * 语义由 `onceTooling` 承担并有单测（成功只探一次 / 失败不缓存），这里只负责接上真实探测。
+ */
+const probeTooling = onceTooling(() => probeExportTooling(realToolDeps()));
 
 function sanitizeFileName(title: string): string {
   const cleaned = title.replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "");

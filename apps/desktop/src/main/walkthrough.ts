@@ -573,12 +573,20 @@ const STEPS: StepDef[] = [
   },
   {
     step: 7,
-    title: "导出与自查：确认导出 TXT + 字数对账",
+    title: "导出与自查：确认导出 TXT + 字数对账（摘要未回前不许勾确认）",
     file: "step7-export.png",
     body: String.raw`
       await tab('导出与自查');
-      const chk = await waitFor(() => document.querySelector('.confirm-check input[type=checkbox]'), 15000);
-      if (!chk) return { ok: false, note: '找不到防手滑确认复选框：' + pageText() };
+      // 防手滑这条承诺要在 UI 上立得住：**没看见数字之前勾不了**。
+      // 所以顺序是"先等摘要（预览已回）→ 再要求确认框可用"；反过来写就会撞上
+      // "勾了之后预览才回来、把勾选冲掉"的竞态（v188 的 step7 就是这么抖了一次）。
+      const summary = await waitFor(() => document.querySelector('.export-summary'), 25000);
+      if (!summary) return { ok: false, note: '导出摘要没出来（预览未返回）：' + pageText() };
+      const chk = await waitFor(() => {
+        const c = document.querySelector('.confirm-check input[type=checkbox]');
+        return c && !c.disabled ? c : null;
+      }, 15000);
+      if (!chk) return { ok: false, note: '摘要已出但确认框仍不可用：' + pageText() };
       if (!chk.checked) { chk.click(); await sleep(200); }
       const btn = await waitFor(() => {
         const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('确认导出 TXT'));
@@ -3473,6 +3481,45 @@ const STEPS: StepDef[] = [
           '；总览看得见新章=' + listed + '；三章预演=' + previewed3 + '；三章入库=' + applied3 +
           '；楔子只点名不入库=' + preambleKept + '；密钥不进回执=' + noSecret +
           '；新增草稿文件=' + addedChapters + '（期望 4）；大纲已变=' + outlineChanged,
+      };
+    `,
+  },
+  {
+    step: 57,
+    title: "导出与自查：本机能力矩阵按实测说话（M5/T5-4，R87）",
+    file: "step57-export-capabilities.png",
+    body: String.raw`
+      // 这一步不写盘，也不猜机器：面板上的每一格都必须是"现场探测 + 判定"的结果。
+      // 断言刻意只钉**与机器无关**的口径（顺序、每条都有原因、TXT 必可用、措辞不许含糊），
+      // 换台机器 EPUB/PDF 的结论会变，但"给了结论且给了依据"这件事不会变。
+      await tab('导出与自查');
+      const panel = await waitFor(() => document.querySelector('.export-capabilities'), 10000);
+      if (panel === null) return { ok: false, note: '导出页没有能力矩阵面板：' + pageText() };
+      const text = () => String(panel.innerText).replace(/\s+/g, ' ');
+      const rows = await waitFor(() => {
+        const r = [...panel.querySelectorAll('tbody tr')];
+        return r.length >= 4 ? r : null;
+      }, 20000);
+      if (rows === null) {
+        return { ok: false, note: '能力矩阵不足 4 行（探测没回来？面板写的是：' + text().slice(0, 220) + '）' };
+      }
+      const formats = rows.map((r) => String(r.children[0].textContent).trim());
+      const verdicts = rows.map((r) => String(r.children[1].textContent).trim());
+      const reasons = rows.map((r) => String(r.children[2].textContent).trim());
+      const orderOk = formats.join(',') === 'TXT,EPUB,DOCX,PDF';
+      const verdictsOk = verdicts.every((v) => v === '可产出' || v === '暂不可');
+      // 「暂不可」必须点名缺什么（"缺引擎"这类具体词），不许只写"不支持"糊过去
+      const specific = reasons.every((r) => r.length >= 8);
+      const txtAvailable = verdicts[0] === '可产出';
+      const honestWording = text().indexOf('按本机实测') >= 0 && text().indexOf('不写入任何文件') >= 0;
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(260);
+      return {
+        ok: orderOk && verdictsOk && specific && txtAvailable && honestWording,
+        note: '顺序=' + formats.join('/') + '（期望 txt/epub/docx/pdf）；判定只用两档=' + verdictsOk +
+          '；每条都有具体依据=' + specific + '；TXT 判可产出=' + txtAvailable +
+          '；措辞如实（实测口径 + 只读探测）=' + honestWording + '；本机结论=' +
+          formats.map((f, i) => f + '=' + verdicts[i]).join('、'),
       };
     `,
   },
