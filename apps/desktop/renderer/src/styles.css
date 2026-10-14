@@ -18,6 +18,23 @@
   --motion-slow: 380ms;
   --ease-premium: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
+  /* 语义底色令牌（R83 普查后补）。此前这些颜色散在组件规则里写成字面量，共 17 处：
+     同一语义出现 2–3 次（如"错误浅底"在错误条 / 徽标 / 导入回执各写一遍），
+     改主题时就会漏。这里**只收已有语义**，不预先发明一套三层体系——
+     普查显示全表 1442 条声明里 var() 已用 246 次，:root 外只剩 26 处字面量，
+     三层重构（primitive→semantic→component）在这个体量上收益不抵一次全表改写的风险。
+     注意：--bad-soft-bg 与 --bad-tint-bg、--warn-soft-bg 与 --warn-tint-bg 是**两种不同的浅底**
+     （深浅不同、用于不同组件），刻意不合并——合并会改变画面。 */
+  --ink-on-accent: #fff;
+  --bad-soft-bg: #fbeae6;
+  --bad-soft-border: #f0d4cd;
+  --bad-tint-bg: #fdf0ee;
+  --good-soft-bg: #e6f2e9;
+  --warn-soft-bg: #fdf7e8;
+  --warn-tint-bg: #fdf6e9;
+  --heat-l1: #d9e8d4;
+  --heat-l2: #a9cfa4;
+  --heat-l3: #6faa74;
 }
 
 * {
@@ -123,11 +140,11 @@ button:disabled {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--ink-on-accent);
 }
 
 button.primary:hover:not(:disabled) {
-  color: #fff;
+  color: var(--ink-on-accent);
   filter: brightness(1.06);
 }
 
@@ -168,9 +185,9 @@ textarea:focus {
 
 .error-bar {
   padding: 8px 16px;
-  background: #fbeae6;
+  background: var(--bad-soft-bg);
   color: var(--bad);
-  border-bottom: 1px solid #f0d4cd;
+  border-bottom: 1px solid var(--bad-soft-border);
   font-size: 13px;
 }
 
@@ -347,12 +364,12 @@ textarea:focus {
 }
 
 .badge.good {
-  background: #e6f2e9;
+  background: var(--good-soft-bg);
   color: var(--good);
 }
 
 .badge.bad {
-  background: #fbeae6;
+  background: var(--bad-soft-bg);
   color: var(--bad);
 }
 
@@ -404,11 +421,11 @@ textarea:focus {
 .chip.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--ink-on-accent);
 }
 
 .chip.on:hover {
-  color: #fff;
+  color: var(--ink-on-accent);
 }
 
 .chip.static {
@@ -1679,7 +1696,7 @@ select {
 }
 
 .stats-tier.is-advanced {
-  color: #fff;
+  color: var(--ink-on-accent);
   border-color: var(--good);
   background: var(--good);
 }
@@ -1742,15 +1759,15 @@ select {
 }
 
 .heat-cell.l1 {
-  background: #d9e8d4;
+  background: var(--heat-l1);
 }
 
 .heat-cell.l2 {
-  background: #a9cfa4;
+  background: var(--heat-l2);
 }
 
 .heat-cell.l3 {
-  background: #6faa74;
+  background: var(--heat-l3);
 }
 
 .heat-cell.l4 {
@@ -2124,7 +2141,7 @@ select {
   padding: 10px 14px;
   border: 1px solid var(--warn);
   border-radius: 8px;
-  background: #fdf7e8;
+  background: var(--warn-soft-bg);
   font-size: 13px;
 }
 
@@ -2159,7 +2176,7 @@ select {
   padding: 10px 14px;
   border: 1px solid var(--warn);
   border-radius: 8px;
-  background: #fdf7e8;
+  background: var(--warn-soft-bg);
   font-size: 13px;
 }
 
@@ -2197,12 +2214,12 @@ select {
 
 .proofread-row.severity-error {
   border-color: var(--bad);
-  background: #fdf0ee;
+  background: var(--bad-tint-bg);
 }
 
 .proofread-row.severity-warn {
   border-color: var(--warn);
-  background: #fdf7e8;
+  background: var(--warn-soft-bg);
 }
 
 .proofread-hit {
@@ -2751,7 +2768,7 @@ table,
 
 .import-probe.warn {
   border-color: var(--warn);
-  background: #fdf6e9;
+  background: var(--warn-tint-bg);
 }
 
 .import-probe-head {
@@ -2773,7 +2790,7 @@ table,
 }
 
 .import-tag.danger {
-  background: #fbeae6;
+  background: var(--bad-soft-bg);
   border-color: var(--bad);
   color: var(--bad);
 }
@@ -2854,7 +2871,7 @@ table,
   padding: 6px 10px;
   border: 1px dashed var(--warn);
   border-radius: 8px;
-  background: #fdf6e9;
+  background: var(--warn-tint-bg);
   margin-bottom: 6px;
 }
 
