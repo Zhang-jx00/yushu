@@ -1,4 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { LlmAbortError, LlmError } from "./config.js";
+import { redactSecretsInText } from "./secrets.js";
 import {
   isAbortError,
   postJson,
@@ -229,7 +231,7 @@ export async function callAnthropicMessagesStream(
         const error = record["error"] as Record<string, unknown> | undefined;
         throw new LlmError(
           "E_LLM_RESPONSE",
-          `provider「${provider.id}」流式返回错误事件：${String(error?.["message"] ?? "unknown")}`,
+          `provider「${provider.id}」流式返回错误事件：${redactSecretsInText(String(error?.["message"] ?? "unknown")).slice(0, 300)}`,
         );
       }
       // message_stop / content_block_start / content_block_stop / ping：忽略
@@ -237,7 +239,7 @@ export async function callAnthropicMessagesStream(
   } catch (err) {
     if (isAbortError(err)) throw new LlmAbortError(text);
     if (err instanceof LlmError) throw err;
-    throw new LlmError("E_LLM_NETWORK", `provider「${provider.id}」流式读取中断：${String(err)}`, {
+    throw new LlmError("E_LLM_NETWORK", `provider「${provider.id}」流式读取中断：${redactSecretsInText(String(err))}`, {
       cause: err,
     });
   }

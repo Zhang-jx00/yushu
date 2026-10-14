@@ -1,4 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { LlmAbortError, LlmError } from "./config.js";
+import { redactSecretsInText } from "./secrets.js";
 import {
   isAbortError,
   postJson,
@@ -156,6 +158,23 @@ export async function callChatCompletionStream(
         return; // 容忍非 JSON 心跳行
       }
       const body = event as Record<string, unknown>;
+      // provider 在流里回 `{"error": …}` 时必须**响**：静默丢掉就等于把一段被截断的稿子
+      // 当成完整候选交给作者（R82 复核发现的原行为）。错误文本是外部内容，先过脱敏。
+      const streamError = body["error"];
+      if (streamError !== undefined && streamError !== null) {
+        const detail =
+          typeof streamError === "string"
+            ? streamError
+            : String(
+                (streamError as Record<string, unknown>)["message"] ??
+                  (streamError as Record<string, unknown>)["type"] ??
+                  JSON.stringify(streamError),
+              );
+        throw new LlmError(
+          "E_LLM_STREAM",
+          `provider「${provider.id}」流式返回错误：${redactSecretsInText(detail).slice(0, 300)}`,
+        );
+      }
       const choice = (body["choices"] as unknown[] | undefined)?.[0] as
         | Record<string, unknown>
         | undefined;
@@ -173,9 +192,14 @@ export async function callChatCompletionStream(
     });
   } catch (err) {
     if (isAbortError(err)) throw new LlmAbortError(text);
-    throw new LlmError("E_LLM_NETWORK", `provider「${provider.id}」流式读取中断：${String(err)}`, {
-      cause: err,
-    });
+    // 流里主动抛出的 E_LLM_STREAM 不能被改写成"网络中断"——那是两件不同的事：
+    // 一件是 provider 明确告诉我们它失败了（带原因），一件是连接断了。
+    if (err instanceof LlmError) throw err;
+    throw new LlmError(
+      "E_LLM_NETWORK",
+      `provider「${provider.id}」流式读取中断：${redactSecretsInText(String(err))}`,
+      { cause: err },
+    );
   }
 
   return {

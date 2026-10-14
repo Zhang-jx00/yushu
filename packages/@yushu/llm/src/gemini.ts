@@ -1,4 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 import { LlmAbortError, LlmError } from "./config.js";
+import { redactSecretsInText } from "./secrets.js";
 import {
   isAbortError,
   postJson,
@@ -174,6 +176,23 @@ export async function callGeminiGenerateStream(
         return; // 容忍心跳 / 非 JSON 行
       }
       const record = event as Record<string, unknown>;
+      // 与 openai_chat 同一口径（R82）：Gemini 在流里回 `{"error": …}` 时过去被静默丢掉，
+      // 调用方拿到半截文本还以为成功了。错误文本是外部内容，先过脱敏再拼进消息。
+      const streamError = record["error"];
+      if (streamError !== undefined && streamError !== null) {
+        const detail =
+          typeof streamError === "string"
+            ? streamError
+            : String(
+                (streamError as Record<string, unknown>)["message"] ??
+                  (streamError as Record<string, unknown>)["status"] ??
+                  JSON.stringify(streamError),
+              );
+        throw new LlmError(
+          "E_LLM_STREAM",
+          `provider「${provider.id}」流式返回错误：${redactSecretsInText(detail).slice(0, 300)}`,
+        );
+      }
       const candidate = joinCandidateParts(record["candidates"]);
       if (candidate.text !== "") {
         text += candidate.text;
@@ -187,7 +206,7 @@ export async function callGeminiGenerateStream(
   } catch (err) {
     if (isAbortError(err)) throw new LlmAbortError(text);
     if (err instanceof LlmError) throw err;
-    throw new LlmError("E_LLM_NETWORK", `provider「${provider.id}」流式读取中断：${String(err)}`, {
+    throw new LlmError("E_LLM_NETWORK", `provider「${provider.id}」流式读取中断：${redactSecretsInText(String(err))}`, {
       cause: err,
     });
   }
