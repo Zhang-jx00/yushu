@@ -24,7 +24,12 @@ export class PathSafetyError extends YushuError {
   }
 }
 
-const WALK_EXCLUDES = new Set([".git", ".yushu", "node_modules"]);
+/**
+ * 目录树遍历跳过的目录。**与 git-ops 的 GIT_EXCLUDES、索引的 DEFAULT_INDEX_EXCLUDES 是同一件事的三份清单**，
+ * 三向一致由 test/exclude-lists.test.ts 钉住（漂移的真实后果是派生物在一处被当作者内容、在另一处被当垃圾）。
+ * 注意 `exports/` 不在这里：导出件要在文件树里看得见，但不进 Git 也不进索引——那是刻意的不对称。
+ */
+export const WALK_EXCLUDES = new Set([".git", ".yushu", "node_modules"]);
 const WRITE_EXCLUDES = new Set([".yushu", "node_modules"]);
 
 export function sha256(text: string): string {
