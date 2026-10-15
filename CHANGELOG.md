@@ -45,6 +45,10 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **平台章节格式接进导出，并修掉跨卷重号（第 94 轮，M5/T5-4 第四段·K11 落地）**：`apps/desktop/src/main/platform-ops.ts` 扫 `packs/platforms/` 并按 id 取包（坏包照样进清单但带 `parseError`，不静默丢）；导出预览新增平台面板（包的溯源行、"你写的标题 → 导出会写出的章头"样例、格式核对行）；`runExport` 接受 `platform`，章头按包里 `chapter_title_format` 写（TXT 与喂给 pandoc 的 Markdown 共用同一个 `formatChapterHead`），**error 级核对行在落笔之前拒**（`E_EXPORT_PLATFORM_GATE`，项目里不留半成品），回执点名平台、模板与被模板换掉的前缀数；导出页加平台选择区（"不按平台"永远第一项，坏包 disabled 且 title 带原因），零新增 CSS。
+  **Fixed**：跨卷导出时章节号在每一卷重新开始（章头用的是**卷内序号**，卷二第一章又写成"第1章"）——导出侧改用它没有的**全书序号**：引擎 `withSequence` 注入、主进程按三级大纲数（**未创建草稿的章同样占号**）；平台模板自带"第N章"而标题也带时，**只在导出副本里让位给模板**（真源不动），预览样例与 warn 行都会显示换算结果。
+  两条新锁：平台 id 的五棒接线锁、导出格式路径的零硬编码锁（带真包做正对照）。验证：**1308/1308（123 文件）**、TC=0、E2E=0、预演**全新 v197** 59/59（抖动 0、证据缺失 0，step59 `attempts=1`），变异 6 条全红。
+
 - **平台章节格式适配起手：参数只从规则包读，代码里一个平台名都不认（第 93 轮，M5/T5-4 第四段·K11）**：
   新增 `@yushu/export/platform-format.ts`（`parsePlatformExport` / `renderChapterTitle` / `checkPlatformExport`，
   8 例 + 5 条变异全红且红得对位）与仓库第一份平台导出包 `packs/platforms/fanqie/platform-export.yaml`。
