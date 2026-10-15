@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { byOutlineOrder, formatChapterHead } from "./assemble.js";
+import { formatChapterHead, withSequence } from "./assemble.js";
 import { stripInternalMarkers } from "./clean.js";
 import type { ExportChapter } from "./types.js";
 
@@ -34,6 +34,8 @@ export interface BuildMarkdownOptions {
   date?: string;
   /** 默认剥离内部标记（HTML 注释 / AI 标识）；显式传 false 才原样保留 */
   stripMarkers?: boolean;
+  /** 平台章节标题模板（K11）；`##` 行按它渲染，占位符不认识时当场抛，不留半成品 */
+  titleFormat?: string;
 }
 
 /** 元数据块（含首尾 `---` 与结尾换行）；pandoc 要求它在文件最前面 */
@@ -51,7 +53,7 @@ export function buildPandocMetadata(options: BuildMarkdownOptions): string {
 /** 装配 pandoc 输入：元数据块 + 「卷 `#` / 章 `##` / 正文原样」 */
 export function buildMarkdown(chapters: ExportChapter[], options: BuildMarkdownOptions): string {
   const head = buildPandocMetadata(options);
-  const sorted = [...chapters].sort(byOutlineOrder);
+  const sorted = withSequence(chapters);
   const blocks: string[] = [];
   let currentVolume = "";
   for (const chapter of sorted) {
@@ -61,7 +63,7 @@ export function buildMarkdown(chapters: ExportChapter[], options: BuildMarkdownO
       currentVolume = chapter.volumeId;
       parts.push(`# ${chapter.volumeTitle}`, "");
     }
-    parts.push(`## ${formatChapterHead(chapter)}`, "");
+    parts.push(`## ${formatChapterHead(chapter, options.titleFormat)}`, "");
     const body = options.stripMarkers === false ? chapter.body : stripInternalMarkers(chapter.body);
     parts.push(body.trim(), "");
     blocks.push(parts.join("\n"));

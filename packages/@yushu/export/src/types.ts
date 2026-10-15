@@ -15,6 +15,13 @@ export interface ExportChapter {
   volumeIndex: number;
   /** 卷内序号 */
   idx: number;
+  /**
+   * 全书连续序号（1 起，跨卷不重置）。
+   * 由 `withSequence` / `assembleExport` 注入——**投稿要的是它，不是 `idx`**：
+   * 大纲里每卷的 `idx` 都从 1 开始，直接拿去编号会让卷二重新出现"第1章"。
+   * 未注入时章头回退用 `idx`（单卷书两者相同）。
+   */
+  seq?: number;
   title: string;
   body: string;
   /** frontmatter 中记录的字数（对账用） */
@@ -54,7 +61,7 @@ export interface WordlistEntry {
   /** 替换建议（可空；T1-19 只给建议，不自动改写正文） */
   suggestion?: string;
   note?: string;
-  /** 平台标注（如 [起点, 番茄]；M5 平台规则包接入后细化） */
+  /** 平台标注（取值来自词库文件本身；M5 平台规则包接入后细化） */
   platforms?: string[];
 }
 
@@ -115,6 +122,12 @@ export interface BuildTxtOptions {
   stripMarkers?: boolean;
   /** 导出时间（ISO；仅写入头部元信息，便于对账） */
   generatedAt?: string;
+  /**
+   * 平台章节标题模板（K11：来自平台导出包的 `chapter_title_format`，**不硬编码平台名**）。
+   * 传了就取代内置的"第N章 标题"，`{index}` 用全书序号；占位符不认识时 `renderChapterTitle` 当场抛，
+   * 不会把 `{num}` 原样吐进作者书稿。
+   */
+  titleFormat?: string;
 }
 
 export interface StripMarkerOptions {

@@ -134,6 +134,24 @@ export function renderChapterTitle(
 const HAS_CHAPTER_PREFIX = /^\s*第[0-9一二三四五六七八九十百千]+[章节回]/;
 
 /**
+ * 模板自己会不会补上"第N章/节/回"前缀（R94）。
+ * `第{index}章 {title}` 会，`《{title}》` 不会——只有"会"的时候才需要处理撞车。
+ */
+export function templateAddsChapterPrefix(template: string): boolean {
+  return /第\{index\}[章节回]/.test(template);
+}
+
+/**
+ * 剥掉标题最前面的"第N章/节/回"（R94）。
+ * **只用于导出副本**：真源一个字都不动。平台模板已经要写编号了，标题里再带一个
+ * 就会导出"第1章 第一章 边城少年"这种东西；把自带前缀让位给平台格式，
+ * 并把这件事在预览样例与 warn 行里说清楚（不许悄悄改）。
+ */
+export function stripLeadingChapterPrefix(title: string): string {
+  return title.replace(HAS_CHAPTER_PREFIX, "").trimStart();
+}
+
+/**
  * 按包核对一批章节：只报**包能支持**的判断（标题会不会重复前缀、编码对不对、投稿材料缺哪几项）。
  * 不判"单章字数超没超"——研究里没给量化上限，写出来就是编的。
  */
@@ -144,8 +162,7 @@ export function checkPlatformExport(input: {
   materials?: Record<string, boolean>;
 }): PlatformFormatRow[] {
   const rows: PlatformFormatRow[] = [];
-  const templatePrefixed = /第\{index\}章/.test(input.pack.chapter_title_format)
-    || /第\{index\}节/.test(input.pack.chapter_title_format);
+  const templatePrefixed = templateAddsChapterPrefix(input.pack.chapter_title_format);
 
   if (input.pack.encoding.toLowerCase() !== "utf-8") {
     rows.push({
@@ -163,10 +180,12 @@ export function checkPlatformExport(input: {
         rule: "export-platform-title-repeat",
         severity: "warn",
         subject: chapter.chapterId,
+        // 这里算出来的串**必须等于导出层真正写出的章头**（有一条测试专门钉这件事）：
+        // 提示与实际产物分叉，作者就会照着一句假话去改稿。
         detail: `标题已含"第N章"，套模板 ${input.pack.chapter_title_format} 会得到「${renderChapterTitle(
           input.pack.chapter_title_format,
-          { index: chapter.idx, title: chapter.title },
-        )}」；建议真源里把标题写成裸名（"边城少年"），前缀交给平台格式`,
+          { index: chapter.idx, title: stripLeadingChapterPrefix(chapter.title) },
+        ).trim()}」；导出副本会去掉标题自带的前缀（真源不动），但建议真源里就写成裸名（"边城少年"）`,
       });
     }
   }

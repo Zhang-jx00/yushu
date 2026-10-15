@@ -7,6 +7,7 @@ import {
   parsePlatformExport,
   renderChapterTitle,
 } from "../src/platform-format.js";
+import { formatChapterHead } from "../src/assemble.js";
 
 /**
  * 平台章节格式适配（M5 / T5-4 第四段·K11，R93）。
@@ -79,6 +80,19 @@ describe("章节标题渲染与格式核对", () => {
     expect(repeat?.detail).toContain("第1章");
     expect(rows.find((row) => row.rule === "export-platform-title-repeat")).toBeDefined();
     expect(rows.some((row) => row.subject === "ch-002")).toBe(false);
+  });
+
+  it("warn 行说的结果串必须等于实际导出的章头（提示不许说谎）", () => {
+    // 这条是 R94 加的：核对行会告诉作者"套模板会得到「…」"，
+    // 而那句「…」必须是导出层真正会写出来的东西——两边各算各的，作者就会照着一条假的建议改稿。
+    const pack = parsePlatformExport(readFileSync(PACK_PATH, "utf8"));
+    const first = chapter(1, "第一章 边城少年", "正文一");
+    const rows = checkPlatformExport({ pack, chapters: [first] });
+    const repeat = rows.find((row) => row.rule === "export-platform-title-repeat");
+    const actualHead = formatChapterHead({ ...first, seq: 1 }, pack.chapter_title_format);
+    expect(repeat?.detail).toContain(actualHead);
+    expect(actualHead).toBe("第1章 边城少年");
+    expect(actualHead).not.toContain("第1章 第一章");
   });
 
   it("投稿材料缺项 ⇒ 按包里的清单点名，不自己另列一套", () => {
