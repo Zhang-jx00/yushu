@@ -278,11 +278,12 @@ export function MemoryView() {
             {(state?.targets ?? []).map((target) => {
               const key = `${target.layer}:${target.id}`;
               return (
-                <li
-                  key={key}
-                  className={key === selectedKey ? "on" : ""}
-                  onClick={() => selectTarget(key)}
-                >
+                <li key={key} className={key === selectedKey ? "on" : ""}>
+                  <button
+                    type="button"
+                    aria-current={key === selectedKey ? "true" : undefined}
+                    onClick={() => selectTarget(key)}
+                  >
                   <div>
                     <span className="badge">{LAYER_LABELS[target.layer] ?? target.layer}</span>
                     <strong>{target.title}</strong>
@@ -294,6 +295,7 @@ export function MemoryView() {
                     素材 {target.sourceChars} 字 ·{" "}
                     {target.hasSummary ? `已入库 rev ${target.summaryRev}` : "未建摘要"}
                   </div>
+                  </button>
                 </li>
               );
             })}
@@ -334,12 +336,17 @@ export function MemoryView() {
                 <>
                   <ul className="memory-coldstart-batch">
                     {state.coldStart.batch.map((item) => (
-                      <li key={`${item.layer}:${item.id}`} onClick={() => selectTarget(`${item.layer}:${item.id}`)}>
+                      <li key={`${item.layer}:${item.id}`}>
+                        <button
+                          type="button"
+                          onClick={() => selectTarget(`${item.layer}:${item.id}`)}
+                        >
                         <div>
                           <span className="badge">{LAYER_LABELS[item.layer] ?? item.layer}</span>
                           <strong>{item.title}</strong>
                         </div>
-                        <div className="muted">素材 {item.sourceChars} 字 · 点击选中后可生成候选</div>
+                        <div className="muted">素材 {item.sourceChars} 字 · 选中后可生成候选（键盘 Tab 也能到）</div>
+                        </button>
                       </li>
                     ))}
                   </ul>

@@ -35,6 +35,57 @@
   --heat-l1: #d9e8d4;
   --heat-l2: #a9cfa4;
   --heat-l3: #6faa74;
+  /* 间距令牌（R96·设计契约 §2）。基准是 **2px 网格**而不是常见的 4/8px：
+     普查 styles.css 得到 :root 外 710 处长度字面量，取值确实铺在 2px 步进上
+     （4×41 / 6×81 / 8×109 / 10×67 / 12×76 / 14×19 / 16×17 / 18×12 / 20×5）。
+     本轮**只把现有取值收进令牌，不顺手把密度改成 4px 基准**——
+     那会同时挪动上百处间距、版心宽度与滚动区高度，是一次带截图对照的独立改版，
+     塞进这一轮就会变成"顺手改掉一片画面"那种没人能审的改动。
+     索引 = 值 / 2（--space-4 = 8px），命名故意数值化：数值化的名字不会骗人，
+     语义化的名字（--gap-cluster 之类）要在改版之后按真实用法再收一层。 */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-9: 18px;
+  --space-10: 20px;
+  --space-12: 24px;
+  /* 圆角令牌：58 处 border-radius 声明里 0 处走令牌（R96 实测），本轮全部收口。
+     取值同样**照现有分布**建阶，不改一个像素：2 / 3 / 4 / 6 / 8 / 10 + pill + full。 */
+  --radius-1: 2px;
+  --radius-2: 3px;
+  --radius-3: 4px;
+  --radius-4: 6px;
+  --radius-5: 8px;
+  --radius-6: 10px;
+  --radius-pill: 999px;
+  --radius-full: 50%;
+  /* 字号 / 行高令牌（契约 §3）。中文正文行高 1.65 落在"1.4–1.7 更适读"的区间里；
+     12.5px 与 11.5px 是表格里已经在用的两档，收进令牌但不合并——
+     合并会在几十张表里同时改变行数与截断位置。 */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 12.5px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --leading-tight: 1.35;
+  --leading-body: 1.65;
+  --leading-display: 1.2;
+  /* 层级与阴影：桌面工作台优先"描边环 + 极浅阴影"，阴影只在浮层上用（M3 的思路：
+     先用色彩与边框表达层级，阴影是必要时的强调，不是默认装饰）。 */
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-raised: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --elev-overlay: 0 6px 20px rgba(0, 0, 0, 0.12);
+  /* 焦点环（契约 §5）：宽度与偏移只在这一处定义。用 outline 而不是 box-shadow ring——
+     outline 在 Windows 高对比 / forced-colors 下会跟着系统色走，box-shadow 不会。 */
+  --focus-width: 2px;
+  --focus-offset: 1px;
 }
 
 * {
@@ -47,9 +98,13 @@ body,
   height: 100%;
 }
 
+/* 字体栈（契约 §3）：先系统英文、再各家中文无衬线，最后落到通用 sans-serif。
+   中文正文**不加 letter-spacing**（长文加字距会把"行"的提示弱化，反而要更大行高补偿）；
+   带字距的只有品牌字样那一处，见 .brand。 */
 body {
   margin: 0;
-  font: 14px/1.65 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font: var(--text-md)/var(--leading-body) "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei",
+    "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
   color: var(--ink);
   background: var(--bg);
 }
@@ -65,8 +120,8 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-8);
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   flex: none;
@@ -74,7 +129,8 @@ body {
 
 .brand {
   color: var(--accent);
-  font-size: 16px;
+  font-size: var(--text-lg);
+  /* 唯一的字距例外：两字品牌标，不是正文。正文一律不加 letter-spacing（契约 §3）。 */
   letter-spacing: 0.08em;
 }
 
@@ -84,7 +140,7 @@ body {
 }
 
 .path {
-  font-size: 12px;
+  font-size: var(--text-xs);
   max-width: 420px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -98,9 +154,9 @@ body {
 /* ---------- 通用控件 ---------- */
 
 button {
-  padding: 6px 14px;
+  padding: var(--space-3) var(--space-7);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-4);
   background: var(--panel);
   color: var(--ink);
   cursor: pointer;
@@ -128,8 +184,8 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: var(--focus-width) solid var(--accent);
+  outline-offset: var(--focus-offset);
 }
 
 button:disabled {
@@ -152,13 +208,13 @@ button.link {
   border: none;
   background: none;
   color: var(--accent);
-  padding: 2px 4px;
+  padding: var(--space-1) var(--space-2);
 }
 
 input,
 textarea {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-4);
   padding: 7px 10px;
   background: var(--panel);
   color: var(--ink);
@@ -167,7 +223,7 @@ textarea {
 
 input:focus,
 textarea:focus {
-  outline: 2px solid var(--accent-soft);
+  outline: var(--focus-width) solid var(--accent-soft);
   border-color: var(--accent);
 }
 
@@ -284,19 +340,20 @@ textarea:focus {
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-radius: var(--radius-6);
+  padding: var(--space-6) var(--space-7);
   min-height: 0;
 }
 
 .panel h3 {
-  margin: 0 0 10px;
-  font-size: 14px;
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-md);
+  line-height: var(--leading-tight);
 }
 
 .panel h3 .muted {
   font-weight: normal;
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 /* 派系包卡片 */
@@ -307,7 +364,7 @@ textarea:focus {
   text-align: left;
   margin-bottom: 8px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-5);
 }
 
 .pack.on {
@@ -357,10 +414,10 @@ textarea:focus {
 
 .badge {
   display: inline-block;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12.5px;
-  margin-bottom: 10px;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-5);
 }
 
 .badge.good {
@@ -403,16 +460,37 @@ textarea:focus {
   font-weight: 600;
 }
 
+.memory-targets li > button,
+.memory-coldstart-batch li > button {
+  /* 列表行是"可点选的"，那它就得是真按钮（键盘能到、有焦点环、Enter/Space 生效）。
+     复位样式是为了视觉上与原来的 li 逐字一致——改的是可达性，不是画面。 */
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.memory-targets li > button:hover,
+.memory-coldstart-batch li > button:hover {
+  color: inherit;
+  transform: none;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .chip {
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12.5px;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
   background: var(--panel);
   border: 1px solid var(--border);
   cursor: pointer;
@@ -480,7 +558,7 @@ textarea:focus {
 
 .tree li {
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -574,7 +652,7 @@ textarea:focus {
   bottom: 16px;
   z-index: 30;
   padding: 6px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--muted);
@@ -604,7 +682,7 @@ textarea:focus {
   overflow: auto;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel);
 }
 
@@ -648,8 +726,8 @@ textarea:focus {
 
 .tabs {
   display: flex;
-  gap: 4px;
-  padding: 8px 16px 0;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-8) 0;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   flex: none;
@@ -658,8 +736,8 @@ textarea:focus {
 .tab {
   border: none;
   background: none;
-  padding: 7px 14px;
-  border-radius: 8px 8px 0 0;
+  padding: 7px var(--space-7);
+  border-radius: var(--radius-5) var(--radius-5) 0 0;
   color: var(--muted);
 }
 
@@ -713,7 +791,7 @@ textarea:focus {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-4);
   cursor: pointer;
   font-size: 13px;
 }
@@ -797,7 +875,7 @@ textarea:focus {
 
 .card-list li {
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   cursor: pointer;
   font-size: 13px;
 }
@@ -833,7 +911,7 @@ textarea:focus {
 
 select {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-4);
   padding: 7px 10px;
   background: var(--panel);
   color: var(--ink);
@@ -892,7 +970,7 @@ select {
 
 .volume-list li {
   padding: 7px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   cursor: pointer;
   font-size: 13px;
 }
@@ -969,7 +1047,7 @@ select {
 
 .chapter-list li {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   padding: 6px 8px;
   background: var(--panel);
 }
@@ -1072,7 +1150,7 @@ select {
 
 .provider {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   padding: 8px 10px;
   margin-bottom: 8px;
   font-size: 13px;
@@ -1105,7 +1183,7 @@ select {
 
 .draft-list li {
   padding: 7px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   cursor: pointer;
   font-size: 13px;
 }
@@ -1149,7 +1227,7 @@ select {
 
 .candidate {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel);
   padding: 10px 12px;
   min-height: 180px;
@@ -1218,7 +1296,7 @@ select {
 
 .memory-targets li {
   padding: 7px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   cursor: pointer;
   font-size: 13px;
 }
@@ -1256,7 +1334,7 @@ select {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel);
   padding: 10px 12px;
   line-height: 1.9;
@@ -1272,7 +1350,7 @@ select {
 
 .memory-fact {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   padding: 8px 10px;
   margin-bottom: 8px;
   font-size: 12.5px;
@@ -1305,7 +1383,7 @@ select {
 
 .injection-entry {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   padding: 8px 10px;
   margin-bottom: 8px;
   font-size: 12.5px;
@@ -1374,13 +1452,13 @@ select {
   margin-top: 8px;
   padding: 6px 8px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel-2);
 }
 
 .confirm-check code {
   background: var(--panel);
-  border-radius: 4px;
+  border-radius: var(--radius-3);
   padding: 0 3px;
 }
 
@@ -1388,7 +1466,7 @@ select {
   margin: 8px 0 0;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel);
   font-size: 12.5px;
   line-height: 1.8;
@@ -1410,7 +1488,7 @@ select {
 
 .index-progress-track {
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--panel-2);
   overflow: hidden;
 }
@@ -1418,7 +1496,7 @@ select {
 .index-progress-bar {
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   transition: width 0.15s linear;
 }
 
@@ -1439,7 +1517,7 @@ select {
 
 .search-results li {
   padding: 5px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-4);
   cursor: pointer;
   line-height: 1.6;
 }
@@ -1471,7 +1549,7 @@ select {
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-4);
 }
 
 .snapshots li:hover {
@@ -1548,7 +1626,7 @@ select {
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-4);
 }
 
 .git-log li:hover {
@@ -1594,7 +1672,7 @@ select {
 
 .stats-progress {
   height: 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-4);
   background: var(--panel-2);
   overflow: hidden;
   max-width: 520px;
@@ -1624,7 +1702,7 @@ select {
   gap: 4px;
   padding: 8px 10px;
   background: var(--panel-2);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
 }
 
 .stats-grid strong {
@@ -1660,7 +1738,7 @@ select {
   flex: 1;
   min-width: 4px;
   background: var(--accent);
-  border-radius: 2px 2px 0 0;
+  border-radius: var(--radius-1) var(--radius-1) 0 0;
 }
 
 .stats-bar.neg {
@@ -1690,7 +1768,7 @@ select {
 
 .stats-tier {
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 12px;
   border: 1px solid var(--border);
 }
@@ -1753,7 +1831,7 @@ select {
 .heat-cell {
   width: 12px;
   height: 12px;
-  border-radius: 3px;
+  border-radius: var(--radius-2);
   border: none;
   padding: 0;
   background: var(--panel-2);
@@ -1785,7 +1863,7 @@ select {
 }
 
 .heat-cell.on {
-  outline: 2px solid var(--ink);
+  outline: var(--focus-width) solid var(--ink);
   outline-offset: 1px;
 }
 
@@ -1827,7 +1905,7 @@ select {
 .name-list li {
   padding: 3px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--panel);
   font-size: 13px;
   cursor: pointer;
@@ -1867,7 +1945,7 @@ select {
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel);
   font-size: 14px;
 }
@@ -1904,7 +1982,7 @@ select {
 .mode-switch button {
   padding: 2px 10px;
   font-size: 12.5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .mode-switch button.on {
@@ -1918,7 +1996,7 @@ select {
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel);
   padding: 12px 16px;
   position: relative; /* @ 候选菜单（T2-2）的绝对定位参照 */
@@ -1966,7 +2044,7 @@ select {
 .entity-mention {
   color: var(--accent);
   background: var(--accent-soft);
-  border-radius: 3px;
+  border-radius: var(--radius-2);
   cursor: pointer;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
@@ -1983,14 +2061,14 @@ select {
 
 .mention-panel code {
   background: var(--panel-2);
-  border-radius: 4px;
+  border-radius: var(--radius-3);
   padding: 0 3px;
 }
 
 .mention-chip {
   padding: 1px 10px;
   font-size: 12.5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border-color: var(--accent-soft);
   background: var(--accent-soft);
   color: var(--accent);
@@ -2009,7 +2087,7 @@ select {
   max-height: 232px;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   font-size: 13px;
@@ -2037,7 +2115,7 @@ select {
   align-items: baseline;
   gap: 6px;
   padding: 5px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-4);
   cursor: pointer;
 }
 
@@ -2085,7 +2163,7 @@ select {
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel);
   position: relative;
 }
@@ -2146,7 +2224,7 @@ select {
   margin: 10px 18px 0;
   padding: 10px 14px;
   border: 1px solid var(--warn);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--warn-soft-bg);
   font-size: 13px;
 }
@@ -2181,7 +2259,7 @@ select {
   margin: 10px 18px 0;
   padding: 10px 14px;
   border: 1px solid var(--warn);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--warn-soft-bg);
   font-size: 13px;
 }
@@ -2214,7 +2292,7 @@ select {
   gap: 6px;
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-4);
   font-size: 13px;
 }
 
@@ -2526,7 +2604,7 @@ table,
 .foreshadow-rh {
   margin-left: 6px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--panel-2);
   color: var(--muted);
   font-size: 11.5px;
@@ -2601,7 +2679,7 @@ table,
   max-height: 320px;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
 }
 
 .graph-node {
@@ -2634,7 +2712,7 @@ table,
   display: inline-block;
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   margin-right: 5px;
 }
 
@@ -2663,7 +2741,7 @@ table,
 .chronology-flag {
   margin-left: 6px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 11.5px;
 }
 
@@ -2745,7 +2823,7 @@ table,
   margin: 0 0 10px;
   padding: 8px 10px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel-2);
   font-size: 12.5px;
   line-height: 1.7;
@@ -2793,7 +2871,7 @@ table,
 .import-probe {
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel-2);
   font-size: 12.5px;
   line-height: 1.7;
@@ -2815,7 +2893,7 @@ table,
 .import-tag {
   display: inline-block;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--muted);
@@ -2904,7 +2982,7 @@ table,
 .import-note {
   padding: 6px 10px;
   border: 1px dashed var(--warn);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--warn-tint-bg);
   margin-bottom: 6px;
 }
@@ -2913,7 +2991,7 @@ table,
 .import-boundary {
   padding: 8px 10px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--panel-2);
   color: var(--muted);
   font-size: 12px;
@@ -2955,7 +3033,7 @@ table,
   margin-top: 10px;
   padding: 10px 12px;
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-5);
   background: var(--accent-soft);
   font-size: 12.5px;
   line-height: 1.7;

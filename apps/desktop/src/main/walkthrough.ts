@@ -1468,7 +1468,10 @@ const STEPS: StepDef[] = [
         return items.find((li) => li.innerText.includes('章摘要') && !li.innerText.includes('素材 0 字')) || null;
       }, 8000);
       if (!target) return { ok: false, note: '找不到有素材的章摘要目标：' + pageText() };
-      target.click();
+      // 列表行是真按钮（契约 §6：可点选的必须是键盘能到的控件），所以点它里面的 button
+      const targetBtn = target.querySelector('button');
+      if (targetBtn === null) return { ok: false, note: '章摘要目标里没有 button（键盘可达性回归）' };
+      targetBtn.click();
       await sleep(250);
       const genBtn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '生成候选');
       if (!genBtn || genBtn.disabled) return { ok: false, note: '生成候选按钮不可用：' + pageText() };
@@ -3741,7 +3744,13 @@ const STEPS: StepDef[] = [
           clicked = '(待补里没有与当前选中不同的条目，无法判定)';
         } else {
           clicked = String((candidate.querySelector('strong') || {}).textContent || '').trim();
-          candidate.click();
+          const candidateBtn = candidate.querySelector('button');
+          if (candidateBtn === null) {
+            clickOk = false;
+            clicked = '(待补项里没有 button，键盘不可达：' + clicked + ')';
+          } else {
+            candidateBtn.click();
+          }
           await sleep(220);
           const after = String((document.querySelector('.memory-targets li.on strong') || {}).textContent || '').trim();
           clickOk = after === clicked && before !== clicked;
