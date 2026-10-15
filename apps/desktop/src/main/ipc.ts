@@ -56,6 +56,10 @@ import {
   type ContextPreviewPayload,
   type CreateProjectPayload,
   type DocSnapshot,
+  type BiblePreviewPayload,
+  type BiblePreviewRequest,
+  type BibleRunPayload,
+  type BibleRunResult,
   type ExportPreviewPayload,
   type ExportPreviewRequest,
   type ExportRunPayload,
@@ -168,6 +172,7 @@ function toProposalPayload(path: string, file: ProposalFile): ProposalPayload {
 }
 import { buildFixedBody, readProofreadPanel } from "./text-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
+import { previewBible, runBibleExport } from "./bible-ops.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
 import { IndexRefreshScheduler } from "./index-scheduler.js";
 import { readLibrary } from "./library-ops.js";
@@ -653,6 +658,14 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNELS.exportRun, (_event, payload: ExportRunPayload) =>
     wrap<ExportRunResult>(() => runExport(requireGateway(), payload)),
+  );
+
+  // 世界圣经 / 设定集（M5 T5-5，R98）：预览只读，导出只写 exports/ 派生物（与 export:run 同一类，不写真源）
+  ipcMain.handle(CHANNELS.biblePreview, (_event, payload: BiblePreviewRequest) =>
+    wrap<BiblePreviewPayload>(() => previewBible(requireGateway(), payload ?? {})),
+  );
+  ipcMain.handle(CHANNELS.bibleRun, (_event, payload: BibleRunPayload) =>
+    wrap<BibleRunResult>(() => runBibleExport(requireGateway(), payload)),
   );
 
   // 干净剪贴板：文本在主进程生成并写入系统剪贴板（渲染层只拿统计与预览）

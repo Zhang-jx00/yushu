@@ -65,6 +65,8 @@ const NON_WRITE_CHANNELS = [
   // 真正会建卷建章的 `import:apply`（R78）必须进 WRITE_CHANNELS，别拿这两条的口径替它说话。
   "importPick",
   "importPreview",
+  // R98 设定集导出：写的是 `exports/*.md` 派生物（与 `exportRun` 完全同一类），真源一个字节不动 ⇒ 不该刷索引
+  "bibleRun",
 ] as const;
 
 /** 解析每个 `ipcMain.handle(CHANNELS.x, …)` 块，返回通道 → 所用包装器 */

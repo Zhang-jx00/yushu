@@ -85,6 +85,10 @@ export const CHANNELS = {
   exportPreview: "export:preview",
   exportRun: "export:run",
   exportClipboard: "export:clipboard",
+  /** 世界圣经（设定集）预览（M5/T5-5，R98）：只读，不落盘 */
+  biblePreview: "bible:preview",
+  /** 世界圣经（设定集）导出（M5/T5-5，R98）：写 exports/ 派生物，与 export:run 同一类 */
+  bibleRun: "bible:run",
   indexStatus: "index:status",
   indexRebuild: "index:rebuild",
   indexSearch: "index:search",
@@ -1350,6 +1354,101 @@ export interface ExportRunResult {
     infos: number;
     strippedPrefixes: number;
   };
+}
+
+/* ---------- 世界圣经 / 设定集一键导出（M5 T5-5，R98） ---------- */
+
+/** 设定集里的一条设定（预览与回执共用；`words` 是正文字数，不含标题与元信息行） */
+export interface BibleEntryPayload {
+  id: string;
+  name: string;
+  type: string;
+  path: string;
+  visibility: string;
+  words: number;
+}
+
+/** 设定集的一章（一个层级一节） */
+export interface BibleSectionPayload {
+  layer: string;
+  heading: string;
+  entries: BibleEntryPayload[];
+}
+
+/** 汇编结论（K11 规则 `export-bible-visibility-leak`） */
+export interface BibleFindingPayload {
+  rule: string;
+  severity: "warn";
+  message: string;
+  related: string;
+}
+
+/** 读不了的设定卡：留在面板上点名，不当它不存在（同 R94 的坏派系包） */
+export interface BibleUnreadablePayload {
+  path: string;
+  error: string;
+}
+
+/** 层级一行的状态：有几张卡、世界里开没开、这次选没选 */
+export interface BibleLayerPayload {
+  key: string;
+  title: string;
+  cards: number;
+  enabled: boolean;
+  selected: boolean;
+}
+
+export interface BiblePreviewRequest {
+  /** 设定集标题；省略则用「书名 设定集」 */
+  title?: string;
+  /** 层级选取；省略 = 世界里开着的层 */
+  layers?: string[];
+  /** 按叙事可见性脱敏 */
+  maskUnrevealed?: boolean;
+}
+
+/** 预览结果（不 extends 请求体：那边的 `layers` 是"选哪些层"，这边是"每层什么状态"，同名不同义） */
+export interface BiblePreviewPayload {
+  /** 实际会写进产物第一行的标题（面板显示的就是产物里的） */
+  title: string;
+  bookTitle: string;
+  sections: BibleSectionPayload[];
+  layers: BibleLayerPayload[];
+  included: number;
+  excludedByLayer: number;
+  masked: BibleEntryPayload[];
+  findings: BibleFindingPayload[];
+  wordCount: number;
+  /** 项目里的设定卡总数（含读不了的） */
+  cardTotal: number;
+  unreadable: BibleUnreadablePayload[];
+  /** 预览可能被截断（整本只落盘才完整） */
+  markdown: string;
+  truncated: boolean;
+  /** 这次预览用没用脱敏（回执要能自证是哪一种） */
+  maskUnrevealed: boolean;
+  error: string | null;
+}
+
+export interface BibleRunPayload extends BiblePreviewRequest {
+  /** 防手滑：必须显式为 true（与章节导出同一口径） */
+  confirmed?: boolean;
+}
+
+export interface BibleRunResult {
+  path: string;
+  hash: string;
+  title: string;
+  included: number;
+  wordCount: number;
+  /** 被脱敏剔除的条数（只报数，报不了名字——名字本身就是剧透） */
+  maskedCount: number;
+  /** 未揭示却仍进了产物的条数（warn 不阻断，但必须看得见） */
+  leakCount: number;
+  /** 读不了、因此没进设定集的卡数 */
+  unreadableCount: number;
+  maskUnrevealed: boolean;
+  layers: string[];
 }
 
 export interface ClipboardPayload {

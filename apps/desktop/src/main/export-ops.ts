@@ -69,7 +69,9 @@ import { repoRoot } from "./paths.js";
  * - 干净剪贴板：去注释（默认）/ 去 AI 标识（可选），写入系统剪贴板由 IPC 层完成。
  */
 
-const EXPORTS_DIR = "exports";
+// 设定集导出（R98 `bible-ops.ts`）与章节导出共用同一个落盘目录与同一套命名规则，
+// 所以这几位助手是导出的**单源**：两处各写一份，早晚一份守得住冲突、另一份守不住。
+export const EXPORTS_DIR = "exports";
 const PROJECT_WORDLIST_DIR = "wordlists";
 /** 预览最多返回的命中条数（全量计数仍在 hitTotal） */
 const HIT_PREVIEW_LIMIT = 300;
@@ -324,12 +326,12 @@ export async function previewExport(
  */
 const probeTooling = onceTooling(() => probeExportTooling(realToolDeps()));
 
-function sanitizeFileName(title: string): string {
+export function sanitizeFileName(title: string): string {
   const cleaned = title.replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "");
   return cleaned === "" ? "未命名作品" : cleaned.slice(0, 40);
 }
 
-function timeStamp(date = new Date()): string {
+export function timeStamp(date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
 }
@@ -344,7 +346,7 @@ export interface ExportRunDeps {
 }
 
 /** 找一个没被占用的导出基名（同名自动追加序号，绝不覆盖既有导出） */
-async function freeExportBase(gateway: ProjectGateway, base: string, extensions: string[]): Promise<string> {
+export async function freeExportBase(gateway: ProjectGateway, base: string, extensions: string[]): Promise<string> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
     let free = true;
