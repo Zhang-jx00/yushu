@@ -2066,6 +2066,38 @@ export interface MemoryRejectedPayload {
   reason: string;
 }
 
+/** 冷启动计划的一层计数（缺 = 缺摘要且**有素材**） */
+export interface MemoryColdStartLayerPayload {
+  total: number;
+  missing: number;
+  covered: number;
+}
+
+/** 冷启动批次里的一条待补目标（只带界面要显示的四个字段） */
+export interface MemoryColdStartTargetPayload {
+  layer: "volume_summary" | "chapter_summary";
+  id: string;
+  title: string;
+  sourceChars: number;
+}
+
+export interface MemoryColdStartPayload {
+  volumes: MemoryColdStartLayerPayload;
+  chapters: MemoryColdStartLayerPayload;
+  /** 正文为空、因此不列待补的目标数（没素材就不逼作者凭空编） */
+  noMaterial: number;
+  materialTargets: number;
+  /** 有素材的目标里已有摘要的占比；一个都无从判时为 null */
+  coverageRatio: number | null;
+  coverageReason: string | null;
+  firstChapterMissing: boolean;
+  batch: MemoryColdStartTargetPayload[];
+  /** 这批的素材字数合计（换算金额交给成本面板，这里不猜单价） */
+  batchChars: number;
+  batchTruncated: boolean;
+  stillMissing: number;
+}
+
 export interface MemoryStatePayload {
   /** 记忆真源目录（memory/；无记录时目录可能尚未创建） */
   dir: string;
@@ -2073,6 +2105,11 @@ export interface MemoryStatePayload {
   project_id: string;
   summaries: MemorySummaryPayload[];
   targets: MemoryTargetPayload[];
+  /**
+   * 冷启动计划（T5-9，R95）：导入长篇后"还缺几条摘要、先补哪几条"。
+   * 由同一份 targets 就地派生——数字必须与上方目标列表自洽，不允许有第二份事实。
+   */
+  coldStart: MemoryColdStartPayload;
   facts: MemoryFactPayload[];
   findings: MemoryFindingPayload[];
   rejected: MemoryRejectedPayload[];

@@ -31,6 +31,8 @@ import {
   type MemoryLintFinding,
   type MemoryRecord,
   type SummaryRecord,
+  planColdStart,
+  type ColdStartTarget,
 } from "@yushu/memory";
 import { chat, costTokensOf, orderProvidersByRoute, resolveRoute, type ChatMessage } from "@yushu/llm";
 import {
@@ -265,11 +267,41 @@ export async function loadMemoryState(gateway: ProjectGateway): Promise<MemorySt
     }
   }
 
+  // 冷启动计划（T5-9）：**就地从同一份 targets 派生**，不重新读盘、不另立一份事实。
+  const coldTargets: ColdStartTarget[] = targets.map((item) => ({
+    layer: item.layer,
+    id: item.id,
+    title: item.title,
+    ...(item.volume_id === undefined ? {} : { volumeId: item.volume_id }),
+    sourceChars: item.sourceChars,
+    hasSummary: item.hasSummary,
+    summaryRev: item.summaryRev,
+  }));
+  const plan = planColdStart({ targets: coldTargets });
+
   return {
     dir: MEMORY_DIR,
     project_id: projectId,
     summaries,
     targets,
+    coldStart: {
+      volumes: plan.volumes,
+      chapters: plan.chapters,
+      noMaterial: plan.noMaterial,
+      materialTargets: plan.materialTargets,
+      coverageRatio: plan.coverageRatio,
+      coverageReason: plan.coverageReason,
+      firstChapterMissing: plan.firstChapterMissing,
+      batch: plan.batch.map((item) => ({
+        layer: item.layer,
+        id: item.id,
+        title: item.title,
+        sourceChars: item.sourceChars,
+      })),
+      batchChars: plan.batchChars,
+      batchTruncated: plan.batchTruncated,
+      stillMissing: plan.stillMissing,
+    },
     facts: factsWithoutProvenance,
     findings,
     rejected,

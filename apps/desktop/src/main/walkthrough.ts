@@ -3698,6 +3698,66 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 60,
+    title: '记忆：冷启动待补与摘要目标同一个事实，点待补即选中目标（M5/T5-9，R95）',
+    file: 'step60-memory-coldstart.png',
+    body: String.raw`
+      // T5-9 的验收点是"长篇导入后不至于开场失忆"。这一步只看**事实一致与衔接可用**：
+      // ① 待补清单里的每一条都能在上方「摘要目标」里找到同名条目（两个面板不许有第二份事实）；
+      // ② 点一条待补 ⇒ 上面就选中它（内容仍走既有「生成候选 → 采纳」，这里不生成任何东西）；
+      // ③ 待补项的素材字数必须 > 0（空正文不进批次，没素材就不编摘要）；
+      // ④ 覆盖率那一行必须给出数字或"无从计算"，不许留白。
+      await tab('规则');
+      await tab('记忆');
+      const panel = await waitFor(() => document.querySelector('.memory-coldstart'), 20000);
+      if (panel === null) return { ok: false, note: '没有冷启动面板：' + pageText().slice(0, 160) };
+      const text = String(panel.textContent).replace(/\s+/g, ' ');
+      const ratioOk = /覆盖率 (\d+%|无从计算)/.test(text);
+      const batchLis = [...panel.querySelectorAll('.memory-coldstart-batch li')];
+      const batchTitles = batchLis.map((li) => String((li.querySelector('strong') || {}).textContent || '').trim());
+      const targetTitles = [...document.querySelectorAll('.memory-targets li strong')].map((el) => String(el.textContent).trim());
+      const chars = batchLis.map((li) => {
+        const m = /素材 (\d+) 字/.exec(String(li.textContent));
+        return m === null ? -1 : Number(m[1]);
+      });
+      let allPresent = true;
+      let clickOk = false;
+      let clicked = '(批次为空)';
+      let before = '';
+      if (batchLis.length > 0) {
+        allPresent = batchTitles.every((title) => targetTitles.indexOf(title) >= 0);
+        const charsOk = chars.every((n) => n > 0);
+        if (!charsOk) allPresent = false;
+        // 必须点一条"当前还没被选中"的待补项：点已选中的那条，处理器是空的也会绿
+        // （M6 变异就是这么活下来的——选择态是上一步留下的，不是本步点出来的）
+        before = String((document.querySelector('.memory-targets li.on strong') || {}).textContent || '').trim();
+        const candidate = batchLis.find((li) => {
+          const title = String((li.querySelector('strong') || {}).textContent || '').trim();
+          return title !== '' && title !== before;
+        });
+        if (candidate === undefined) {
+          clickOk = false;
+          clicked = '(待补里没有与当前选中不同的条目，无法判定)';
+        } else {
+          clicked = String((candidate.querySelector('strong') || {}).textContent || '').trim();
+          candidate.click();
+          await sleep(220);
+          const after = String((document.querySelector('.memory-targets li.on strong') || {}).textContent || '').trim();
+          clickOk = after === clicked && before !== clicked;
+        }
+      }
+      const emptyOk = batchLis.length === 0 ? /没有待补目标/.test(text) : true;
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: ratioOk && allPresent && clickOk && emptyOk,
+        note: '覆盖率行有结论=' + ratioOk + '；待补 ' + batchLis.length + ' 条与目标表同名=' + allPresent +
+          '；点待补把选中从「' + before + '」挪到=' + clickOk + '（' + clicked + '）；空批次如实说明=' + emptyOk +
+          '；空素材未列入=' + (chars.filter((n) => n <= 0).length === 0),
+      };
+    `,
+  },
 ];
 
 /**

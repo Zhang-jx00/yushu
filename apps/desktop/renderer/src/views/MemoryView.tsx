@@ -256,6 +256,14 @@ export function MemoryView() {
       setNotice(`事实已删除：${id}`);
     });
 
+  const selectTarget = (key: string) => {
+    setSelectedKey(key);
+    setCandidate("");
+    setLastRun(null);
+    setNotice(null);
+    setError(null);
+  };
+
   return (
     <div className="memory">
       <aside>
@@ -273,13 +281,7 @@ export function MemoryView() {
                 <li
                   key={key}
                   className={key === selectedKey ? "on" : ""}
-                  onClick={() => {
-                    setSelectedKey(key);
-                    setCandidate("");
-                    setLastRun(null);
-                    setNotice(null);
-                    setError(null);
-                  }}
+                  onClick={() => selectTarget(key)}
                 >
                   <div>
                     <span className="badge">{LAYER_LABELS[target.layer] ?? target.layer}</span>
@@ -296,6 +298,62 @@ export function MemoryView() {
               );
             })}
           </ul>
+        </section>
+
+        {/* 冷启动待补（T5-9，R95）：缺多少、缺在哪、先补哪几条。
+            这里**不生成任何摘要**——点一条只是在上面的「摘要目标」里选中它，
+            内容仍走既有的「生成候选 → 采纳」（候选化原则、AI 关闭即不可发起）。 */}
+        <section className="panel memory-coldstart">
+          <h3>
+            冷启动待补 <span className="muted">T5-9：长篇导入后不至于开场失忆</span>
+          </h3>
+          {state === null ? (
+            <p className="muted">正在读取记忆状态…</p>
+          ) : (
+            <>
+              <div className="muted">
+                卷摘要 {state.coldStart.volumes.covered} /{" "}
+                {state.coldStart.volumes.covered + state.coldStart.volumes.missing} 已补 · 章摘要{" "}
+                {state.coldStart.chapters.covered} / {state.coldStart.chapters.covered + state.coldStart.chapters.missing} 已补 ·{" "}
+                {state.coldStart.coverageRatio === null
+                  ? "覆盖率无从计算"
+                  : `覆盖率 ${Math.round(state.coldStart.coverageRatio * 100)}%`}
+              </div>
+              {state.coldStart.coverageReason !== null && <p className="warn">{state.coldStart.coverageReason}</p>}
+              {state.coldStart.noMaterial > 0 && (
+                <p className="muted">
+                  另有 {state.coldStart.noMaterial} 个目标正文仍为空，不列入待补（没有素材就不编摘要）。
+                </p>
+              )}
+              {state.coldStart.firstChapterMissing && (
+                <p className="warn">第一章还没有摘要：开场注入此时只能靠世界核心卡。</p>
+              )}
+              {state.coldStart.batch.length === 0 ? (
+                <p className="muted">没有待补目标：有素材的卷与章都已有摘要。</p>
+              ) : (
+                <>
+                  <ul className="memory-coldstart-batch">
+                    {state.coldStart.batch.map((item) => (
+                      <li key={`${item.layer}:${item.id}`} onClick={() => selectTarget(`${item.layer}:${item.id}`)}>
+                        <div>
+                          <span className="badge">{LAYER_LABELS[item.layer] ?? item.layer}</span>
+                          <strong>{item.title}</strong>
+                        </div>
+                        <div className="muted">素材 {item.sourceChars} 字 · 点击选中后可生成候选</div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="muted">
+                    本批合计素材 {state.coldStart.batchChars} 字
+                    {state.coldStart.batchTruncated
+                      ? `；仍有 ${state.coldStart.stillMissing} 条排在后面（分批补，不一次铺开）`
+                      : ""}
+                    。候选仍走「生成候选 → 采纳」，御书不自动写入真源。
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </section>
 
         <section className="panel">
