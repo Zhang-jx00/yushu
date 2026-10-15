@@ -45,6 +45,21 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **平台章节格式适配起手：参数只从规则包读，代码里一个平台名都不认（第 93 轮，M5/T5-4 第四段·K11）**：
+  新增 `@yushu/export/platform-format.ts`（`parsePlatformExport` / `renderChapterTitle` / `checkPlatformExport`，
+  8 例 + 5 条变异全红且红得对位）与仓库第一份平台导出包 `packs/platforms/fanqie/platform-export.yaml`。
+  K11 明写「平台章节格式参数从 I07 规则包读取，不硬编码」，所以这一层不认平台名也不写阈值：
+  包必须带 `source_urls` 与 `effective_date`（缺即抛，对应 I07 的 error 级 `pr-rule-source-missing`）、
+  **未知键直接拒**（悄悄多出一个代码不认识的字段比报错危险，它会安静地被忽略）、
+  占位符只认 `{index}` / `{title}`（写错当场抛，不许把 `{num}` 原样吐进作者的书稿）。
+  **宁缺毋造两处**：I07 只给了晋江的签约模板四部分（简纲/人设/创新点/看点），没给番茄的投稿材料清单
+  ⇒ 番茄包 `submission_materials` 留空，并有断言钉住「代码不替它补一套」；单章字数上限研究里没有量化
+  ⇒ 只报「口径是什么」，不假装能判「这章超没超」。
+  **R88 扩面的门禁第二次兑现**：本轮新代码被 `typecheck` 判出两处类型问题
+  （`matchAll` 结果里的 `string | undefined` 传进 `sort`、测试里对 `as const` 元组做 `includes`）——
+  放在 R88 之前会一路静默。验证：`pnpm test` **1277/1277（121 文件）**、TC=0；
+  e2e 与 UI 预演**未跑**并写明理由（只加纯函数与数据文件，没触碰现有运行时路径）。
+
 - **装完引擎不必重启：把面板上那句承诺兑现（第 92 轮，M5/T5-4 第四段·PDF 口径收口）**：
   R87 的能力面板写着"装上任一引擎后即可用"，可探测结果被进程内缓存住——作者真去装了 xelatex，
   面板仍然说"暂不可"，直到重启应用。**那是一句兑现不了的承诺写在 UI 上**。现在 `onceTooling` 带 `reset()`、
