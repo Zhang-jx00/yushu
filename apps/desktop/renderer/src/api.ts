@@ -55,6 +55,7 @@ import type {
   CreateProjectPayload,
   DocSnapshot,
   ExportPreviewPayload,
+  ExportPreviewRequest,
   ExportRunPayload,
   ExportRunResult,
   FusionPreview,
@@ -223,7 +224,7 @@ export interface YushuApi {
     apply: (payload: ImportApplyPayload) => Promise<ImportApplyResultPayload>;
   };
   export: {
-    preview: () => Promise<ExportPreviewPayload>;
+    preview: (payload?: ExportPreviewRequest) => Promise<ExportPreviewPayload>;
     run: (payload: ExportRunPayload) => Promise<ExportRunResult>;
     clipboard: (payload?: ClipboardPayload) => Promise<ClipboardResult>;
   };

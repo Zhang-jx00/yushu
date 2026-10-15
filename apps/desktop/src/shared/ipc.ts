@@ -1209,6 +1209,12 @@ export interface SkippedWordlistPayload {
   error: string;
 }
 
+/** 预览的请求：只有一件事可要求——要不要重探本机工具链（R92） */
+export interface ExportPreviewRequest {
+  /** true ⇒ 清掉进程内探测缓存重新下发；作者装完 PDF 引擎后备好 EPUBCheck jar 后不必重启应用 */
+  refresh?: boolean;
+}
+
 export interface ExportPreviewPayload {
   bookTitle: string;
   volumes: number;

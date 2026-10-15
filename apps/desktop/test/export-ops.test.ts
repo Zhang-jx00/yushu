@@ -283,6 +283,28 @@ describe("导出预览的能力矩阵（T5-4）", () => {
     expect(preview.chapters).toBe(1);
     expect(preview.totalWords).toBe(countWords(prose));
   });
+
+  it("带 refreshTooling 的预览会重探一次（装完 PDF 引擎不必重启应用）", async () => {
+    const fixture = await setupProject();
+    let underlying = 0;
+    // 用产品同一个 onceTooling 组合：这样测的是"预览有没有把 reset 接上"，不是另造一套缓存
+    const { onceTooling } = await import("../src/main/export-tooling.js");
+    const probe = onceTooling(async () => {
+      underlying += 1;
+      return {
+        pandocVersion: "2.10",
+        pandocOutputFormats: ["epub3"],
+        pdfEngines: [],
+        epubCheckAvailable: false,
+      };
+    });
+    await previewExport(fixture.gateway, { probeTooling: probe });
+    await previewExport(fixture.gateway, { probeTooling: probe });
+    expect(underlying, "默认走缓存：两次预览只探一次").toBe(1);
+
+    await previewExport(fixture.gateway, { probeTooling: probe, refreshTooling: true });
+    expect(underlying, "带 refreshTooling 就必须重探，否则面板永远停在旧结论").toBe(2);
+  });
 });
 /**
  * 真实多格式导出（M5 / T5-4 第三段，R90）。
@@ -441,5 +463,36 @@ describe("多格式导出（T5-4 第三段）", () => {
     expect(out.sourcePath).toBeUndefined();
     expect(fake.commands).toHaveLength(0);
     expect((await listExports(fixture.gateway)).filter((name) => name.endsWith(".md"))).toEqual([]);
+  });
+});
+
+/**
+ * 「重新核对 → 重探工具链」这条链路的接线锁（R92）。
+ *
+ * 单测能证明 `onceTooling.reset()` 与 `previewExport({refreshTooling:true})` 各自成立，
+ * 但证不了**中间那几棒有没有人接**。这条锁逐棒点名：渲染层按钮 → api → preload → 主进程 handler
+ * → `previewExport` → `reset()`。任何一棒把参数丢了（尤其 preload 忘了转发 payload），
+ * 功能会安静地退回"必须重启应用"，而且没有任何测试会红。
+ */
+describe("重新核对刷新工具链的接线（R92）", () => {
+  const read = async (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
+
+  it("五棒都在：payload 从按钮一路传到 reset", async () => {
+    const shared = await read("../src/shared/ipc.ts");
+    const mainIpc = await read("../src/main/ipc.ts");
+    const preload = await read("../preload/preload.cjs");
+    const api = await read("../renderer/src/api.ts");
+    const view = await read("../renderer/src/views/ExportView.tsx");
+
+    expect(shared).toMatch(/interface ExportPreviewRequest \{[\s\S]*?refresh\?: boolean/);
+    expect(mainIpc).toContain("(_event, payload: ExportPreviewRequest)");
+    expect(mainIpc).toContain("refreshTooling: payload?.refresh === true");
+    // preload 必须把 payload 转发出去：写成 invoke("export:preview") 就静默失效了
+    expect(preload).toMatch(/preview: \(payload\) => invoke\("export:preview", payload\)/);
+    expect(api).toContain("preview: (payload?: ExportPreviewRequest)");
+    expect(view).toContain("api().export.preview({ refresh: forceTooling })");
+    // 按钮不能直接把 refresh 当 handler（那会把 click 事件当成 forceTooling）
+    expect(view).toContain("onClick={() => refresh(true)}");
+    expect(view).not.toMatch(/onClick=\{refresh\}/);
   });
 });

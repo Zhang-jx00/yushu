@@ -185,6 +185,25 @@ describe("探测缓存（T5-4）", () => {
     expect(result.pandocVersion).toBe("2.10");
     expect(calls).toBe(2);
   });
+
+  it("reset 之后重新探一次：作者装完 PDF 引擎不必重启应用", async () => {
+    let calls = 0;
+    let installed = false;
+    const next = onceTooling(async () => {
+      calls += 1;
+      return installed
+        ? { ...tooling, pdfEngines: ["xelatex"] }
+        : { ...tooling, pdfEngines: [] };
+    });
+    expect((await next()).pdfEngines).toEqual([]);
+    expect((await next()).pdfEngines).toEqual([]); // 缓存生效：还是旧结论
+    expect(calls).toBe(1);
+
+    installed = true; // 作者装了 xelatex
+    next.reset(); // 「重新核对」该做的就是这件事
+    expect((await next()).pdfEngines).toEqual(["xelatex"]);
+    expect(calls).toBe(2);
+  });
 });
 
 describe("Pandoc 转换与 EPUB 门禁（T5-4）", () => {

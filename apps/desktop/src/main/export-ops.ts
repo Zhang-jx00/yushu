@@ -42,6 +42,7 @@ import {
   onceTooling,
   validateEpub,
   type ToolDeps,
+  type ToolingProbe,
 } from "./export-tooling.js";
 import { repoRoot } from "./paths.js";
 
@@ -167,7 +168,9 @@ function messageOf(err: unknown): string {
 
 /** 导出预览的可选注入（默认走现场探测；测试用它把"探测失败"变成可复现场景） */
 export interface ExportPreviewOptions {
-  probeTooling?: () => Promise<ExportTooling>;
+  probeTooling?: ToolingProbe | (() => Promise<ExportTooling>);
+  /** 强制重探工具链：作者装完 PDF 引擎 / 备好 EPUBCheck jar 后点「重新核对」就该看到新结论 */
+  refreshTooling?: boolean;
 }
 
 /** 导出预览：统计 + 字数对账 + 敏感词命中 + 词库信息 + 本机能力矩阵（T1-18/19、T5-4） */
@@ -193,7 +196,10 @@ export async function previewExport(
   let capabilities: ExportPreviewPayload["capabilities"] = [];
   let capabilitiesNote: string | null = null;
   try {
-    capabilities = assessExportFormats(await (options.probeTooling ?? probeTooling)());
+    const probe = options.probeTooling ?? probeTooling;
+    // 「重新核对」的语义包含"工具链也重问一遍"：否则装完引擎不重启应用就永远看到旧结论
+    if (options.refreshTooling) (probe as ToolingProbe).reset?.();
+    capabilities = assessExportFormats(await probe());
   } catch (err) {
     capabilitiesNote = `本机工具链探测失败：${messageOf(err)}；能力矩阵本轮不给结论（这不等于这些格式都不能用）`;
   }

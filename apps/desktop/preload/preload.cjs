@@ -121,7 +121,7 @@ contextBridge.exposeInMainWorld("yushu", {
     apply: (payload) => invoke("import:apply", payload),
   },
   export: {
-    preview: () => invoke("export:preview"),
+    preview: (payload) => invoke("export:preview", payload),
     run: (payload) => invoke("export:run", payload),
     clipboard: (payload) => invoke("export:clipboard", payload),
   },

@@ -84,9 +84,24 @@ export async function probeExportTooling(deps: ToolDeps): Promise<ExportTooling>
  * 缓存的是**探测**（外部事实），判定 `assessExportFormats` 每次都重算：
  * 把判定也缓存进去，将来判定逻辑改了会拿旧结论冒充新逻辑。
  */
-export function onceTooling(fetch: () => Promise<ExportTooling>): () => Promise<ExportTooling> {
+/** 可重探的探测入口：`next()` 拿缓存结果，`next.reset()` 让下一次重新下发 */
+export interface ToolingProbe {
+  (): Promise<ExportTooling>;
+  reset: () => void;
+}
+
+/**
+ * 进程内"只探一次"的包装（R87，reset 由 R92 补）。
+ *
+ * 探测要 spawn 十条外部命令，每次打开导出页都重跑一遍不值当；但**失败的探测不能留在缓存里**——
+ * 一次 `EACCES` 抖动就把"探测失败"永久挂在面板上，比慢更难查。
+ * `reset()` 解决另一半：作者**装了 PDF 引擎之后不必重启应用**，点一次「重新核对」就能刷新结论。
+ * 缓存的是**探测**（外部事实），判定 `assessExportFormats` 每次都重算——
+ * 把判定也缓存进去，将来判定逻辑改了会拿旧结论冒充新逻辑。
+ */
+export function onceTooling(fetch: () => Promise<ExportTooling>): ToolingProbe {
   let cache: Promise<ExportTooling> | null = null;
-  return () => {
+  const next = (() => {
     if (cache === null) {
       cache = fetch().catch((err: unknown) => {
         cache = null;
@@ -94,7 +109,11 @@ export function onceTooling(fetch: () => Promise<ExportTooling>): () => Promise<
       });
     }
     return cache;
+  }) as ToolingProbe;
+  next.reset = () => {
+    cache = null;
   };
+  return next;
 }
 
 /** 真实命令表：主进程用；Windows 上 `where` 查可执行文件，jar 走文件存在性 */

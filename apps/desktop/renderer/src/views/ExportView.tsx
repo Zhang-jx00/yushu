@@ -38,11 +38,11 @@ export function ExportView() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceTooling = false) => {
     setBusy(true);
     try {
       setError(null);
-      const state = await api().export.preview();
+      const state = await api().export.preview({ refresh: forceTooling });
       setPreview(state);
       setReviewed(false);
       setExported(null);
@@ -182,7 +182,8 @@ export function ExportView() {
             >
               确认导出 {format.toUpperCase()}
             </button>
-            <button type="button" disabled={busy} onClick={refresh}>
+            {/* 必须显式传 true：直接把 refresh 当 handler 会把 click 事件当成 forceTooling */}
+            <button type="button" disabled={busy} onClick={() => refresh(true)}>
               重新核对
             </button>
           </div>
@@ -261,6 +262,7 @@ export function ExportView() {
           <p className="muted">
             探测只做只读命令（<code>--version</code> / <code>--list-output-formats</code> / 查可执行文件是否存在），
             不写入任何文件；缺少引擎时这里会说清缺什么，而不是等导出失败才发现。
+            装好引擎或备好 EPUBCheck jar 之后，点一次「重新核对」就会重问本机，不必重启应用。
           </p>
         </section>
 

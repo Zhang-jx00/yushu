@@ -57,6 +57,7 @@ import {
   type CreateProjectPayload,
   type DocSnapshot,
   type ExportPreviewPayload,
+  type ExportPreviewRequest,
   type ExportRunPayload,
   type ExportRunResult,
   type FusionPreview,
@@ -640,8 +641,8 @@ export function registerIpcHandlers(): void {
 
   /* ---------- 导出与敏感词自查（S6） ---------- */
 
-  ipcMain.handle(CHANNELS.exportPreview, () =>
-    wrap<ExportPreviewPayload>(() => previewExport(requireGateway())),
+  ipcMain.handle(CHANNELS.exportPreview, (_event, payload: ExportPreviewRequest) =>
+    wrap<ExportPreviewPayload>(() => previewExport(requireGateway(), { refreshTooling: payload?.refresh === true })),
   );
 
   ipcMain.handle(CHANNELS.exportRun, (_event, payload: ExportRunPayload) =>
