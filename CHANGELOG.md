@@ -45,6 +45,23 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **"顺序必须可复现"从口头规矩变成有判据的规范条目（第 91 轮，R89 插轮）**：核出处时发现
+  前两轮的台账**口径偏高**——"确定性靠码点比较、不用 `localeCompare`"这条从没进过 `docs/03` §1.2
+  的规范红线表，也不在 `GOVERNANCE.md` 那五条里，只在轮次记录与代码注释里出现过。
+  所以本轮先补规范（`docs/03` §1.2 新增"顺序必须可复现"一行，含精确口径与唯一例外），再落实现与判据：
+  新增 `@yushu/core/order.ts` 的 `codePointCompare` / `codePointCompareBy`；实测生产代码有 **15 处
+  `.localeCompare(`**（12 处连 locale 都不传，跟着 ICU/环境走），改掉其中 13 处调用
+  （`project-ops` 那行是混合的：类型序属结构序走码点，名字序给人看保留显式 `zh`）；
+  把仓库里两份私藏的同义副本（`llm/cost.ts` 的 `byCode`、`world-engine/propagate.ts` 的 `byCodePoint`）
+  折进公共实现，比较器从此只有一份；`apps/cli` 因此补上 `@yushu/core` 依赖。
+  **锁** `apps/desktop/test/order-determinism.test.ts`（6 例）：白名单外零容忍、白名单内**每一处调用**必须显式带
+  locale、扫描器自身要能红（总文件数下限取**实测 191 留余量**，再加"每个扫描根都至少读到一个文件"）。
+  **三条写锁时的自抓**：① 用"整行有没有逗号+引号"判断有没有传 locale 是错的——一行写两个调用时后者会把
+  前者掩护过去，改成按括号深度逐调用取实参后变异 C 才红；② 总数下限挡不住"少扫一个根"，补逐根断言后
+  变异 D 才红；③ 下限我一开始拍成 300，实测 191，**测试当场拒绝了这个猜测**（下限必须来自测量）。
+  口径也写清不夸大：实现是 `<` / `>` 的 **UTF-16 码元序**，BMP 内与码点序一致，本项目排序对象都在 BMP 内。
+  验证：`pnpm test` **1266/1266（120 文件）**、TC=0、E2E=0、预演**全新 v195** 58/58（抖动 0、证据缺失 0）。
+
 - **真实多格式导出落地：产品第一次产出非 TXT 格式（第 90 轮，M5/T5-4 第三段）**：`runExport` 加 `format`
   （缺省 `txt`，与旧行为逐字一致），非 TXT 走「写 `.md` 源 → pandoc 转换 →（EPUB）跑门禁」；导出页加格式选择器
   （复用 `.chip` 设计系统，不可用的格式 disabled 且理由就写在下一行）；预演新增 **step58**。
