@@ -6,11 +6,14 @@ import {
   assembleExport,
   assessExportFormats,
   buildClipboardText,
+  buildMarkdown,
   buildTxt,
+  epubGatePassed,
   mergeWordlists,
   parseWordlist,
   scanSensitive,
   type ExportChapter,
+  type ExportFormat,
   type ExportTooling,
   type MergedWordlistEntry,
   type Wordlist,
@@ -25,13 +28,21 @@ import {
 } from "@yushu/world-engine";
 import type {
   ClipboardResult,
+  ExportGatePayload,
   ExportPreviewPayload,
   ExportRunPayload,
   ExportRunResult,
   SkippedWordlistPayload,
 } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
-import { onceTooling, probeExportTooling, realToolDeps } from "./export-tooling.js";
+import {
+  convertWithPandoc,
+  probeExportTooling,
+  realToolDeps,
+  onceTooling,
+  validateEpub,
+  type ToolDeps,
+} from "./export-tooling.js";
 import { repoRoot } from "./paths.js";
 
 /**
@@ -225,13 +236,42 @@ function timeStamp(date = new Date()): string {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
 }
 
+/** 多格式导出的可注入面（测试喂假 pandoc 与假工具链；默认走现场探测 + 真实 spawn） */
+export interface ExportRunDeps {
+  tooling?: ExportTooling;
+  run?: ToolDeps["run"];
+  exists?: ToolDeps["exists"];
+}
+
+/** 找一个没被占用的导出基名（同名自动追加序号，绝不覆盖既有导出） */
+async function freeExportBase(gateway: ProjectGateway, base: string, extensions: string[]): Promise<string> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
+    let free = true;
+    for (const ext of extensions) {
+      if (await gateway.readDoc(`${EXPORTS_DIR}/${base}${suffix}.${ext}`).catch(() => null)) {
+        free = false;
+        break;
+      }
+    }
+    if (free) return `${base}${suffix}`;
+  }
+  throw new YushuError("E_EXPORT_NAME", "导出文件名冲突过多，请稍后重试或修改书名");
+}
+
 /**
- * 导出 TXT（T1-18）：写项目内 exports/<书名>-<时间戳>.txt；同名自动追加序号（不覆盖既有导出）。
+ * 导出（T1-18 / T5-4）：TXT 由御书自己装配；EPUB / DOCX / PDF 走 pandoc。
  * 防手滑：confirmed 必须显式为 true（服务端校验，UI 另有二次确认）。
+ *
+ * 三条要紧的口径：
+ * ① **产不出的格式在落笔之前就拒**——先写一个 `.md` 再报错，等于把半成品留在作者项目里；
+ * ② pandoc 失败时**中途写下的 `.md` 会被清掉**，并把 pandoc 的原始错误带回去（不吞、不改写）；
+ * ③ 回执里的 `format` 是**实际产出的格式**，UI 直接照它说话，不许"点了 EPUB 结果拿到 TXT"。
  */
 export async function runExport(
   gateway: ProjectGateway,
   payload: ExportRunPayload,
+  deps: ExportRunDeps = {},
 ): Promise<ExportRunResult> {
   if (payload.confirmed !== true) {
     throw new YushuError(
@@ -248,27 +288,65 @@ export async function runExport(
   }
 
   const assembled = assembleExport({ chapters });
-  const text = buildTxt(assembled.chapters, {
-    bookTitle,
-    includeToc: payload.includeToc ?? true,
-    stripMarkers: payload.stripMarkers ?? true,
-  });
-
+  const format: ExportFormat = payload.format ?? "txt";
+  const tooling = deps.tooling ?? (await probeTooling());
   const base = `${sanitizeFileName(bookTitle)}-${timeStamp()}`;
+
   let path = "";
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const candidate = `${EXPORTS_DIR}/${base}${attempt === 0 ? "" : `-${attempt + 1}`}.txt`;
-    const exists = await gateway.readDoc(candidate).catch(() => null);
-    if (!exists) {
-      path = candidate;
-      break;
+  let sourcePath: string | undefined;
+  let hash = "";
+
+  if (format === "txt") {
+    const text = buildTxt(assembled.chapters, {
+      bookTitle,
+      includeToc: payload.includeToc ?? true,
+      stripMarkers: payload.stripMarkers ?? true,
+    });
+    const named = await freeExportBase(gateway, base, ["txt"]);
+    path = `${EXPORTS_DIR}/${named}.txt`;
+    hash = (await gateway.writeDoc(path, text)).hash;
+  } else {
+    // 先看能力，再动笔：这一句顺序就是这一轮的全部意义
+    const capability = assessExportFormats(tooling).find((item) => item.format === format);
+    if (!capability || !capability.available) {
+      throw new YushuError(
+        "E_EXPORT_FORMAT_UNAVAILABLE",
+        `不产出 ${format.toUpperCase()}：${capability?.reason ?? "未知原因"}（未落笔，项目里不会留下半成品；也不会退而求其次给别的格式）`,
+      );
+    }
+    const markdown = buildMarkdown(assembled.chapters, {
+      bookTitle,
+      stripMarkers: payload.stripMarkers ?? true,
+    });
+    const named = await freeExportBase(gateway, base, ["md", format]);
+    sourcePath = `${EXPORTS_DIR}/${named}.md`;
+    path = `${EXPORTS_DIR}/${named}.${format}`;
+    hash = (await gateway.writeDoc(sourcePath, markdown)).hash;
+
+    const toolDeps: ToolDeps = {
+      run: deps.run ?? realToolDeps().run,
+      exists: deps.exists ?? realToolDeps().exists,
+    };
+    const converted = await convertWithPandoc(toolDeps, {
+      tooling,
+      // 给外部命令的必须是**绝对路径**：spawn 出来的 pandoc 用的是主进程的 cwd（开发态是 apps/desktop），
+      // 传 `exports/x.md` 它就去那儿找，报"文件不存在"。回执里给 UI 的仍是项目内相对路径。
+      sourcePath: join(gateway.root, sourcePath),
+      targetPath: join(gateway.root, path),
+      format,
+      title: bookTitle,
+      toc: payload.includeToc ?? true,
+    });
+    if (!converted.ok) {
+      // 半成品不清走就是噪音；清不掉也要把路径说清楚，别让作者自己去找
+      const cleaned = await gateway.deleteDoc(sourcePath).then(() => true).catch(() => false);
+      throw new YushuError(
+        "E_EXPORT_CONVERT",
+        `${converted.message}（源文件 ${sourcePath} ${cleaned ? "已清理" : "未清理成功，请手动删除"}）`,
+      );
     }
   }
-  if (path === "") {
-    throw new YushuError("E_EXPORT_NAME", "导出文件名冲突过多，请稍后重试或修改书名");
-  }
 
-  const written = await gateway.writeDoc(path, text);
   const { entries } = await loadWordlists(gateway);
   const scan = scanSensitive(
     assembled.chapters.map((chapter) => ({
@@ -280,12 +358,42 @@ export async function runExport(
     entries,
   );
 
+  // EPUB 才有质量门禁：EPUBCheck 不在 ⇒ ran:false 且 passed:false，理由写"未校验"
+  let gate: ExportGatePayload | undefined;
+  if (format === "epub") {
+    const toolDeps: ToolDeps = {
+      run: deps.run ?? realToolDeps().run,
+      exists: deps.exists ?? realToolDeps().exists,
+    };
+    const report = await validateEpub(toolDeps, { tooling, epubPath: path });
+    const verdict = epubGatePassed(report);
+    gate = {
+      ran: report.ran,
+      passed: verdict.passed,
+      reason: verdict.reason,
+      ...(report.ran
+        ? {
+            detail: {
+              fatalErrors: report.fatalErrors,
+              errors: report.errors,
+              warnings: report.warnings,
+              messages: report.messages.slice(0, 20),
+            },
+          }
+        : {}),
+    };
+  }
+
   return {
     path,
-    hash: written.hash,
+    // 非 TXT 时这是 `.md` 源的 hash：EPUB / DOCX 是二进制，没有文本 hash 可给
+    hash,
     chapters: assembled.stats.chapters,
     words: assembled.stats.totalWords,
     clean: scan.summary.bySeverity.error === 0,
+    format,
+    ...(sourcePath === undefined ? {} : { sourcePath }),
+    ...(gate === undefined ? {} : { gate }),
   };
 }
 

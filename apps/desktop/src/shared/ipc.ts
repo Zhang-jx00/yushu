@@ -1249,6 +1249,17 @@ export interface ExportRunPayload {
   confirmed: boolean;
   includeToc?: boolean;
   stripMarkers?: boolean;
+  /** 导出格式（T5-4）；缺省 = `txt`，与 R90 之前的行为逐字一致 */
+  format?: "txt" | "epub" | "docx" | "pdf";
+}
+
+/** EPUB 质量门禁的结论（T5-4）；`ran:false` 时 `passed` 必为 false——没检查过就不算通过 */
+export interface ExportGatePayload {
+  ran: boolean;
+  passed: boolean;
+  reason: string;
+  /** 跑过时才有：EPUBCheck 的计数与原文行 */
+  detail?: { fatalErrors: number; errors: number; warnings: number; messages: string[] };
 }
 
 export interface ExportRunResult {
@@ -1258,6 +1269,12 @@ export interface ExportRunResult {
   words: number;
   /** 无错误级敏感词命中（提示级不阻断） */
   clean: boolean;
+  /** 实际产出的格式（回执要说清楚，不许"点了 EPUB 结果拿到 TXT"） */
+  format: "txt" | "epub" | "docx" | "pdf";
+  /** 喂给 pandoc 的 Markdown 源（仅非 TXT 格式有）；pandoc 失败时会被清掉 */
+  sourcePath?: string;
+  /** EPUB 才有：EPUBCheck 门禁结论 */
+  gate?: ExportGatePayload;
 }
 
 export interface ClipboardPayload {

@@ -135,6 +135,11 @@ export interface ConvertRequest {
   targetPath: string;
   format: ExportFormat;
   title: string;
+  /**
+   * 要不要目录。卷是 `#`、章是 `##`（见 R89 的 `buildMarkdown`），
+   * 所以 `--toc-depth` 必须到 2，否则 EPUB / DOCX 的目录只剩卷一级。
+   */
+  toc?: boolean;
 }
 
 export interface ConvertResult {
@@ -165,6 +170,8 @@ export async function convertWithPandoc(
     "markdown",
     "--to",
     WRITER_BY_FORMAT[request.format],
+    // 目录由 pandoc 生成（R89 的源装配刻意不手搓目录，两边合起来才只有一份目录）
+    ...(request.toc ? ["--toc", "--toc-depth=2"] : []),
     request.sourcePath,
     "--output",
     request.targetPath,

@@ -12,8 +12,21 @@ import { api } from "../api";
 
 const SEVERITY_LABEL: Record<string, string> = { error: "错误", warn: "警告", info: "提示" };
 
+/** 导出格式（与 `ExportRunPayload.format` 同一套字面量；顺序与能力矩阵一致） */
+const EXPORT_FORMATS = ["txt", "epub", "docx", "pdf"] as const;
+type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+/** 门禁结论怎么说：没跑过就是"未校验"，不许写成"通过" */
+function gateLine(result: { gate?: { ran: boolean; passed: boolean; reason: string } } | null): string {
+  if (!result?.gate) return "";
+  const gate = result.gate;
+  if (!gate.ran) return `；EPUB 质检：${gate.reason}`;
+  return gate.passed ? "；EPUB 质检通过" : `；EPUB 质检未通过：${gate.reason}`;
+}
+
 export function ExportView() {
   const [preview, setPreview] = useState<ExportPreviewPayload | null>(null);
+  const [format, setFormat] = useState<ExportFormat>("txt");
   const [includeToc, setIncludeToc] = useState(true);
   const [stripMarkers, setStripMarkers] = useState(true);
   const [reviewed, setReviewed] = useState(false);
@@ -54,12 +67,12 @@ export function ExportView() {
     setError(null);
     setNotice(null);
     try {
-      const result = await api().export.run({ confirmed: true, includeToc, stripMarkers });
+      const result = await api().export.run({ confirmed: true, format, includeToc, stripMarkers });
       setExported(result);
       setNotice(
-        `已导出 → ${result.path}（${result.chapters} 章 · ${result.words} 字）${
+        `已导出 ${result.format.toUpperCase()} → ${result.path}（${result.chapters} 章 · ${result.words} 字）${
           result.clean ? "；无 error 级敏感词命中" : "；⚠ 仍有 error 级命中，建议处理后再投稿"
-        }`,
+        }${gateLine(result)}${result.sourcePath ? `；源文件 ${result.sourcePath}` : ""}`,
       );
       setReviewed(false);
     } catch (err) {
@@ -85,14 +98,41 @@ export function ExportView() {
   };
 
   const errorHits = preview?.bySeverity.error ?? 0;
+  // TXT 永远可出（御书自己装配）；其余以现场探测的结论为准
+  const selectedUnavailable =
+    format !== "txt" && preview?.capabilities.find((entry) => entry.format === format)?.available !== true;
 
   return (
     <div className="export">
       <aside>
         <section className="panel">
           <h3>
-            导出 TXT <span className="muted">T1-18</span>
+            导出 <span className="muted">T1-18 / T5-4</span>
           </h3>
+          {/* 格式选择：不可用的格式直接 disabled，理由就写在下面一行——点不动要有原因，不许静默 */}
+          <div className="chips export-formats" role="group" aria-label="导出格式">
+            {EXPORT_FORMATS.map((item) => {
+              const cap = preview?.capabilities.find((entry) => entry.format === item);
+              const available = item === "txt" ? true : cap?.available === true;
+              return (
+                <button
+                  type="button"
+                  key={item}
+                  className={`chip${format === item ? " on" : ""}`}
+                  disabled={!available || busy || preview === null}
+                  title={cap?.reason ?? "正在探测本机工具链…"}
+                  onClick={() => setFormat(item)}
+                >
+                  {item.toUpperCase()}
+                </button>
+              );
+            })}
+          </div>
+          <p className="muted export-format-reason">
+            {preview === null
+              ? "正在核对章数、字数与本机工具链…"
+              : (preview.capabilities.find((entry) => entry.format === format)?.reason ?? "")}
+          </p>
           {preview && (
             <div className="export-summary">
               <div>
@@ -134,14 +174,23 @@ export function ExportView() {
             </span>
           </label>
           <div className="outline-actions">
-            <button type="button" className="primary" disabled={busy || !reviewed || !preview?.chapters} onClick={doExport}>
-              确认导出 TXT
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || !reviewed || !preview?.chapters || selectedUnavailable}
+              onClick={doExport}
+            >
+              确认导出 {format.toUpperCase()}
             </button>
             <button type="button" disabled={busy} onClick={refresh}>
               重新核对
             </button>
           </div>
-          {exported && <div className="muted">最近导出：{exported.path}</div>}
+          {exported && (
+            <div className="muted">
+              最近导出（{exported.format.toUpperCase()}）：{exported.path}
+            </div>
+          )}
         </section>
 
         <section className="panel">

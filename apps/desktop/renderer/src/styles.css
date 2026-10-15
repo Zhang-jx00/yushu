@@ -428,6 +428,12 @@ textarea:focus {
   color: var(--ink-on-accent);
 }
 
+/* 不可选的格式（如本机没装 PDF 引擎）：按下去要有理由，不是点了没反应 */
+.chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .chip.static {
   cursor: default;
   background: var(--panel-2);

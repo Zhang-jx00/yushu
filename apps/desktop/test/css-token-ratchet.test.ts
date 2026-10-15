@@ -89,13 +89,26 @@ const HEX = /#[0-9a-fA-F]{3,8}\b/g;
 const COLOR_FN = /\b(?:rgba?|hsla?)\([^)]*\)/g;
 const DURATION = /\b\d+(?:\.\d+)?m?s\b/g;
 
+/**
+ * 命中所在的最近选择器。
+ * 例外登记认"哪条规则的哪个字面量"，不认行号——行号每插一段 CSS 就全体漂移，
+ * 那不是棘轮在保护什么，那是它在制造假警（R90 加一条 `.chip:disabled` 就红了三次）。
+ */
+function selectorAt(index: number): string {
+  for (let k = index; k >= 0; k -= 1) {
+    const line = (masked[k] ?? "").trim();
+    if (line.endsWith("{")) return line.slice(0, -1).trim();
+  }
+  return "(顶层)";
+}
+
 function literalsOutsideRoot(pattern: RegExp): string[] {
   const hits: string[] = [];
   for (let i = 0; i < masked.length; i += 1) {
     const trimmed = (masked[i] ?? "").trim();
     if (trimmed === "" || insideRoot(i + 1)) continue;
     for (const match of trimmed.match(pattern) ?? []) {
-      hits.push(`${String(i + 1)}:${match.replace(/\s+/g, "")}`);
+      hits.push(`${selectorAt(i)}=${match.replace(/\s+/g, "")}`);
     }
   }
   return hits;
@@ -123,11 +136,15 @@ describe("CSS 令牌棘轮（R83：字面量只降不升，例外逐条登记）
     const colors = literalsOutsideRoot(HEX).concat(literalsOutsideRoot(COLOR_FN));
     // 上限 1（当前实测恰好 1）：新增任何一处硬写颜色都会红
     expect(colors.length).toBeLessThanOrEqual(1);
-    expect(colors).toEqual(["2008:rgba(0,0,0,0.12)"]);
+    expect(colors).toEqual([".mention-menu=rgba(0,0,0,0.12)"]);
   });
 
   it("字面时长例外逐条登记：进度条两档刻意不同 + reduced-motion 的 0.01ms 惯用值", () => {
-    expect(literalsOutsideRoot(DURATION)).toEqual(["1416:0.15s", "1600:0.2s", "2311:0.01ms"]);
+    expect(literalsOutsideRoot(DURATION)).toEqual([
+      ".index-progress-bar=0.15s",
+      ".stats-progress-bar=0.2s",
+      ".tab=0.01ms",
+    ]);
   });
 
   it("本轮收进来的语义令牌都必须被用到（防「定义了没人用」的死令牌）", () => {
