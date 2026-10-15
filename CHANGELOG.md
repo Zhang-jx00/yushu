@@ -45,6 +45,24 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **真实多格式导出落地：产品第一次产出非 TXT 格式（第 90 轮，M5/T5-4 第三段）**：`runExport` 加 `format`
+  （缺省 `txt`，与旧行为逐字一致），非 TXT 走「写 `.md` 源 → pandoc 转换 →（EPUB）跑门禁」；导出页加格式选择器
+  （复用 `.chip` 设计系统，不可用的格式 disabled 且理由就写在下一行）；预演新增 **step58**。
+  **本机真跑出一份 5747 字节的 EPUB**（zip 头 `PK`、内含 `mimetype`），同目录留着 500 字节的 `.md` 源，
+  回执明写「EPUB 质检：未校验」。四条口径：① 产不出的格式**在落笔之前就拒**，项目里不留半成品；
+  ② pandoc 失败时**清掉中途写下的 `.md`**，并把它的原始 stderr 原样带回去；③ 给外部命令的是**绝对路径**
+  （spawn 的 cwd 是主进程目录，传相对路径 pandoc 报 `openBinaryFile: does not exist`），回执给 UI 的仍是项目内相对路径；
+  ④ 目录交给 pandoc `--toc --toc-depth=2`（卷 `#` 章 `##`），源装配那边不手搓目录。
+  **预演抓出的第二条真缺陷**：v192 的 step58 就红在上面那条相对路径上——本轮顺手给 step58 加了
+  "把 `.error-bar` 原文抄进证据行"，下次失败自带诊断，不用再猜"为什么没有回执"。
+  **一条自己写的弱锁（本轮最该记的）**：变异 M1「把外层能力守卫删掉」测试**没红**——
+  `convertWithPandoc` 内层也拒绝、消息里都含"引擎"，于是只断言错误消息等于没断言是谁报的。
+  改成断言**错误码**（`E_EXPORT_FORMAT_UNAVAILABLE` vs `E_EXPORT_CONVERT`）后 M1 立刻转红，6 条变异全部能红。
+  **另把 CSS 棘轮的例外登记从行号改成「选择器 = 字面量」**：加一条 `.chip:disabled` 就让三条登记全体漂移，
+  那是假警不是约束（约束力没变：新增硬写颜色照样红）。重试态幂等：step58 也改成先切走再切回强制重挂载。
+  验证：**1255/1255（118 文件）**、TC=0、E2E=0、预演**全新 v194** 58/58（抖动 0、证据缺失 0）。
+  **T5-4 仍不勾**：PDF 真实产出（代码路径已就位，卡在本机没有引擎）、EPUBCheck jar 接入、K11 平台章节格式适配。
+
 - **Pandoc 源装配：把「导出用的 Markdown」做成一份不重排、不重复、不读墙钟的产物（第 89 轮，M5/T5-4 第二段）**：
   新增 `@yushu/export/src/markdown.ts`——`buildMarkdown` / `buildPandocMetadata` / `yamlScalar`（12 例单测）。
   三条"不做"就是这一层的价值：① **不重排正文**（真源本来就是 Markdown，导出层再加工一遍等于把作者的排版换掉）；
