@@ -16,7 +16,7 @@
 | 项目 | 状态 |
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
-| 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；main 与本地同步；`git push --dry-run` 已验证凭据可用） |
+| 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；凭据可用。**2026-10-15 R90 收口时有 3 条提交未推出去**：`github.com:443` 连不上（`Failed to connect to github.com:443 after 21129 ms`，`git ls-remote` 也拿不到引用——是网络不是权限）。未推的是 `d664478` / `58a4cb6` / `a06f55d`，本地 `main` 完好。**接手第一件事：`git push origin main` 并核对 `git ls-remote origin main` 等于本地 HEAD**） |
 | 单测 | **1255/1255 全绿**（118 个测试文件）——`pnpm test`（R90 新增多格式导出 6 例；R89 为 1249/118） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物）。**R88 起这份"零错误"覆盖 `src` 与 `test` 两面**：每个有测试的包多一份 `tsconfig.test.json`（`noEmit`）并接进该包脚本；此前 11 份配置的 `include` 都只有 `src`，约 120 个测试文件从来没被类型检查（锁：`typecheck-coverage.test.ts` 23 例） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
