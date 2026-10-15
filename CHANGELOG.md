@@ -45,6 +45,21 @@
 
 - **M4/T4-3 一致性报告格式与豁免清单（第 53 轮，引擎侧）**：新增 `world-engine/consistency-report.ts`。`locateCardRefSpans` 用 YAML AST 的 `range` 给出卡内每条 `refs` 的 **UTF-16 区间**（与 T3-13 同口径，面板可直接高亮）；报告条目 `{rule, severity, subject, related?, path?, evidence, span, fix}` **与校对 finding 同形**，找不到原文时 `span:null` 而不造 0-0 假区间；`fix` 给可执行方向并统一留"要豁免就写理由"的出口（倒置类点名两端层名，为此给 `StructureFinding` 补 `fromLayer/toLayer`）。豁免清单 `config/consistency.yaml` 落实 A6：**reason 缺失或全空格直接拒绝加载、subject 必填（省略＝整条规则关掉）、rule 必须是已实现 id、未知键拒绝**；匹配键用 规则+主体+目标而非行号；被豁免条目进 `suppressed` 带理由与决策时间，用不上的豁免进 `unusedAllow`。**两个坑由测试逼出**：`item.get("relation")` 默认返回解好值的 JS 数据（要 `get(key, true)` 才拿到带 range 的节点）；带正文的卡必报「multiple documents」，按 errors 非空一律退回无区间会让每张正常卡都失去跳转。**验证**：TDD 两轮红绿 + 18 例 → **747/747（77 文件）**，typecheck 11 包全 Done；变异 4 次能红（忽略 related→1、区间塌成一点→4、不要求 reason→1、不报 unusedAllow→2），1 次未杀到（`!range` 兜底不可达）如实记录。纯引擎轮未跑 e2e / 预演。
 
+- **装完引擎不必重启：把面板上那句承诺兑现（第 92 轮，M5/T5-4 第四段·PDF 口径收口）**：
+  R87 的能力面板写着"装上任一引擎后即可用"，可探测结果被进程内缓存住——作者真去装了 xelatex，
+  面板仍然说"暂不可"，直到重启应用。**那是一句兑现不了的承诺写在 UI 上**。现在 `onceTooling` 带 `reset()`、
+  预览请求带 `refresh`，「重新核对」这一钮把工具链也重问一遍（约 565ms，仍然只读命令）。
+  参数从按钮到 `reset()` 共五棒（渲染层 → api → preload → 主进程 handler → `previewExport`），
+  任何一棒把参数弄丢，功能就安静退回"必须重启"而**运行时看起来完全正常**——这类断棒单测抓不到，
+  故补一条逐棒点名的接线锁；四条变异逐棒验证全部能红（preload 不转发 / handler 不往下传 /
+  按钮把 `refresh` 直接当 handler / `previewExport` 不调 `reset`）。
+  **顺手抓到自己写的 `onClick={refresh}`**：click 事件被当成第一个实参 ⇒ `forceTooling` 恒真，
+  每次点按钮都在重探；改成显式传 `true`，并在锁里加一条"不许出现 `onClick={refresh}`"的反向断言。
+  **K11 顺延到 R93**：K11 明写"平台章节格式参数从 I07 规则包读取，不硬编码"，而仓库里没有任何平台包本体
+  （只有 `packs/xuanhuan-xitong` 一个流派包）——先填包再适配，不自己编一套平台数字冒充规则包。
+  验证：**1269/1269（120 文件）**、TC=0、E2E=0、预演**全新 v196** 58/58（接线锁是 v196 之后补的，
+  只读源码不触运行时，故两次跑分开说，不合并成一句"全绿"）。
+
 - **"顺序必须可复现"从口头规矩变成有判据的规范条目（第 91 轮，R89 插轮）**：核出处时发现
   前两轮的台账**口径偏高**——"确定性靠码点比较、不用 `localeCompare`"这条从没进过 `docs/03` §1.2
   的规范红线表，也不在 `GOVERNANCE.md` 那五条里，只在轮次记录与代码注释里出现过。
