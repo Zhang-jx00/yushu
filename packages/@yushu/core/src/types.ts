@@ -47,6 +47,12 @@ export interface GenreAxes {
 /** 叙事可见性（冰山原则：已写未揭示 / 已埋伏笔 / 已揭示 / 隐藏） */
 export type Visibility = "written_unrevealed" | "foreshadowed" | "revealed" | "hidden";
 
+/**
+ * 可见性取值表（R98）。有了它，"哪些算未揭示"这类判定才有可对照的枚举——
+ * 此前四种取值只在 schema 里以 JSON enum 出现过一次，引擎侧要用就得自己再抄一遍。
+ */
+export const VISIBILITIES: readonly Visibility[] = ["written_unrevealed", "foreshadowed", "revealed", "hidden"];
+
 /** 外键式引用（写 ID，不写显示名） */
 export interface RelationRef {
   relation: string;

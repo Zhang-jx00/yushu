@@ -3,7 +3,8 @@
  * 御书导出管线（M1 最小版）：
  * - TXT 装配：章节顺序（按三级大纲）→ 目录与分章 → 全文；字数与正文对账（T1-18）；
  * - 敏感词自查：外置词库（带来源与版本）+ 命中定位 + 替换建议（T1-19）；
- * - 干净剪贴板与内部标记清洗（T1-20）。
+ * - 干净剪贴板与内部标记清洗（T1-20）；
+ * - 世界圣经（设定集）自动汇编：按层级编排目录 + 按叙事可见性脱敏（T5-5，R98）。
  * 本包为纯函数（不碰 fs）；项目数据读取与落盘由宿主（主进程 export-ops）负责。
  * EPUB/DOCX/PDF 管线与 EPUBCheck 门禁留待 M5。
  */
@@ -15,3 +16,4 @@ export * from "./sensitive.js";
 export * from "./formats.js";
 export * from "./markdown.js";
 export * from "./platform-format.js";
+export * from "./bible.js";
