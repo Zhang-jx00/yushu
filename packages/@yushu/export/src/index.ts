@@ -14,3 +14,4 @@ export * from "./clean.js";
 export * from "./sensitive.js";
 export * from "./formats.js";
 export * from "./markdown.js";
+export * from "./platform-format.js";

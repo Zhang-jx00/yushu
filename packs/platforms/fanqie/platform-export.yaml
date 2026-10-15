@@ -1,0 +1,23 @@
+# 番茄小说·导出格式参数（M5/T5-4 第四段·K11，R93）
+#
+# 这份包里的每一个值都要能在下面的来源里找到出处；找不到出处的字段一律**不填**，
+# 而不是借用别的平台的数字。K11 明写"平台章节格式参数从 I07 规则包读取，不硬编码"，
+# 而 I07 的 pr-rule-source-missing 把"缺来源"定为 error 级——所以这里宁缺毋造。
+#
+# 关于 submission_materials：I07 只给了**晋江**的签约模板四部分（简纲/人设/创新点/看点），
+# 没有给番茄的投稿材料清单 ⇒ 本包留空。留空的效果是"不报缺项"，
+# 而不是拿晋江的清单去要求番茄作者——那会比不报更糟。
+platform: fanqie
+version: 1.0.0
+effective_date: 2025-01-01
+checked_at: 2026-09-29
+source_urls:
+  - https://notice.fanqienovel.com/docs/9476/fulijieshao
+  - https://fanqienovel.com/writer/zone/help
+chapter_title_format: "第{index}章 {title}"
+encoding: utf-8
+volume_separator: "\n\n"
+# 番茄的字数口径是"自然月内每日有效过审字数"（I07 第 2 条 + 上面第二个来源）；
+# 这里只带**口径名**，不带阈值：阈值属于全勤福利判定（I07/I01/I08），不属于导出格式。
+valid_word_rule: "后台打卡口径（自然月内每日有效过审字数）"
+submission_materials: []
