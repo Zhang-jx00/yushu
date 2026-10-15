@@ -12,10 +12,12 @@ import {
   type RuleSetGroup,
 } from "@yushu/genre-engine";
 import {
+  checkPowerGate,
   collectIndexInput,
   parsePowerLog,
   pairPowerLog,
   powerPairData,
+  POWER_GATE_ORIGIN,
   type IndexEntityRow,
 } from "@yushu/world-engine";
 import type { ProjectGateway } from "./file-gateway.js";
@@ -199,6 +201,11 @@ export async function evaluatePackRules(
       continue;
     }
     for (const pair of pairPowerLog(log.entries)) pairs.push({ entity, pair, data: powerPairData(pair) });
+    // 台账完整性核对（R97：D03 R3 升级三件套、R5 临时增益要回落）。它不进包规则不是偷懒：
+    // 核对的是"作者自己声明的升级有没有交代代价"，与流派无关，与 R57 那条分工也不冲突。
+    for (const row of checkPowerGate({ subject: entity.id, entries: log.entries })) {
+      findings.push({ ...row, origin: POWER_GATE_ORIGIN });
+    }
   }
 
   // T4-12（R85）：跨包同 id 先合并再求值——不合并的话同一条规则会被两个包各报一遍，

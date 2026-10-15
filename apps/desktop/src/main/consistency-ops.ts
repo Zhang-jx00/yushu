@@ -27,7 +27,7 @@ import type {
 import { gatewayReader } from "./index-ops.js";
 import { evaluatePackRules } from "./rule-findings.js";
 import { foreshadowReportFindings } from "./foreshadow-ops.js";
-import { FORESHADOW_RULE_IDS } from "@yushu/world-engine";
+import { FORESHADOW_RULE_IDS, POWER_GATE_RULE_IDS } from "@yushu/world-engine";
 import { runAiAudit, type AiAuditResult } from "./ai-audit.js";
 import { projectPackIds } from "./rule-ops.js";
 import type { ProjectGateway } from "./file-gateway.js";
@@ -174,6 +174,8 @@ async function computeReport(
     // 伏笔结论同口径：清单与引擎同源（覆盖锁在 foreshadow.test.ts），漏一条就会"报得出来却豁免不掉"
     ...FORESHADOW_RULE_IDS,
     "fs-ledger-unreadable",
+    // 战力台账核对（R97）同口径：id 与引擎同源，漏一条就会"报得出来却豁免不掉"
+    ...POWER_GATE_RULE_IDS,
   ];
 
   let allow: ConsistencyAllowList | null = null;

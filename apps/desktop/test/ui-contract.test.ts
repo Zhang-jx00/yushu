@@ -262,13 +262,12 @@ describe("可点选的必须是键盘能到的控件（契约 §6）", () => {
       debt[rel] = hits.length;
       total += hits.length;
     }
-    // R96 实测 10 处（12 处起，本轮修掉记忆页 2 处）。要减就改这个数字并真的改画面。
-    expect(total).toBeLessThanOrEqual(10);
+    // R96 起 12 → 10（记忆页 2 处），R97 再修掉编辑器草稿章节表 1 处 ⇒ 9。要降必须真的改画面。
+    expect(total).toBeLessThanOrEqual(9);
     expect(debt).toEqual({
       "apps/desktop/renderer/src/components/RelationGraphPanel.tsx": 1,
       "apps/desktop/renderer/src/views/AiView.tsx": 1,
       "apps/desktop/renderer/src/views/ArchiveView.tsx": 2,
-      "apps/desktop/renderer/src/views/ChapterEditorView.tsx": 1,
       "apps/desktop/renderer/src/views/GenesisView.tsx": 1,
       "apps/desktop/renderer/src/views/OutlineView.tsx": 1,
       "apps/desktop/renderer/src/views/ProjectView.tsx": 3,
@@ -284,6 +283,14 @@ describe("可点选的必须是键盘能到的控件（契约 §6）", () => {
     const style = readFileSync(CSS_PATH, "utf8");
     expect(style).toContain(".memory-targets li > button");
     expect(style).toContain(".memory-coldstart-batch li > button");
+  });
+
+  it("编辑器草稿章节表与记忆页一样是真按钮并标了选中态（M4 变异暴露的空档）", () => {
+    const editor = readFileSync(join(VIEW_ROOT, "views", "ChapterEditorView.tsx"), "utf8");
+    expect(editor).not.toMatch(/<li[^>]*onClick=/);
+    expect(editor).toContain("aria-current={target.chapterPath === selectedPath ? \"true\" : undefined}");
+    const style = readFileSync(CSS_PATH, "utf8");
+    expect(style).toContain(".draft-list li > button");
   });
 
   it("图标仍是上游原件 + 许可声明在文件头（改了 path 就等于署名失效）", () => {

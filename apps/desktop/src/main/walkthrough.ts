@@ -719,7 +719,10 @@ const STEPS: StepDef[] = [
       await window.yushu.ai.adopt({ usageId: 'walkthrough-mention', volumeId: vol.id, chapterId: chap.id, text: '\n\n@测试设定1 走进了夜色里。', mode: 'append' });
       const item = await waitFor(() => document.querySelector('.draft-list li'), 8000);
       if (!item) return { ok: false, note: '找不到草稿章节列表项：' + pageText() };
-      item.click();
+      // 选章是真按钮（键盘可达），所以这里点它里面的 button；没有就说明可达性回归了
+      const itemBtn = item.querySelector('button');
+      if (itemBtn === null) return { ok: false, note: '草稿章节列表项里没有 button（键盘可达性回归）' };
+      itemBtn.click();
       const decorated = await waitFor(() => document.querySelector('.cm-content .entity-mention'), 12000);
       const panel = await waitFor(() => document.querySelector('.mention-panel'), 8000);
       const panelText = panel ? String(panel.textContent || '') : '';

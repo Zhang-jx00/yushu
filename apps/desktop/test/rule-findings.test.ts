@@ -157,3 +157,76 @@ describe("派系包规则求值（战力崩塌）", () => {
     expect(run.findings).toEqual([]);
   });
 });
+
+/**
+ * 战力台账核对（R97）：D03 的 R3「新能力三件套」与 R5「临时增益要回落」。
+ *
+ * 这里要看的不是引擎会不会算（`power-gate.test.ts` 管了），而是**结论有没有走到同一份报告里**：
+ * 出处要点名"御书台账核对"（不许冒充包规则），级别要进得了豁免清单，
+ * 而"作者还没记代价"必须先是一条总述而不是一片红。
+ */
+const GATE_LOG_RISING = `    - chapter: 第 3 章
+      tier: 3
+      combat_power: 100
+    - chapter: 第 4 章
+      tier: 4
+      combat_power: 260
+`;
+
+const GATE_LOG_PARTIAL = `    - chapter: 第 3 章
+      tier: 3
+      combat_power: 100
+    - chapter: 第 4 章
+      tier: 4
+      combat_power: 260
+      gain:
+        evidence_ref: 第 4 章地宫血脉觉醒
+        cost: 左臂经脉裂，三个月不能握剑
+`;
+
+const GATE_LOG_BUFF = `    - chapter: 第 3 章
+      tier: 3
+      combat_power: 100
+    - chapter: 第 4 章
+      tier: 3
+      combat_power: 260
+      kind: buff
+      gain:
+        evidence_ref: 借用长老剑意
+        cost: 事后昏睡两日
+        reuse_record: 只用这一次
+`;
+
+describe("战力台账核对进同一份报告（D03 R3 / R5，R97）", () => {
+  it("升级没记代价 ⇒ 只有一条 info 总述，出处点名御书而不是某个包", async () => {
+    await writePowerCard("char-linyuan", "林渊", GATE_LOG_RISING);
+    const run = await evaluatePackRules(gateway, { packIds: ["xuanhuan-xitong"] });
+    const rows = run.findings.filter((finding) => finding.rule.startsWith("powerup-gate"));
+    expect(rows.map((row) => row.rule)).toEqual(["powerup-gate-no-data"]);
+    expect(rows[0]?.severity).toBe("info");
+    expect(rows[0]?.origin).toContain("御书");
+    expect(rows[0]?.message).toContain("不等于");
+    // 战力没降 ⇒ 包规则那条崩塌结论不该出现（两条结论各管各的，不互相顶替）
+    expect(run.findings.some((finding) => finding.rule === "power-no-regress")).toBe(false);
+  });
+
+  it("开始记代价了 ⇒ 总述换成逐条 warn，缺哪件点哪件", async () => {
+    await writePowerCard("char-linyuan", "林渊", GATE_LOG_PARTIAL);
+    const run = await evaluatePackRules(gateway, { packIds: ["xuanhuan-xitong"] });
+    const gate = run.findings.filter((finding) => finding.rule === "powerup-gate");
+    expect(gate).toHaveLength(1);
+    expect(gate[0]?.severity).toBe("warn");
+    expect(gate[0]?.related).toBe("第 4 章");
+    expect(gate[0]?.message).toContain("复用记录");
+    expect(run.findings.some((finding) => finding.rule === "powerup-gate-no-data")).toBe(false);
+  });
+
+  it("临时增益不写失效章 ⇒ buff-ttl 点名那一章；三件套齐了就不该再有 gate 结论", async () => {
+    await writePowerCard("char-linyuan", "林渊", GATE_LOG_BUFF);
+    const run = await evaluatePackRules(gateway, { packIds: ["xuanhuan-xitong"] });
+    const buff = run.findings.find((finding) => finding.rule === "buff-ttl");
+    expect(buff?.severity).toBe("warn");
+    expect(buff?.related).toBe("第 4 章");
+    expect(run.findings.filter((finding) => finding.rule.startsWith("powerup-gate"))).toEqual([]);
+  });
+});

@@ -942,18 +942,21 @@ export function ChapterEditorView({
         )}
         <ul className="draft-list">
           {targets.map((target) => (
-            <li
-              key={target.chapterPath}
-              className={target.chapterPath === selectedPath ? "on" : ""}
-              onClick={() => selectTarget(target.chapterPath)}
-            >
-              <div>
-                <strong>{target.title}</strong>
-                <span className="muted">{target.wordCount} 字</span>
-              </div>
-              <div className="muted">
-                {target.volumeTitle} · 第 {target.idx} 章{target.hasBody ? "" : "（空正文）"}
-              </div>
+            <li key={target.chapterPath} className={target.chapterPath === selectedPath ? "on" : ""}>
+              {/* 草稿章节列表是"选章"的主入口，键盘必须能到（契约 §6；R97 清的第 3 处键盘债） */}
+              <button
+                type="button"
+                aria-current={target.chapterPath === selectedPath ? "true" : undefined}
+                onClick={() => selectTarget(target.chapterPath)}
+              >
+                <div>
+                  <strong>{target.title}</strong>
+                  <span className="muted">{target.wordCount} 字</span>
+                </div>
+                <div className="muted">
+                  {target.volumeTitle} · 第 {target.idx} 章{target.hasBody ? "" : "（空正文）"}
+                </div>
+              </button>
             </li>
           ))}
         </ul>
