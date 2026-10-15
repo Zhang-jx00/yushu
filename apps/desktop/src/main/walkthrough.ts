@@ -3770,6 +3770,123 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 61,
+    title: '设定集：目录按层级编排、脱敏真的不写字、面板与产物同一份结论（M5/T5-5，R98）',
+    file: 'step61-world-bible.png',
+    body: String.raw`
+      // T5-5 的验收点不是"页面上有个面板"，而是这四件事能对上：
+      // ① 条目数来自真卡（一张卡都没有就如实给不出结论）；
+      // ② 未揭示条目在**不开脱敏**时逐条点名（warn 行必须存在——上游建的卡默认是 hidden）；
+      // ③ 勾上脱敏后：屏幕上的预览里那些名字必须消失，且"少掉的条数"等于脱敏清单点名的条数（面板自洽）；
+      // ④ 落笔那一次与面板同一份结论：产物第一行等于面板那个标题，三级标题（###）数等于面板条目数，
+      //    回执报的条目 / 略过 / 未揭示三个数与文件里数出来的对上，不留第二个结论。
+      // 分支（两条都真跑，不挑好看的）：若项目里的卡全是未揭示，开脱敏后条目数为 0——
+      // 这时先当场验"导出按钮不可点"（空设定集不许落盘），再退回不脱敏导出，
+      // 并要求那些名字**确实出现在产物里**、回执点名泄露数 > 0。
+      await tab('规则');
+      await tab('导出与自查');
+      const panel = await waitFor(() => document.querySelector('.bible-panel'), 20000);
+      if (panel === null) return { ok: false, note: '没有设定集面板：' + pageText().slice(0, 160) };
+      if ((await waitFor(() => panel.querySelector('.bible-summary'), 30000)) === null) {
+        return { ok: false, note: '预览没回来（没有摘要行）' };
+      }
+      const read = () => {
+        const n = panel.querySelector('.bible-included');
+        return n === null ? -1 : Number(String(n.textContent).trim());
+      };
+      const clip = () => {
+        const n = panel.querySelector('.clip-preview');
+        return n === null ? '' : String(n.textContent);
+      };
+      const title = String((panel.querySelector('.bible-title') || {}).textContent || '').trim();
+      const sectionRows = [...panel.querySelectorAll('.bible-toc tbody tr')];
+      const leakRows = [...panel.querySelectorAll('.bible-leaks tbody tr')].length;
+      const m0 = read();
+      if (m0 <= 0) return { ok: false, note: '默认选取下条目数=' + m0 + '（项目里没有设定卡，本步给不出结论）' };
+      if (title === '') return { ok: false, note: '面板标题是空的' };
+      if (leakRows === 0) return { ok: false, note: '未开脱敏却一条 warn 都没有（不该发生）：条目 ' + m0 };
+      const maskBox = panel.querySelector('.bible-mask input[type=checkbox]');
+      if (maskBox === null) return { ok: false, note: '没有脱敏开关' };
+      if (!maskBox.checked) maskBox.click();
+      const maskedRows = await waitFor(() => {
+        const rows = [...panel.querySelectorAll('.bible-masked tbody tr')];
+        return rows.length > 0 ? rows : null;
+      }, 30000);
+      if (maskedRows === null) return { ok: false, note: '勾了脱敏但没有脱敏清单：条目 ' + read() };
+      const maskedNames = maskedRows.map((tr) => String(tr.children[0].textContent).trim()).filter((x) => x !== '');
+      const m1 = read();
+      const selfConsistent = m1 === m0 - maskedNames.length;
+      const clipAfter = clip();
+      const truncated = clipAfter.indexOf('预览截断') >= 0;
+      const goneFromClip = truncated ? true : maskedNames.every((n) => clipAfter.indexOf(n) < 0);
+      const goBtn = () => [...panel.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('导出设定集') >= 0);
+      let emptyBlocked = true;
+      if (m1 === 0) {
+        const btn = goBtn();
+        emptyBlocked = btn !== undefined && btn.disabled === true;
+      }
+      const withMask = m1 > 0;
+      if (!withMask) {
+        maskBox.click();
+        await waitFor(() => (read() === m0 ? read() : null), 30000);
+      }
+      const chk = await waitFor(() => {
+        const c = panel.querySelector('.confirm-check input[type=checkbox]');
+        return c !== null && c.disabled === false ? c : null;
+      }, 30000);
+      if (chk === null) {
+        return { ok: false, note: '确认框一直不可勾（脱敏后=' + m1 + '，回落读到=' + read() + '）：' + pageText().slice(0, 120) };
+      }
+      if (!chk.checked) chk.click();
+      await sleep(160);
+      const go = goBtn();
+      if (go === undefined || go.disabled) return { ok: false, note: '导出设定集按钮不可点' };
+      go.click();
+      const receipt = await waitFor(() => {
+        const n = panel.querySelector('.bible-receipt');
+        return n === null ? null : String(n.textContent).replace(/\s+/g, ' ');
+      }, 40000);
+      if (receipt === null) {
+        const err = document.querySelector('.error-bar');
+        return { ok: false, note: '没有回执' + (err === null ? '' : '：' + String(err.textContent).slice(0, 160)) };
+      }
+      const pathMatch = /→ (\S+?\.md)/.exec(receipt);
+      if (pathMatch === null) return { ok: false, note: '回执里抠不出路径：' + receipt.slice(0, 140) };
+      const doc = await window.yushu.doc.read(pathMatch[1]).catch(() => null);
+      if (doc === null) return { ok: false, note: '读不到 ' + pathMatch[1] };
+      const text = String(doc.content);
+      const firstLine = text.split(String.fromCharCode(10))[0].trim();
+      const titleOk = firstLine === '# ' + title;
+      const headingCount = (text.match(/^### /gm) || []).length;
+      const expectCount = withMask ? m1 : m0;
+      const countOk = headingCount === expectCount;
+      const stillIn = maskedNames.filter((n) => text.indexOf(n) >= 0);
+      const contentOk = withMask ? stillIn.length === 0 : stillIn.length === maskedNames.length;
+      const sectionOk = sectionRows.length > 0 && text.indexOf('## ') >= 0;
+      // 字符串里的正则：写两条反斜杠，求值后才剩 \d
+      const num = (label) => {
+        const m = new RegExp(label + ' (\\d+) 条').exec(receipt);
+        return m === null ? -1 : Number(m[1]);
+      };
+      const receiptIncluded = /(\d+) 条 ·/.test(receipt) ? Number(/(\d+) 条 ·/.exec(receipt)[1]) : -1;
+      const receiptMasked = num('略过');
+      const receiptLeaks = num('未揭示仍在产物');
+      const receiptOk = receiptIncluded === expectCount &&
+        receiptMasked === (withMask ? maskedNames.length : 0) &&
+        (withMask ? receiptLeaks === 0 : receiptLeaks === leakRows);
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: titleOk && selfConsistent && goneFromClip && emptyBlocked && countOk && sectionOk && contentOk && receiptOk,
+        note: '标题同源=' + titleOk + '（' + firstLine + '）；层级节=' + sectionRows.length + '；未开脱敏点名=' +
+          leakRows + ' 条；开脱敏 ' + m0 + '→' + m1 + '（剔除 ' + maskedNames.length + ' 条，自洽=' + selfConsistent +
+          '，预览不再出现=' + goneFromClip + (truncated ? '·预览截断未判' : '') + '）；空设定集不可导=' + emptyBlocked +
+          '；落笔用' + (withMask ? '脱敏' : '不脱敏（全是未揭示设定）') + '；产物 ###=' + headingCount + '/' + expectCount +
+          '；脱敏名出现在产物=' + stillIn.length + '；回执=' + receipt.slice(0, 130),
+      };
+    `,
+  },
 ];
 
 /**

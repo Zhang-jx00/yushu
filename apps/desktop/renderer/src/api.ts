@@ -54,6 +54,10 @@ import type {
   ContextPreviewPayload,
   CreateProjectPayload,
   DocSnapshot,
+  BiblePreviewPayload,
+  BiblePreviewRequest,
+  BibleRunPayload,
+  BibleRunResult,
   ExportPreviewPayload,
   ExportPreviewRequest,
   ExportRunPayload,
@@ -227,6 +231,11 @@ export interface YushuApi {
     preview: (payload?: ExportPreviewRequest) => Promise<ExportPreviewPayload>;
     run: (payload: ExportRunPayload) => Promise<ExportRunResult>;
     clipboard: (payload?: ClipboardPayload) => Promise<ClipboardResult>;
+  };
+  /** 世界圣经 / 设定集一键导出（M5 T5-5，R98） */
+  bible: {
+    preview: (payload?: BiblePreviewRequest) => Promise<BiblePreviewPayload>;
+    run: (payload: BibleRunPayload) => Promise<BibleRunResult>;
   };
   index: {
     status: () => Promise<IndexStatusPayload>;

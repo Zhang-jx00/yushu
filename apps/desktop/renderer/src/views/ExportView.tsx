@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { useCallback, useEffect, useState } from "react";
 import type { ClipboardResult, ExportPreviewPayload, ExportRunResult } from "../../../src/shared/ipc";
+import { BiblePanel } from "../components/BiblePanel";
 import { api } from "../api";
 
 /**
@@ -330,6 +331,9 @@ export function ExportView() {
             )}
           </section>
         )}
+
+        {/* 设定集（世界圣经）：R98 / T5-5，与章节导出同页不同事，各自确认、各自落盘 */}
+        <BiblePanel />
 
         <section className="panel">
           <h3>
