@@ -490,7 +490,7 @@ describe("重新核对刷新工具链的接线（R92）", () => {
     // preload 必须把 payload 转发出去：写成 invoke("export:preview") 就静默失效了
     expect(preload).toMatch(/preview: \(payload\) => invoke\("export:preview", payload\)/);
     expect(api).toContain("preview: (payload?: ExportPreviewRequest)");
-    expect(view).toContain("api().export.preview({ refresh: forceTooling })");
+    expect(view).toMatch(/api\(\)\.export\.preview\(\{\s*refresh: forceTooling,\s*platform:/);
     // 按钮不能直接把 refresh 当 handler（那会把 click 事件当成 forceTooling）
     expect(view).toContain("onClick={() => refresh(true)}");
     expect(view).not.toMatch(/onClick=\{refresh\}/);

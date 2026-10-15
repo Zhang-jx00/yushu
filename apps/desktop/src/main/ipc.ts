@@ -642,7 +642,13 @@ export function registerIpcHandlers(): void {
   /* ---------- 导出与敏感词自查（S6） ---------- */
 
   ipcMain.handle(CHANNELS.exportPreview, (_event, payload: ExportPreviewRequest) =>
-    wrap<ExportPreviewPayload>(() => previewExport(requireGateway(), { refreshTooling: payload?.refresh === true })),
+    wrap<ExportPreviewPayload>(() =>
+      previewExport(requireGateway(), {
+        refreshTooling: payload?.refresh === true,
+        // 平台格式（R94 / K11）：整条链只传 id，参数一律由主进程去包里读
+        platform: payload?.platform,
+      }),
+    ),
   );
 
   ipcMain.handle(CHANNELS.exportRun, (_event, payload: ExportRunPayload) =>

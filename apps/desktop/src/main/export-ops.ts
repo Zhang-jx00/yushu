@@ -8,14 +8,20 @@ import {
   buildClipboardText,
   buildMarkdown,
   buildTxt,
+  checkPlatformExport,
   epubGatePassed,
+  formatChapterHead,
   mergeWordlists,
   parseWordlist,
   scanSensitive,
+  stripLeadingChapterPrefix,
+  templateAddsChapterPrefix,
   type ExportChapter,
   type ExportFormat,
   type ExportTooling,
   type MergedWordlistEntry,
+  type PlatformExportPack,
+  type PlatformFormatRow,
   type Wordlist,
 } from "@yushu/export";
 import {
@@ -32,6 +38,8 @@ import type {
   ExportPreviewPayload,
   ExportRunPayload,
   ExportRunResult,
+  PlatformPackSummary,
+  PlatformPreviewPayload,
   SkippedWordlistPayload,
 } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
@@ -44,6 +52,13 @@ import {
   type ToolDeps,
   type ToolingProbe,
 } from "./export-tooling.js";
+import {
+  loadPlatformPack,
+  platformPacksRoot,
+  scanPlatformPacks,
+  summaryOf,
+  toSummary,
+} from "./platform-ops.js";
 import { repoRoot } from "./paths.js";
 
 /**
@@ -73,9 +88,13 @@ async function collectChapters(gateway: ProjectGateway): Promise<CollectedChapte
 
   if (outlineSnap) {
     const outline = parseOutline(outlineSnap.content);
+    // 全书序号按**大纲**数，而不是按"已经写了正文的章"数：没建草稿的章在作者的书里同样占一个章号，
+    // 跳过它会让后面每一章都往前挪一位（R94 查跨卷重号时发现的第二层）。
+    let globalSeq = 0;
     for (let volumeIndex = 0; volumeIndex < outline.volumes.length; volumeIndex += 1) {
       const volume = outline.volumes[volumeIndex]!;
       for (const chapter of volume.chapters) {
+        globalSeq += 1;
         if (!chapter.chapter_id) {
           missingDrafts += 1;
           continue;
@@ -95,6 +114,7 @@ async function collectChapters(gateway: ProjectGateway): Promise<CollectedChapte
           act: volume.act,
           volumeIndex,
           idx: chapter.idx,
+          seq: globalSeq,
           title: chapter.title,
           body,
           statedWordCount: entity.word_count,
@@ -171,6 +191,48 @@ export interface ExportPreviewOptions {
   probeTooling?: ToolingProbe | (() => Promise<ExportTooling>);
   /** 强制重探工具链：作者装完 PDF 引擎 / 备好 EPUBCheck jar 后点「重新核对」就该看到新结论 */
   refreshTooling?: boolean;
+  /** 平台包 id（R94 / K11）：选了就把该平台的章节格式核对结果一并给出 */
+  platform?: string;
+  /** 平台包根目录；默认仓库 `packs/platforms/`（测试与将来的外接包目录用它） */
+  platformRoot?: string;
+}
+
+/** 章头样例最多给几章（全书都按同一条模板，列完没意义） */
+const TITLE_SAMPLE_LIMIT = 5;
+
+/**
+ * 按平台包算出**导出层真正会写出的那一行章头**（R94）。
+ *
+ * 预览、核对行、实际导出必须走同一个函数：三处各算各的，作者就会照着一句假话改稿。
+ */
+function platformChapterHead(chapter: ExportChapter, pack: PlatformExportPack): string {
+  return formatChapterHead(chapter, pack.chapter_title_format);
+}
+
+/** 标题自带"第N章"前缀（平台模板会把它换成自己的编号） */
+function carriesOwnPrefix(title: string): boolean {
+  return stripLeadingChapterPrefix(title) !== title;
+}
+
+/** 平台核对的入参章节：序号用**全书序号**（投稿要的是它，不是卷内 idx） */
+function platformCheckInput(chapters: ExportChapter[], pack: PlatformExportPack) {
+  const rows = checkPlatformExport({
+    pack,
+    chapters: chapters.map((chapter) => ({
+      chapterId: chapter.chapterId,
+      idx: chapter.seq ?? chapter.idx,
+      title: chapter.title,
+    })),
+    // 材料清单照抄包里的，但**不替作者判"缺哪几项"**：御书里没有可核对的项目内约定，
+    // 报"还缺"就是编的。清单本身在摘要里给作者看（submissionMaterials）。
+    materials: Object.fromEntries(pack.submission_materials.map((name) => [name, true])),
+  });
+  return {
+    rows,
+    strippedPrefixes: chapters.filter(
+      (chapter) => templateAddsChapterPrefix(pack.chapter_title_format) && carriesOwnPrefix(chapter.title),
+    ).length,
+  };
 }
 
 /** 导出预览：统计 + 字数对账 + 敏感词命中 + 词库信息 + 本机能力矩阵（T1-18/19、T5-4） */
@@ -204,6 +266,33 @@ export async function previewExport(
     capabilitiesNote = `本机工具链探测失败：${messageOf(err)}；能力矩阵本轮不给结论（这不等于这些格式都不能用）`;
   }
 
+  // 平台格式（R94 / K11）：清单永远给（有多少包就说多少），选中才核对；
+  // 找不到包 / 包不合规只让面板留白 + 一句原话，不把整页预览打死。
+  const platformRoot = options.platformRoot ?? platformPacksRoot();
+  const scanned = await scanPlatformPacks(platformRoot);
+  const platforms: PlatformPackSummary[] = scanned.map(toSummary);
+  let platform: PlatformPreviewPayload | null = null;
+  let platformNote: string | null = null;
+  if (options.platform !== undefined && options.platform !== "") {
+    try {
+      const { pack } = await loadPlatformPack(options.platform, platformRoot);
+      const { rows, strippedPrefixes } = platformCheckInput(assembled.chapters, pack);
+      platform = {
+        pack: { ...summaryOf(options.platform, pack), parseError: null },
+        rows,
+        titles: assembled.chapters.slice(0, TITLE_SAMPLE_LIMIT).map((chapter) => ({
+          chapterId: chapter.chapterId,
+          title: chapter.title,
+          head: platformChapterHead(chapter, pack),
+        })),
+        checkedChapters: assembled.chapters.length,
+        strippedPrefixes,
+      };
+    } catch (err) {
+      platformNote = messageOf(err);
+    }
+  }
+
   return {
     bookTitle,
     volumes: assembled.stats.volumes,
@@ -220,6 +309,9 @@ export async function previewExport(
     capabilities,
     capabilitiesNote,
     wordlistDirs: dirs,
+    platforms,
+    platform,
+    platformNote,
   };
 }
 
@@ -247,6 +339,8 @@ export interface ExportRunDeps {
   tooling?: ExportTooling;
   run?: ToolDeps["run"];
   exists?: ToolDeps["exists"];
+  /** 平台包根目录（默认仓库 packs/platforms/）；测试用它喂坏包 */
+  platformRoot?: string;
 }
 
 /** 找一个没被占用的导出基名（同名自动追加序号，绝不覆盖既有导出） */
@@ -295,6 +389,34 @@ export async function runExport(
 
   const assembled = assembleExport({ chapters });
   const format: ExportFormat = payload.format ?? "txt";
+
+  // 平台格式（R94）：**先核对再落笔**。包不合规（比如声明的编码与导出实际写的对不上）
+  // 就在写任何文件之前拒掉——先写下 .md 源再报错，等于把半成品留在作者项目里。
+  let titleFormat: string | undefined;
+  let platformReceipt: ExportRunResult["platform"];
+  if (payload.platform !== undefined && payload.platform !== "") {
+    const { pack } = await loadPlatformPack(
+      payload.platform,
+      deps.platformRoot ?? platformPacksRoot(),
+    );
+    const { rows, strippedPrefixes } = platformCheckInput(assembled.chapters, pack);
+    const errors = rows.filter((row: PlatformFormatRow) => row.severity === "error");
+    if (errors.length > 0) {
+      throw new YushuError(
+        "E_EXPORT_PLATFORM_GATE",
+        `不按 ${payload.platform} 的格式导出：${errors[0]!.detail}（error 级共 ${errors.length} 条）；未落笔，项目里不会留下半成品`,
+      );
+    }
+    titleFormat = pack.chapter_title_format;
+    platformReceipt = {
+      id: payload.platform,
+      chapterTitleFormat: pack.chapter_title_format,
+      errors: errors.length,
+      warnings: rows.filter((row: PlatformFormatRow) => row.severity === "warn").length,
+      infos: rows.filter((row: PlatformFormatRow) => row.severity === "info").length,
+      strippedPrefixes,
+    };
+  }
   const tooling = deps.tooling ?? (await probeTooling());
   const base = `${sanitizeFileName(bookTitle)}-${timeStamp()}`;
 
@@ -307,6 +429,7 @@ export async function runExport(
       bookTitle,
       includeToc: payload.includeToc ?? true,
       stripMarkers: payload.stripMarkers ?? true,
+      ...(titleFormat === undefined ? {} : { titleFormat }),
     });
     const named = await freeExportBase(gateway, base, ["txt"]);
     path = `${EXPORTS_DIR}/${named}.txt`;
@@ -323,6 +446,7 @@ export async function runExport(
     const markdown = buildMarkdown(assembled.chapters, {
       bookTitle,
       stripMarkers: payload.stripMarkers ?? true,
+      ...(titleFormat === undefined ? {} : { titleFormat }),
     });
     const named = await freeExportBase(gateway, base, ["md", format]);
     sourcePath = `${EXPORTS_DIR}/${named}.md`;
@@ -398,6 +522,7 @@ export async function runExport(
     words: assembled.stats.totalWords,
     clean: scan.summary.bySeverity.error === 0,
     format,
+    ...(platformReceipt === undefined ? {} : { platform: platformReceipt }),
     ...(sourcePath === undefined ? {} : { sourcePath }),
     ...(gate === undefined ? {} : { gate }),
   };

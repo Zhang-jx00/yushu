@@ -24,9 +24,22 @@ function gateLine(result: { gate?: { ran: boolean; passed: boolean; reason: stri
   return gate.passed ? "；EPUB 质检通过" : `；EPUB 质检未通过：${gate.reason}`;
 }
 
+/** 按平台格式导出时回执要说清用了哪个包、哪条模板，以及有多少标题的前缀被换掉（R94） */
+function platformLine(result: {
+  platform?: { id: string; chapterTitleFormat: string; warnings: number; strippedPrefixes: number };
+} | null): string {
+  if (!result?.platform) return "";
+  const info = result.platform;
+  return `；平台格式 ${info.id}：${info.chapterTitleFormat}（警告 ${info.warnings} 条${
+    info.strippedPrefixes > 0 ? `，${info.strippedPrefixes} 章自带前缀已让位给模板` : ""
+  }）`;
+}
+
 export function ExportView() {
   const [preview, setPreview] = useState<ExportPreviewPayload | null>(null);
   const [format, setFormat] = useState<ExportFormat>("txt");
+  /** 平台包 id（R94）；"" = 不按任何平台格式 */
+  const [platform, setPlatform] = useState("");
   const [includeToc, setIncludeToc] = useState(true);
   const [stripMarkers, setStripMarkers] = useState(true);
   const [reviewed, setReviewed] = useState(false);
@@ -42,7 +55,10 @@ export function ExportView() {
     setBusy(true);
     try {
       setError(null);
-      const state = await api().export.preview({ refresh: forceTooling });
+      const state = await api().export.preview({
+        refresh: forceTooling,
+        platform: platform === "" ? undefined : platform,
+      });
       setPreview(state);
       setReviewed(false);
       setExported(null);
@@ -56,7 +72,8 @@ export function ExportView() {
     } finally {
       setBusy(false);
     }
-  }, []);
+    // platform 进依赖：换一个平台就该重新核对一次（预览里的格式行与样例随之变）
+  }, [platform]);
 
   useEffect(() => {
     void refresh();
@@ -67,12 +84,18 @@ export function ExportView() {
     setError(null);
     setNotice(null);
     try {
-      const result = await api().export.run({ confirmed: true, format, includeToc, stripMarkers });
+      const result = await api().export.run({
+        confirmed: true,
+        format,
+        includeToc,
+        stripMarkers,
+        platform: platform === "" ? undefined : platform,
+      });
       setExported(result);
       setNotice(
         `已导出 ${result.format.toUpperCase()} → ${result.path}（${result.chapters} 章 · ${result.words} 字）${
           result.clean ? "；无 error 级敏感词命中" : "；⚠ 仍有 error 级命中，建议处理后再投稿"
-        }${gateLine(result)}${result.sourcePath ? `；源文件 ${result.sourcePath}` : ""}`,
+        }${gateLine(result)}${platformLine(result)}${result.sourcePath ? `；源文件 ${result.sourcePath}` : ""}`,
       );
       setReviewed(false);
     } catch (err) {
@@ -133,6 +156,41 @@ export function ExportView() {
               ? "正在核对章数、字数与本机工具链…"
               : (preview.capabilities.find((entry) => entry.format === format)?.reason ?? "")}
           </p>
+          {/* 平台格式（R94 / K11）：清单来自 packs/platforms/，代码里没有一个平台名；没有包就整区不出现 */}
+          {preview !== null && preview.platforms.length > 0 && (
+            <div className="chips export-platforms" role="group" aria-label="平台章节格式">
+              <button
+                type="button"
+                className={`chip${platform === "" ? " on" : ""}`}
+                disabled={busy}
+                title="章头照作者写的样子导出"
+                onClick={() => setPlatform("")}
+              >
+                不按平台
+              </button>
+              {preview.platforms.map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  className={`chip${platform === item.id ? " on" : ""}`}
+                  disabled={busy || item.parseError !== null}
+                  title={
+                    item.parseError !== null
+                      ? `包不合规：${item.parseError}`
+                      : `${item.platform} v${item.version} · 生效 ${item.effectiveDate} · 核对 ${item.checkedAt}`
+                  }
+                  onClick={() => setPlatform(item.id)}
+                >
+                  {item.id}
+                </button>
+              ))}
+            </div>
+          )}
+          {preview !== null && preview.platforms.length === 0 && (
+            <p className="muted export-platforms-empty">
+              本机没有任何平台导出包（packs/platforms/ 为空），章头将照作者原文写。
+            </p>
+          )}
           {preview && (
             <div className="export-summary">
               <div>
@@ -193,6 +251,85 @@ export function ExportView() {
             </div>
           )}
         </section>
+
+        {/* 平台格式核对（R94）：包从哪儿来、套上后每章的章头长什么样、哪里不对 */}
+        {preview !== null && (preview.platform !== null || preview.platformNote !== null) && (
+          <section className="panel export-platform-panel">
+            <h3>
+              平台章节格式 <span className="muted">K11：参数从包读，不硬编码</span>
+            </h3>
+            {preview.platformNote !== null && (
+              <p className="warn">未给出核对结果：{preview.platformNote}</p>
+            )}
+            {preview.platform !== null && (
+              <>
+                <p className="muted">
+                  {preview.platform.pack.id} · v{preview.platform.pack.version} · 生效{" "}
+                  {preview.platform.pack.effectiveDate} · 核对于 {preview.platform.pack.checkedAt} · 模板{" "}
+                  {preview.platform.pack.chapterTitleFormat} · 编码 {preview.platform.pack.encoding} · 来源{" "}
+                  {preview.platform.pack.sourceUrls.length} 条 · 已核对 {preview.platform.checkedChapters} 章
+                </p>
+                {preview.platform.pack.validWordRule !== "" && (
+                  <p className="muted">字数口径（照包转述，不判超没超）：{preview.platform.pack.validWordRule}</p>
+                )}
+                {preview.platform.pack.submissionMaterials.length > 0 && (
+                  <p className="muted">
+                    投稿材料清单（由包列出；是否齐备请作者自己确认，御书没有可核对的项目内约定）：
+                    {preview.platform.pack.submissionMaterials.join("、")}
+                  </p>
+                )}
+                {preview.platform.strippedPrefixes > 0 && (
+                  <p className="warn">
+                    {preview.platform.strippedPrefixes} 章的标题自带"第N章"前缀：导出副本里会让位给平台模板的编号（
+                    <b>真源一个字不动</b>），建议把标题写成裸名。
+                  </p>
+                )}
+                <table className="slot-table export-platform-samples">
+                  <thead>
+                    <tr>
+                      <th>章节</th>
+                      <th>你写的标题</th>
+                      <th>导出会写出的章头</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.platform.titles.map((sample) => (
+                      <tr key={sample.chapterId}>
+                        <td>{sample.chapterId}</td>
+                        <td>{sample.title}</td>
+                        <td>{sample.head}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {preview.platform.rows.length === 0 ? (
+                  <p className="muted">格式核对：没有问题。</p>
+                ) : (
+                  <table className="slot-table export-platform-rows">
+                    <thead>
+                      <tr>
+                        <th>级别</th>
+                        <th>规则</th>
+                        <th>对象</th>
+                        <th>说明</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.platform.rows.map((row) => (
+                        <tr key={`${row.rule}-${row.subject}`}>
+                          <td>{SEVERITY_LABEL[row.severity] ?? row.severity}</td>
+                          <td>{row.rule}</td>
+                          <td>{row.subject}</td>
+                          <td>{row.detail}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
+          </section>
+        )}
 
         <section className="panel">
           <h3>

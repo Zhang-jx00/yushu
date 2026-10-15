@@ -3608,6 +3608,96 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 59,
+    title: '导出与自查：平台章节格式从包读，样例与盘上产物一致（M5/T5-4·K11，R94）',
+    file: 'step59-platform-format.png',
+    body: String.raw`
+      // K11 的验收点是"参数从包读，而且真的落到产物上"。这一步管四件事：
+      // ① 平台清单来自 packs/platforms/——一个都没有就如实跳过，不假装跑过；
+      // ② 选中平台后必须给出"你写的标题 → 导出会写出的章头"样例，且章头里**不许出现重复的"第N章"**
+      //    （这是 R94 查出来的真缺陷：模板补一个前缀、标题自带一个，产物就成了"第1章 第一章 边城少年"）；
+      // ③ 坏包必须 disabled 且 title 带原因（点不动要有理由，不许静默）；
+      // ④ 按平台格式导出 TXT：回执要点名平台，且**盘上文件的章头必须等于 UI 展示的那条样例**
+      //    ——UI 与磁盘不许有第二个结论。
+      await tab('规则');
+      await tab('导出与自查'); // 强制重挂载：不继承上一轮的格式 / 平台选中态
+      const chips = await waitFor(() => {
+        const c = [...document.querySelectorAll('.export-platforms .chip')];
+        return c.length >= 2 ? c : null;
+      }, 20000);
+      if (chips === null) {
+        const empty = String((document.querySelector('.export-platforms-empty') || {}).textContent || '').trim();
+        return { ok: empty.length > 0, note: '本机没有平台包（如实跳过，不给结论）：' + (empty || pageText()).slice(0, 120) };
+      }
+      const labels = chips.map((c) => String(c.textContent).trim());
+      const noneFirst = labels[0] === '不按平台';
+      const packButtons = chips.slice(1);
+      const disabledOnes = packButtons.filter((c) => c.disabled === true);
+      const disabledHaveReason = disabledOnes.every((c) => String(c.title).length > 6);
+      const target = packButtons.find((c) => c.disabled === false);
+      if (target === undefined) return { ok: false, note: '平台包全不可用：' + labels.join('/') };
+      const picked = String(target.textContent).trim();
+      target.click();
+      const panel = await waitFor(() => document.querySelector('.export-platform-panel'), 20000);
+      if (panel === null) return { ok: false, note: '选了 ' + picked + ' 但没长出平台面板' };
+      const samples = [...panel.querySelectorAll('.export-platform-samples tbody tr')].map((tr) => ({
+        title: String(tr.children[1].textContent).trim(),
+        head: String(tr.children[2].textContent).trim(),
+      }));
+      const DUPLICATED = /第[0-9一二三四五六七八九十百千]+[章节回]\s*第[0-9一二三四五六七八九十百千]+[章节回]/;
+      const noDup = samples.length > 0 && samples.every((s) => s.head.length > 0 && !DUPLICATED.test(s.head));
+      const rowNodes = [...panel.querySelectorAll('.export-platform-rows tbody tr')];
+      const severities = rowNodes.map((tr) => String(tr.children[0].textContent).trim());
+      const severityOk = severities.every((s) => ['错误', '警告', '提示'].indexOf(s) >= 0);
+      const meta = String(panel.textContent).replace(/\s+/g, ' ');
+      const metaOk = meta.indexOf('生效') >= 0 && meta.indexOf('核对于') >= 0 && meta.indexOf('来源') >= 0;
+      // 等确认框可勾再勾：换平台会触发一次重新核对，期间它是 disabled（v188 的那次抖动就出在这里）
+      const chk = await waitFor(() => {
+        const c = document.querySelector('.confirm-check input[type=checkbox]');
+        return c !== null && c.disabled === false ? c : null;
+      }, 20000);
+      if (chk === null) return { ok: false, note: '确认框一直不可勾：' + pageText().slice(0, 160) };
+      if (!chk.checked) chk.click();
+      await sleep(160);
+      const go = [...document.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('确认导出') >= 0);
+      if (go && !go.disabled) go.click();
+      const notice = await waitFor(() => {
+        const t = String(document.body.innerText);
+        const hit = t.split('\n').find((line) => line.indexOf('已导出 TXT') >= 0 && line.indexOf('平台格式') >= 0);
+        return hit === undefined ? null : String(hit);
+      }, 40000);
+      const errBar = document.querySelector('.error-bar');
+      const failText = errBar === null ? '' : String(errBar.textContent).replace(/\s+/g, ' ').slice(0, 200);
+      let diskOk = false;
+      let diskNote = '没有回执，未读盘';
+      if (notice !== null && samples.length > 0) {
+        const pathMatch = /→ (\S+?\.txt)/.exec(notice);
+        if (pathMatch === null) {
+          diskNote = '回执里抠不出路径：' + notice.slice(0, 120);
+        } else {
+          const doc = await window.yushu.doc.read(pathMatch[1]).catch(() => null);
+          if (doc === null) {
+            diskNote = '读不到 ' + pathMatch[1];
+          } else {
+            diskOk = String(doc.content).indexOf(samples[0].head) >= 0;
+            diskNote = '盘上章头等于样例=' + diskOk + '（' + samples[0].head + '）';
+          }
+        }
+      }
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: noneFirst && disabledHaveReason && noDup && severityOk && metaOk && notice !== null && diskOk,
+        note: '平台包=' + picked + '；清单首项不按平台=' + noneFirst +
+          '；坏包带原因=' + disabledHaveReason + '（disabled ' + disabledOnes.length + ' 个）' +
+          '；样例 ' + samples.length + ' 条·无重复前缀=' + noDup +
+          '；核对行=' + rowNodes.length + '·级别合法=' + severityOk +
+          '；溯源齐=' + metaOk + '；回执带平台=' + (notice !== null) + '；' + diskNote +
+          (failText === '' ? '' : '；错误条=' + failText),
+      };
+    `,
+  },
 ];
 
 /**

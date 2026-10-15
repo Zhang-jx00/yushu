@@ -1209,10 +1209,56 @@ export interface SkippedWordlistPayload {
   error: string;
 }
 
-/** 预览的请求：只有一件事可要求——要不要重探本机工具链（R92） */
+/** 平台导出包的摘要（R94 / K11）：字段全部来自包，代码里一个平台参数都没有 */
+export interface PlatformPackSummary {
+  /** 包 id = 目录名，与包里的 platform 字段可以不同；代码只把它当标识，不认得任何平台 */
+  id: string;
+  platform: string;
+  version: string;
+  chapterTitleFormat: string;
+  encoding: string;
+  /** 平台"有效字数"口径原文（研究里没给量化上限，所以这里只转述口径，不判超没超） */
+  validWordRule: string;
+  submissionMaterials: string[];
+  sourceUrls: string[];
+  effectiveDate: string;
+  checkedAt: string;
+  /** 包在目录里但解析不过 ⇒ 这里放原因原文（坏包不许静默从清单里消失） */
+  parseError: string | null;
+}
+
+/** 平台格式核对行（与引擎 `PlatformFormatRow` 同形；载荷在这里自描述，不让渲染层去依赖引擎包） */
+export interface PlatformFormatRowPayload {
+  rule: string;
+  severity: "error" | "warn" | "info";
+  subject: string;
+  detail: string;
+}
+
+/** 套上平台格式后的章头样例：作者标题 → 导出会写出的那一行 */
+export interface PlatformTitleSample {
+  chapterId: string;
+  title: string;
+  head: string;
+}
+
+/** 选中平台包后的预览面板数据 */
+export interface PlatformPreviewPayload {
+  pack: PlatformPackSummary;
+  rows: PlatformFormatRowPayload[];
+  /** 只给前几章的样例（全书章头都按同一条模板，列完没意义） */
+  titles: PlatformTitleSample[];
+  checkedChapters: number;
+  /** 有多少章的标题自带"第N章"前缀，在导出副本里让位给了平台格式（真源不动） */
+  strippedPrefixes: number;
+}
+
+/** 预览的请求：只有两件事可要求——要不要重探工具链（R92）、按哪个平台格式核对（R94） */
 export interface ExportPreviewRequest {
   /** true ⇒ 清掉进程内探测缓存重新下发；作者装完 PDF 引擎后备好 EPUBCheck jar 后不必重启应用 */
   refresh?: boolean;
+  /** 平台包 id；不传 = 不按任何平台格式核对 */
+  platform?: string;
 }
 
 export interface ExportPreviewPayload {
@@ -1248,6 +1294,15 @@ export interface ExportPreviewPayload {
   capabilitiesNote: string | null;
   /** 词库扫描目录（外置可更新：仓库内置 + 项目内覆盖） */
   wordlistDirs: string[];
+  /**
+   * 本机可用的平台导出包清单（R94 / K11）：扫 `packs/platforms/` 得到，
+   * 一项都没有就是没有——界面据此决定平台选择区是否出现，不预设任何平台。
+   */
+  platforms: PlatformPackSummary[];
+  /** 选中的平台包核对结果；未选 / 出问题时为 null */
+  platform: PlatformPreviewPayload | null;
+  /** 选中了平台包但没能给出结论时的实话（找不到包、包不合规）。null = 正常 */
+  platformNote: string | null;
 }
 
 export interface ExportRunPayload {
@@ -1257,6 +1312,8 @@ export interface ExportRunPayload {
   stripMarkers?: boolean;
   /** 导出格式（T5-4）；缺省 = `txt`，与 R90 之前的行为逐字一致 */
   format?: "txt" | "epub" | "docx" | "pdf";
+  /** 平台包 id（R94 / K11）：章头按包的 `chapter_title_format` 写；不传 = 照作者原文 */
+  platform?: string;
 }
 
 /** EPUB 质量门禁的结论（T5-4）；`ran:false` 时 `passed` 必为 false——没检查过就不算通过 */
@@ -1281,6 +1338,18 @@ export interface ExportRunResult {
   sourcePath?: string;
   /** EPUB 才有：EPUBCheck 门禁结论 */
   gate?: ExportGatePayload;
+  /**
+   * 按平台格式导出时才有（R94）：回执要说清用的是哪个包、哪条模板，
+   * 以及有多少章的自带前缀在导出副本里让位给了平台格式——作者不必去数，但必须能看见。
+   */
+  platform?: {
+    id: string;
+    chapterTitleFormat: string;
+    errors: number;
+    warnings: number;
+    infos: number;
+    strippedPrefixes: number;
+  };
 }
 
 export interface ClipboardPayload {
