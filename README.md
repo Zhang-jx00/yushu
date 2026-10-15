@@ -66,10 +66,11 @@ pnpm --filter @yushu/desktop dev      # Electron + Vite 热更新
 ## 怎么验（四连门禁，缺一项不算完成）
 
 ```bash
-pnpm test                # 单元/集成测试：1322 例 / 125 文件
+pnpm test                # 单元/集成测试：1335 例 / 126 文件
 pnpm typecheck           # 9 个包 + 2 个应用零错误（内含全量构建）
 pnpm --filter @yushu/desktop e2e     # 离线 mock LLM 的端到端全链路，逐条具名断言
 pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 60 步 UI 预演 + 逐步截图取证
+# 前端改动的判据：docs/10-前端设计契约.md（令牌 / 中文排版 / 动效 / 键盘可达），由 ui-contract.test.ts 钉住
 ```
 
 另有 `kill-test`（强杀进程不丢稿实测）与 `perf-test`（百万字性能实测）两个专项探针。
