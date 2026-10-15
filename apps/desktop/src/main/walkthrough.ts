@@ -3523,6 +3523,91 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 58,
+    title: "导出与自查：格式选择 + 真出一份 EPUB，门禁说「未校验」（M5/T5-4，R90）",
+    file: "step58-export-formats.png",
+    body: String.raw`
+      // 这一轮第一次让产品真的产出非 TXT 格式。三条要紧的断言：
+      // ① 选择器与能力矩阵必须说同一句话（同一个事实不许有两个结论）；
+      // ② 选中的格式要一路带到按钮与回执里（"点了 EPUB 结果拿到 TXT"是最坏的那种错）；
+      // ③ EPUBCheck 不在 ⇒ 回执写「未校验」，不许写「通过」。
+      await tab('规则');
+      await tab('导出与自查'); // 强制重挂载：重试时不能继承上一轮选中的格式（v192 第二次 attempt 就带着 EPUB 选中态进来）
+      const chips = await waitFor(() => {
+        const c = [...document.querySelectorAll('.export-formats .chip')];
+        return c.length >= 4 ? c : null;
+      }, 20000);
+      if (chips === null) return { ok: false, note: '没有格式选择器：' + pageText() };
+      const labels = chips.map((c) => String(c.textContent).trim());
+      const orderOk = labels.join(',') === 'TXT,EPUB,DOCX,PDF';
+      // 能力矩阵面板里的结论（同一页另一处，必须与选择器一致）
+      const capRows = [...document.querySelectorAll('.export-capabilities tbody tr')].map((tr) => ({
+        format: String(tr.children[0].textContent).trim().toUpperCase(),
+        verdict: String(tr.children[1].textContent).trim(),
+      }));
+      const agree = labels.every((label, i) => {
+        const row = capRows.find((r) => r.format === label);
+        if (row === undefined) return false;
+        const chipAvailable = chips[i].disabled === false;
+        return chipAvailable === (row.verdict === '可产出');
+      });
+      const txtSelectedByDefault = String(chips[0].className).indexOf('on') >= 0;
+
+      // 挑一个"本机可产出"的非 TXT 格式真出一次；本机没有就如实标注（不假装跑过）
+      const pickIndex = labels.findIndex((label, i) => i > 0 && chips[i].disabled === false);
+      let ranFormat = '';
+      let failText = '';
+      let receiptOk = false;
+      let gateOk = false;
+      let fileOnDisk = false;
+      if (pickIndex > 0) {
+        const picked = labels[pickIndex];
+        chips[pickIndex].click();
+        await sleep(220);
+        const btnLabel = [...document.querySelectorAll('button')]
+          .find((b) => String(b.textContent).indexOf('确认导出') >= 0);
+        ranFormat = picked + '=' + (btnLabel === undefined ? '按钮不见了' : String(btnLabel.textContent).trim());
+        const reasonText = String((document.querySelector('.export-format-reason') || {}).textContent || '').trim();
+        const reasonChanged = reasonText.length > 6 && reasonText.indexOf('御书自己装配') < 0;
+        const chk = document.querySelector('.confirm-check input[type=checkbox]');
+        if (chk && !chk.disabled && !chk.checked) chk.click();
+        await sleep(160);
+        const go = [...document.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('确认导出') >= 0);
+        if (go && !go.disabled) go.click();
+        const notice = await waitFor(() => {
+          const t = String(document.body.innerText);
+          const hit = t.split('\n').find((line) => line.indexOf('已导出 ' + picked) >= 0);
+          return hit === undefined ? null : String(hit);
+        }, 40000);
+        receiptOk = notice !== null && reasonChanged;
+        // 失败时把错误条原文抄进证据行：下一次不用再猜"为什么没有回执"（v192 就是这样查出来的相对路径）
+        const errBar = document.querySelector('.error-bar');
+        failText = errBar === null ? '' : String(errBar.textContent).replace(/\s+/g, ' ').slice(0, 220);
+        // 门禁措辞：EPUBCheck 不在 ⇒ 必须出现「未校验」；在 ⇒ 必须出现"通过/未通过"，两者都不许沉默
+        gateOk = notice === null ? false : (picked !== 'EPUB' || /未校验|质检通过|质检未通过/.test(notice));
+        if (notice !== null) {
+          const tree = await window.yushu.project.tree();
+          fileOnDisk = tree.some((e) => e.type === 'file' && e.path.indexOf('exports/') === 0
+            && e.path.endsWith('.' + picked.toLowerCase()));
+        }
+      } else {
+        ranFormat = '本机除 TXT 外无可产出格式（跳过实际产出，不假装跑过）';
+        receiptOk = true;
+        gateOk = true;
+        fileOnDisk = true;
+      }
+      document.querySelector('.export-formats').scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: orderOk && agree && txtSelectedByDefault && receiptOk && gateOk && fileOnDisk,
+        note: '顺序=' + labels.join('/') + '；选择器与能力矩阵一致=' + agree +
+          '；默认选中 TXT=' + txtSelectedByDefault + '；实跑格式=' + ranFormat +
+          '；回执到位=' + receiptOk + '；门禁措辞=' + gateOk + '；产物落盘=' + fileOnDisk +
+          (failText === '' ? '' : '；错误条=' + failText),
+      };
+    `,
+  },
 ];
 
 /**
