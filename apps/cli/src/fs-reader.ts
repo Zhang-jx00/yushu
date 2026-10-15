@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { codePointCompare } from "@yushu/core";
 import { promises as fs } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import type { IndexSourceFile, IndexSourceReader } from "@yushu/world-engine";
@@ -34,7 +35,7 @@ export function createFsReader(rootDir: string): IndexSourceReader {
     listFiles: async () => {
       const acc: IndexSourceFile[] = [];
       await walk(rootAbs, rootAbs, acc);
-      return acc.sort((a, b) => a.path.localeCompare(b.path));
+      return acc.sort((a, b) => codePointCompare(a.path, b.path));
     },
     readText: (path) => fs.readFile(join(rootAbs, ...path.split("/")), "utf8"),
   };

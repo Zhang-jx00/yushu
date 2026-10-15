@@ -178,6 +178,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@yushu/core':
+        specifier: workspace:*
+        version: link:../../packages/@yushu/core
       '@yushu/search':
         specifier: workspace:*
         version: link:../../packages/@yushu/search

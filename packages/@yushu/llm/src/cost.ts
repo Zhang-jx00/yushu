@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { codePointCompare } from "@yushu/core";
 import type { ChatUsage, ModelPricing } from "./types.js";
 
 /**
@@ -211,14 +212,9 @@ function emptyRow(key: string): CostAggregateRow {
   };
 }
 
-/** 码点序比较（不用 localeCompare——避免 ICU/locale 漂移导致同输入不同序） */
-function byCode(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-/** 码点序比较（不用 localeCompare——避免 ICU/locale 漂移导致同输入不同序） */
+/** 聚合行按 key 的码点序（比较器统一用 @yushu/core 那一份，不再各包私藏副本） */
 function byKeyCode(a: CostAggregateRow, b: CostAggregateRow): number {
-  return byCode(a.key, b.key);
+  return codePointCompare(a.key, b.key);
 }
 
 function median(values: number[]): number | null {
@@ -266,7 +262,7 @@ function accumulate(bucket: Bucket, entry: CostEntry, pricing: ModelPricing | un
 function finalize(bucket: Bucket): CostAggregateRow {
   const row = bucket.row;
   row.promptDeviationMedian = median(bucket.deviations);
-  const currencies = Object.keys(row.costByCurrency).sort(byCode);
+  const currencies = Object.keys(row.costByCurrency).sort(codePointCompare);
   if (currencies.length === 1) {
     row.currency = currencies[0]!;
     row.cost = row.costByCurrency[currencies[0]!] ?? null;
@@ -327,7 +323,7 @@ export function summarizeCosts(
   const byTask = rowsOf(tasks);
   const byModel = rowsOf(models);
   const byChapter = rowsOf(chapters);
-  const currencies = Object.keys(totalsRow.costByCurrency).sort(byCode);
+  const currencies = Object.keys(totalsRow.costByCurrency).sort(codePointCompare);
 
   return {
     byTask,

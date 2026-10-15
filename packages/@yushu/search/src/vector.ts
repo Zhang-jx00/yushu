@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { codePointCompare } from "@yushu/core";
 import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -177,7 +178,7 @@ export function openVectorStore(db: DatabaseSync, options: VectorStoreOptions = 
         chunkId: String(row["chunk_id"] ?? ""),
         score: cosineSimilarity(query, blobToVec(row["vec"] as Uint8Array)),
       }));
-      scored.sort((a, b) => b.score - a.score || a.chunkId.localeCompare(b.chunkId));
+      scored.sort((a, b) => b.score - a.score || codePointCompare(a.chunkId, b.chunkId));
       return scored.slice(0, limit);
     },
   };

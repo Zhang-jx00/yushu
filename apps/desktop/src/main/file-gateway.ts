@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
-import { YushuError } from "@yushu/core";
+import { YushuError, codePointCompare } from "@yushu/core";
 import type { DocSnapshot, TreeEntry } from "../shared/ipc.js";
 
 /**
@@ -71,7 +71,7 @@ export class ProjectGateway {
     const entries: TreeEntry[] = [];
     const walk = async (dirAbs: string, relPrefix: string): Promise<void> => {
       const dirents = await fs.readdir(dirAbs, { withFileTypes: true });
-      const sorted = [...dirents].sort((a, b) => a.name.localeCompare(b.name));
+      const sorted = [...dirents].sort((a, b) => codePointCompare(a.name, b.name));
       for (const dirent of sorted) {
         if (WALK_EXCLUDES.has(dirent.name) || dirent.name.endsWith(".tmp")) continue;
         const rel = relPrefix ? `${relPrefix}/${dirent.name}` : dirent.name;

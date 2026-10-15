@@ -2,7 +2,7 @@
 import { existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import { basename, join } from "node:path";
-import { YushuError, type EntityBase, type GenreAxes, type WorldConfig } from "@yushu/core";
+import { YushuError, type EntityBase, type GenreAxes, type WorldConfig, codePointCompare } from "@yushu/core";
 import {
   ROMANCE_MODES,
   WORDLIST,
@@ -251,7 +251,7 @@ export async function listCards(gateway: ProjectGateway): Promise<CardSummary[]>
     }
   }
   return rows.sort(
-    (a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name, "zh"),
+    (a, b) => codePointCompare(a.type, b.type) || a.name.localeCompare(b.name, "zh"),
   );
 }
 

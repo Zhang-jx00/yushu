@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { countWords } from "@yushu/core";
+import { countWords, codePointCompare } from "@yushu/core";
 import type {
   BuildTxtOptions,
   ExportChapter,
@@ -18,7 +18,7 @@ import { stripInternalMarkers } from "./clean.js";
 /** 大纲序（卷序 → 卷内序号 → 章 id）；导出侧只认这一把尺（TXT / Markdown 共用） */
 export function byOutlineOrder(a: ExportChapter, b: ExportChapter): number {
   return (
-    a.volumeIndex - b.volumeIndex || a.idx - b.idx || a.chapterId.localeCompare(b.chapterId)
+    a.volumeIndex - b.volumeIndex || a.idx - b.idx || codePointCompare(a.chapterId, b.chapterId)
   );
 }
 

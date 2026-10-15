@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { parse as parseYaml } from "yaml";
-import { YushuError } from "@yushu/core";
+import { YushuError, codePointCompare } from "@yushu/core";
 import type {
   MergedWordlistEntry,
   SensitiveHit,
@@ -144,7 +144,7 @@ export function scanChapter(
       });
     }
   }
-  return hits.sort((a, b) => a.chapterId.localeCompare(b.chapterId) || a.index - b.index);
+  return hits.sort((a, b) => codePointCompare(a.chapterId, b.chapterId) || a.index - b.index);
 }
 
 /** 扫描全书（多章），返回命中 + 汇总（词库信息、按严重级计数） */

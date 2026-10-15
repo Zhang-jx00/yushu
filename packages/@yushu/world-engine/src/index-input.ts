@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { codePointCompare } from "@yushu/core";
 import { createHash } from "node:crypto";
 import { parseOutline } from "./outline.js";
 import { readCardFile } from "./cards.js";
@@ -270,7 +271,7 @@ export async function collectIndexInput(
 
   const list = (await reader.listFiles())
     .filter((file) => isIndexablePath(file.path, excludes))
-    .sort((a, b) => a.path.localeCompare(b.path));
+    .sort((a, b) => codePointCompare(a.path, b.path));
 
   const texts = new Map<string, string>();
   for (const file of list) {

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import * as fs from "node:fs";
 import { join } from "node:path";
-import { YushuError } from "@yushu/core";
+import { YushuError, codePointCompare } from "@yushu/core";
 import type {
   GitChangePayload,
   GitCommitEntryPayload,
@@ -150,7 +150,7 @@ async function listChanges(git: GitApi, dir: string): Promise<GitChangePayload[]
     const state = classifyChange(row[1], row[2]);
     if (state) changes.push({ path, state });
   }
-  return changes.sort((a, b) => a.path.localeCompare(b.path));
+  return changes.sort((a, b) => codePointCompare(a.path, b.path));
 }
 
 async function resolveAuthor(git: GitApi, dir: string): Promise<{ name: string; email: string }> {

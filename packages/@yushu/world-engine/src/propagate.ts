@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { createHash } from "node:crypto";
-import { YushuError } from "@yushu/core";
+import { YushuError, codePointCompare } from "@yushu/core";
 import type { IndexEntityRow, IndexRefRow } from "./index-input.js";
 
 /**
@@ -82,11 +82,6 @@ export class PropagateError extends YushuError {
 
 export const PROPAGATE_DEFAULT_MAX_DEPTH = 3;
 
-/** 码点序比较（红线：不用 localeCompare，换机器换 locale 不能换序） */
-function byCodePoint(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
 function severityFor(depth: number): ImpactSeverity {
   if (depth === 1) return "error";
   if (depth === 2) return "warn";
@@ -132,7 +127,7 @@ export function propagate(
     else reverse.set(row.target, [edge]);
   }
   for (const list of reverse.values()) {
-    list.sort((a, b) => byCodePoint(a.from, b.from) || byCodePoint(a.relation, b.relation));
+    list.sort((a, b) => codePointCompare(a.from, b.from) || codePointCompare(a.relation, b.relation));
   }
 
   const weights = options.weights ?? {};
@@ -191,7 +186,7 @@ export function propagate(
   const payload = {
     change,
     impact,
-    truncated: frontier.size > 0 ? { frontier: [...frontier].sort(byCodePoint), count: frontier.size } : null,
+    truncated: frontier.size > 0 ? { frontier: [...frontier].sort(codePointCompare), count: frontier.size } : null,
     cycle,
     maxDepth,
   };
@@ -202,7 +197,7 @@ export function propagate(
     impact: cycle === null ? impact : [],
     truncated: payload.truncated,
     cycle,
-    assumedRelations: cycle === null ? [...assumed].sort(byCodePoint) : [],
+    assumedRelations: cycle === null ? [...assumed].sort(codePointCompare) : [],
     maxDepth,
   };
 }

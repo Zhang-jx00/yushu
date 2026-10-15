@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { codePointCompare } from "@yushu/core";
 import type { DatabaseSync } from "node:sqlite";
 import { buildMatchQuery, chunkHitFromRow, unspaceCjk } from "./index-db.js";
 import type { ChunkHit } from "./types.js";
@@ -121,7 +122,7 @@ export function rrfFuse(
   }
   return [...scores.entries()]
     .map(([id, score]) => ({ id, score }))
-    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+    .sort((a, b) => b.score - a.score || codePointCompare(a.id, b.id));
 }
 
 /** 查询 bigram 覆盖：查询字符 bigram 集合命中文本 bigram 集合的比例（0-1） */
@@ -158,7 +159,7 @@ export function rerankHits(hits: RagHit[], query: string, topK: number): RagHit[
     const reason = `词面覆盖 ${coverage.toFixed(3)} · ${route} · 融合 #${hit.rank}`;
     return { hit, score, reason };
   });
-  scored.sort((a, b) => b.score - a.score || a.hit.rank - b.hit.rank || a.hit.chunkId.localeCompare(b.hit.chunkId));
+  scored.sort((a, b) => b.score - a.score || a.hit.rank - b.hit.rank || codePointCompare(a.hit.chunkId, b.hit.chunkId));
   return scored.slice(0, topK).map((entry, index) => ({
     ...entry.hit,
     rerank: { rank: index + 1, score: entry.score, reason: entry.reason },

@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { codePointCompare } from "@yushu/core";
 import { estimateTokens, truncateToTokens } from "./injection.js";
 
 /**
@@ -219,7 +220,7 @@ export function assembleContext(
       const ra = a.recency ?? 0;
       const rb = b.recency ?? 0;
       if (ra !== rb) return rb - ra;
-      return a.id.localeCompare(b.id);
+      return codePointCompare(a.id, b.id);
     });
     if (config.recent_n !== undefined && bucket.length > config.recent_n) {
       for (const extra of bucket.slice(config.recent_n)) {

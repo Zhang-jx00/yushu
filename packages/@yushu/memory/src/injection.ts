@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { codePointCompare } from "@yushu/core";
 import { MemoryError } from "./errors.js";
 import { trackMentions } from "./mentions.js";
 
@@ -273,7 +274,7 @@ export function planInjection(items: InjectableItem[], ctx: InjectionContext): I
     const pos = POSITION_ORDER.indexOf(a.position) - POSITION_ORDER.indexOf(b.position);
     if (pos !== 0) return pos;
     if (a.priority !== b.priority) return b.priority - a.priority;
-    return a.id.localeCompare(b.id);
+    return codePointCompare(a.id, b.id);
   });
   return {
     entries,

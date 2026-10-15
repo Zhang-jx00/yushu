@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { codePointCompare } from "@yushu/core";
 import { promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
 import { INDEX_DIR } from "@yushu/world-engine";
@@ -52,7 +53,7 @@ export async function readAiFeedbackState(rootDir: string, limit = 30): Promise<
   for (const entry of entries) counter.set(entry.reason, (counter.get(entry.reason) ?? 0) + 1);
   const counts = [...counter.entries()]
     .map(([reason, count]) => ({ reason, count }))
-    .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
+    .sort((a, b) => b.count - a.count || codePointCompare(a.reason, b.reason));
   return {
     path: AI_FEEDBACK_PATH,
     total: entries.length,
