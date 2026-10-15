@@ -406,7 +406,13 @@ export async function applyImport(
   };
 }
 
-/** 用户放弃这次导入：把票作废，别让票据在进程里悬到 TTL 结束 */
+/**
+ * 用户放弃这次导入：把票作废，别让票据在进程里悬到 TTL 结束。
+ *
+ * **尚未接线**（R99 死代码审计点名的那一条，登记在 `test/dead-exports.test.ts` 的名单里）：
+ * 界面还没有"取消导入"的入口，等 T5-7 的"可中断续跑"一起做。
+ * 留着而不删，是因为它表达的是闸门已有能力的正确用法（`gate.revoke`），删了反而会让那条路重新被发明一遍。
+ */
 export function cancelImport(ticket: string, gate: ImportGate = importGate): void {
   gate.revoke(ticket);
 }

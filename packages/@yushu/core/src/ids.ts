@@ -79,10 +79,6 @@ export function makeId(prefix: IdPrefix, seed?: string): string {
   return `${prefix}-${local}`;
 }
 
-export function isValidLocalId(local: string): boolean {
-  return LOCAL_RE.test(local);
-}
-
 /** 校验实体 ID（前缀-本地段） */
 export function isValidEntityId(id: string): boolean {
   const m = ENTITY_ID_RE.exec(id);

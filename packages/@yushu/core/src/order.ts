@@ -16,8 +16,3 @@
 export function codePointCompare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
-
-/** 按某个字符串键做确定性比较（`sort(byCodePointOf((x) => x.path))` 这种写法用） */
-export function codePointCompareBy<T>(key: (item: T) => string): (a: T, b: T) => number {
-  return (a, b) => codePointCompare(key(a), key(b));
-}
