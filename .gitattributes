@@ -1,0 +1,55 @@
+# 御书的换行口径（R100）：**文本一律 LF，仓库内与工作树都是**，二进制一律不处理。
+#
+# 为什么必须有这个文件：这台机器 `core.autocrlf=true`，而 git 的换行处理是**按 checkout 时的本地配置**决定的——
+# 没有本文件时，同一个 blob 在不同人手里 checkout 出 CRLF 或 LF，`git status` 一路报
+# "LF will be replaced by CRLF"，而 `git diff --numstat` 看不见行尾差异（差异只出现在按字节比对时）。
+# 本项目有"按字节复验产物与快照 hash"的判据，行尾漂移会让它们误报，所以把口径钉死在仓库里而不是各人机器上。
+#
+# 判据：`apps/desktop/test/eol-hygiene.test.ts`（现场跑 `git ls-files --eol`，
+# 要求 index 与工作树都没有 CRLF 或混杂行尾，并核对下面每条 binary 声明）。
+
+# 默认：让 git 自己判文本/二进制，文本一律 LF（含工作树）
+* text=auto eol=lf
+
+# 二进制：不做换行处理、不做 diff、不做合并（图片证据是仓库里最大的一类，别让 git 去猜）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.epub binary
+*.docx binary
+*.pdf binary
+*.jar binary
+*.db binary
+*.sqlite binary
+
+# 明确声明为文本的后缀（防启发式把"看起来像二进制"的真源判错；这些是御书项目的真源与派生文件类型）
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.cts   text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.toml  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+
+# 无后缀但确是文本的仓库文件
+NOTICE   text eol=lf
+LICENSE  text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.env.example text eol=lf
