@@ -2,7 +2,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { adoptDraft } from "../src/main/ai-ops.js";
 import { previewExport, runExport } from "../src/main/export-ops.js";
 import { scanPlatformPacks } from "../src/main/platform-ops.js";
@@ -39,6 +39,19 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+/**
+ * 临时平台包根的登记簿（R102 收口时查出来的漏）：`packRoot()` 每次调用都 mkdtemp 一个目录，
+ * 而原来没有任何一处删它——跑一段之后系统临时目录里堆起 180 个 `yushu-platforms-*`。
+ * 测试自己造的东西要自己清干净，否则"全绿"是拿磁盘垃圾换来的。
+ */
+const packRoots: string[] = [];
+
+afterAll(async () => {
+  for (const root of packRoots.splice(0)) {
+    await rm(root, { recursive: true, force: true }).catch(() => undefined);
+  }
+});
+
 /** 两卷各 2 章纲；只给**卷二第一章**建草稿并写正文（未建草稿的章也要占全书序号） */
 async function secondVolumeDraftProject(): Promise<ProjectGateway> {
   await createProject({ dir, title: "天启界", packIds: ["xuanhuan-xitong"], axes: AXES });
@@ -69,6 +82,7 @@ async function secondVolumeDraftProject(): Promise<ProjectGateway> {
 /** 临时平台包根目录：坏包与自定义包只能这么喂给测试（生产默认读仓库 packs/platforms/） */
 async function packRoot(yamlById: Record<string, string>): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "yushu-platforms-"));
+  packRoots.push(root);
   for (const [id, yaml] of Object.entries(yamlById)) {
     await mkdir(join(root, id), { recursive: true });
     await writeFile(join(root, id, "platform-export.yaml"), yaml, "utf8");
