@@ -23,3 +23,4 @@ export * from "./satisfaction.js";
 export * from "./rule-stats.js";
 export * from "./pov-config.js";
 export * from "./pov-check.js";
+export * from "./visibility-check.js";
