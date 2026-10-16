@@ -16,7 +16,7 @@
 | 项目 | 状态 |
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
-| 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；凭据可用，推送没出过权限问题）。**2026-10-15 那一小时 `github.com:443` 反复连不上**：R90 的 3 条卡了约 30 分钟后重试成功（`07b94af..08272e2`）；R91 的提交连试 4 次超时/重置后同样重试成功；R101 收口时 3 条提交仍卡在本地（`Failed to connect to github.com:443` / `Recv failure: Connection was reset`），当时 `git push ... | tail` 还报过 `PUSH=0` 而真实 `PUSH_EXIT=128`——**别信管道尾部的退出码**。**当前状态（2026-10-16 R102 收口时）：已恢复并全部推上去**——`git push origin main` 退出码 0、`0ce116a..12d6664`（含 R101 卡住的 4 条 + R102 前两条），`git ls-remote origin main` 逐字等于本地 HEAD `12d6664`。教训一句：网络类失败要在账上写清"当时"的状态，恢复了就立刻更正，别让过期状态留在交接文档里 |
+| 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；凭据可用，推送没出过权限问题）。**2026-10-15 那一小时 `github.com:443` 反复连不上**：R90 的 3 条卡了约 30 分钟后重试成功（`07b94af..08272e2`）；R91 的提交连试 4 次超时/重置后同样重试成功；R101 收口时 3 条提交仍卡在本地（`Failed to connect to github.com:443` / `Recv failure: Connection was reset`），当时 `git push ... | tail` 还报过 `PUSH=0` 而真实 `PUSH_EXIT=128`——**别信管道尾部的退出码**。**当前状态（2026-10-16 R102 收口时）：已恢复并全部推上去**——`git push origin main` 两次退出码 0（`0ce116a..12d6664` 含 R101 卡住的 4 条 + R102 前两条；`12d6664..6737947` 是落档条），`git ls-remote origin main` 逐字等于本地 HEAD `6737947`。教训一句：网络类失败要在账上写清"当时"的状态，恢复了就立刻更正，别让过期状态留在交接文档里 |
 | 单测 | **1446/1446 全绿**（136 个测试文件）——`pnpm test`（R102 新增视角引擎 16 + 桌面侧 17 + 规则 id 覆盖锁 3 + 四处对账 1 + 写通道分类 2；R101 为 1407/133） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物）。**R88 起这份"零错误"覆盖 `src` 与 `test` 两面**：每个有测试的包多一份 `tsconfig.test.json`（`noEmit`）并接进该包脚本；此前 11 份配置的 `include` 都只有 `src`，约 120 个测试文件从来没被类型检查（锁：`typecheck-coverage.test.ts` 23 例） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
