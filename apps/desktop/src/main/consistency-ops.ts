@@ -28,7 +28,8 @@ import { gatewayReader } from "./index-ops.js";
 import { evaluatePackRules } from "./rule-findings.js";
 import { foreshadowReportFindings } from "./foreshadow-ops.js";
 import { povReportFindings, POV_UNREADABLE_RULE } from "./pov-ops.js";
-import { FORESHADOW_RULE_IDS, POWER_GATE_RULE_IDS, POV_RULE_IDS } from "@yushu/world-engine";
+import { visibilityReportFindings, VIS_UNREADABLE_RULE } from "./visibility-ops.js";
+import { FORESHADOW_RULE_IDS, POWER_GATE_RULE_IDS, POV_RULE_IDS, VISIBILITY_RULE_IDS } from "@yushu/world-engine";
 import { runAiAudit, type AiAuditResult } from "./ai-audit.js";
 import { projectPackIds } from "./rule-ops.js";
 import type { ProjectGateway } from "./file-gateway.js";
@@ -163,12 +164,15 @@ async function computeReport(
   // 视角结论并入同一张表（R102）：判定在 `pov-check.ts`，这里同样只投影。
   // 并入的理由不是"凑数"：豁免清单与豁免率只认这张表，不进表的角度结论就豁不掉（详见 pov-ops 注释）。
   const povFindings = await povReportFindings(gateway);
+  // 信息可见性结论并入同一张表（R103）：判定在 `visibility-check.ts`，这里同样只投影
+  const visibilityFindings = await visibilityReportFindings(gateway);
   const allFindings = [
     ...structure.findings,
     ...packFindings,
     ...aiFindings,
     ...foreshadowFindings,
     ...povFindings,
+    ...visibilityFindings,
   ];
   // 豁免清单只认**本次真的参与求值的那些 id**（内置三条 + 包里的规则 id）：
   // 仍然不许豁免一条不存在的规则，但包规则接入后不能再被这句挡在门外
@@ -190,6 +194,10 @@ async function computeReport(
     ...POV_RULE_IDS,
     // 策略文件读不了是**桌面侧**的结论（引擎只吃解析好的对象），与 fs-ledger-unreadable 同一类
     POV_UNREADABLE_RULE,
+    // 可见性结论（R103）同口径；覆盖锁在 apps/desktop/test/visibility-rule-ids.test.ts
+    ...VISIBILITY_RULE_IDS,
+    // 坏卡读不动也是桌面侧的结论（引擎只吃解析好的行）
+    VIS_UNREADABLE_RULE,
   ];
 
   let allow: ConsistencyAllowList | null = null;
@@ -246,9 +254,9 @@ async function computeReport(
   let filteredOut = 0;
   // 轻校验只在**给了范围**时过滤；范围空着不过滤——没范围就报全部比"悄悄清零"诚实
   if (timing === "post-generate" && scope.scoped) {
-    const kept = entries.filter((entry) => new Set(scope.ids).has(entry.subject));
-    filteredOut = entries.length - kept.length;
-    entries = kept;
+    const inside = new Set(scope.ids);
+    filteredOut = entries.filter((entry) => !inside.has(entry.subject)).length;
+    entries = entries.filter((entry) => inside.has(entry.subject));
   }
 
   return {
@@ -281,7 +289,9 @@ async function computeReport(
       rejected: aiAudit.rejected,
     },
     counted: {
-      findings: structure.findings.length,
+      // 全源口径（R103 纠正）：此前只数结构类，于是 entries/suppressed 是全源、findings 是单源，
+      // "entries + suppressed === findings" 这条不变量在多源并入后必然假失败（e2e 撞出来的）
+      findings: allFindings.length,
       entries: entries.length,
       suppressed: report.suppressed.length,
       filteredOut,

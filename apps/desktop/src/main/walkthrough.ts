@@ -4075,6 +4075,133 @@ const STEPS: StepDef[] = [
           '」前 ' + rowsAfterSave + ' 条 → 后 ' + (bindOk ? dropped : '?') + ' 条=' + bindOk + '；回执点名=' + receiptOk,
       };
     `,
+  },  {
+    step: 64,
+    title: '信息可见性：档案页登记来源章节 → 全书体检当场多出该条结论，清掉登记后又当场消失（M4/T4-2 第四批，R103）',
+    file: 'step64-visibility-check.png',
+    body: String.raw`
+      // 这一步要证的是"写入点 → 判定 → 同表"整条链，而且**两个方向都要动**：
+      // ① 挑一张可见性 hidden、且当前没登记任何来源章节的卡（从盘上真源判，不猜夹具形状）；
+      // ② 在「世界观档案」把某章 id 填进「来源章节」并保存 ⇒ 盘上必须真有这一行；
+      // ③ 点「全书体检」⇒ 表里必须新增 vis-hidden-but-sourced 且主体是这张卡、出处写着"信息可见性核对"
+      //    （并进总表才谈得上豁免与豁免率）；
+      // ④ **把那行登记清掉再体检一次 ⇒ 该条必须消失**。方向 ④ 是这一步真正的牙：
+      //    读到旧表也会"有该行"，只有真的按当下数据重判才会"消失"——单靠 ③ 分不清新表与旧表。
+      // 收尾再登记一次并把那一行滚进视口：截图要拍在被断言的那一段（R58 的截图纪律），
+      // 这条登记是合法的作者动作，本步是末步，保留它不回滚。
+      await tab('世界观档案');
+      const archive = await waitFor(() => document.querySelector('.archive'), 20000);
+      if (archive === null) return { ok: false, note: '没有档案页：' + pageText().slice(0, 140) };
+      const cards = await window.yushu.card.list();
+      let target = null;
+      for (const item of cards || []) {
+        if (!item.id || item.visibility !== 'hidden' || item.error) continue;
+        const raw = await window.yushu.doc.read(item.path).catch(() => null);
+        if (raw === null) continue;
+        const line = /^source_chapters:\s*(.*)$/m.exec(String(raw.content));
+        const filled = line !== null && line[1].trim() !== '' && line[1].trim() !== '[]';
+        if (!filled) { target = item; break; }
+      }
+      if (target === null) return { ok: false, note: '找不到"hidden 且未登记来源章节"的卡，本步无从验证' };
+      const library = await window.yushu.library.list();
+      const drafted = (library.chapters || []).find((c) => c.chapterPath);
+      if (!drafted) return { ok: false, note: '项目里没有已建草稿的章，没有章 id 可登记' };
+      const matched = /\/(ch-[^/]+)\.md$/.exec(drafted.chapterPath);
+      if (matched === null) return { ok: false, note: '章节路径抠不出章 id：' + drafted.chapterPath };
+      const chapterId = matched[1];
+      const row = [...archive.querySelectorAll('li')].find((li) => String(li.textContent).indexOf(target.id) >= 0);
+      if (!row) return { ok: false, note: '列表里找不到那张卡：' + target.id };
+      row.click();
+      // 载入是异步的（card:read → setDoc）：在旧 doc 上改值会被随后到达的载入结果整片盖掉，
+      // 更糟的是"保存"会写给**上一张还开着的卡**（v217/v218 实测：界面回"已保存"、目标卡盘上却没有那一行）。
+      // 所以先等编辑区的面板标题真的换成这张卡的路径（.panel-title 在侧栏也有一个，必须限定在 .editor 里）。
+      const loadedInto = async (pathText) => await waitFor(() => {
+        const t = document.querySelector('.editor .panel-title .muted');
+        return t && String(t.textContent).indexOf(pathText) >= 0 ? true : null;
+      }, 20000);
+      if ((await loadedInto(target.path)) === null) return { ok: false, note: '档案页没有载入这张卡：' + target.path };
+      const box = await waitFor(() => document.querySelector('.card-source-chapters'), 20000);
+      if (box === null) return { ok: false, note: '档案页没有「来源章节」输入框（写入点没接上）' };
+      if (String(box.value).trim() !== '') return { ok: false, note: '挑中的卡已经登记了来源章节：' + box.value };
+      await sleep(200);
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(box), 'value').set;
+      const saveCard = async (el) => {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        // React 的 onChange → setState 是异步的：同一拍里点保存会拿到**旧 state**（v217 实测：
+        // 界面回执"已保存"、盘上却没有那一行）。先等一帧让状态落定，再点保存。
+        await sleep(160);
+        const btn = [...document.querySelectorAll('.editor-foot button')].find((b) => String(b.textContent).indexOf('保存') >= 0);
+        if (!btn) return false;
+        btn.click();
+        return await waitFor(() => {
+          const out = document.querySelector('.editor-foot .muted');
+          return out && String(out.textContent).indexOf('已保存') >= 0 ? true : null;
+        }, 20000) !== null;
+      };
+      setter.call(box, chapterId);
+      const savedOn = await saveCard(box);
+      const disk = await window.yushu.doc.read(target.path);
+      const diskOk = disk !== null && String(disk.content).indexOf(chapterId) >= 0;
+      await tab('规则');
+      const keyOf = (tr) => String((tr.querySelectorAll('td')[1] || {}).textContent || '').trim() + ':' +
+        String((tr.querySelectorAll('td')[2] || {}).textContent || '').trim().split(' ')[0];
+      const expect = 'vis-hidden-but-sourced:' + target.id;
+      const tableHas = () => [...document.querySelectorAll('.consistency-table tbody tr')].some((tr) => keyOf(tr) === expect);
+      const manualBtn = document.querySelector('.consistency-manual');
+      if (!manualBtn) return { ok: false, note: '没有全书体检按钮' };
+      manualBtn.click();
+      const appeared = await waitFor(() => (tableHas() ? true : null), 40000);
+      const originRow = [...document.querySelectorAll('.consistency-table tbody tr')].find((tr) => keyOf(tr) === expect);
+      const originText = originRow ? String([...originRow.querySelectorAll('td')][5]?.textContent || '').trim() : '';
+      const originOk = originText.indexOf('信息可见性核对') >= 0;
+      if (originRow) originRow.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      // 反向：清掉登记 → 恢复原状，并验那条结论跟着消失（旧表分不清，只有重判才会消失）
+      await tab('世界观档案');
+      // 换标签页会卸载档案页组件，卡得重新点开——否则输入框根本不在 DOM 里
+      const archive2 = await waitFor(() => document.querySelector('.archive'), 20000);
+      if (archive2 === null) return { ok: false, note: '回到档案页失败' };
+      const row2 = [...archive2.querySelectorAll('li')].find((li) => String(li.textContent).indexOf(target.id) >= 0);
+      if (!row2) return { ok: false, note: '回来后列表里找不到那张卡：' + target.id };
+      row2.click();
+      if ((await loadedInto(target.path)) === null) return { ok: false, note: '回来后没载入这张卡' };
+      const box2 = await waitFor(() => document.querySelector('.card-source-chapters'), 20000);
+      if (box2 === null) return { ok: false, note: '回来后没有来源章节输入框' };
+      await sleep(200);
+      setter.call(box2, '');
+      const cleared = await saveCard(box2);
+      await tab('规则');
+      document.querySelector('.consistency-manual').click();
+      const gone = await waitFor(() => (tableHas() ? null : true), 40000);
+      const diskBack = await window.yushu.doc.read(target.path);
+      const restored = diskBack !== null && String(diskBack.content).indexOf(chapterId) < 0;
+      // 收尾再登记一次并把那一行滚进视口（R58 的截图纪律：证据要拍在被断言的那一段，
+      // 只拍到页首的"表里没有"不算证据）。这条登记是合法的作者动作，末步保留它、不再回滚。
+      await tab('世界观档案');
+      const archive3 = await waitFor(() => document.querySelector('.archive'), 20000);
+      const row3 = archive3 === null ? null : [...archive3.querySelectorAll('li')].find((li) => String(li.textContent).indexOf(target.id) >= 0);
+      if (!row3) return { ok: false, note: '第三次回不到那张卡' };
+      row3.click();
+      if ((await loadedInto(target.path)) === null) return { ok: false, note: '第三次没载入这张卡' };
+      const box3 = await waitFor(() => document.querySelector('.card-source-chapters'), 20000);
+      if (box3 === null) return { ok: false, note: '第三次没有输入框' };
+      await sleep(200);
+      setter.call(box3, chapterId);
+      const reRegistered = await saveCard(box3);
+      await tab('规则');
+      document.querySelector('.consistency-manual').click();
+      const finalRow = await waitFor(() => [...document.querySelectorAll('.consistency-table tbody tr')]
+        .find((tr) => keyOf(tr) === expect) || null, 40000);
+      if (finalRow) finalRow.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: savedOn && diskOk && appeared !== null && originOk && cleared && gone !== null && restored && reRegistered && !!finalRow,
+        note: '登记 ' + chapterId + ' → ' + target.id + '：保存=' + savedOn + '；盘上生效=' + diskOk +
+          '；体检表新增该条=' + (appeared !== null) + '；出处=' + (originOk ? originText : '(未找到该行)') +
+          '；清空=' + cleared + '；再体检后该条消失=' + (gone !== null) + '；盘上恢复原状=' + restored +
+          '；第三次重新登记并回到该行=' + (reRegistered && !!finalRow),
+      };
+    `,
   },
 ];
 

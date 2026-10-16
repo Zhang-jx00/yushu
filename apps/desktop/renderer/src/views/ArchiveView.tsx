@@ -280,6 +280,21 @@ export function ArchiveView({
                 />
               </label>
               <label className="field">
+                <span>来源章节（逗号分隔的章 id，供冰山台账与可见性核对）</span>
+                <input
+                  className="card-source-chapters"
+                  value={doc.card.source_chapters?.join(", ") ?? ""}
+                  onChange={(event) =>
+                    patch({
+                      source_chapters: event.target.value
+                        .split(/[,，]/)
+                        .map((item) => item.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
                 <span>可见性（冰山原则）</span>
                 <select
                   value={doc.card.visibility ?? "hidden"}

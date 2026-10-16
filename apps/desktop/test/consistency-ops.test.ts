@@ -85,8 +85,10 @@ describe("手动全书体检（manual）", () => {
   it("给出悬空引用条目：span 指向卡文件、切片含被引用的目标，fix 给可执行方向", async () => {
     const report = await runConsistencyCheck(gateway, { timing: "manual" });
     expect(report.timing).toBe("manual");
-    expect(report.entries).toHaveLength(1);
-    const entry = report.entries[0]!;
+    // R103 起，这张表里还会有一条全局的可见性 info（"没人登记出处 ⇒ 本轮没核对过"），
+    // 所以结构类那条按规则取；总数口径写在下面 counted.entries 那一行。
+    expect(report.entries.filter((item) => item.rule === "ref-dangling")).toHaveLength(1);
+    const entry = report.entries.find((item) => item.rule === "ref-dangling")!;
     expect(entry.rule).toBe("ref-dangling");
     expect(entry.severity).toBe("error");
     expect(entry.span).not.toBeNull();
@@ -96,7 +98,11 @@ describe("手动全书体检（manual）", () => {
     const card = await gateway.readDoc(CARD_PATH);
     expect(card.content.slice(entry.span!.start, entry.span!.end)).toContain("relation: 师从");
     expect(entry.fix).toContain("config/consistency.yaml");
-    expect(report.counted.entries).toBe(1);
+    expect(report.counted.entries).toBe(2);
+    // 那条多出来的必须是可见性核对的"没核对过"，不是别的规则混进来
+    expect(report.entries.filter((item) => item.rule !== "ref-dangling").map((item) => item.rule)).toEqual([
+      "vis-no-source-registered",
+    ]);
   });
 
   it("未纳入范围的章节类引用如实列出（不把「没判」藏起来）", async () => {
@@ -137,7 +143,9 @@ describe("豁免与 fail-safe", () => {
       ].join("\n"),
     );
     const report = await runConsistencyCheck(gateway, { timing: "manual" });
-    expect(report.entries).toEqual([]);
+    // 豁免只豁免掉那条 ref-dangling；全局的可见性 info 不在豁免范围内、必须还在——
+    // "点一下豁免就把整张表清成空"是最难被发现的假干净
+    expect(report.entries.map((item) => item.rule)).toEqual(["vis-no-source-registered"]);
     expect(report.suppressed).toHaveLength(1);
     expect(report.suppressed[0]!.reason).toContain("第二部");
     expect(report.suppressed[0]!.decidedAt).toBe("2026-10-09T10:00:00.000Z");
@@ -148,7 +156,7 @@ describe("豁免与 fail-safe", () => {
     await writeAllow("apiVersion: yushu.consistency-allow/v1\nentries:\n  - rule: ref-dangling\n    subject: char-linyuan\n");
     const report = await runConsistencyCheck(gateway, { timing: "manual" });
     expect(report.allowError).toContain("reason");
-    expect(report.entries).toHaveLength(1);
+    expect(report.entries.filter((item) => item.rule === "ref-dangling")).toHaveLength(1);
     expect(report.suppressed).toEqual([]);
   });
 });
@@ -156,11 +164,13 @@ describe("豁免与 fail-safe", () => {
 describe("三态时机的范围与缓存", () => {
   it("生成后即时轻校验只看本次涉及的实体，范围外条数如实计数", async () => {
     const all = await runConsistencyCheck(gateway, { timing: "manual" });
-    expect(all.entries).toHaveLength(1);
+    expect(all.entries.filter((item) => item.rule === "ref-dangling")).toHaveLength(1);
     const light = await runConsistencyCheck(gateway, { timing: "post-generate", entityIds: ["char-haize"] });
     expect(light.entries).toEqual([]);
-    expect(light.counted.findings).toBe(1);
-    expect(light.counted.filteredOut).toBe(1);
+    // 全源口径（R103）：结构 1 条 + 那条全局的可见性 info = 2
+    expect(light.counted.findings).toBe(2);
+    // 范围外计数含那条全局的可见性 info（它不属于任何实体，带范围时同样被滤掉并计数，不静默少掉）
+    expect(light.counted.filteredOut).toBe(2);
   });
 
   it("保存后异步：置脏后必须重算，未置脏时可复用缓存", async () => {
@@ -174,7 +184,7 @@ describe("三态时机的范围与缓存", () => {
     expect(isConsistencyStale()).toBe(true);
     const recomputed = await runConsistencyCheck(gateway, { timing: "post-save" });
     expect(recomputed.ranAgain).toBe(true);
-    expect(recomputed.entries).toHaveLength(1);
+    expect(recomputed.entries.filter((item) => item.rule === "ref-dangling")).toHaveLength(1);
   });
 
   it("手动体检永远重算（作者点按钮就是要看当下的真结果）", async () => {
@@ -198,14 +208,15 @@ describe("采纳后即时轻校验（post-generate 的调用点）", () => {
     const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: "林渊收剑入鞘。" });
     expect(report.scopeIds).toEqual(["char-linyuan"]);
     expect(report.entries.map((e) => e.subject)).toEqual(["char-linyuan"]);
-    expect(report.counted.filteredOut).toBe(0);
+    // 那条全局的可见性 info 也被范围滤掉（它不属于 char-linyuan），计数必须看得见
+    expect(report.counted.filteredOut).toBe(1);
   });
 
   it("正文只提到干净的实体时零结论，但范围外那条要看得见", async () => {
     const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: "海泽在门口等着。" });
     expect(report.scopeIds).toEqual(["char-haize"]);
     expect(report.entries).toEqual([]);
-    expect(report.counted.filteredOut).toBe(1);
+    expect(report.counted.filteredOut).toBe(2);
   });
 
   it("正文谁都没提到：范围为空、零结论，且不把全书结论倒给作者", async () => {

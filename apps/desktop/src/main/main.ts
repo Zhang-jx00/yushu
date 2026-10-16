@@ -1311,6 +1311,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       auditScopeIds: "(未跑)",
       auditHitRule: "(未跑)",
       auditFilteredOut: -1,
+      auditEntryRules: "(未跑)",
       auditMs: -1,
       packRuleFound: false,
       packRuleOrigin: "(无)",
@@ -1389,6 +1390,10 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       });
       const consRestored = await api.card.read(consCardPath);
       const consClean = await api.consistency.check({ timing: "manual" });
+      // R103 起表里会有与本次探针无关的行（可见性、别人的卡…）。这条探针要证的是
+      // "**我弄脏的那张卡**复原之后不再有任何结论指向它"，所以按主体过滤，不按整张表的总数——
+      // 总数口径会随其它规则的结论漂移，那不是这里要测的东西。
+      const restoreScoped = consClean.entries.filter((entry) => entry.subject === consRestored.card.id);
       // 派系包规则拿项目数据求值（R57）：刻意放在复原检查之后——为了让包规则出结论
       // 而改动既有断言（entriesAfterRestore === 0）是不能做的事
       await api.card.write({
@@ -1449,7 +1454,8 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         spanTop: aiEntry && aiEntry.span ? aiEntry.span.file.split("/")[0] : "(无 span)",
         origin: aiEntry && aiEntry.origin ? aiEntry.origin.slice(0, 40) : "(无出处)",
         // 合并而不是替换：AI 那一轮的非 AI 结论数必须等于上一轮（结构 + 包规则）全量。
-        // 注意不能拿 counted.findings 比——它就是结构条数，两次恒等，等于写了条永真的断言。
+        // 注意不能拿 counted.findings 比——R103 起它是**全源**条数（结构 + 包 + AI + 伏笔 + 视角 + 可见性），
+        // 两次跑都含同一份非 AI 结论，恒等值没有信息量；这里要的是"AI 那一轮没把非 AI 结论挤掉"。
         nonAiEntries: aiRun.entries.filter((entry) => !entry.rule.startsWith("ai-sampled-")).length,
         prevEntries: packCheck.entries.length,
       };
@@ -1473,6 +1479,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
           ? auditAdopt.audit.entries[0].rule
           : "(条数 " + auditAdopt.audit.entries.length + ")",
         auditFilteredOut: auditAdopt.audit.filteredOut,
+        auditEntryRules: [...new Set(auditAdopt.audit.entries.map((entry) => entry.rule))].join(",") || "(空)",
         // 轻校验是同步跑在采纳回执里的：把真实耗时打出来，规模一大就是要在这里先看见
         auditMs: Date.now() - auditT0,
         packRuleFound: packEntry !== undefined,
@@ -1496,7 +1503,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
           consRestored.card.name === consOriginal.card.name &&
           JSON.stringify(consRestored.card.refs ?? []) === JSON.stringify(consOriginal.card.refs ?? []) &&
           consRestored.body === consOriginal.body,
-        entriesAfterRestore: consClean.counted.entries,
+        entriesAfterRestore: restoreScoped.length,
         error: "",
       };
     } catch (err) {
@@ -2216,6 +2223,7 @@ async function runE2E(win: BrowserWindow): Promise<void> {
         auditScopeIds: string;
         auditHitRule: string;
         auditFilteredOut: number;
+        auditEntryRules: string;
         auditMs: number;
         packRuleFound: boolean;
         packRuleOrigin: string;
@@ -3318,7 +3326,11 @@ async function runE2E(win: BrowserWindow): Promise<void> {
       [`result.consistency.auditScopeIds === result.consistency.auditTargetId`,
         result.consistency.auditScopeIds === result.consistency.auditTargetId],
       [`result.consistency.auditHitRule === "ref-dangling"`, result.consistency.auditHitRule === "ref-dangling"],
-      [`result.consistency.auditFilteredOut === 0`, result.consistency.auditFilteredOut === 0],
+      // 轻校验报出来的**只能是被提到的那条实体结论**（R103 起表里多了一条全局的可见性 info，
+      // 它不属于任何实体、被范围滤掉；原先的 filteredOut === 0 因此不再成立——
+      // 这里改成点名"轻校验到底报了谁"，比数条数更准；计数口径钉在 consistency-ops.test.ts）
+      [`result.consistency.auditEntryRules === "ref-dangling"`,
+        result.consistency.auditEntryRules === "ref-dangling"],
       [`result.consistency.diskUnchanged`, result.consistency.diskUnchanged],
       [`result.consistency.entries >= 1`, result.consistency.entries >= 1],
       [`result.consistency.spans >= 1`, result.consistency.spans >= 1],

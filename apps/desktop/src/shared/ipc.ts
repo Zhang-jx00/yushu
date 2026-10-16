@@ -1076,6 +1076,12 @@ export interface ConsistencyReportPayload {
       dateCheck: "applied" | "skipped";
     };
   };
+  /**
+   * `findings` = 本轮**送进报告的全部结论**（结构 + 包规则 + AI 采样 + 伏笔 + 视角 + 可见性，R103 起）。
+   * 它此前只数结构类那一份，而 `entries` / `suppressed` 是全源口径——
+   * 三个字段并排却不同口径，`entries + suppressed === findings` 这条不变量在多源之后必然不成立
+   * （e2e 的 `invariantHolds` 就是这条，R103 把它撞红之后才对正）。
+   */
   counted: { findings: number; entries: number; suppressed: number; filteredOut: number };
   /**
    * 阈值配置的实际状态（R84 / T4-11「误报率纳入可校准阈值」）。
@@ -1624,6 +1630,12 @@ export interface PovSetChapterResult {
   path: string;
   hash: string;
   pov: string;
+}
+
+/** 读不动的设定卡（可见性核对用：坏卡不许消失在"零结论"里） */
+export interface VisibilityUnreadablePayload {
+  path: string;
+  error: string;
 }
 
 export interface ClipboardPayload {
