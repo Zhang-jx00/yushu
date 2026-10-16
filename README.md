@@ -48,7 +48,7 @@ RAG 混合检索、上下文组装与可复现快照、设定抽取候选化、T
 密钥 `safeStorage` 加密（明文落盘直接阻断）、「关闭 AI」的主进程侧闸门、中文自查、
 一致性体检三态与报告（`span` / `evidence` / `fix` 三件套 + 豁免清单）、派系包规则求值、
 全书体检 AI 采样核验、影响传播提案与逐项决策后写回真源、世界观档案里的伏笔台账 / 时间线 /
-关系图谱 / 编年史四张只读面板（判定全在引擎，删掉索引库也照样出图）、TXT / EPUB / DOCX 导出与敏感词自查、设定集（世界圣经）一键汇编导出（层级目录 + 可见性脱敏）、
+关系图谱 / 编年史四张只读面板（判定全在引擎，删掉索引库也照样出图）、TXT / EPUB / DOCX 导出与敏感词自查、设定集（世界圣经）一键汇编导出（层级目录 + 可见性脱敏）、项目迁移包导出（`.yushu/` 与密文库不进包、明文密钥写出前剥离、落盘后复扫），
 中文全文检索（FTS5，utilityProcess 增量重建）、内容寻址快照与 Git 整体回滚、
 崩溃恢复（真实强杀不丢稿实测）、码字统计与写作会话。
 
@@ -66,10 +66,10 @@ pnpm --filter @yushu/desktop dev      # Electron + Vite 热更新
 ## 怎么验（四连门禁，缺一项不算完成）
 
 ```bash
-pnpm test                # 单元/集成测试：1393 例 / 132 文件
+pnpm test                # 单元/集成测试：1407 例 / 133 文件
 pnpm typecheck           # 9 个包 + 2 个应用零错误（内含全量构建）
 pnpm --filter @yushu/desktop e2e     # 离线 mock LLM 的端到端全链路，逐条具名断言
-pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 61 步 UI 预演 + 逐步截图取证
+pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 62 步 UI 预演 + 逐步截图取证
 # 前端改动的判据：docs/10-前端设计契约.md（令牌 / 中文排版 / 动效 / 键盘可达），由 ui-contract.test.ts 钉住
 ```
 
@@ -107,6 +107,7 @@ EPUB / DOCX 已能真出（T5-4 进行中：PDF 要本机装 LaTeX / typst / wea
 3. **密钥永不以明文落盘**：真源只记 `api_key_env` / `key_ref`，密文进 `.yushu/secrets.json`，该目录不入 Git、不入索引、不进快照。
 4. **派生层不能变成第二真源**：一致性结论、影响传播提案都落派生区，不写 `reports/`。
 5. **确定性优先**：排序走码点序（不用 `localeCompare`），同输入必得同输出。
+6. **交付物不带密钥**：项目迁移包里既没有密文库（`.yushu/`），也不允许留下任何疑似明文密钥——写出前剥离、落盘后再复扫一遍。
 
 贡献前请读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全相关的实际实现与已知边界见 [SECURITY.md](SECURITY.md)。
 
