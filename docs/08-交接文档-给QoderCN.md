@@ -16,7 +16,7 @@
 | 项目 | 状态 |
 |---|---|
 | 工作目录 | `d:\Zcode对话\workspace\novel` |
-| 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；凭据可用，推送没出过权限问题）。**2026-10-15 这一小时里 `github.com:443` 反复连不上**：R90 的 3 条卡了约 30 分钟后重试成功（`07b94af..08272e2`）；R91 的提交也连试 4 次超时/重置，随后同样重试成功。**当前状态：远端 `main` 等于本地 HEAD（收口时以 `git ls-remote origin main` 复核，不靠"我记得推了"）**。教训一句：网络类失败要在账上写清"当时"的状态，恢复了就立刻更正，别让过期状态留在交接文档里 |
+| 远端 | `https://github.com/Zhang-jx00/yushu.git`（公开仓库；凭据可用，推送没出过权限问题）。**2026-10-15 这一小时里 `github.com:443` 反复连不上**：R90 的 3 条卡了约 30 分钟后重试成功（`07b94af..08272e2`）；R91 的提交也连试 4 次超时/重置，随后同样重试成功。**当前状态（2026-10-15 R101 收口时）：R101 的 3 条提交仍在本地，`git push` 连续三次失败**（`Failed to connect to github.com:443` / `Recv failure: Connection was reset`，与 R90/R91 那次同源）。网络恢复后要立刻补推并以 `git ls-remote origin main` 复核等于本地 HEAD——**别信"我记得推了"，也别信管道尾部的退出码**：本轮 `git push ... | tail` 就报过 `PUSH=0` 而真实 `PUSH_EXIT=128`。教训一句：网络类失败要在账上写清"当时"的状态，恢复了就立刻更正，别让过期状态留在交接文档里 |
 | 单测 | **1407/1407 全绿**（133 个测试文件）——`pnpm test`（R101 新增迁移包桌面侧 13 例 + 四处对账 1 例；R100 为 1393/132） |
 | 类型检查 | **11 个包/应用零错误**——`pnpm typecheck`（注意：内含 `pnpm -r run build`，即构建全部产物）。**R88 起这份"零错误"覆盖 `src` 与 `test` 两面**：每个有测试的包多一份 `tsconfig.test.json`（`noEmit`）并接进该包脚本；此前 11 份配置的 `include` 都只有 `src`，约 120 个测试文件从来没被类型检查（锁：`typecheck-coverage.test.ts` 23 例） |
 | e2e | 全链路通过（离线 mock LLM，无需外网/Key）——`pnpm --filter @yushu/desktop e2e`；R43 起含「密钥安全」探针、R45 起含「中文自查」探针（`diskUnchanged:true` 即「两个只读通道不写盘」的实测） |
