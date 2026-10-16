@@ -66,7 +66,7 @@ interface StepDef {
    * 桩只包住原生对话框，产品链路（IPC → 闸门 → 引擎 → 面板）全程真实执行，
    * 且**每次 attempt 重新起一份**——重试不会接着上一次的调用次数往下走。
    */
-  fixture?: "import-dialog";
+  fixture?: "import-dialog" | "export-dir";
 }
 
 const SCREENSHOT_REL_DIR = "docs/assets/m1-preview";
@@ -391,6 +391,57 @@ async function openImportDialogFixture(win: BrowserWindow): Promise<{ dir: strin
     restore: async () => {
       dialog.showOpenDialog = original;
       await win.webContents.executeJavaScript("delete window.__yushuPick;").catch(() => undefined);
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    },
+  };
+}
+
+/**
+ * 迁移包导出的目标目录夹具（R101 / step62）：把"操作系统那一层"换成一个临时目录，
+ * 其余全走真通道（对话框 → 票据 → 预览 → 落盘 → 复扫）。跑完由 `check()` 去**盘上**核对，
+ * 不信任界面上的数字：清单与回执必须互相对得上，且包里不许出现 `.yushu`。
+ */
+async function openExportDirFixture(): Promise<{
+  dir: string;
+  restore(): Promise<void>;
+  check(): Promise<{ ok: boolean; detail: string }>;
+}> {
+  const dir = await fs.mkdtemp(join(tmpdir(), "yushu-export-target-"));
+  const original = dialog.showOpenDialog;
+  dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [dir] })) as typeof dialog.showOpenDialog;
+  return {
+    dir,
+    check: async () => {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      const bundles = entries.filter((entry) => entry.isDirectory() && entry.name.includes("迁移包")).map((entry) => entry.name);
+      if (bundles.length !== 1) {
+        return { ok: false, detail: `目标目录里的迁移包子目录数=${String(bundles.length)}（应为 1）` };
+      }
+      const root = join(dir, bundles[0]!);
+      const walk = async (rel: string): Promise<string[]> => {
+        const out: string[] = [];
+        for (const entry of await fs.readdir(join(root, rel), { withFileTypes: true })) {
+          const child = rel === "" ? entry.name : `${rel}/${entry.name}`;
+          if (entry.isDirectory()) out.push(...(await walk(child)));
+          else out.push(child);
+        }
+        return out;
+      };
+      const files = await walk("");
+      const manifest = files.find((name) => name === "MANIFEST.yaml");
+      const leaked = files.filter((name) => name.startsWith(".yushu/") || name.includes("secrets.json"));
+      const manifestText = manifest === undefined ? "" : await fs.readFile(join(root, "MANIFEST.yaml"), "utf8");
+      const declared = /^files: (\d+)$/m.exec(manifestText);
+      const ok = manifest !== undefined && leaked.length === 0 && declared !== null && Number(declared[1]) + 1 === files.length;
+      return {
+        ok,
+        detail:
+          `盘上=${String(files.length)} 个文件（清单声明 ${declared === null ? "?" : declared[1]} 个真源 + 清单自身）；` +
+          `MANIFEST=${manifest === undefined ? "缺" : "有"}；密文库/派生出现在包里=${String(leaked.length)} 条`,
+      };
+    },
+    restore: async () => {
+      dialog.showOpenDialog = original;
       await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
     },
   };
@@ -3886,6 +3937,72 @@ const STEPS: StepDef[] = [
           '；脱敏名出现在产物=' + stillIn.length + '；回执=' + receipt.slice(0, 130),
       };
     `,
+  },  {
+    step: 62,
+    title: '迁移包导出：交给别人的那份没有密钥、也没有派生物；界面数字与盘上文件对账（M3/T3-14 后半，R101）',
+    file: 'step62-project-bundle.png',
+    fixture: 'export-dir',
+    body: String.raw`
+      // T3-14 后半的验收点是"导出的那份干净"。这一步只管屏幕上四件事，
+      // 盘上的账由夹具的 check() 独立核（清单声明的真源数 + 清单自身 == 实到文件数，且包里不许出现 .yushu / secrets.json）：
+      // ① 没选导出位置之前，确认框必须**不可勾**（防手滑，也防"勾完了才发现没地方写"）；
+      // ② 点了选目录（对话框被换成临时目录）⇒ 按钮变成"已选：xxx"，确认框随之可勾——这两条都必须是这一步点出来的**变化**；
+      // ③ 回执里的文件数 == 预览报的真源数 + 1（+1 是 MANIFEST 自己），两个口径必须能互相算平；
+      // ④ 回执里"复扫命中 N 条"必须为 0——不是"没写这行"，是写了且为 0。
+      await tab('规则');
+      await tab('导出与自查');
+      const panel = await waitFor(() => document.querySelector('.project-export-panel'), 20000);
+      if (panel === null) return { ok: false, note: '没有迁移包面板：' + pageText().slice(0, 160) };
+      const summary = await waitFor(() => panel.querySelector('.export-summary'), 30000);
+      if (summary === null) return { ok: false, note: '清点没回来（没有摘要行）' };
+      const summaryText = String(summary.textContent).replace(/\s+/g, ' ');
+      const declared = /(\d+) 个真源文件/.exec(summaryText);
+      if (declared === null) return { ok: false, note: '抠不出真源文件数：' + summaryText.slice(0, 140) };
+      const early = panel.querySelector('.confirm-check input[type=checkbox]');
+      const blockedBefore = early !== null && early.disabled === true;
+      const pick = [...panel.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('选择导出位置') >= 0);
+      if (pick === undefined) return { ok: false, note: '没有"选择导出位置"按钮（可能上一轮残留了选中态）' };
+      pick.click();
+      const pickedLabel = await waitFor(() => {
+        const b = [...panel.querySelectorAll('button')].find((x) => String(x.textContent).indexOf('已选：') >= 0);
+        return b === undefined ? null : String(b.textContent).replace(/\s+/g, ' ');
+      }, 20000);
+      if (pickedLabel === null) return { ok: false, note: '点了选目录但按钮没变成「已选」（对话框桩或票据通道没通）' };
+      const chk = await waitFor(() => {
+        const c = panel.querySelector('.confirm-check input[type=checkbox]');
+        return c !== null && c.disabled === false ? c : null;
+      }, 20000);
+      if (chk === null) {
+        return { ok: false, note: '选了目录但确认框仍不可勾：' + String(pickedLabel) };
+      }
+      if (!chk.checked) chk.click();
+      await sleep(160);
+      const go = [...panel.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('导出迁移包') >= 0);
+      if (go === undefined || go.disabled) return { ok: false, note: '导出迁移包按钮不可点' };
+      go.click();
+      const receipt = await waitFor(() => {
+        const r = panel.querySelector('.project-export-receipt');
+        return r === null ? null : String(r.textContent).replace(/\s+/g, ' ');
+      }, 60000);
+      if (receipt === null) {
+        const err = document.querySelector('.error-bar');
+        return { ok: false, note: '没有回执' + (err === null ? '' : '：' + String(err.textContent).slice(0, 160)) };
+      }
+      const written = /（(\d+) 个文件/.exec(receipt);
+      const residue = /复扫命中 (\d+) 条/.exec(receipt);
+      const redacted = /剥离明文密钥 (\d+) 处/.exec(receipt);
+      const countOk = written !== null && Number(written[1]) === Number(declared[1]) + 1;
+      const scanOk = residue !== null && Number(residue[1]) === 0;
+      const ok = blockedBefore && pickedLabel !== null && countOk && scanOk;
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok,
+        note: '未选目录时不可勾=' + blockedBefore + '；' + String(pickedLabel) +
+          '；真源=' + declared[1] + ' → 写出=' + (written === null ? '?' : written[1]) + '（含 MANIFEST，对平=' + countOk + '）' +
+          '；剥离明文=' + (redacted === null ? '?' : redacted[1]) + ' 处；复扫命中=' + (residue === null ? '?' : residue[1]) + ' 条',
+      };
+    `,
   },
 ];
 
@@ -3967,7 +4084,12 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
     const attempts: StepAttempt[] = [];
     while (attempts.length < MAX_STEP_ATTEMPTS) {
       // 需要夹具的步骤：每次 attempt 起一份新的（对话框桩的调用计数复位），跑完立刻还原并删文件
-      const fixture = def.fixture === "import-dialog" ? await openImportDialogFixture(win) : null;
+      const fixture =
+        def.fixture === "import-dialog"
+          ? await openImportDialogFixture(win)
+          : def.fixture === "export-dir"
+            ? await openExportDirFixture()
+            : null;
       if (fixture) {
         await win.webContents.executeJavaScript(
           `window.__yushuImportFixture = ${JSON.stringify(JSON.stringify({ dir: fixture.dir }))};`,
@@ -3977,7 +4099,15 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
         const res = (await win.webContents.executeJavaScript(buildScript(def.body))) as
           | { ok?: boolean; note?: string }
           | null;
-        attempts.push({ ok: Boolean(res && res.ok), detail: String(res && res.note ? res.note : "(脚本无返回)") });
+        let ok = Boolean(res && res.ok);
+        let detail = String(res && res.note ? res.note : "(脚本无返回)");
+        // 有盘上核对的步骤：界面上的数字必须被磁盘上的事实二次确认，否则"回执漂亮"不算通过
+        if (fixture && "check" in fixture && typeof fixture.check === "function") {
+          const checked = await fixture.check();
+          ok = ok && checked.ok;
+          detail = detail + "；盘上核对=" + checked.detail;
+        }
+        attempts.push({ ok, detail });
       } catch (err) {
         attempts.push({ ok: false, detail: `执行失败：${err instanceof Error ? err.message : String(err)}` });
       } finally {

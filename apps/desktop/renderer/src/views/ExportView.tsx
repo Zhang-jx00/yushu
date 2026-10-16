@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ClipboardResult, ExportPreviewPayload, ExportRunResult } from "../../../src/shared/ipc";
 import { BiblePanel } from "../components/BiblePanel";
+import { ProjectExportPanel } from "../components/ProjectExportPanel";
 import { api } from "../api";
 
 /**
@@ -331,6 +332,9 @@ export function ExportView() {
             )}
           </section>
         )}
+
+        {/* 项目迁移包（R101 / T3-14 后半）：把真源打给人，密钥与派生物留在原地 */}
+        <ProjectExportPanel />
 
         {/* 设定集（世界圣经）：R98 / T5-5，与章节导出同页不同事，各自确认、各自落盘 */}
         <BiblePanel />
