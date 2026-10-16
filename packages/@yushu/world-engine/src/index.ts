@@ -21,3 +21,5 @@ export * from "./relation-graph.js";
 export * from "./chronicle.js";
 export * from "./satisfaction.js";
 export * from "./rule-stats.js";
+export * from "./pov-config.js";
+export * from "./pov-check.js";
