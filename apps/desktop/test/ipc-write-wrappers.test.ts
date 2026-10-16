@@ -67,6 +67,8 @@ const NON_WRITE_CHANNELS = [
   "importPreview",
   // R98 设定集导出：写的是 `exports/*.md` 派生物（与 `exportRun` 完全同一类），真源一个字节不动 ⇒ 不该刷索引
   "bibleRun",
+  // R101 迁移包导出：写的是**项目外**用户选的目录，本项目真源与索引都不动 ⇒ 不走 wrapWrite（密钥剥离与复扫由自身判据钉）
+  "projectExportRun",
 ] as const;
 
 /** 解析每个 `ipcMain.handle(CHANNELS.x, …)` 块，返回通道 → 所用包装器 */

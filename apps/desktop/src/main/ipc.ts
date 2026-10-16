@@ -56,6 +56,10 @@ import {
   type ContextPreviewPayload,
   type CreateProjectPayload,
   type DocSnapshot,
+  type ProjectExportPickPayload,
+  type ProjectExportPreviewPayload,
+  type ProjectExportRunPayload,
+  type ProjectExportRunResult,
   type BiblePreviewPayload,
   type BiblePreviewRequest,
   type BibleRunPayload,
@@ -173,6 +177,8 @@ function toProposalPayload(path: string, file: ProposalFile): ProposalPayload {
 import { buildFixedBody, readProofreadPanel } from "./text-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { previewBible, runBibleExport } from "./bible-ops.js";
+import { previewProjectExport, runProjectExport } from "./project-export.js";
+import { exportTargets } from "./export-gate.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
 import { IndexRefreshScheduler } from "./index-scheduler.js";
 import { readLibrary } from "./library-ops.js";
@@ -658,6 +664,30 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNELS.exportRun, (_event, payload: ExportRunPayload) =>
     wrap<ExportRunResult>(() => runExport(requireGateway(), payload)),
+  );
+
+  /* ---------- 项目迁移包导出（M3 T3-14 后半，R101） ---------- */
+
+  // 目标目录只能由原生对话框结果登记成票据：渲染层从头到尾拿不到、也不该拿到绝对路径
+  ipcMain.handle(CHANNELS.projectExportPick, async () => {
+    const result = await dialog.showOpenDialog({
+      title: "选择迁移包的导出位置",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { name: "", entries: 0, canceled: true } satisfies ProjectExportPickPayload;
+    }
+    const picked = await exportTargets.register(result.filePaths[0]!);
+    return { name: picked.name, entries: picked.entries, canceled: false, ticket: picked.ticket } satisfies ProjectExportPickPayload;
+  });
+
+  ipcMain.handle(CHANNELS.projectExportPreview, (_event, payload?: { includeExports?: boolean }) =>
+    wrap<ProjectExportPreviewPayload>(() => previewProjectExport(requireGateway(), payload ?? {})),
+  );
+
+  // 写的是**项目外**的目录，本项目真源一个字节不动 ⇒ 与 export:run 同类，走只读包装器（分类见写通道锁）
+  ipcMain.handle(CHANNELS.projectExportRun, (_event, payload: ProjectExportRunPayload) =>
+    wrap<ProjectExportRunResult>(() => runProjectExport(requireGateway(), payload)),
   );
 
   // 世界圣经 / 设定集（M5 T5-5，R98）：预览只读，导出只写 exports/ 派生物（与 export:run 同一类，不写真源）

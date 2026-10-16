@@ -54,6 +54,10 @@ import type {
   ContextPreviewPayload,
   CreateProjectPayload,
   DocSnapshot,
+  ProjectExportPickPayload,
+  ProjectExportPreviewPayload,
+  ProjectExportRunPayload,
+  ProjectExportRunResult,
   BiblePreviewPayload,
   BiblePreviewRequest,
   BibleRunPayload,
@@ -126,6 +130,14 @@ export interface YushuApi {
     /** 当前已挂载项目的快照（未打开项目时为 null） */
     current: () => Promise<ProjectSnapshot | null>;
     chooseDirectory: () => Promise<string | null>;
+    /**
+     * 迁移包三条通道（M3 T3-14 后半，R101）。与 chooseDirectory 不是一类：
+     * 那条把绝对路径回给渲染层（建项目时只是"填进表单"），而导出目标**只回票据**——
+     * 拿到路径就能往任意目录写文件，等于把红线 5 从背面拆掉。
+     */
+    exportPick: () => Promise<ProjectExportPickPayload & { ticket?: string }>;
+    exportPreview: (payload?: { includeExports?: boolean }) => Promise<ProjectExportPreviewPayload>;
+    exportRun: (payload: ProjectExportRunPayload) => Promise<ProjectExportRunResult>;
     create: (payload: CreateProjectPayload) => Promise<ProjectSnapshot>;
     world: () => Promise<WorldSummary | null>;
   };

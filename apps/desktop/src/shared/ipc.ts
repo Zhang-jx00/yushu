@@ -89,6 +89,12 @@ export const CHANNELS = {
   biblePreview: "bible:preview",
   /** 世界圣经（设定集）导出（M5/T5-5，R98）：写 exports/ 派生物，与 export:run 同一类 */
   bibleRun: "bible:run",
+  /** 项目迁移包·挑目标目录（M3/T3-14 后半，R101）：原生对话框结果只登记成票据，路径不出主进程 */
+  projectExportPick: "project:exportPick",
+  /** 项目迁移包·预览（R101）：只读，报清单 / 跳过理由 / 要剥几条明文密钥 */
+  projectExportPreview: "project:exportPreview",
+  /** 项目迁移包·导出（R101）：写到**项目外**的目录，凭票据解析；本项目真源一个字节不动 */
+  projectExportRun: "project:exportRun",
   indexStatus: "index:status",
   indexRebuild: "index:rebuild",
   indexSearch: "index:search",
@@ -1428,6 +1434,70 @@ export interface BiblePreviewPayload {
   /** 这次预览用没用脱敏（回执要能自证是哪一种） */
   maskUnrevealed: boolean;
   error: string | null;
+}
+
+/* ---------- 项目迁移包导出（M3 T3-14 后半，R101） ---------- */
+
+/** 进包的一个真源文件 */
+export interface ProjectExportFilePayload {
+  path: string;
+  bytes: number;
+}
+
+/** 被跳过的一条 + 为什么跳（静默少文件与静默多文件一样坏） */
+export interface ProjectExportExcludedPayload {
+  path: string;
+  reason: string;
+}
+
+/** 某个文本文件里按 K12 检出的疑似明文密钥条数（写出前会被剥离） */
+export interface ProjectExportRedactionPayload {
+  path: string;
+  count: number;
+}
+
+export interface ProjectExportPreviewPayload {
+  bookTitle: string;
+  files: ProjectExportFilePayload[];
+  totalBytes: number;
+  excluded: ProjectExportExcludedPayload[];
+  /** 读不出文本内容的文件（二进制 / 超大）：不假装带上了 */
+  unreadable: ProjectExportExcludedPayload[];
+  redactions: ProjectExportRedactionPayload[];
+  note: string;
+}
+
+export interface ProjectExportPickPayload {
+  /** 只显示用的目录名与条目数：绝对路径不外传 */
+  name: string;
+  entries: number;
+  canceled: boolean;
+  /** 取消时没有票；成功时只有票号（路径留在主进程） */
+  ticket?: string;
+}
+
+export interface ProjectExportRunPayload {
+  /** 目标目录票据（由 project:exportPick 发；渲染层拿不到也不该拿路径） */
+  ticket: string;
+  /** 防手滑：必须显式 true */
+  confirmed?: boolean;
+  /** 是否把 exports/ 也装进包里（默认不装） */
+  includeExports?: boolean;
+}
+
+export interface ProjectExportRunResult {
+  /** 目标目录下新建的子目录名（不含父路径） */
+  subdir: string;
+  bookTitle: string;
+  createdAt: string;
+  files: number;
+  bytes: number;
+  /** 写出前剥离掉的明文密钥处数 */
+  redacted: number;
+  /** 落盘后复扫仍检出的条数：>0 时整包已被删除并抛错，成功回执恒为 0 */
+  plaintextRemaining: number;
+  skippedDerived: number;
+  unreadableSkipped: number;
 }
 
 export interface BibleRunPayload extends BiblePreviewRequest {
