@@ -95,6 +95,12 @@ export const CHANNELS = {
   projectExportPreview: "project:exportPreview",
   /** 项目迁移包·导出（R101）：写到**项目外**的目录，凭票据解析；本项目真源一个字节不动 */
   projectExportRun: "project:exportRun",
+  /** 视角看板·预览（M4/T4-2 第三批，R102）：只读，读 config/pov.yaml + 章 frontmatter */
+  povPreview: "pov:preview",
+  /** 视角看板·保存策略（R102）：先解析后落盘，写的是真源 config/pov.yaml ⇒ 走 wrapWrite */
+  povWriteConfig: "pov:writeConfig",
+  /** 视角看板·绑定本章视角（R102）：只改章 frontmatter 的 pov，正文与字数不动 */
+  povSetChapter: "pov:setChapter",
   indexStatus: "index:status",
   indexRebuild: "index:rebuild",
   indexSearch: "index:search",
@@ -1519,6 +1525,105 @@ export interface BibleRunResult {
   unreadableCount: number;
   maskUnrevealed: boolean;
   layers: string[];
+}
+
+/* ---------- 视角策略与看板（M4 / T4-2 第三批，R102；判据 docs/research/F-叙事与故事构建/F04） ---------- */
+
+/**
+ * 看板上的一行章：`drafted=false` 表示章纲里有条目但还没建草稿——
+ * 那样的章**不参与视角核对**（没有 frontmatter 可谈），但必须计数点名，
+ * 否则"未建章"会被读成"全书视角没问题"。
+ */
+export interface PovChapterRowPayload {
+  /** 已建草稿 = 章节实体 id（ch-*）；未建草稿 = 章纲 id（co-*） */
+  chapterId: string;
+  /** 章节文件路径；未建草稿为 null */
+  path: string | null;
+  volumeTitle: string;
+  title: string;
+  /** 全书章序（跨卷连续编号）：切换预算按它算间隔 */
+  idx: number;
+  /** 章 frontmatter 里的 pov，未填为空串 */
+  pov: string;
+  drafted: boolean;
+  /** 该章文件的当前哈希（写入时作 baseHash 用）；未建草稿为 null */
+  hash: string | null;
+}
+
+/** 引擎结论的原样投影（字段与 `pov-check.ts` 同源，面板按 message/evidence/fix 三件套渲染） */
+export interface PovFindingPayload {
+  rule: string;
+  severity: "warn" | "info";
+  subject: string;
+  related?: string;
+  message: string;
+  evidence: string;
+  fix: string;
+  origin: string;
+}
+
+export interface PovPreviewPayload {
+  configPath: string;
+  /**
+   * `undeclared` = 没有这个文件（或文件为空）；`unreadable` = 有文件但解析不过。
+   * 后者**一条结论都不发**：把读不了的策略当"没问题"，等于用假绿灯骗作者。
+   */
+  state: "declared" | "undeclared" | "unreadable";
+  configText: string;
+  /** 策略文件当前哈希（保存时回传作 baseHash；文件不存在为 null） */
+  configHash: string | null;
+  /** 解析失败原因（state=unreadable 时非空） */
+  configError: string | null;
+  mode: string;
+  distance: string;
+  defaultPov: string;
+  allowedPovs: string[];
+  granularity: string;
+  minGapChapters: number | null;
+  signalRequired: boolean | null;
+  exemptions: Array<{ scope: string; id: string; reason: string }>;
+  /** 视角下拉的候选：只来自角色卡 */
+  characters: Array<{ id: string; name: string }>;
+  chapters: PovChapterRowPayload[];
+  findings: PovFindingPayload[];
+  counted: {
+    outlineChapters: number;
+    drafted: number;
+    notDrafted: number;
+    withPov: number;
+    characters: number;
+    findings: number;
+  };
+}
+
+export interface PovPreviewRequest {
+  /** 严格档（默认 true）：切换预算按 warn 报；宽松档降一级为 info */
+  strict?: boolean;
+}
+
+export interface PovWriteConfigPayload {
+  content: string;
+  /** 预览给回的哈希；文件此前不存在时传 null（= 新建，不许盲写已存在的文件） */
+  baseHash: string | null;
+}
+
+export interface PovWriteResult {
+  path: string;
+  hash: string;
+}
+
+export interface PovSetChapterPayload {
+  /** 章节文件路径（chapters/ 前缀，仍经 FileGateway 的路径防护） */
+  path: string;
+  /** 角色 id；空串 = 清除本章视角 */
+  pov: string;
+  baseHash: string;
+}
+
+export interface PovSetChapterResult {
+  path: string;
+  hash: string;
+  pov: string;
 }
 
 export interface ClipboardPayload {

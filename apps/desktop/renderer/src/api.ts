@@ -62,6 +62,12 @@ import type {
   BiblePreviewRequest,
   BibleRunPayload,
   BibleRunResult,
+  PovPreviewPayload,
+  PovPreviewRequest,
+  PovWriteConfigPayload,
+  PovWriteResult,
+  PovSetChapterPayload,
+  PovSetChapterResult,
   ExportPreviewPayload,
   ExportPreviewRequest,
   ExportRunPayload,
@@ -248,6 +254,12 @@ export interface YushuApi {
   bible: {
     preview: (payload?: BiblePreviewRequest) => Promise<BiblePreviewPayload>;
     run: (payload: BibleRunPayload) => Promise<BibleRunResult>;
+  };
+  /** 视角看板（M4 T4-2 第三批，R102）：预览只读；两处写入都带 baseHash */
+  pov: {
+    preview: (payload?: PovPreviewRequest) => Promise<PovPreviewPayload>;
+    writeConfig: (payload: PovWriteConfigPayload) => Promise<PovWriteResult>;
+    setChapter: (payload: PovSetChapterPayload) => Promise<PovSetChapterResult>;
   };
   index: {
     status: () => Promise<IndexStatusPayload>;

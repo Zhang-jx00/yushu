@@ -27,7 +27,8 @@ import type {
 import { gatewayReader } from "./index-ops.js";
 import { evaluatePackRules } from "./rule-findings.js";
 import { foreshadowReportFindings } from "./foreshadow-ops.js";
-import { FORESHADOW_RULE_IDS, POWER_GATE_RULE_IDS } from "@yushu/world-engine";
+import { povReportFindings, POV_UNREADABLE_RULE } from "./pov-ops.js";
+import { FORESHADOW_RULE_IDS, POWER_GATE_RULE_IDS, POV_RULE_IDS } from "@yushu/world-engine";
 import { runAiAudit, type AiAuditResult } from "./ai-audit.js";
 import { projectPackIds } from "./rule-ops.js";
 import type { ProjectGateway } from "./file-gateway.js";
@@ -159,7 +160,16 @@ async function computeReport(
   }));
   // 伏笔台账的结论并入同一张表（R75）：判定在 `foreshadow.ts`，这里只投影，不重做一遍
   const foreshadowFindings = await foreshadowReportFindings(gateway);
-  const allFindings = [...structure.findings, ...packFindings, ...aiFindings, ...foreshadowFindings];
+  // 视角结论并入同一张表（R102）：判定在 `pov-check.ts`，这里同样只投影。
+  // 并入的理由不是"凑数"：豁免清单与豁免率只认这张表，不进表的角度结论就豁不掉（详见 pov-ops 注释）。
+  const povFindings = await povReportFindings(gateway);
+  const allFindings = [
+    ...structure.findings,
+    ...packFindings,
+    ...aiFindings,
+    ...foreshadowFindings,
+    ...povFindings,
+  ];
   // 豁免清单只认**本次真的参与求值的那些 id**（内置三条 + 包里的规则 id）：
   // 仍然不许豁免一条不存在的规则，但包规则接入后不能再被这句挡在门外
   const knownRuleIds = [
@@ -176,6 +186,10 @@ async function computeReport(
     "fs-ledger-unreadable",
     // 战力台账核对（R97）同口径：id 与引擎同源，漏一条就会"报得出来却豁免不掉"
     ...POWER_GATE_RULE_IDS,
+    // 视角结论（R102）同口径；覆盖锁在 apps/desktop/test/pov-rule-ids.test.ts
+    ...POV_RULE_IDS,
+    // 策略文件读不了是**桌面侧**的结论（引擎只吃解析好的对象），与 fs-ledger-unreadable 同一类
+    POV_UNREADABLE_RULE,
   ];
 
   let allow: ConsistencyAllowList | null = null;

@@ -132,6 +132,11 @@ contextBridge.exposeInMainWorld("yushu", {
     preview: (payload) => invoke("bible:preview", payload),
     run: (payload) => invoke("bible:run", payload),
   },
+  pov: {
+    preview: (payload) => invoke("pov:preview", payload),
+    writeConfig: (payload) => invoke("pov:writeConfig", payload),
+    setChapter: (payload) => invoke("pov:setChapter", payload),
+  },
   index: {
     status: () => invoke("index:status"),
     rebuild: (payload) => invoke("index:rebuild", payload),

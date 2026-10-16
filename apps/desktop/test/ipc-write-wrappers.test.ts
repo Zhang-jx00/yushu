@@ -43,6 +43,10 @@ const WRITE_CHANNELS = [
   // R79 存量导入·入库：建卷 + 建章纲 + 写章节草稿，全是真源写 ⇒ 必须与上面同一类
   // （R78 那条注记说的"import:apply 落地时必须换进写清单"，换的就是这一行）
   "importApply",
+  // R102 视角看板的两处写入都是真源：`config/pov.yaml`（策略 YAML）与章 frontmatter 的 `pov`。
+  // 走 wrapWrite 不只看哈希：策略一改，上一轮体检结论就该置脏；章一改，索引要跟着刷。
+  "povWriteConfig",
+  "povSetChapter",
 ] as const;
 
 /** 写盘但不写真源（派生物 / 索引器排除文件 / .git 内部）——走只读包装器是有意的 */

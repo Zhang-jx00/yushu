@@ -4003,6 +4003,78 @@ const STEPS: StepDef[] = [
           '；剥离明文=' + (redacted === null ? '?' : redacted[1]) + ' 处；复扫命中=' + (residue === null ? '?' : residue[1]) + ' 条',
       };
     `,
+  },  {
+    step: 63,
+    title: '视角看板：没声明就不判、策略当场生效、绑视角少一条结论、并进全书体检（M4/T4-2 第三批，R102）',
+    file: 'step63-pov-board.png',
+    body: String.raw`
+      // T4-2 第三批的验收点不是"页面上有个面板"，而是这四件事在屏幕上真的接上了：
+      // ① 没写策略时引擎那句原话必须在（「没有结论不等于没有问题」），面板不许把它显示成"暂无结论"；
+      // ② 在文本框里改策略 ⇒ 保存按钮从**不可点**变可点（这必须是本步点出来的变化，不是既有状态），
+      //    点保存后策略摘要与逐章结论同屏出现；
+      // ③ 下拉换到某个真实角色 ⇒ 那条「本章未声明视角」当场少一条（写入点不是摆设）；
+      // ④ 点「全书体检」后，视角结论出现在那张总表里（出处列点名视角核对）——
+      //    并进总表才谈得上豁免与豁免率，只在面板里自说自话的结论豁不掉。
+      // 顺序：④ 放在 ③ 之前，因为绑掉最后一章就没有可并进的结论了（那是"判干净了"，不是本步要证的）。
+      await tab('规则');
+      const panel = await waitFor(() => document.querySelector('.pov-panel'), 20000);
+      if (panel === null) return { ok: false, note: '没有视角看板面板：' + pageText().slice(0, 160) };
+      const text = (sel) => String((panel.querySelector(sel) || {}).textContent || '').replace(/\s+/g, ' ');
+      const stateLine = await waitFor(() => {
+        const n = panel.querySelector('.pov-state');
+        return n === null ? null : String(n.textContent).replace(/\s+/g, ' ');
+      }, 30000);
+      if (stateLine === null) return { ok: false, note: '没有状态行（未声明/读不了都没显示）：' + pageText().slice(0, 160) };
+      const honestEmpty = stateLine.indexOf('不等于') >= 0;
+      const countedBefore = text('.pov-counted');
+      if (countedBefore.indexOf('未建草稿') < 0) return { ok: false, note: '计数行没点名未建草稿的章：' + countedBefore };
+      const findingsRows = () => panel.querySelectorAll('.pov-findings tbody tr').length;
+      const saveBtn = () => [...panel.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('保存策略') >= 0);
+      const btn0 = saveBtn();
+      if (btn0 === undefined) return { ok: false, note: '没有「保存策略」按钮' };
+      const disabledBefore = btn0.disabled === true;
+      const box = panel.querySelector('.pov-config');
+      if (box === null) return { ok: false, note: '没有策略输入框' };
+      const NL = String.fromCharCode(10);
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(box), 'value').set;
+      setter.call(box, 'mode: third_limited' + NL + 'distance: 贴近' + NL);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      const enabledAfter = await waitFor(() => (saveBtn() !== undefined && saveBtn().disabled === false ? true : null), 15000);
+      if (enabledAfter === null) return { ok: false, note: '改了策略但保存按钮仍不可点（dirty 判定没接上）' };
+      saveBtn().click();
+      const strategy = await waitFor(() => (panel.querySelector('.pov-strategy') === null ? null : text('.pov-strategy')), 30000);
+      if (strategy === null) return { ok: false, note: '保存后没出现策略摘要（回执错误：' + text('.error-text') + '）' };
+      const modeOk = strategy.indexOf('third_limited') >= 0;
+      const rowsAfterSave = findingsRows();
+      if (rowsAfterSave === 0) return { ok: false, note: '已声明三限模式却零结论——项目里没有已建草稿的章？计数=' + text('.pov-counted') };
+      document.querySelector('.consistency-manual').click();
+      const merged = await waitFor(() => {
+        const rows = [...document.querySelectorAll('.consistency-table tbody tr')];
+        return rows.some((tr) => String(tr.textContent).indexOf('pov-missing') >= 0 &&
+          String(tr.textContent).indexOf('视角策略核对') >= 0) ? rows.filter((tr) => String(tr.textContent).indexOf('pov-missing') >= 0).length : null;
+      }, 60000);
+      const mergeOk = merged !== null;
+      const firstSel = panel.querySelector('.pov-chapters tbody tr .pov-bind');
+      if (firstSel === null) return { ok: false, note: '章节表里没有视角下拉' };
+      const opts = [...firstSel.querySelectorAll('option')].filter((o) => String(o.value) !== '');
+      if (opts.length === 0) return { ok: false, note: '下拉里没有角色候选（项目里没有角色卡）' };
+      const pick = String(opts[0].value);
+      const selSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(firstSel), 'value').set;
+      selSetter.call(firstSel, pick);
+      firstSel.dispatchEvent(new Event('change', { bubbles: true }));
+      const dropped = await waitFor(() => (findingsRows() === rowsAfterSave - 1 ? findingsRows() : null), 30000);
+      const bindOk = dropped !== null;
+      const receipt = text('.pov-receipt');
+      const receiptOk = receipt.indexOf(pick) >= 0;
+      panel.scrollIntoView({ block: 'start' });
+      await sleep(240);
+      return {
+        ok: honestEmpty && disabledBefore && modeOk && mergeOk && bindOk && receiptOk,
+        note: '未声明原话=' + honestEmpty + '（' + stateLine.slice(0, 40) + '…）；保存按钮 禁用→可点=' + (disabledBefore && enabledAfter !== null) +
+          '；策略摘要 mode=' + modeOk + '；并进全书体检的视角结论=' + (mergeOk ? merged : 0) + ' 条；绑「' + pick +
+          '」前 ' + rowsAfterSave + ' 条 → 后 ' + (bindOk ? dropped : '?') + ' 条=' + bindOk + '；回执点名=' + receiptOk,
+      };
+    `,
   },
 ];
 

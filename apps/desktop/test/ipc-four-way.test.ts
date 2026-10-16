@@ -175,6 +175,22 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(typed.has("project.exportRun")).toBe(true);
   });
 
+  it("视角看板三条通道在四处齐备（R102 新增：preview 只读，另两条写真源）", () => {
+    expect(channels.get("povPreview")).toBe("pov:preview");
+    expect(channels.get("povWriteConfig")).toBe("pov:writeConfig");
+    expect(channels.get("povSetChapter")).toBe("pov:setChapter");
+    expect(registered).toContain("povPreview");
+    expect(registered).toContain("povWriteConfig");
+    expect(registered).toContain("povSetChapter");
+    expect(literals.invoke.has("pov:preview")).toBe(true);
+    expect(literals.invoke.has("pov:writeConfig")).toBe(true);
+    expect(literals.invoke.has("pov:setChapter")).toBe(true);
+    const typed = memberPaths(apiTs, /export interface YushuApi \{/);
+    expect(typed.has("pov.preview")).toBe(true);
+    expect(typed.has("pov.writeConfig")).toBe(true);
+    expect(typed.has("pov.setChapter")).toBe(true);
+  });
+
   it("设定集两条通道在四处齐备（R98 新增：preview 只读、run 只写 exports/ 派生物）", () => {
     expect(channels.get("biblePreview")).toBe("bible:preview");
     expect(channels.get("bibleRun")).toBe("bible:run");

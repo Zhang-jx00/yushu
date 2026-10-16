@@ -9,6 +9,7 @@ import type {
   ProposalDecisionPayload,
   ProposalPayload,
 } from "../../../src/shared/ipc";
+import { PovPanel } from "../components/PovPanel";
 import { api } from "../api";
 
 /**
@@ -518,6 +519,8 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
           </>
         )}
       </section>
+      {/* 视角策略与看板（T4-2 第三批，R102）：结论已并进上面的体检表，这里给策略与逐章绑定 */}
+      <PovPanel />
       <section className="panel propagate-panel">
         <h3>影响传播（提案与逐项决策）</h3>
         <div className="propagate-bar">

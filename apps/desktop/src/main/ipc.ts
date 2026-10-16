@@ -60,6 +60,12 @@ import {
   type ProjectExportPreviewPayload,
   type ProjectExportRunPayload,
   type ProjectExportRunResult,
+  type PovPreviewPayload,
+  type PovPreviewRequest,
+  type PovSetChapterPayload,
+  type PovSetChapterResult,
+  type PovWriteConfigPayload,
+  type PovWriteResult,
   type BiblePreviewPayload,
   type BiblePreviewRequest,
   type BibleRunPayload,
@@ -177,6 +183,7 @@ function toProposalPayload(path: string, file: ProposalFile): ProposalPayload {
 import { buildFixedBody, readProofreadPanel } from "./text-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { previewBible, runBibleExport } from "./bible-ops.js";
+import { previewPov, setChapterPov, writePovConfig } from "./pov-ops.js";
 import { previewProjectExport, runProjectExport } from "./project-export.js";
 import { exportTargets } from "./export-gate.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
@@ -696,6 +703,21 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(CHANNELS.bibleRun, (_event, payload: BibleRunPayload) =>
     wrap<BibleRunResult>(() => runBibleExport(requireGateway(), payload)),
+  );
+
+  /* ---------- 视角看板（M4 T4-2 第三批，R102） ---------- */
+
+  // 只读：读 config/pov.yaml 与章 frontmatter，不碰索引也不写盘
+  ipcMain.handle(CHANNELS.povPreview, (_event, payload?: PovPreviewRequest) =>
+    wrap<PovPreviewPayload>(() => previewPov(requireGateway(), payload ?? {})),
+  );
+  // 保存策略：写真源 YAML（config/pov.yaml），所以与卡/章同级走 wrapWrite
+  ipcMain.handle(CHANNELS.povWriteConfig, (_event, payload: PovWriteConfigPayload) =>
+    wrapWrite<PovWriteResult>(() => writePovConfig(requireGateway(), payload)),
+  );
+  // 绑本章视角：只重写章 frontmatter 的 pov —— 正文的唯一写入口仍是 chapter:write
+  ipcMain.handle(CHANNELS.povSetChapter, (_event, payload: PovSetChapterPayload) =>
+    wrapWrite<PovSetChapterResult>(() => setChapterPov(requireGateway(), payload)),
   );
 
   // 干净剪贴板：文本在主进程生成并写入系统剪贴板（渲染层只拿统计与预览）
