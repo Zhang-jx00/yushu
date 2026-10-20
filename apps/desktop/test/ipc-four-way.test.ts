@@ -219,6 +219,18 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(typed.has("publish.schedule")).toBe(true);
   });
 
+  it("导入·AI 筛选与人工校正两条通道在四处齐备（R107 新增：两条都只改计划）", () => {
+    expect(channels.get("importAiSplit")).toBe("import:aiSplit");
+    expect(channels.get("importCorrect")).toBe("import:correct");
+    expect(registered).toContain("importAiSplit");
+    expect(registered).toContain("importCorrect");
+    expect(literals.invoke.has("import:aiSplit")).toBe(true);
+    expect(literals.invoke.has("import:correct")).toBe(true);
+    const typed = memberPaths(apiTs, /export interface YushuApi \{/);
+    expect(typed.has("import.aiSplit")).toBe(true);
+    expect(typed.has("import.correct")).toBe(true);
+  });
+
   it("入库通道在四处齐备（R79 新增：这条是真源写，与上面两条只读的不是一类）", () => {
     expect(channels.get("importApply")).toBe("import:apply");
     expect(registered).toContain("importApply");
