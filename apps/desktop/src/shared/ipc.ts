@@ -146,6 +146,8 @@ export const CHANNELS = {
   /** 五层记忆（M3 / T3-5）：状态 / AI 摘要候选 / 摘要入库 / 事实登记 / 事实删除 / 注入预演（T3-6） */
   memoryState: "memory:state",
   memorySummarize: "memory:summarize",
+  /** 批量补摘要候选（T5-9 第二段，R106）：与预算护栏联动、分批推进；产出的也只是候选 */
+  memorySummarizeBatch: "memory:summarizeBatch",
   memorySaveSummary: "memory:saveSummary",
   memorySaveFact: "memory:saveFact",
   memoryDeleteFact: "memory:deleteFact",
@@ -2572,6 +2574,56 @@ export interface MemorySummarizeResult {
   chars: number;
   provider_id: string;
   model: string;
+}
+
+/**
+ * 批量补摘要候选（M5/T5-9 第二段，R106）。
+ *
+ * **候选化不变**：批量跑出来的也只是候选，逐条采纳才写库。
+ */
+export interface MemorySummarizeBatchPayload {
+  /** 本次最多跑几条（分批推进；缺省由主进程按冷启动批次给） */
+  limit?: number;
+  /**
+   * 作者已显式确认（超预算 / 有条目算不出金额时必需）。
+   *
+   * 未确认而主进程判定需要确认 ⇒ 拒绝跑并把理由带回界面（E_MEMORY_BATCH_CONFIRM）。
+   */
+  confirm?: boolean;
+}
+
+export interface MemorySummarizeBatchCandidate {
+  layer: "volume_summary" | "chapter_summary";
+  id: string;
+  title: string;
+  text: string;
+  chars: number;
+  provider_id: string;
+  model: string;
+  /** 这一条的预估 prompt token */
+  promptTokens: number;
+  /** 这一条的预估金额；null = **算不出来**（provider 没配单价），不是 0 */
+  cost: number | null;
+  currency: string;
+}
+
+export interface MemorySummarizeBatchResult {
+  candidates: MemorySummarizeBatchCandidate[];
+  /** 跑失败的条目与原因（不静默吞掉） */
+  failed: { id: string; title: string; reason: string }[];
+  /** 预算护栏的预检结论（J09 §3.3：生成前成本预估 + 超预算需用户确认） */
+  budget: {
+    needsConfirm: boolean;
+    confirmReasons: string[];
+    warnings: string[];
+    reason: string;
+    estimatedTokens: number;
+    estimatedCost: number;
+    /** 金额算不出来的条目 id（不参与上限计算，但要说明） */
+    unpricedIds: string[];
+  };
+  /** 本批跑完还有多少条待补（分批推进，不一次铺开） */
+  stillMissing: number;
 }
 
 export interface MemorySaveSummaryPayload {

@@ -4647,6 +4647,61 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 68,
+    title: '批量补摘要：预算预检 → 批量生成候选（盘上没写库）→ 采纳一条 → 摘要文件真的出现（M5/T5-9 第二段，R106）',
+    file: 'step68-memory-batch.png',
+    body: String.raw`
+      // 这一步要证 T5-9 第二段（批量补候选）的三件事：
+      // ① **与预算护栏联动**：面板上必须摆出预检结论（要花多少 / 要不要作者点头），
+      //    没接护栏的批量就是个"烧钱按钮"；
+      // ② **候选化不变**：批量跑出候选后，**盘上不能多出摘要文件**（写库要作者逐条采纳）；
+      // ③ 采纳一条 ⇒ 盘上才真的多出摘要文件——**反向的牙**：只验"没写"分不清"没跑"与"跑了没写"。
+      await tab('记忆');
+      const panel = await waitFor(() => document.querySelector('.memory-coldstart'), 20000);
+      if (panel === null) return { ok: false, note: '记忆页没有「冷启动待补」面板：' + pageText().slice(0, 140) };
+      const countSummaries = async () => {
+        const tree = await window.yushu.project.tree();
+        // 卷摘要落在 memory/volumes/、章摘要落在 memory/chapters/ —— 两边都要数：
+        // 批次的顺序是**卷摘要在前**，只数 chapters/ 会把"采纳了卷摘要"看成"没采纳"。
+        return tree.filter((item) => item.type === 'file' &&
+          (item.path.indexOf('memory/chapters/') === 0 || item.path.indexOf('memory/volumes/') === 0)).length;
+      };
+      const before = await countSummaries();
+      const btn = [...panel.querySelectorAll('button')].find((b) => String(b.textContent).trim() === '批量生成候选');
+      if (btn === undefined) return { ok: false, note: '面板里没有「批量生成候选」按钮' };
+      if (btn.disabled) return { ok: false, note: '「批量生成候选」按钮不可点' };
+      btn.click();
+      const candidates = await waitFor(() => {
+        const list = panel.querySelector('.memory-batch-candidates');
+        return list !== null && list.querySelectorAll('li').length > 0 ? list : null;
+      }, 90000);
+      if (candidates === null) return { ok: false, note: '批量跑完没出现候选：' + panel.innerText.slice(0, 200) };
+      const rows = candidates.querySelectorAll('li').length;
+      const budgetLine = [...panel.querySelectorAll('div')]
+        .map((d) => String(d.textContent || ''))
+        .find((text) => text.indexOf('预算预检') >= 0) || '';
+      const budgetOk = budgetLine.indexOf('预算预检') >= 0;
+      // 候选化：跑完候选，盘上的摘要文件数**一个都没多**
+      const afterBatch = await countSummaries();
+      const notWritten = afterBatch === before;
+      // 反向：采纳一条 ⇒ 盘上才真的多出一个摘要文件
+      const adopt = [...candidates.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('采纳这条') >= 0);
+      if (adopt === undefined) return { ok: false, note: '候选行里没有「采纳这条」按钮' };
+      adopt.click();
+      const written = await waitFor(async () => ((await countSummaries()) > before ? true : null), 30000);
+      const afterAdopt = await countSummaries();
+      const target = panel.querySelector('.memory-batch-candidates');
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: budgetOk && notWritten && written !== null && afterAdopt === before + 1,
+        note: '批量候选=' + rows + ' 条；预算预检在屏幕上=' + budgetOk + '（' + budgetLine.slice(0, 70) + '）' +
+          '；跑完候选后盘上摘要文件 ' + before + ' → ' + afterBatch + '（一个没多=' + notWritten + '）' +
+          '；采纳一条→盘上摘要文件 ' + afterAdopt + '（比跑之前多 1=' + (afterAdopt === before + 1) + '）',
+      };
+    `,
+  },
 ];
 
 /**

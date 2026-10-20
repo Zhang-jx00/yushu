@@ -227,6 +227,8 @@ contextBridge.exposeInMainWorld("yushu", {
     state: () => invoke("memory:state"),
     /** AI 摘要候选（生成不入库——采纳是用户显式动作） */
     summarize: (payload) => invoke("memory:summarize", payload),
+    /** 批量补摘要候选（T5-9 第二段，R106）：与预算护栏联动；产出的也只是候选 */
+    summarizeBatch: (payload) => invoke("memory:summarizeBatch", payload),
     /** 摘要入库：origin=ai（rev>0 拒绝覆盖）/ origin=human（rev+1） */
     saveSummary: (payload) => invoke("memory:saveSummary", payload),
     /** 事实登记（带出处：章节 + 字符区间，服务端计算摘录 hash） */

@@ -106,6 +106,8 @@ import {
   type MemoryStatePayload,
   type MemorySummarizePayload,
   type MemorySummarizeResult,
+  type MemorySummarizeBatchPayload,
+  type MemorySummarizeBatchResult,
   type NamingGeneratePayload,
   type NamingResultPayload,
   type OutlineChapterDraftResult,
@@ -230,6 +232,7 @@ import {
   saveMemoryFact,
   saveMemorySummary,
   summarizeMemory,
+  summarizeMemoryBatch,
 } from "./memory-ops.js";
 import { adoptSettingCandidate, previewSettingExtraction } from "./extract-ops.js";
 import {
@@ -901,6 +904,12 @@ export function registerIpcHandlers(): void {
   // 摘要候选：生成不入库（候选化原则）；入库走 memory:saveSummary 的显式动作
   ipcMain.handle(CHANNELS.memorySummarize, (_event, payload: MemorySummarizePayload) =>
     wrap<MemorySummarizeResult>(() => summarizeMemory(requireGateway(), payload)),
+  );
+
+  // 批量补摘要候选（T5-9 第二段，R106）：**只发请求、不写库**（候选化不变）；
+  // 与预算护栏联动——超预算或有条目算不出金额时，未确认就不跑（E_MEMORY_BATCH_CONFIRM）
+  ipcMain.handle(CHANNELS.memorySummarizeBatch, (_event, payload: MemorySummarizeBatchPayload) =>
+    wrap<MemorySummarizeBatchResult>(() => summarizeMemoryBatch(requireGateway(), payload)),
   );
 
   ipcMain.handle(CHANNELS.memorySaveSummary, (_event, payload: MemorySaveSummaryPayload) =>

@@ -32,9 +32,19 @@ import {
   type MemoryRecord,
   type SummaryRecord,
   planColdStart,
+  planBatchAgainstBudget,
+  type ColdStartBatchEstimate,
   type ColdStartTarget,
 } from "@yushu/memory";
-import { chat, costTokensOf, orderProvidersByRoute, resolveRoute, type ChatMessage } from "@yushu/llm";
+import {
+  chat,
+  computeCost,
+  costTokensOf,
+  orderProvidersByRoute,
+  resolveRoute,
+  type ChatMessage,
+  type ModelPricing,
+} from "@yushu/llm";
 import {
   MEMORY_DIR,
   MEMORY_CHAPTER_SUMMARIES_DIR,
@@ -68,17 +78,21 @@ import type {
   MemoryStatePayload,
   MemorySummarizePayload,
   MemorySummarizeResult,
+  MemorySummarizeBatchPayload,
+  MemorySummarizeBatchResult,
   MemorySummaryPayload,
   MemoryTargetPayload,
 } from "../shared/ipc.js";
 import { appendAiUsage, newUsageId } from "./ai-usage.js";
 import {
+  loadBudgetConfigForUse,
   loadLlmConfigForUse,
   loadRoutingConfigForUse,
   reliabilityGate,
   sessionKeySnapshot,
   storedKeysFor,
 } from "./ai-ops.js";
+import { spentThisMonthByCurrency } from "./cost-ops.js";
 import {
   locateChapter,
   readChapterBody,
@@ -313,29 +327,32 @@ function truncateSource(text: string): string {
   return `${text.slice(0, MAX_SOURCE_CHARS)}\n……（素材超长已截断）`;
 }
 
-/** AI 摘要候选（T3-5）：生成不入库——采纳是用户显式动作（候选化原则） */
-export async function summarizeMemory(
+/**
+ * 摘要提示词（单条与批量**共用同一份**）。
+ *
+ * 抽出来是为了让"生成前成本预估"与"真发出去的请求"是同一份提示词——
+ * 各造一遍的话，护栏看到的 token 数和真发的不一样，预算就成了一句空话。
+ */
+async function buildSummaryMessages(
   gateway: ProjectGateway,
-  payload: MemorySummarizePayload,
-): Promise<MemorySummarizeResult> {
-  // A4 闸门：AI 关闭时不得发起任何 LLM 请求（摘要与抽取同样是联网入口）
-  assertAiEnabled();
-
+  layer: "volume_summary" | "chapter_summary",
+  id: string,
+): Promise<{ messages: ChatMessage[]; sourceLabel: string; chapterId?: string }> {
   const outline = await readOutlineSafe(gateway);
   if (!outline) throw new YushuError("E_OUTLINE", "项目尚无大纲：请先完成三级大纲");
 
   let sourceLabel = "";
   let source = "";
   let chapterId: string | undefined;
-  if (payload.layer === "chapter_summary") {
-    const located = locateChapter(outline, payload.id);
-    if (!located) throw new YushuError("E_INVALID_INPUT", `找不到章节：${payload.id}`);
+  if (layer === "chapter_summary") {
+    const located = locateChapter(outline, id);
+    if (!located) throw new YushuError("E_INVALID_INPUT", `找不到章节：${id}`);
     source = await readChapterBody(gateway, located.path);
     sourceLabel = `章「${located.chapter.title}」（${located.volume.title}）`;
-    chapterId = payload.id;
+    chapterId = id;
   } else {
-    const volume = outline.volumes.find((item) => item.id === payload.id);
-    if (!volume) throw new YushuError("E_INVALID_INPUT", `找不到卷纲：${payload.id}`);
+    const volume = outline.volumes.find((item) => item.id === id);
+    if (!volume) throw new YushuError("E_INVALID_INPUT", `找不到卷纲：${id}`);
     const parts: string[] = [];
     for (const chapter of volume.chapters) {
       if (!chapter.chapter_id) continue;
@@ -360,9 +377,21 @@ export async function summarizeMemory(
     },
     {
       role: "user",
-      content: `【对象】${sourceLabel}\n【正文】\n${truncateSource(source)}\n【任务】输出该${payload.layer === "chapter_summary" ? "章" : "卷"}的中文摘要（3-6 条要点）。`,
+      content: `【对象】${sourceLabel}\n【正文】\n${truncateSource(source)}\n【任务】输出该${layer === "chapter_summary" ? "章" : "卷"}的中文摘要（3-6 条要点）。`,
     },
   ];
+  return { messages, sourceLabel, ...(chapterId === undefined ? {} : { chapterId }) };
+}
+
+/** AI 摘要候选（T3-5）：生成不入库——采纳是用户显式动作（候选化原则） */
+export async function summarizeMemory(
+  gateway: ProjectGateway,
+  payload: MemorySummarizePayload,
+): Promise<MemorySummarizeResult> {
+  // A4 闸门：AI 关闭时不得发起任何 LLM 请求（摘要与抽取同样是联网入口）
+  assertAiEnabled();
+
+  const { messages, chapterId } = await buildSummaryMessages(gateway, payload.layer, payload.id);
 
   const config = await loadLlmConfigForUse(gateway);
   if (config.providers.length === 0) {
@@ -404,6 +433,201 @@ export async function summarizeMemory(
     chars,
     provider_id: result.provider_id,
     model: result.model,
+  };
+}
+
+/** 批量补摘要的默认条数（分批推进：一次 335 章的导入不可能一次全跑） */
+export const MEMORY_BATCH_DEFAULT_LIMIT = 3;
+
+/**
+ * 批量补摘要候选（T5-9 第二段，R106）。
+ *
+ * **任务原文的「自动补候选」补在这一段**（R95 只落了"缺多少 / 缺在哪 / 先补哪几条"）。
+ * 四条口径：
+ * ① **候选化不变**：批量跑出来的也只是候选，逐条采纳才写库（红线不变）；
+ * ② **与预算护栏联动**（J09 §3.3）：生成前先做成本预估并把结论摆出来，
+ *    **超预算 / 有条目算不出金额 ⇒ 必须作者显式确认**，未确认不跑；
+ * ③ **分批推进**：一次只跑 limit 条，剩下的排到下一批（335 章一次全跑既烧钱又没意义）；
+ * ④ **AI 关闭时这条路径根本不发起请求**（A4 闸门，与单条同一道门）。
+ */
+export async function summarizeMemoryBatch(
+  gateway: ProjectGateway,
+  payload: MemorySummarizeBatchPayload,
+): Promise<MemorySummarizeBatchResult> {
+  // A4 闸门：批量也是联网入口
+  assertAiEnabled();
+
+  const state = await loadMemoryState(gateway);
+  const plan = state.coldStart;
+  const limit = Math.max(1, payload.limit ?? MEMORY_BATCH_DEFAULT_LIMIT);
+  /**
+   * 冷启动计划里的批次 → 引擎口径的目标（批次里的都是"缺摘要"的，所以 hasSummary 恒为 false）
+   */
+  const batchTargets: ColdStartTarget[] = plan.batch.slice(0, limit).map((item) => ({
+    layer: item.layer,
+    id: item.id,
+    title: item.title,
+    sourceChars: item.sourceChars,
+    hasSummary: false,
+    summaryRev: 0,
+  }));
+  const stillMissing = Math.max(0, plan.stillMissing + (plan.batch.length - batchTargets.length));
+
+  if (batchTargets.length === 0) {
+    return {
+      candidates: [],
+      failed: [],
+      budget: {
+        needsConfirm: false,
+        confirmReasons: [],
+        warnings: [],
+        reason: "本批没有可补的目标（没有素材就不编摘要）",
+        estimatedTokens: 0,
+        estimatedCost: 0,
+        unpricedIds: [],
+      },
+      stillMissing,
+    };
+  }
+
+  const config = await loadLlmConfigForUse(gateway);
+  if (config.providers.length === 0) {
+    throw new YushuError("E_LLM_ROUTE", "无可用 provider：请先在「AI 副驾」配置模型端点");
+  }
+  const routing = await loadRoutingConfigForUse(gateway);
+  const route = resolveRoute("summarize", config.providers, routing);
+  const providers = orderProvidersByRoute(config.providers, route);
+  const primary = providers[0];
+  const primaryModel = primary?.models[0];
+  const isLocal = primary?.kind === "local";
+  const pricing: ModelPricing | undefined = primaryModel?.pricing;
+
+  // 提示词只造一次：预估与实发必须是同一份
+  const prepared: {
+    target: ColdStartTarget;
+    messages: ChatMessage[];
+    chapterId?: string;
+    promptTokens: number;
+  }[] = [];
+  const failed: { id: string; title: string; reason: string }[] = [];
+  for (const target of batchTargets) {
+    try {
+      const built = await buildSummaryMessages(gateway, target.layer, target.id);
+      prepared.push({
+        target,
+        messages: built.messages,
+        ...(built.chapterId === undefined ? {} : { chapterId: built.chapterId }),
+        promptTokens: built.messages.reduce((sum, message) => sum + estimateTokens(message.content), 0),
+      });
+    } catch (err) {
+      failed.push({
+        id: target.id,
+        title: target.title,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const budgetConfig = (await loadBudgetConfigForUse(gateway)).config;
+  const currency = pricing?.currency ?? budgetConfig.currency ?? "";
+  /**
+   * 每条的预估金额：
+   * - **本地端点 ⇒ 0**（真的零成本，J09 §3.8）；
+   * - **配了价 ⇒ 按 prompt token 折算**（输出 token 未计，面板与回执都写明）；
+   * - **没配价 ⇒ null（算不出来）**，不是 0——拿 0 冒充会让月度上限形同虚设。
+   */
+  const costOf = (promptTokens: number): number | null => {
+    if (isLocal) return 0;
+    if (!pricing) return null;
+    const breakdown = computeCost({ prompt: promptTokens }, pricing);
+    return breakdown === null ? null : breakdown.total;
+  };
+  const estimates: ColdStartBatchEstimate[] = prepared.map((item) => ({
+    id: item.target.id,
+    promptTokens: item.promptTokens,
+    cost: costOf(item.promptTokens),
+    currency,
+  }));
+
+  const decision = planBatchAgainstBudget({
+    batch: prepared.map((item) => item.target),
+    estimates,
+    spentThisMonth: await spentThisMonthByCurrency(gateway),
+    budget: {
+      ...(budgetConfig.monthly_cap === undefined ? {} : { monthlyCap: budgetConfig.monthly_cap }),
+      ...(budgetConfig.per_call_confirm_over === undefined
+        ? {}
+        : { perCallConfirmOver: budgetConfig.per_call_confirm_over }),
+      ...(budgetConfig.warn_ratio === undefined ? {} : { warnRatio: budgetConfig.warn_ratio }),
+      ...(budgetConfig.currency === undefined ? {} : { currency: budgetConfig.currency }),
+    },
+  });
+
+  if (decision.needsConfirm && payload.confirm !== true) {
+    throw new YushuError(
+      "E_MEMORY_BATCH_CONFIRM",
+      `这批要你先确认才跑：${decision.confirmReasons.join("；")}（勾选确认后可重试）`,
+    );
+  }
+
+  const candidates: MemorySummarizeBatchResult["candidates"] = [];
+  for (const item of prepared) {
+    try {
+      const result = await chat(providers, { messages: item.messages }, {
+        sessionKeys: sessionKeySnapshot(),
+        storedKeys: await storedKeysFor(gateway, providers),
+        reliability: { config: routing.reliability, gate: reliabilityGate },
+      });
+      const text = result.text.trim();
+      if (text === "") throw new YushuError("E_LLM_EMPTY", "模型返回为空：请重试或更换 provider");
+      const chars = countWords(text);
+      await appendAiUsage(gateway.root, {
+        id: newUsageId(),
+        type: "generate",
+        task: "summarize",
+        provider_id: result.provider_id,
+        model: result.model,
+        status: "ok",
+        chars,
+        ...(item.chapterId === undefined ? {} : { chapter_id: item.chapterId }),
+        ...(result.usage ? { tokens: costTokensOf(result.usage) } : {}),
+        estimate: { prompt: item.promptTokens },
+      });
+      const estimate = estimates.find((row) => row.id === item.target.id);
+      candidates.push({
+        layer: item.target.layer,
+        id: item.target.id,
+        title: item.target.title,
+        text,
+        chars,
+        provider_id: result.provider_id,
+        model: result.model,
+        promptTokens: item.promptTokens,
+        cost: estimate?.cost ?? null,
+        currency: estimate?.currency ?? currency,
+      });
+    } catch (err) {
+      failed.push({
+        id: item.target.id,
+        title: item.target.title,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return {
+    candidates,
+    failed,
+    budget: {
+      needsConfirm: decision.needsConfirm,
+      confirmReasons: decision.confirmReasons,
+      warnings: decision.warnings,
+      reason: decision.reason,
+      estimatedTokens: decision.estimatedTokens,
+      estimatedCost: decision.estimatedCost,
+      unpricedIds: decision.unpricedIds,
+    },
+    stillMissing,
   };
 }
 

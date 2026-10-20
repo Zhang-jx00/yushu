@@ -11,6 +11,7 @@ import type {
   MemoryStatePayload,
   MemoryTargetPayload,
   MemorySummarizeResult,
+MemorySummarizeBatchResult,
 } from "../../../src/shared/ipc";
 import { api } from "../api";
 
@@ -108,6 +109,12 @@ export function MemoryView() {
   const [extraction, setExtraction] = useState<ExtractPreviewResult | null>(null);
   const [extractAdopted, setExtractAdopted] = useState<Record<string, string>>({});
 
+  // 批量补摘要候选（T5-9 第二段，R106）：预算预检结论 + 显式确认 + 产出的候选
+  const [batchLimit, setBatchLimit] = useState(3);
+  const [batchConfirm, setBatchConfirm] = useState(false);
+  const [batchResult, setBatchResult] = useState<MemorySummarizeBatchResult | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
+
   const refresh = useCallback(async () => {
     const next = await api().memory.state();
     setState(next);
@@ -173,12 +180,59 @@ export function MemoryView() {
       );
     });
 
+  /**
+   * 批量补摘要候选（T5-9 第二段，R106）。
+   *
+   * `confirm` 为真时才带上确认位：主进程在"超预算 / 有条目算不出金额"时会拒跑并给出理由，
+   * 这里把作者的确认原样带回去——**确认是作者的动作，界面不替他勾**。
+   */
+  const runBatch = async (confirm: boolean) => {
+    setBatchBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await api().memory.summarizeBatch({
+        limit: batchLimit,
+        ...(confirm ? { confirm: true } : {}),
+      });
+      setBatchResult(result);
+      setBatchConfirm(confirm);
+      setNotice(
+        `本批生成候选 ${result.candidates.length} 条（未入库，需逐条采纳）；预算预检：${result.budget.reason}`,
+      );
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  /** 采纳一条批量候选（候选化原则：只有作者点了才写库） */
+  const adoptBatch = async (item: MemorySummarizeBatchResult["candidates"][number]) => {
+    setBatchBusy(true);
+    setError(null);
+    try {
+      const saved = await api().memory.saveSummary({
+        layer: item.layer,
+        id: item.id,
+        text: item.text,
+        origin: "ai",
+      });
+      setNotice(`已采纳 ${item.title} → ${saved.path}（rev ${saved.summary_rev}；rev 0 仍可被 AI 更新）`);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
   const addFact = () =>
     guard(async () => {
       const keys = factKeys
         .split(/[,，、\s]+/)
-        .map((item) => item.trim())
-        .filter(Boolean);
+        .map((item) => item.trim())        .filter(Boolean);
       await api().memory.saveFact({
         keys,
         text: factText,
@@ -357,6 +411,82 @@ export function MemoryView() {
                       : ""}
                     。候选仍走「生成候选 → 采纳」，御书不自动写入真源。
                   </div>
+                  {/* 批量补候选（T5-9 第二段，R106）：与预算护栏联动、分批推进、候选化不变。
+                      预检结论（要花多少 / 要不要你点头）由主进程给，这里只渲染。 */}
+                  <div className="field">
+                    <span>批量补摘要候选（分批推进；产出的也只是候选）</span>
+                    <select
+                      className="memory-batch-limit"
+                      value={String(batchLimit)}
+                      onChange={(event) => setBatchLimit(Number(event.target.value) || 1)}
+                    >
+                      {[1, 3, 5, 10].map((n) => (
+                        <option key={n} value={String(n)}>
+                          本次 {n} 条
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={batchBusy || state.coldStart.batch.length === 0}
+                      onClick={() => void runBatch(false)}
+                    >
+                      批量生成候选
+                    </button>
+                    {batchResult?.budget.needsConfirm === true && (
+                      <label className="field">
+                        <span>这批要先确认（勾选后可重试）</span>
+                        <input
+                          type="checkbox"
+                          className="memory-batch-confirm"
+                          checked={batchConfirm}
+                          onChange={(event) => setBatchConfirm(event.target.checked)}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {batchResult !== null && (
+                    <>
+                      <div className={batchResult.budget.needsConfirm ? "warn" : "muted"}>
+                        预算预检：{batchResult.budget.reason}
+                      </div>
+                      {batchResult.budget.needsConfirm && (
+                        <button type="button" disabled={batchBusy} onClick={() => void runBatch(true)}>
+                          我确认，继续跑这批
+                        </button>
+                      )}
+                      {batchResult.candidates.length > 0 && (
+                        <ul className="issues memory-batch-candidates">
+                          {batchResult.candidates.map((item) => (
+                            <li key={`${item.layer}:${item.id}`}>
+                              <div>
+                                <span className="badge">{LAYER_LABELS[item.layer] ?? item.layer}</span>
+                                <strong>{item.title}</strong>
+                              </div>
+                              <div className="muted">
+                                候选 {item.chars} 字 · {item.provider_id} / {item.model} · 预估 {item.promptTokens} tok ·{" "}
+                                {item.cost === null ? "金额算不出（provider 没配单价）" : `预估 ${item.cost.toFixed(4)} ${item.currency}`}
+                              </div>
+                              <div className="muted">{item.text}</div>
+                              <button type="button" disabled={batchBusy} onClick={() => void adoptBatch(item)}>
+                                采纳这条（AI 入库）
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {batchResult.failed.length > 0 && (
+                        <p className="error-text">
+                          这批有 {batchResult.failed.length} 条没跑成：
+                          {batchResult.failed.map((item) => `${item.title}（${item.reason}）`).join("；")}
+                        </p>
+                      )}
+                      <div className="muted">
+                        本批跑完还有 {batchResult.stillMissing} 条待补（分批推进，不一次铺开）。
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </>

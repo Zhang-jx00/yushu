@@ -15,6 +15,7 @@ import {
   type CostAggregateRow,
   type CostEntry,
   type CostTokens,
+  type LlmProviderSpec,
   type ModelPricing,
 } from "@yushu/llm";
 import { estimateTokens } from "@yushu/memory";
@@ -110,45 +111,46 @@ function toCostEntry(entry: {
   return item;
 }
 
-export async function readCostPanel(
-  gateway: ProjectGateway,
-  payload: AiCostPayload = {},
-): Promise<AiCostPanelPayload> {
-  const usageEntries = await readAiUsage(gateway.root, COST_SCAN_LIMIT);
-  const config = await loadLlmConfigForUse(gateway);
-
+/**
+ * 定价表（面板回显的行 + 查价函数）：**一份实现，两处用**。
+ *
+ * 抽出来的理由：成本面板与「批量补摘要」的预算护栏都要查价。两处各查一遍，
+ * 护栏按一套价算「本月已用」、面板按另一套价显示，作者看到的就是两个互相矛盾的数字。
+ *
+ * 回落只在「该 provider 只有一个价」时启用：真端点常回显具体版本名（带日期后缀），
+ * 与配置里的别名对不上；多价 provider 无法判断该用哪个，宁可计入未配置价格也不猜。
+ */
+export function pricingTable(providers: LlmProviderSpec[]): {
+  rows: CostPricingRowPayload[];
+  pricingFor: (providerId?: string, model?: string) => { pricing?: ModelPricing; viaFallback: boolean };
+  resolvePricing: (providerId?: string, model?: string) => ModelPricing | undefined;
+} {
   const pricingIndex = new Map<string, ModelPricing>();
-  const pricingRows: CostPricingRowPayload[] = [];
+  const rows: CostPricingRowPayload[] = [];
   /** provider.id → 该 provider 已配置价格的模型清单（回显名查不中时的回落依据） */
   const pricedModelsByProvider = new Map<string, ModelPricing[]>();
-  for (const provider of config.providers) {
+  for (const provider of providers) {
     const priced: ModelPricing[] = [];
     for (const model of provider.models) {
       if (model.pricing) {
         pricingIndex.set(pricingKey(provider.id, model.name), model.pricing);
         priced.push(model.pricing);
-        pricingRows.push({
+        rows.push({
           provider_id: provider.id,
           model: model.name,
           configured: true,
           ...(model.pricing.currency ? { currency: model.pricing.currency } : {}),
           input: model.pricing.input,
           output: model.pricing.output,
-          ...(model.pricing.cache_read !== undefined
-            ? { cache_read: model.pricing.cache_read }
-            : {}),
-          ...(model.pricing.cache_write !== undefined
-            ? { cache_write: model.pricing.cache_write }
-            : {}),
+          ...(model.pricing.cache_read !== undefined ? { cache_read: model.pricing.cache_read } : {}),
+          ...(model.pricing.cache_write !== undefined ? { cache_write: model.pricing.cache_write } : {}),
         });
       } else {
-        pricingRows.push({ provider_id: provider.id, model: model.name, configured: false });
+        rows.push({ provider_id: provider.id, model: model.name, configured: false });
       }
     }
     if (priced.length > 0) pricedModelsByProvider.set(provider.id, priced);
   }
-  // 回落只在「该 provider 只有一个价」时启用：真端点常回显具体版本名（带日期后缀），
-  // 与配置里的别名对不上；多价 provider 无法判断该用哪个，宁可计入未配置价格也不猜。
   const pricingFor = (
     providerId?: string,
     model?: string,
@@ -160,8 +162,43 @@ export async function readCostPanel(
     if (priced && priced.length === 1) return { pricing: priced[0], viaFallback: true };
     return { viaFallback: false };
   };
-  const resolvePricing = (providerId?: string, model?: string): ModelPricing | undefined =>
-    pricingFor(providerId, model).pricing;
+  return { rows, pricingFor, resolvePricing: (id, model) => pricingFor(id, model).pricing };
+}
+
+/**
+ * 本月已用金额（按币种）——「批量补摘要」的预算护栏用它判断"这批会不会超月度上限"。
+ *
+ * 口径与成本面板**同一份**：同一份 usage 记录、同一个定价解析、同一个归月键。
+ */
+export async function spentThisMonthByCurrency(gateway: ProjectGateway): Promise<Record<string, number>> {
+  const usageEntries = await readAiUsage(gateway.root, COST_SCAN_LIMIT);
+  const config = await loadLlmConfigForUse(gateway);
+  const { resolvePricing } = pricingTable(config.providers);
+  const costEntries: CostEntry[] = usageEntries
+    .filter((entry) => entry.type === "generate")
+    .map((entry) =>
+      toCostEntry({
+        task: entry.task,
+        provider_id: entry.provider_id,
+        model: entry.model,
+        channel: entry.channel,
+        chapter_id: entry.chapter_id,
+        time: entry.time,
+        tokens: entry.tokens as CostTokens | undefined,
+        estimate: entry.estimate as CostTokens | undefined,
+      }),
+    );
+  return spentInMonth(costEntries, resolvePricing, currentMonthKey()).byCurrency;
+}
+
+export async function readCostPanel(
+  gateway: ProjectGateway,
+  payload: AiCostPayload = {},
+): Promise<AiCostPanelPayload> {
+  const usageEntries = await readAiUsage(gateway.root, COST_SCAN_LIMIT);
+  const config = await loadLlmConfigForUse(gateway);
+
+  const { rows: pricingRows, pricingFor, resolvePricing } = pricingTable(config.providers);
 
   // 只对「模型调用」聚合：adopt 记录是用户采纳动作，没有 token 语义，计入会虚增条目数
   const callEntries = usageEntries.filter((entry) => entry.type === "generate");

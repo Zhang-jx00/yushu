@@ -104,6 +104,8 @@ import type {
   MemoryStatePayload,
   MemorySummarizePayload,
   MemorySummarizeResult,
+  MemorySummarizeBatchPayload,
+  MemorySummarizeBatchResult,
   NamingGeneratePayload,
   NamingResultPayload,
   OutlineChapterDraftResult,
@@ -357,6 +359,8 @@ export interface YushuApi {
     state: () => Promise<MemoryStatePayload>;
     /** AI 摘要候选（生成不入库——采纳是用户显式动作） */
     summarize: (payload: MemorySummarizePayload) => Promise<MemorySummarizeResult>;
+    /** 批量补摘要候选（T5-9 第二段，R106）：与预算护栏联动、分批推进；产出的也只是候选 */
+    summarizeBatch: (payload: MemorySummarizeBatchPayload) => Promise<MemorySummarizeBatchResult>;
     /** 摘要入库：origin=ai（人工已修订 rev>0 时拒绝覆盖）/ origin=human（rev+1，冻结 AI 自动覆盖） */
     saveSummary: (payload: MemorySaveSummaryPayload) => Promise<MemorySaveSummaryResult>;
     /** 事实登记（出处可选：章节实体 id + 字符区间 [start, end)） */
