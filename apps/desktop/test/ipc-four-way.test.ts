@@ -203,6 +203,22 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(typed.has("bible.run")).toBe(true);
   });
 
+  it("发布状态机三条通道在四处齐备（R105 新增：board 只读，另两条写真源）", () => {
+    expect(channels.get("publishBoard")).toBe("publish:board");
+    expect(channels.get("publishSetStatus")).toBe("publish:setStatus");
+    expect(channels.get("publishSchedule")).toBe("publish:schedule");
+    expect(registered).toContain("publishBoard");
+    expect(registered).toContain("publishSetStatus");
+    expect(registered).toContain("publishSchedule");
+    expect(literals.invoke.has("publish:board")).toBe(true);
+    expect(literals.invoke.has("publish:setStatus")).toBe(true);
+    expect(literals.invoke.has("publish:schedule")).toBe(true);
+    const typed = memberPaths(apiTs, /export interface YushuApi \{/);
+    expect(typed.has("publish.board")).toBe(true);
+    expect(typed.has("publish.setStatus")).toBe(true);
+    expect(typed.has("publish.schedule")).toBe(true);
+  });
+
   it("入库通道在四处齐备（R79 新增：这条是真源写，与上面两条只读的不是一类）", () => {
     expect(channels.get("importApply")).toBe("import:apply");
     expect(registered).toContain("importApply");

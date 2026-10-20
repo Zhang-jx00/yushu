@@ -47,6 +47,11 @@ const WRITE_CHANNELS = [
   // 走 wrapWrite 不只看哈希：策略一改，上一轮体检结论就该置脏；章一改，索引要跟着刷。
   "povWriteConfig",
   "povSetChapter",
+  // R105 发布状态机：改状态要写章 frontmatter 的 status + `config/publish.yaml` 的留痕，
+  // 设时要写章 frontmatter 的 publish_at —— **全是真源写** ⇒ 必须与上面同一类
+  // （"只提醒不代替平台发布"是语义，不是"只读通道"的许可证）
+  "publishSetStatus",
+  "publishSchedule",
 ] as const;
 
 /** 写盘但不写真源（派生物 / 索引器排除文件 / .git 内部）——走只读包装器是有意的 */
