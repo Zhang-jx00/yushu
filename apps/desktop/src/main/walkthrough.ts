@@ -4691,8 +4691,14 @@ const STEPS: StepDef[] = [
       adopt.click();
       const written = await waitFor(async () => ((await countSummaries()) > before ? true : null), 30000);
       const afterAdopt = await countSummaries();
-      const target = panel.querySelector('.memory-batch-candidates');
-      if (target) target.scrollIntoView({ block: 'center' });
+      // 截图要拍在**被断言的那一段**：预算预检那行与候选列表是同一块的两头，
+      // 把预检行滚到画面中间，候选列表正好在它下面（只滚候选列表会把预检行顶到画面外）。
+      const budgetEl = [...panel.querySelectorAll('div')].find((d) => String(d.textContent || '').indexOf('预算预检') >= 0);
+      if (budgetEl) budgetEl.scrollIntoView({ block: 'center' });
+      else {
+        const list = panel.querySelector('.memory-batch-candidates');
+        if (list) list.scrollIntoView({ block: 'center' });
+      }
       await sleep(240);
       return {
         ok: budgetOk && notWritten && written !== null && afterAdopt === before + 1,
