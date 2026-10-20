@@ -24,3 +24,5 @@ export * from "./rule-stats.js";
 export * from "./pov-config.js";
 export * from "./pov-check.js";
 export * from "./visibility-check.js";
+export * from "./opening-check.js";
+export * from "./gate-check.js";
