@@ -152,6 +152,8 @@ export interface Chapter {
   pov: string;
   word_count: number;
   status: ChapterStatus;
+  /** 计划发布时刻（ISO 串；M5/T5-6 的定时发布——**本地提醒队列，不代替平台发布**） */
+  publish_at?: string;
   /** 章纲引用（I02） */
   outline_ref: string;
   scene_ids: string[];

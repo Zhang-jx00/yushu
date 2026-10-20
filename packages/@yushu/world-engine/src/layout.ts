@@ -29,6 +29,15 @@ export const BUDGET_CONFIG_PATH = `${CONFIG_DIR}/budget.yaml`;
 /** 一致性豁免清单（M4 / T4-3，可选文件；**每条豁免必须写理由**，故属真源而非派生物） */
 export const CONSISTENCY_ALLOW_PATH = `${CONFIG_DIR}/consistency.yaml`;
 
+/**
+ * 发布台账（M5 / T5-6，可选文件；**作者动作的留痕**，故属真源而非派生物）。
+ *
+ * 记的是"这一章什么时候从什么状态到了什么状态"——I01 §5 要求「回退记录留痕」：
+ * 没有它，"发了又撤回"和"从没发过"在盘上长得一模一样，当日字数口径（番茄全勤）也算不出来。
+ * 派生区放不了这个：删掉 `.yushu/` 它就没了，而它是**作者决定的记录**，不是机器算出来的结论。
+ */
+export const PUBLISH_LEDGER_PATH = `${CONFIG_DIR}/publish.yaml`;
+
 /** 伏笔台账（M4 / T4-6，可选文件；登记→埋设→回收→未回收看板的唯一真源，docs/03 §5.3） */
 export const FORESHADOW_PATH = `${WORLD_DIR}/foreshadow.yaml`;
 
