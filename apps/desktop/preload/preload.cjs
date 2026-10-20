@@ -137,6 +137,11 @@ contextBridge.exposeInMainWorld("yushu", {
     writeConfig: (payload) => invoke("pov:writeConfig", payload),
     setChapter: (payload) => invoke("pov:setChapter", payload),
   },
+  publish: {
+    board: () => invoke("publish:board"),
+    setStatus: (payload) => invoke("publish:setStatus", payload),
+    schedule: (payload) => invoke("publish:schedule", payload),
+  },
   index: {
     status: () => invoke("index:status"),
     rebuild: (payload) => invoke("index:rebuild", payload),

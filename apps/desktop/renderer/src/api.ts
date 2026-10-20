@@ -68,6 +68,11 @@ import type {
   PovWriteResult,
   PovSetChapterPayload,
   PovSetChapterResult,
+  PublishBoardPayload,
+  PublishSchedulePayload,
+  PublishScheduleResult,
+  PublishSetStatusPayload,
+  PublishSetStatusResult,
   ExportPreviewPayload,
   ExportPreviewRequest,
   ExportRunPayload,
@@ -260,6 +265,12 @@ export interface YushuApi {
     preview: (payload?: PovPreviewRequest) => Promise<PovPreviewPayload>;
     writeConfig: (payload: PovWriteConfigPayload) => Promise<PovWriteResult>;
     setChapter: (payload: PovSetChapterPayload) => Promise<PovSetChapterResult>;
+  };
+  /** 发布状态机（M5 T5-6，R105）：看板只读；两处写入都带 baseHash */
+  publish: {
+    board: () => Promise<PublishBoardPayload>;
+    setStatus: (payload: PublishSetStatusPayload) => Promise<PublishSetStatusResult>;
+    schedule: (payload: PublishSchedulePayload) => Promise<PublishScheduleResult>;
   };
   index: {
     status: () => Promise<IndexStatusPayload>;

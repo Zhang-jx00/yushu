@@ -4,6 +4,7 @@ import type { LibraryViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { Disclosure } from "../components/Disclosure";
 import { ImportPanel } from "../components/ImportPanel";
+import { PublishPanel } from "../components/PublishPanel";
 import { computeVirtualWindow } from "../virtual-list";
 
 /**
@@ -98,6 +99,9 @@ export function LibraryView({ onOpen }: { onOpen: (path: string) => void }) {
       </div>
       <Disclosure className="library-import" label="导入存量稿件（先出三份报告，确认后才建卷建章）">
         <ImportPanel />
+      </Disclosure>
+      <Disclosure className="library-publish" label="发布状态（状态机 / 定时提醒 / 字数闸）">
+        <PublishPanel />
       </Disclosure>
       <div
         className="library-list"

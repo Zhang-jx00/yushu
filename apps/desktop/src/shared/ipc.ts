@@ -107,6 +107,12 @@ export const CHANNELS = {
   indexProgress: "index:progress",
   /** 稿件总览（T2-4 切片 A：全库视图） */
   libraryList: "library:list",
+  /** 发布状态看板（M5/T5-6，R105）：**只读**——状态分组 / 定时提醒 / 字数闸，判定层在引擎 */
+  publishBoard: "publish:board",
+  /** 改发布状态（M5/T5-6）：**真源写**（章 frontmatter 的 status + 发布台账留痕） */
+  publishSetStatus: "publish:setStatus",
+  /** 设定 / 清除定时发布（M5/T5-6）：**真源写**（章 frontmatter 的 publish_at） */
+  publishSchedule: "publish:schedule",
   namingGenerate: "naming:generate",
   /** 通用剪贴板写入（主进程 Electron clipboard；渲染层 file:// 下 navigator.clipboard 不可靠） */
   appWriteClipboard: "app:writeClipboard",
@@ -1788,6 +1794,143 @@ export interface LibraryViewPayload {
   bookTitle: string;
   chapters: LibraryChapterEntry[];
   totals: { chapters: number; drafted: number; words: number };
+}
+
+/* ---------------- 发布状态机（M5 / T5-6，R105） ---------------- */
+
+/**
+ * 发布状态（**本文件保持零依赖**，所以这里本地写一份结构类型）。
+ *
+ * 它必须与三处逐字一致：`@yushu/world-engine` 的 `PUBLISH_STATUSES`、
+ * `@yushu/schema` 的 chapterSchema 枚举、docs/03 §5.3 的 `Chapter.status`。
+ * 漂移由 `apps/desktop/test/publish-status-ids.test.ts` 盯住（少一处对账就红）。
+ */
+export type PublishStatus = "draft" | "revised" | "published";
+
+/** 看板里的一章（只读面板用） */
+export interface PublishChapterRow {
+  id: string;
+  title: string;
+  /** 项目内相对路径（写入点要靠它定位文件） */
+  path: string;
+  status: PublishStatus;
+  wordCount: number;
+  /** 文件当前 hash（写入点做 baseHash 并发检测要用） */
+  hash: string;
+  /** 计划发布时刻（空串 = 未设） */
+  publishAt: string;
+  /** 已到点但还没处理（本地提醒队列） */
+  due: boolean;
+}
+
+/** 一条到期待处理（本地提醒队列；I01 §3.7：**只是提醒，不代替平台发布**） */
+export interface PublishReminderRow {
+  id: string;
+  title: string;
+  publishAt: string;
+  /** 到期时长（毫秒） */
+  dueMs: number;
+  wordCount: number;
+}
+
+/** 发布看板（只读通道的载荷） */
+export interface PublishBoardPayload {
+  /** 当前口径包（番茄等）；没有可用包时为空串 */
+  platform: string;
+  platformVersion: string;
+  effectiveDate: string;
+  sourceUrls: string[];
+  /** 平台"有效字数"的口径名（本地算不了后台口径时如实报出口径） */
+  validWordRule: string;
+  /**
+   * 三条判定的出处（状态机 / 定时提醒 / 字数闸各一条）。
+   *
+   * 面板把它们写出来，作者才能核"这是按哪条规则判的"——与体检表的 `origin` 同一口径。
+   */
+  origins: { status: string; reminder: string; word: string };
+  /** 口径包读不了时的原因（空串 = 没问题）；读不了就不判，不降级成"没问题" */
+  rulesError: string;
+  chapters: PublishChapterRow[];
+  reminders: PublishReminderRow[];
+  groups: { draft: number; revised: number; published: number };
+  word: {
+    count: number;
+    total: number;
+    min: number;
+    max: number;
+    median: number;
+    /** 平台有没有声明单章下限（没声明 = 不判，不静默） */
+    perChapterFloorDeclared: boolean;
+    belowFloor: { id: string; title: string; wordCount: number }[];
+    daily?: {
+      date: string;
+      publishedChars: number;
+      standard?: number;
+      advanced?: number;
+      reached: string[];
+    };
+  };
+  /** 台账条数（回退留痕） */
+  ledgerEvents: number;
+  /**
+   * 迁移指引矩阵（3×3 全给，含非法迁移的**理由**）。
+   *
+   * 界面按这张表渲染按钮：合法的可点、非法的禁用并把理由挂在 title 上。
+   * 渲染层不自己抄一份迁移表——抄一份就会漂移，漂移出来的按钮点下去只会被引擎拒。
+   */
+  transitionGuide: {
+    from: PublishStatus;
+    to: PublishStatus;
+    ok: boolean;
+    reason: string;
+    rollback: boolean;
+  }[];
+  /** 台账读不动的原因（空串 = 没问题）；读不动就不拿空账当"没有留痕" */
+  ledgerError: string;
+  /** 账实不符的章（章节状态与台账最后一条对不上）：空数组 = 没有 */
+  mismatches: string[];
+}
+
+/** 改发布状态（真源写） */
+export interface PublishSetStatusPayload {
+  /** 章节的项目内相对路径 */
+  path: string;
+  to: PublishStatus;
+  /**
+   * 作者自己写的一句理由（回退时特别有用；不强制）。
+   *
+   * **迁移时刻不给渲染层填**——由主进程取本地时刻（带时区偏移）：
+   * ① 渲染层填不出可信的时区；② 日期部分要与作者所在时区一致，
+   * 否则"今日已发布字数"会算到隔壁那天；③ 时间戳是事实，不该由调用方声称。
+   */
+  note?: string;
+  /** 章节文件当前的 hash（并发检测：外部改过即拒） */
+  baseHash: string;
+}
+
+export interface PublishSetStatusResult {
+  path: string;
+  from: PublishStatus;
+  to: PublishStatus;
+  at: string;
+  /** 这是回退（回退要留痕） */
+  rollback: boolean;
+  /** 台账条数（写完后的总条数） */
+  ledgerEvents: number;
+  wordCount: number;
+}
+
+/** 设定 / 清除定时发布（真源写；空串 = 清除定时） */
+export interface PublishSchedulePayload {
+  path: string;
+  /** ISO 串；空串 = 清除定时 */
+  publishAt: string;
+  baseHash: string;
+}
+
+export interface PublishScheduleResult {
+  path: string;
+  publishAt: string;
 }
 
 /* ---------- 命名生成器（S2；T1-8） ---------- */

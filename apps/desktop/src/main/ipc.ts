@@ -132,6 +132,11 @@ import {
   type GitStatePayload,
   type TreeEntry,
   type WorldSummary,
+  type PublishBoardPayload,
+  type PublishSchedulePayload,
+  type PublishScheduleResult,
+  type PublishSetStatusPayload,
+  type PublishSetStatusResult,
 } from "../shared/ipc.js";
 import { PathSafetyError, ProjectGateway } from "./file-gateway.js";
 import {
@@ -184,6 +189,7 @@ import { buildFixedBody, readProofreadPanel } from "./text-ops.js";
 import { buildClipboardResult, previewExport, runExport } from "./export-ops.js";
 import { previewBible, runBibleExport } from "./bible-ops.js";
 import { previewPov, setChapterPov, writePovConfig } from "./pov-ops.js";
+import { readPublishBoard, scheduleChapterPublish, setChapterPublishStatus } from "./publish-ops.js";
 import { previewProjectExport, runProjectExport } from "./project-export.js";
 import { exportTargets } from "./export-gate.js";
 import { readIndexStatus, rebuildProjectIndex, searchProjectIndex } from "./index-ops.js";
@@ -718,6 +724,19 @@ export function registerIpcHandlers(): void {
   // 绑本章视角：只重写章 frontmatter 的 pov —— 正文的唯一写入口仍是 chapter:write
   ipcMain.handle(CHANNELS.povSetChapter, (_event, payload: PovSetChapterPayload) =>
     wrapWrite<PovSetChapterResult>(() => setChapterPov(requireGateway(), payload)),
+  );
+
+  // 发布状态机（M5/T5-6，R105）：看板**只读**——判定全在引擎，桌面端只负责读真源与画表
+  ipcMain.handle(CHANNELS.publishBoard, () =>
+    wrap<PublishBoardPayload>(() => readPublishBoard(requireGateway())),
+  );
+  // 改发布状态：**真源写**（章 frontmatter 的 status + config/publish.yaml 的留痕），走 wrapWrite
+  ipcMain.handle(CHANNELS.publishSetStatus, (_event, payload: PublishSetStatusPayload) =>
+    wrapWrite<PublishSetStatusResult>(() => setChapterPublishStatus(requireGateway(), payload)),
+  );
+  // 设定 / 清除定时发布：**真源写**（章 frontmatter 的 publish_at），走 wrapWrite
+  ipcMain.handle(CHANNELS.publishSchedule, (_event, payload: PublishSchedulePayload) =>
+    wrapWrite<PublishScheduleResult>(() => scheduleChapterPublish(requireGateway(), payload)),
   );
 
   // 干净剪贴板：文本在主进程生成并写入系统剪贴板（渲染层只拿统计与预览）

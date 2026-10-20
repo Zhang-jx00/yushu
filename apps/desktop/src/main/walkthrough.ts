@@ -4512,6 +4512,141 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 67,
+    title: '发布状态机：标记已发布 → 盘上状态变了且台账留痕，退回草稿 → 又变回去；定时到点进提醒队列（M5/T5-6，R105）',
+    file: 'step67-publish-state.png',
+    body: String.raw`
+      // 这一步要证「发布状态机」在界面上是通的，而且**两个方向都动**：
+      // ① 写入口：标记已发布 ⇒ **盘上**那章的 frontmatter status 真的变了（盘上核对，不信界面数字），
+      //    且台账多了一条留痕（I01 §5「回退记录留痕」）；
+      // ② 反向：退回草稿 ⇒ 盘上又变回 draft。只验"能改成已发布"分不清"真写了"与"界面骗人"；
+      // ③ **非法迁移（草稿 → 修订中）按钮是禁用的**，理由来自引擎的迁移矩阵
+      //    （渲染层不自己抄一份迁移表——抄一份就会漂移，漂出来的按钮点下去只会被引擎拒）；
+      // ④ 定时发布：设一个已过的时刻 ⇒ 进提醒队列，且面板上必须写明"只是本地提醒，不代替平台发布"；
+      //    清除定时 ⇒ 提醒消失。
+      await tab('稿件总览');
+      const toggle = await waitFor(() => {
+        const t = [...document.querySelectorAll('.disclosure-toggle')].find((x) => String(x.textContent).indexOf('发布状态') >= 0);
+        return t || null;
+      }, 10000);
+      if (toggle === null) return { ok: false, note: '总览页没有「发布状态」折叠区：' + pageText().slice(0, 140) };
+      // 折叠区点击要幂等：重试时上一轮可能已经展开了（再点一次会把它关掉）
+      if (String(toggle.closest('.disclosure').className).indexOf('open') < 0) {
+        toggle.click();
+        await sleep(320);
+      }
+      const panel = await waitFor(() => document.querySelector('.publish-panel'), 20000);
+      if (panel === null) return { ok: false, note: '展开后没有发布状态面板' };
+      const picker = await waitFor(() => {
+        const sel = panel.querySelector('select');
+        return sel !== null && sel.options.length > 0 ? sel : null;
+      }, 20000);
+      if (picker === null) return { ok: false, note: '发布状态面板没有可选的章节' };
+      // 挑一章**当前是草稿**的：失败重试时上一轮可能已经把某章标成已发布了（写是真源，重试带得过去），
+      // 直接用第一项会撞上"初始状态不是 draft"——那不是产品缺陷，是夹具必须挑对对象。
+      const draftOption = [...picker.options].find((o) => String(o.textContent).indexOf('（草稿 · ') >= 0);
+      if (draftOption === undefined) return { ok: false, note: '面板里没有处于草稿态的章节可选' };
+      const pickSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(picker), 'value').set;
+      pickSetter.call(picker, String(draftOption.value));
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(320);
+      const chapterId = String(picker.value);
+      const tree = await window.yushu.project.tree();
+      const entry = tree.find((item) => item.type === 'file' && String(item.path).endsWith('/' + chapterId + '.md'));
+      if (entry === undefined) return { ok: false, note: '项目树里找不到这一章的文件：' + chapterId };
+      const path = String(entry.path);
+      const readStatus = async () => {
+        const raw = await window.yushu.doc.read(path);
+        const m = /^status:\s*(\S+)/m.exec(String(raw.content));
+        return { status: m === null ? '(读不到)' : String(m[1]), content: String(raw.content) };
+      };
+      const chip = (label) => {
+        const list = [...panel.querySelectorAll('button')].filter((b) => String(b.textContent).indexOf(label) >= 0);
+        return list.length > 0 ? list[0] : null;
+      };
+      const reminderLine = () => {
+        const lines = [...panel.querySelectorAll('div')].filter((d) => String(d.textContent).indexOf('定时提醒') >= 0);
+        return lines.length > 0 ? String(lines[0].textContent) : '';
+      };
+      const reminderCount = () => {
+        const m = /(\d+)\s*条/.exec(reminderLine());
+        return m === null ? -1 : Number(m[1]);
+      };
+      const before = await readStatus();
+      if (before.status !== 'draft') return { ok: false, note: '这一章的初始状态不是 draft（' + before.status + '），本步无从验证' };
+
+      // ① 标记已发布
+      const publishBtn = chip('标记为已发布');
+      if (publishBtn === null) return { ok: false, note: '面板里没有「标记为已发布」按钮' };
+      if (publishBtn.disabled) return { ok: false, note: '「标记为已发布」按钮不可点' };
+      publishBtn.click();
+      const published = await waitFor(() => (panel.innerText.indexOf('草稿 → 已发布') >= 0 ? true : null), 20000);
+      if (published === null) return { ok: false, note: '点了「标记为已发布」但没有回执：' + panel.innerText.slice(0, 160) };
+      const afterPublish = await readStatus();
+      const statusOnDisk = afterPublish.status === 'published';
+      let ledgerOk = false;
+      const ledgerRaw = await window.yushu.doc.read('config/publish.yaml').catch(() => null);
+      if (ledgerRaw !== null) {
+        ledgerOk = String(ledgerRaw.content).indexOf('to: published') >= 0;
+      }
+
+      // ② 反向：退回草稿（回退也要留痕）
+      const backBtn = chip('退回草稿');
+      if (backBtn === null) return { ok: false, note: '面板里没有「退回草稿」按钮' };
+      backBtn.click();
+      const backed = await waitFor(() => (panel.innerText.indexOf('已发布 → 草稿') >= 0 ? true : null), 20000);
+      if (backed === null) return { ok: false, note: '点了「退回草稿」但没有回执：' + panel.innerText.slice(0, 160) };
+      const afterBack = await readStatus();
+      const backOnDisk = afterBack.status === 'draft';
+
+      // ③ 非法迁移：草稿 → 修订中 的按钮必须禁用，且理由挂在 title 上
+      const reviseBtn = chip('标记为修订中');
+      const reviseBlocked = reviseBtn !== null && reviseBtn.disabled === true;
+      const reviseReason = reviseBtn === null ? '' : String(reviseBtn.getAttribute('title') || '');
+      const reviseWhyOk = reviseReason.indexOf('修订') >= 0;
+
+      // ④ 定时发布：设一个已过的时刻 ⇒ 进提醒队列；清除 ⇒ 提醒消失
+      const atBox = await waitFor(() => panel.querySelector('input[type="datetime-local"]'), 10000);
+      if (atBox === null) return { ok: false, note: '面板里没有定时发布输入框' };
+      const past = new Date(Date.now() - 3600000);
+      const pad = (v) => String(v).padStart(2, '0');
+      const localValue = String(past.getFullYear()) + '-' + pad(past.getMonth() + 1) + '-' + pad(past.getDate()) +
+        'T' + pad(past.getHours()) + ':' + pad(past.getMinutes());
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(atBox), 'value').set;
+      setter.call(atBox, localValue);
+      atBox.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(200);
+      const setBtn = chip('设定定时');
+      if (setBtn === null) return { ok: false, note: '面板里没有「设定定时」按钮' };
+      setBtn.click();
+      const scheduled = await waitFor(() => (reminderCount() >= 1 ? true : null), 20000);
+      const countWhenDue = reminderCount();
+      const reminderText = reminderLine();
+      const reminderOk = reminderText.indexOf('只是本地提醒，不代替平台发布') >= 0;
+      const scheduledOnDisk = (await readStatus()).content.indexOf('publish_at') >= 0;
+      const clearBtn = chip('清除定时');
+      if (clearBtn === null) return { ok: false, note: '面板里没有「清除定时」按钮' };
+      clearBtn.click();
+      const cleared = await waitFor(() => (reminderCount() === 0 ? true : null), 20000);
+      const clearedOnDisk = (await readStatus()).content.indexOf('publish_at') < 0;
+
+      const target = [...panel.querySelectorAll('div')].find((d) => String(d.textContent).indexOf('台账留痕') >= 0);
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: statusOnDisk && ledgerOk && backOnDisk && reviseBlocked && reviseWhyOk &&
+          scheduled !== null && reminderOk && scheduledOnDisk && cleared !== null && clearedOnDisk,
+        note: '章 ' + chapterId + '：初始=' + before.status +
+          '；标记已发布→盘上=' + afterPublish.status + '；台账留了痕=' + ledgerOk +
+          '；退回草稿→盘上=' + afterBack.status +
+          '；非法迁移（草稿→修订中）禁用=' + reviseBlocked + '（理由=' + reviseReason.slice(0, 40) + '）' +
+          '；定时到点→提醒条数=' + countWhenDue + '；「只是本地提醒」在屏幕上=' + reminderOk +
+          '；盘上写了 publish_at=' + scheduledOnDisk + '；清除定时→提醒清零=' + (cleared !== null) +
+          '；盘上 publish_at 已清=' + clearedOnDisk,
+      };
+    `,
+  },
 ];
 
 /**
