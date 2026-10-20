@@ -26,4 +26,5 @@ export * from "./pov-check.js";
 export * from "./visibility-check.js";
 export * from "./opening-check.js";
 export * from "./gate-check.js";
+export * from "./import-split.js";
 export * from "./publish.js";

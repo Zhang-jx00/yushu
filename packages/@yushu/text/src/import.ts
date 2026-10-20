@@ -187,8 +187,18 @@ const CN_NUM = "0〇零一二三四五六七八九十百千万两";
 const VOLUME_RE = new RegExp(`^\\s*第\\s*[${CN_NUM}]+\\s*卷(?:\\s+\\S.{0,30})?\\s*$`);
 const CHAPTER_RE = new RegExp(`^\\s*第\\s*[${CN_NUM}]+\\s*[章节回](?:\\s+\\S.{0,40})?\\s*$|^\\s*(?:Chapter|CHAPTER)\\s+\\d+.{0,40}$`);
 
-/** 按章节标题切分；认不出标题就整篇交回去，不按字数硬切 */
-export function splitImportedChapters(text: string): SplitResult {
+/** 严筛：这一行是不是"确定的章标题"（窄正则；海选捞到的候选里，再用它分一次） */
+export function isStrictChapterTitle(line: string): boolean {
+  return CHAPTER_RE.test(line);
+}
+
+/**
+ * 装配：给定"章标题行"与"卷标题行"，切出章 / 楔子 / 卷提示。
+ *
+ * 严筛（正则）与 AI 筛（模型指认的行）**共用这一套装配逻辑**——
+ * 两处各写一遍，"预演看到的章"与"入库写出的章"就会对不上，而分章对账唯一的价值恰恰是拿两边比。
+ */
+function assembleSplit(text: string, titleLines: ReadonlySet<number>, volumeLines: ReadonlySet<number>): SplitResult {
   const lines = text.split("\n");
   if (text.trim() === "") {
     return { chapters: [], preamble: null, volumeHints: [], hardSplit: false, note: "空文本：没有可切的正文" };
@@ -198,13 +208,15 @@ export function splitImportedChapters(text: string): SplitResult {
   const preambleLines: string[] = [];
   let current: { title: string; body: string[] } | null = null;
 
-  for (const line of lines) {
-    if (VOLUME_RE.test(line)) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const lineNo = index + 1;
+    if (volumeLines.has(lineNo)) {
       // 卷标题先判：`卷` 不在章的字符类里，避免"第一卷 风起"被当成一章
       volumeHints.push(line.trim());
       continue;
     }
-    if (CHAPTER_RE.test(line)) {
+    if (titleLines.has(lineNo)) {
       if (current !== null) chapters.push({ title: current.title, body: current.body.join("\n").trim() });
       current = { title: line.trim(), body: [] };
       continue;
@@ -231,4 +243,349 @@ export function splitImportedChapters(text: string): SplitResult {
     hardSplit: true,
     note: null,
   };
+}
+
+/** 按章节标题切分；认不出标题就整篇交回去，不按字数硬切 */
+export function splitImportedChapters(text: string): SplitResult {
+  const lines = text.split("\n");
+  const titleLines = new Set<number>();
+  const volumeLines = new Set<number>();
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const lineNo = index + 1;
+    if (VOLUME_RE.test(line)) {
+      volumeLines.add(lineNo);
+      continue;
+    }
+    if (CHAPTER_RE.test(line)) titleLines.add(lineNo);
+  }
+  return assembleSplit(text, titleLines, volumeLines);
+}
+
+/**
+ * 按**指定行**切章（AI 筛选后用；行号来自海选候选，1 起）。
+ *
+ * 与严筛共用装配逻辑 ⇒ 同一份正文、同一份装配，预演与入库必然对得上。
+ * 行号越界或倒序 ⇒ 一律忽略（模型给的行号不可信），不静默改切法。
+ */
+export function splitImportedChaptersAt(text: string, titleLines: readonly number[]): SplitResult {
+  const total = text.split("\n").length;
+  const valid = titleLines.filter((line) => Number.isInteger(line) && line >= 1 && line <= total);
+  const ordered = [...new Set(valid)].sort((a, b) => a - b);
+  const lines = text.split("\n");
+  const volumeLines = new Set<number>();
+  for (let index = 0; index < lines.length; index += 1) {
+    if (VOLUME_RE.test(lines[index] ?? "")) volumeLines.add(index + 1);
+  }
+  return assembleSplit(text, new Set(ordered), volumeLines);
+}
+
+/* ---------------- 第二段：海选候选 / 误切检测 / 人工校正（R107，I09 §3.4 与 §3.5） ---------------- */
+
+/**
+ * **海选**（I09 §3.4 的前半段「规则海选」）：比严筛（上面的 `CHAPTER_RE`）宽一档的
+ * "这行像不像章节标题"。宽出来的部分正是**严筛认不准**的地方——带方括号 / 冒号 / 全角空格
+ * 的章标题、以及被误当成标题的一整段正文。
+ *
+ * 为什么要两段：正则一刀切下去，"认不准"与"真不是标题"分不开——
+ * 直接按正则切，切错的地方作者只能整篇弃用；先海选、再让 AI（或作者）筛，
+ * 切错的地方能逐条指出来。
+ */
+export interface ChapterCandidate {
+  /** 行号（1 起）：AI 只能指认这些行，别的行一律丢弃 */
+  line: number;
+  /** 该行原文（trim 后） */
+  text: string;
+  /** 命中的规则 id（便于报告"这行是被哪条规则捞出来的"） */
+  rule: string;
+}
+
+/** 海选规则包：逐条放宽，**命中第一条就停**（规则有先后，宽的在前） */
+const CANDIDATE_RULES: Array<{ id: string; re: RegExp }> = [
+  // 【第一章 起】/ [第二章 承] / 《第三章 转》——书名号与方括号里也是章标题
+  { id: "cn-chapter-bracket", re: /^\s*[【\[《]\s*第\s*[0-9〇零一二三四五六七八九十百千万两]+\s*[章节回]/ },
+  // 第一章 / 第 3 章 / 第十二章 夜探藏经阁 / 第二章：承
+  { id: "cn-chapter", re: /^\s*第\s*[0-9〇零一二三四五六七八九十百千万两]+\s*[章节回]/ },
+  // Chapter 7 / CHAPTER 8
+  { id: "en-chapter", re: /^\s*(?:Chapter|CHAPTER)\s+\d+/ },
+];
+
+export function findChapterCandidates(text: string): ChapterCandidate[] {
+  const out: ChapterCandidate[] = [];
+  const lines = text.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (line.trim() === "") continue;
+    for (const rule of CANDIDATE_RULES) {
+      if (rule.re.test(line)) {
+        out.push({ line: index + 1, text: line.trim(), rule: rule.id });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** 中文数字 → 阿拉伯数字（认不出的字返回 null，不硬编一个号出来） */
+function cnNumber(text: string): number | null {
+  if (/^\d+$/.test(text)) return Number(text);
+  const digits: Record<string, number> = {
+    〇: 0, 零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+  };
+  let total = 0;
+  let section = 0;
+  let current = 0;
+  let seen = false;
+  for (const ch of text) {
+    if (ch in digits) {
+      current = digits[ch] ?? 0;
+      seen = true;
+      continue;
+    }
+    if (ch === "十") {
+      section += (current === 0 ? 1 : current) * 10;
+      current = 0;
+      seen = true;
+      continue;
+    }
+    if (ch === "百") {
+      section += (current === 0 ? 1 : current) * 100;
+      current = 0;
+      seen = true;
+      continue;
+    }
+    if (ch === "千") {
+      section += (current === 0 ? 1 : current) * 1000;
+      current = 0;
+      seen = true;
+      continue;
+    }
+    if (ch === "万") {
+      total += (section + current) * 10000;
+      section = 0;
+      current = 0;
+      seen = true;
+      continue;
+    }
+    return null;
+  }
+  if (!seen) return null;
+  return total + section + current;
+}
+
+/** 从标题里解析章号（"第十二章 夜探藏经阁" → 12）；不是章标题返回 null */
+export function chapterTitleNumber(title: string): number | null {
+  const text = title.trim();
+  const cn = /第\s*([0-9〇零一二三四五六七八九十百千万两]+)\s*[章节回]/.exec(text);
+  if (cn !== null) return cnNumber(cn[1] ?? "");
+  const en = /(?:Chapter|CHAPTER)\s+(\d+)/.exec(text);
+  if (en !== null) return Number(en[1]);
+  return null;
+}
+
+/** 误切的三类校验（I09 §3.5） */
+export type MiscutCode = "chapter-index-gap" | "chapter-title-too-long" | "chapter-length-outlier";
+
+export interface MiscutIssue {
+  code: MiscutCode;
+  message: string;
+}
+
+export interface MiscutRow {
+  /** 章在预演清单里的序号（0 起，与界面列表一致） */
+  index: number;
+  title: string;
+  chars: number;
+  issues: MiscutIssue[];
+}
+
+/** 标题长度上限：与严筛自己的 40 字上限同档（超过就"像是一段正文被当成了标题"） */
+const TITLE_LENGTH_LIMIT = 40;
+/** 字数离群的倍数（中位数的 1/5 与 5 倍之外） */
+const LENGTH_OUTLIER_FACTOR = 5;
+/** 字数离群判定所需的最小样本数（章太少时不下结论——两章时必然"异常"） */
+const LENGTH_OUTLIER_MIN_SAMPLES = 3;
+
+/**
+ * 误切检测（I09 §3.5）：章号连续性 / 标题长度 / 章节字数分布三类校验。
+ *
+ * 三条口径：
+ * ① **章号连续性按"上一条解析出的号"比**，不按位置比——从第 5 章开始的节选不是错切，
+ *    位置比对会把它误报成"断号"；
+ * ② **字数离群在样本不足时不下结论**（少于 3 章不比）——两章时必然有一章"异常"；
+ * ③ **只报不改**：校正由作者显式做（合并 / 拆分 / 重排），工具不替作者改他的稿子。
+ */
+export function detectMiscuts(chapters: ReadonlyArray<{ title: string; chars: number }>): MiscutRow[] {
+  const rows: MiscutRow[] = [];
+  let previousNumber: number | null = null;
+  const counts = chapters.map((item) => item.chars).sort((a, b) => a - b);
+  const median =
+    counts.length === 0
+      ? 0
+      : counts.length % 2 === 1
+        ? (counts[(counts.length - 1) / 2] ?? 0)
+        : ((counts[counts.length / 2 - 1] ?? 0) + (counts[counts.length / 2] ?? 0)) / 2;
+
+  for (let index = 0; index < chapters.length; index += 1) {
+    const item = chapters[index];
+    if (item === undefined) continue;
+    const issues: MiscutIssue[] = [];
+    const number = chapterTitleNumber(item.title);
+    if (number !== null) {
+      if (previousNumber !== null && number !== previousNumber + 1) {
+        issues.push({
+          code: "chapter-index-gap",
+          message:
+            number === previousNumber
+              ? `章号重复：上一章是第 ${String(previousNumber)} 章，这章又是第 ${String(number)} 章（可能同一章被切了两次）`
+              : `章号不连续：上一章是第 ${String(previousNumber)} 章，这章是第 ${String(number)} 章（中间少了章，或顺序错了）`,
+        });
+      }
+      previousNumber = number;
+    }
+    if (item.title.length > TITLE_LENGTH_LIMIT) {
+      issues.push({
+        code: "chapter-title-too-long",
+        message: `标题 ${String(item.title.length)} 字，超过 ${String(TITLE_LENGTH_LIMIT)} 字：像是一段正文被当成了标题`,
+      });
+    }
+    if (counts.length >= LENGTH_OUTLIER_MIN_SAMPLES && median > 0) {
+      const low = median / LENGTH_OUTLIER_FACTOR;
+      const high = median * LENGTH_OUTLIER_FACTOR;
+      if (item.chars < low || item.chars > high) {
+        issues.push({
+          code: "chapter-length-outlier",
+          message: `本章 ${String(item.chars)} 字，与全书中位数 ${String(median)} 字差了一个量级：可能切错了`,
+        });
+      }
+    }
+    if (issues.length > 0) rows.push({ index, title: item.title, chars: item.chars, issues });
+  }
+  return rows;
+}
+
+/** 人工校正的四种动作（I09 §3.5 的「合并 / 拆分 / 重排」） */
+export type ImportCorrection =
+  | { kind: "merge"; at: number }
+  /**
+   * `line` 是**该章正文里**的行号（1 起），不是原稿行号——两者差着一个首尾空行的偏移。
+   *
+   * `title` 是新章的标题（作者点的那一行本身）——不给就退回「（续）」。
+   */
+  | { kind: "split"; at: number; line: number; title?: string }
+  | { kind: "move"; from: number; to: number };
+
+/**
+ * 把**原稿行号**解析成「第几章 + 该章正文里的第几行」。
+ *
+ * 为什么要换算：章正文在装配时 trim 过（首尾空行被去掉），原稿行号与正文行号差着一个偏移；
+ * 直接拿原稿行号当正文行号切，切点会落在**错误的句子上**——切错的地方作者最难发现
+ * （章还在、字数还对，只有内容错位）。
+ *
+ * 三条口径：
+ * ① 切点**不能是章标题本身**（那已经是边界了，再切一刀等于多出一个空章）；
+ * ② 切点**必须在第一章之后**（第一章之前是楔子，不属于任何一章）；
+ * ③ 切点**必须前后都留得住**：章正文的第一行切了前半章是空的、最后一行切了后半章是空的
+ *    ⇒ 一律返回 null，由调用点如实说"切不开"，不硬切一刀。
+ */
+export function resolveSourceLine(
+  text: string,
+  boundaries: readonly number[],
+  line: number,
+): { chapterIndex: number; bodyLine: number } | null {
+  const lines = text.split("\n");
+  const sorted = [...new Set(boundaries)].sort((a, b) => a - b);
+  if (sorted.length === 0 || !Number.isInteger(line) || line < 1) return null;
+  let chapterIndex = -1;
+  for (let index = 0; index < sorted.length; index += 1) {
+    const boundary = sorted[index];
+    if (boundary !== undefined && boundary <= line) chapterIndex = index;
+  }
+  if (chapterIndex < 0) return null; // 楔子里：不属于任何一章
+  const start = sorted[chapterIndex] ?? 0;
+  if (start === line) return null; // 这一行就是章标题：已经是边界了
+  const end = sorted[chapterIndex + 1] ?? lines.length + 1;
+  // 首尾空行在装配时被 trim 掉了：先数掉首部空行，正文行号才与原稿行号对得上
+  let leading = 0;
+  for (let probe = start + 1; probe < end; probe += 1) {
+    if ((lines[probe - 1] ?? "").trim() === "") leading += 1;
+    else break;
+  }
+  let trailing = 0;
+  for (let probe = end - 1; probe > start; probe -= 1) {
+    if ((lines[probe - 1] ?? "").trim() === "") trailing += 1;
+    else break;
+  }
+  const bodyCount = end - start - 1 - leading - trailing;
+  const bodyLine = line - start - leading;
+  // 切点那一行要**当新章的标题**（不留在正文里），所以它前面得留得住一行、后头也得留得住一行
+  if (bodyLine < 2 || bodyLine >= bodyCount) return null;
+  return { chapterIndex, bodyLine };
+}
+
+/**
+ * 按作者的校正改切分结果。
+ *
+ * 四条口径：
+ * ① **不合入参**：返回新数组，原数组原样（作者可以撤销重来）；
+ * ② **越界的指令被忽略**，不炸也不改内容——作者点了不该点的按钮不该毁掉整篇预演；
+ * ③ **拆分的那一行成为新章的标题**（作者点的是"这行其实是章标题"）：
+ *    给的 `title` 就是它；没给才退回「（续）」——章号本来就不可靠
+ *    （这正是误切检测要报的东西），标出来让作者看见。
+ */
+export function applyImportCorrections(
+  chapters: readonly ImportedChapter[],
+  corrections: readonly ImportCorrection[],
+): ImportedChapter[] {
+  let current = chapters.map((item) => ({ title: item.title, body: item.body }));
+  for (const correction of corrections) {
+    if (correction.kind === "merge") {
+      const at = correction.at;
+      if (!Number.isInteger(at) || at < 0 || at + 1 >= current.length) continue;
+      const first = current[at];
+      const second = current[at + 1];
+      if (first === undefined || second === undefined) continue;
+      const merged: ImportedChapter = {
+        title: first.title,
+        body: second.body === "" ? first.body : `${first.body}\n${second.body}`,
+      };
+      current = [...current.slice(0, at), merged, ...current.slice(at + 2)];
+      continue;
+    }
+    if (correction.kind === "split") {
+      const at = correction.at;
+      if (!Number.isInteger(at) || at < 0 || at >= current.length) continue;
+      const target = current[at];
+      if (target === undefined) continue;
+      const lines = target.body.split("\n");
+      // `line` 是**该章正文内**的行号（1 起）：原稿行号要先过 `resolveSourceLine` 换算，
+      // 拿原稿行号直接切会切在错误的句子上。
+      const line = correction.line;
+      if (!Number.isInteger(line) || line < 1 || line > lines.length) continue;
+      // 切点那一行**当新章的标题**（不留在正文里），前后的正文各归各的
+      const head = lines.slice(0, line - 1).join("\n").trim();
+      const tail = lines.slice(line).join("\n").trim();
+      if (head === "" || tail === "") continue;
+      const title = correction.title !== undefined && correction.title.trim() !== ""
+        ? correction.title.trim()
+        : `${target.title}（续）`;
+      current = [
+        ...current.slice(0, at),
+        { title: target.title, body: head },
+        { title, body: tail },
+        ...current.slice(at + 1),
+      ];
+      continue;
+    }
+    if (correction.kind === "move") {
+      const from = correction.from;
+      const to = correction.to;
+      if (!Number.isInteger(from) || !Number.isInteger(to)) continue;
+      if (from < 0 || from >= current.length || to < 0 || to >= current.length) continue;
+      const [moved] = current.splice(from, 1);
+      if (moved === undefined) continue;
+      current.splice(to, 0, moved);
+    }
+  }
+  return current;
 }
