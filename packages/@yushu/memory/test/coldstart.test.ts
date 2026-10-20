@@ -1,6 +1,11 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from "vitest";
-import { planColdStart, type ColdStartTarget } from "../src/coldstart.js";
+import {
+  planBatchAgainstBudget,
+  planColdStart,
+  type ColdStartBatchEstimate,
+  type ColdStartTarget,
+} from "../src/coldstart.js";
 
 /**
  * 冷启动记忆衔接（M5 / T5-9，R95）：长篇项目导入后"开场即失忆"的量化与待补批次。
@@ -22,6 +27,24 @@ function target(overrides: Partial<ColdStartTarget> = {}): ColdStartTarget {
     summaryRev: 0,
     ...overrides,
   };
+}
+
+/**
+ * 批量补摘要的**预算护栏联动**（R106）。
+ *
+ * 判据回源 **J09 §3.3**：「生成前成本预估 → 续写/批量任务弹"预计消耗 ¥x / N tokens"，
+ * **超预算需用户确认**（低成本护栏）」；**J09 §3.5**：摘要回填是 batch_eligible 任务；
+ * **J09 §3.8**：「本地端点标注"零成本"」。
+ *
+ * 三条要紧的口径：
+ * ① **没设月度上限就不拦**（不设限就是不限）——但**要报预估**（作者有权知道要花多少）；
+ * ② **算不出金额 ≠ 零成本**：云端 provider 没配单价是"算不出"，本地端点才是真的 0。
+ *    算不出时**不能当 0 算**（那会让上限形同虚设），而且**护栏对这几条无效 ⇒ 必须显式确认**；
+ * ③ **超预算要显式确认，不自动拦停**（J09 §3.3 说的是"需用户确认"）——
+ *    拦停是策略变更，得作者在场决定。
+ */
+function estimate(overrides: Partial<ColdStartBatchEstimate> = {}): ColdStartBatchEstimate {
+  return { id: "ch-001", promptTokens: 1200, cost: 0.02, currency: "CNY", ...overrides };
 }
 
 /** 两卷：卷一 3 章（首章已补）、卷二 2 章；卷摘要都没补；卷二末章正文为空 */
@@ -114,5 +137,112 @@ describe("冷启动批次（先补哪几条）", () => {
     expect(shuffled.noMaterial).toBe(forward.noMaterial);
     // 批次顺序跟着输入走：主进程给的是大纲序，那才是作者认定的顺序
     expect(shuffled.batch.map((item) => item.id)).not.toEqual(forward.batch.map((item) => item.id));
+  });
+});
+
+describe("批量补摘要的预算护栏联动（J09 §3.3 / §3.5 / §3.8）", () => {
+  const batch: ColdStartTarget[] = [
+    target({ layer: "volume_summary", id: "vol-1", title: "第一卷·起", volumeId: "vol-1", sourceChars: 3600 }),
+    target({ id: "ch-002", title: "第2章 后事", volumeId: "vol-1", sourceChars: 1200 }),
+    target({ id: "ch-003", title: "第3章 转折", volumeId: "vol-1", sourceChars: 1200 }),
+  ];
+
+  it("没设月度上限 ⇒ 不拦，但**要报预估**（作者有权知道这批要花多少）", () => {
+    const decision = planBatchAgainstBudget({
+      batch,
+      estimates: [estimate({ id: "vol-1" }), estimate({ id: "ch-002" }), estimate({ id: "ch-003" })],
+      spentThisMonth: {},
+      budget: null,
+    });
+    expect(decision.ids).toEqual(["vol-1", "ch-002", "ch-003"]);
+    expect(decision.needsConfirm).toBe(false);
+    expect(decision.estimatedCost).toBeCloseTo(0.06, 10);
+    expect(decision.estimatedTokens).toBe(3600);
+    expect(decision.reason).toContain("未设月度上限");
+  });
+
+  it("跑完这批会超月度上限 ⇒ 需要显式确认（超预算不是自动拦停）", () => {
+    const decision = planBatchAgainstBudget({
+      batch,
+      estimates: [estimate({ id: "vol-1" }), estimate({ id: "ch-002" }), estimate({ id: "ch-003" })],
+      spentThisMonth: { CNY: 0.95 },
+      budget: { monthlyCap: 1, currency: "CNY" },
+    });
+    expect(decision.needsConfirm).toBe(true);
+    expect(decision.ids).toHaveLength(3);
+    expect(decision.projected["CNY"]).toBeCloseTo(1.01, 10);
+    expect(decision.reason).toContain("月度上限");
+  });
+
+  it("本批用不完上限 ⇒ 不需要确认", () => {
+    const decision = planBatchAgainstBudget({
+      batch,
+      estimates: [estimate({ id: "vol-1" }), estimate({ id: "ch-002" }), estimate({ id: "ch-003" })],
+      spentThisMonth: { CNY: 0.1 },
+      budget: { monthlyCap: 10, currency: "CNY" },
+    });
+    expect(decision.needsConfirm).toBe(false);
+    expect(decision.projected["CNY"]).toBeCloseTo(0.16, 10);
+  });
+
+  it("单条预估超单次确认阈值 ⇒ 需要显式确认（J09 的 per_call_confirm_over）", () => {
+    const decision = planBatchAgainstBudget({
+      batch,
+      estimates: [estimate({ id: "vol-1", cost: 0.5 }), estimate({ id: "ch-002" }), estimate({ id: "ch-003" })],
+      spentThisMonth: {},
+      budget: { perCallConfirmOver: 0.1, currency: "CNY" },
+    });
+    expect(decision.needsConfirm).toBe(true);
+    expect(decision.reason).toContain("单次");
+  });
+
+  it("**算不出金额 ≠ 零成本**：没配单价的条目不进金额合计，而且护栏对它们无效 ⇒ 必须显式确认", () => {
+    const decision = planBatchAgainstBudget({
+      batch,
+      estimates: [
+        estimate({ id: "vol-1", cost: null }),
+        estimate({ id: "ch-002", cost: 0.02 }),
+        estimate({ id: "ch-003", cost: 0.02 }),
+      ],
+      spentThisMonth: { CNY: 0 },
+      budget: { monthlyCap: 10, currency: "CNY" },
+    });
+    expect(decision.unpricedIds).toEqual(["vol-1"]);
+    expect(decision.estimatedCost).toBeCloseTo(0.04, 10);
+    expect(decision.needsConfirm).toBe(true);
+    expect(decision.reason).toContain("算不出金额");
+  });
+
+  it("本地端点零成本（真的 0）⇒ 不用确认，也不算成「算不出」", () => {
+    const decision = planBatchAgainstBudget({
+      batch,
+      estimates: [estimate({ id: "vol-1", cost: 0 }), estimate({ id: "ch-002", cost: 0 }), estimate({ id: "ch-003", cost: 0 })],
+      spentThisMonth: {},
+      budget: { monthlyCap: 1, currency: "CNY" },
+    });
+    expect(decision.estimatedCost).toBe(0);
+    expect(decision.unpricedIds).toEqual([]);
+    expect(decision.needsConfirm).toBe(false);
+  });
+
+  it("临近上限（warn_ratio）⇒ 不拦，但结论里要点名到了百分之几", () => {
+    const decision = planBatchAgainstBudget({
+      batch,
+      estimates: [estimate({ id: "vol-1" }), estimate({ id: "ch-002" }), estimate({ id: "ch-003" })],
+      spentThisMonth: { CNY: 0.75 },
+      budget: { monthlyCap: 1, warnRatio: 0.8, currency: "CNY" },
+    });
+    expect(decision.needsConfirm).toBe(false);
+    expect(decision.reason).toContain("临近");
+  });
+
+  it("同一输入两次调用逐字一致（不读墙钟、不带随机）", () => {
+    const input = {
+      batch,
+      estimates: [estimate({ id: "vol-1" }), estimate({ id: "ch-002" })],
+      spentThisMonth: { CNY: 0.1 },
+      budget: { monthlyCap: 1, currency: "CNY" },
+    };
+    expect(JSON.stringify(planBatchAgainstBudget(input))).toBe(JSON.stringify(planBatchAgainstBudget(input)));
   });
 });

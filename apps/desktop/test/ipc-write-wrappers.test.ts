@@ -78,6 +78,10 @@ const NON_WRITE_CHANNELS = [
   "bibleRun",
   // R101 迁移包导出：写的是**项目外**用户选的目录，本项目真源与索引都不动 ⇒ 不走 wrapWrite（密钥剥离与复扫由自身判据钉）
   "projectExportRun",
+  // R106 批量补摘要候选：**只发请求、只产候选**，真源一个字节不动（写库要走 memory:saveSummary，
+  // 那条在写清单里）⇒ 走只读包装器是有意的。
+  // 顺带说明它为什么仍属"只读"：AI 用量落的是 `.yushu/ai-usage.jsonl`（派生物，与其它 AI 通道同类）。
+  "memorySummarizeBatch",
 ] as const;
 
 /** 解析每个 `ipcMain.handle(CHANNELS.x, …)` 块，返回通道 → 所用包装器 */
