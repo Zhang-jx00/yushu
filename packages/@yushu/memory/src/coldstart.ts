@@ -109,3 +109,171 @@ export function planColdStart(input: {
     stillMissing: ordered.length - batch.length,
   };
 }
+
+/* ---------------- 批量补摘要的预算护栏联动（R106） ---------------- */
+
+/**
+ * 预算护栏（结构性参数；调用方从 `config/budget.yaml` 映射过来）。
+ *
+ * 这里**不 import `@yushu/llm`**：记忆包只依赖 `@yushu/core`（见 package.json），
+ * 而预算配置的解析与校验属于 LLM 包那一边。两边共用**数值口径**，不共用类型。
+ */
+export interface ColdStartBatchBudget {
+  /** 月度上限（金额，单位见 currency）；缺省 = 不设预算 */
+  monthlyCap?: number;
+  /** 单次调用预估超过该值需用户确认（J09 `per_call_confirm_over`） */
+  perCallConfirmOver?: number;
+  /** 临近上限的比例阈值（缺省 0.8） */
+  warnRatio?: number;
+  currency?: string;
+}
+
+/**
+ * 一条候选的预估（调用方给）。
+ *
+ * **金额是 `number | null`，null 表示「算不出来」**——云端 provider 没配单价就是算不出来。
+ * 它**不是 0**：拿 0 冒充会让月度上限形同虚设（那是最坏的静默）。
+ * 真的 0 是本地端点那种情形（J09 §3.8「本地端点标注零成本」），由调用方如实给 0。
+ */
+export interface ColdStartBatchEstimate {
+  id: string;
+  /** 预估 prompt token（面板看"这批大概多少 token"） */
+  promptTokens: number;
+  /** 预估金额；null = 算不出来（没配单价），不是 0 */
+  cost: number | null;
+  currency: string;
+}
+
+export interface ColdStartBatchDecision {
+  /** 这一批要跑哪些（按 batch 顺序：卷摘要在前） */
+  ids: string[];
+  /** 预估 token 合计 */
+  estimatedTokens: number;
+  /** 预估金额合计（**只算算得出来的**；算不出的不按 0 计入） */
+  estimatedCost: number;
+  /** 金额算不出来的条目 id（不参与上限计算，但要说明） */
+  unpricedIds: string[];
+  /** 跑完这批之后本月已用（按币种） */
+  projected: Record<string, number>;
+  /** 需要作者显式确认（超月度上限 / 单次超阈值 / 有条目算不出金额） */
+  needsConfirm: boolean;
+  /** 触发确认的理由（逐条，面板直接显示） */
+  confirmReasons: string[];
+  /** 只是提醒、不需要作者点头的事（未设上限 / 临近上限） */
+  warnings: string[];
+  /** 一句话结论（面板显示） */
+  reason: string;
+}
+
+/**
+ * 批量补摘要的**生成前成本预估 + 超预算确认**（J09 §3.3）。
+ *
+ * 四条口径：
+ * ① **没设月度上限就不拦**（不设限就是不限），但**必须报预估**——作者有权知道这批要花多少；
+ * ② **算不出金额 ≠ 零成本**：算不出的条目不进金额合计，而且**护栏对它们无效** ⇒ 必须显式确认
+ *    （不能默认"反正算不出来就当免费"）；
+ * ③ **超预算是"需用户确认"，不是自动拦停**（J09 §3.3 原话）——拦停是策略变更，得作者在场决定；
+ * ④ **单次超阈值只针对那一条**（`per_call_confirm_over` 是单次口径，不是整批口径）。
+ */
+export function planBatchAgainstBudget(input: {
+  batch: ColdStartTarget[];
+  estimates: ColdStartBatchEstimate[];
+  /** 本自然月已发生金额（按币种） */
+  spentThisMonth: Record<string, number>;
+  budget: ColdStartBatchBudget | null;
+}): ColdStartBatchDecision {
+  const byId = new Map(input.estimates.map((item) => [item.id, item]));
+  const ids: string[] = [];
+  const unpricedIds: string[] = [];
+  const confirmReasons: string[] = [];
+  const warnings: string[] = [];
+  let estimatedTokens = 0;
+  let estimatedCost = 0;
+  const projected: Record<string, number> = {};
+
+  for (const target of input.batch) {
+    const estimate = byId.get(target.id);
+    ids.push(target.id);
+    if (estimate === undefined) continue;
+    estimatedTokens += estimate.promptTokens;
+    if (estimate.cost === null) {
+      unpricedIds.push(target.id);
+      continue;
+    }
+    estimatedCost += estimate.cost;
+    projected[estimate.currency] = (projected[estimate.currency] ?? 0) + estimate.cost;
+  }
+  for (const [currency, amount] of Object.entries(input.spentThisMonth)) {
+    projected[currency] = (projected[currency] ?? 0) + amount;
+  }
+
+  const budget = input.budget;
+  const cap = budget?.monthlyCap;
+  if (cap !== undefined) {
+    const currency = budget?.currency ?? Object.keys(projected)[0];
+    const spent = currency === undefined ? 0 : (projected[currency] ?? 0);
+    const ratio = spent / cap;
+    const warnRatio = budget?.warnRatio ?? 0.8;
+    if (ratio > 1) {
+      confirmReasons.push(
+        `本批跑完本月已用将达到 ${spent.toFixed(4)}，超过月度上限 ${cap}（${Math.round(ratio * 100)}%）`,
+      );
+    } else if (ratio >= warnRatio) {
+      // 临近只是**提醒**，不是要作者点头的事（J09 §3.3 的确认条件是"超预算"）
+      warnings.push(
+        `本批跑完本月已用将达到 ${spent.toFixed(4)}，是月度上限 ${cap} 的 ${Math.round(ratio * 100)}%（临近阈值 ${Math.round(warnRatio * 100)}%）`,
+      );
+    }
+  } else {
+    warnings.push("未设月度上限（config/budget.yaml）——本批不按金额设限");
+  }
+
+  const perCall = budget?.perCallConfirmOver;
+  if (perCall !== undefined) {
+    for (const target of input.batch) {
+      const estimate = byId.get(target.id);
+      if (estimate === undefined || estimate.cost === null) continue;
+      if (estimate.cost > perCall) {
+        confirmReasons.push(
+          `「${target.title}」这条预估 ${estimate.cost.toFixed(4)} 超过单次确认阈值 ${perCall}`,
+        );
+      }
+    }
+  }
+
+  if (unpricedIds.length > 0) {
+    confirmReasons.push(
+      `本批有 ${String(unpricedIds.length)} 条算不出金额（provider 没配单价）——护栏对这几条无效，需你确认`,
+    );
+  }
+
+  // 「未设月度上限」「临近上限」都只是**说明**，不需要作者点头：
+  // 没设限就不需要确认，临近也只是提醒（J09 §3.3 的确认条件是"超预算"）。
+  const needsConfirm = confirmReasons.length > 0;
+
+  const parts: string[] = [];
+  parts.push(`本批 ${String(ids.length)} 条，预估 ${String(estimatedTokens)} token`);
+  if (unpricedIds.length === 0) {
+    parts.push(`金额 ${estimatedCost.toFixed(4)} ${budget?.currency ?? ""}`.trim());
+  } else {
+    parts.push(
+      `已知金额 ${estimatedCost.toFixed(4)}（另有 ${String(unpricedIds.length)} 条算不出金额，不计入）`,
+    );
+  }
+  parts.push(...warnings);
+  if (needsConfirm) {
+    parts.push(`需显式确认：${confirmReasons.join("；")}`);
+  }
+
+  return {
+    ids,
+    estimatedTokens,
+    estimatedCost,
+    unpricedIds,
+    projected,
+    needsConfirm,
+    confirmReasons,
+    warnings,
+    reason: parts.join(" ｜ "),
+  };
+}
