@@ -38,6 +38,9 @@ export function ImportPanel() {
   const [confirmSingle, setConfirmSingle] = useState(false);
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<ImportApplyResultPayload | null>(null);
+  /** AI 筛选 / 人工校正（R107）：两者都只改计划，界面上的"分章预演"随之换新 */
+  const [aiBusy, setAiBusy] = useState(false);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     if (picked === null) return;
@@ -112,6 +115,56 @@ export function ImportPanel() {
   const needsConfirm = view !== null && !view.split.hardSplit;
   const canApply = view !== null && !busy && !applying && (!needsConfirm || confirmSingle);
 
+  /**
+   * AI 二次筛选切分（R107）：只改计划，不写盘。
+   *
+   * 回执原话直接显示——**回退到正则切分时必须让作者看见**，
+   * 不静默换一个算法（"看起来筛过了"与"其实没筛"差着一整个章节边界）。
+   */
+  const runAiSplit = async () => {
+    if (picked === null) return;
+    try {
+      setError("");
+      setAiBusy(true);
+      // 规则要一起带过去：清洗会删行，候选行号随规则变（少了这一步，AI 认的行会指错文字）
+      const result = await api().import.aiSplit({
+        ticket: picked.ticket,
+        ...(rules.length > 0 ? { rules } : {}),
+      });
+      setView(result.preview);
+      setNotice(result.note);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  /** 人工校正（合并 / 拆分 / 重排）：同样只改计划 */
+  const correct = async (
+    correction:
+      | { kind: "merge"; at: number }
+      | { kind: "split"; candidateIndex: number }
+      | { kind: "move"; from: number; to: number },
+  ) => {
+    if (picked === null) return;
+    try {
+      setError("");
+      setAiBusy(true);
+      const result = await api().import.correct({
+        ticket: picked.ticket,
+        correction,
+        ...(rules.length > 0 ? { rules } : {}),
+      });
+      setView(result.preview);
+      setNotice(result.note);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   const addRule = () => {
     const pattern = draft.trim();
     if (pattern === "") return;
@@ -138,6 +191,7 @@ export function ImportPanel() {
       </div>
 
       {error !== "" && <div className="error-text">{error}</div>}
+      {notice !== "" && <div className="muted import-note">{notice}</div>}
 
       {picked !== null && view === null && error === "" && <div className="muted">正在读字节并算报告…</div>}
 
@@ -272,6 +326,113 @@ export function ImportPanel() {
             )}
           </div>
 
+          {/* 第二段（R107，I09 §3.4 / §3.5）：AI 二次筛选切章 + 误切校正。
+              两件事都**只改计划**，不写盘——真源写仍是下面那条「确认入库」，
+              而且它用的是**同一份**计划（计划上下文跟着票据走），所以预演与入库必然对得上。 */}
+          <div className="import-block">
+            <div className="import-block-title">
+              切分复核：AI 二次筛选 + 误切校正
+              <span className="muted">（I09：规则海选 → AI 筛选；误切进人工校正清单）</span>
+            </div>
+            <div className="import-counts">
+              <span className="import-source">
+                切分来源：{view.ai.used ? `AI 筛过（${view.ai.provider_id} / ${view.ai.model}，保留 ${String(view.ai.kept)} 条）` : "正则切分"}
+              </span>
+              <span>疑似标题候选 {String(view.candidates.length)} 条</span>
+              <span>人工校正 {String(view.ai.corrections)} 处</span>
+            </div>
+            {view.ai.fallback !== "" && <div className="import-warn import-note">{view.ai.fallback}</div>}
+            {view.ai.rejected.length > 0 && (
+              <div className="import-warn import-note">AI 指认被丢弃 {String(view.ai.rejected.length)} 条：{view.ai.rejected.join("；")}</div>
+            )}
+            <div className="import-actions">
+              <button type="button" disabled={busy || picked === null} onClick={() => void runAiSplit()}>
+                {aiBusy ? "AI 正在筛…" : "AI 筛一遍切分"}
+              </button>
+              <span className="muted">
+                AI 只在候选里挑（越界的一律丢弃）；筛不出来就回退正则切分，并把理由写在这里。
+              </span>
+            </div>
+            {view.miscuts.length > 0 ? (
+              <>
+                <div className="import-warn import-note">
+                  检出 {String(view.miscuts.length)} 处疑似误切（章号连续性 / 标题长度 / 章节字数分布）——请逐条处置
+                </div>
+                <table className="slot-table import-table import-miscut-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>标题</th>
+                      <th>字数</th>
+                      <th>问题</th>
+                      <th>校正</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {view.miscuts.map((row) => (
+                      <tr key={`${String(row.index)}`}>
+                        <td className="import-num">{String(row.index + 1)}</td>
+                        <td>{row.title === "" ? "（无标题）" : row.title}</td>
+                        <td className="import-num">{String(row.chars)}</td>
+                        <td className="muted">{row.issues.map((issue) => issue.message).join("；")}</td>
+                        <td>
+                          <button
+                            type="button"
+                            disabled={busy || row.index === 0}
+                            onClick={() => void correct({ kind: "merge", at: row.index - 1 })}
+                          >
+                            与上一章合并
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy || row.index + 1 >= view.chapters.length}
+                            onClick={() => void correct({ kind: "merge", at: row.index })}
+                          >
+                            与下一章合并
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy || row.index + 1 >= view.chapters.length}
+                            onClick={() => void correct({ kind: "move", from: row.index, to: row.index + 1 })}
+                          >
+                            下移
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="muted import-note">
+                  合并有两个方向：「与上一章合并」把这一章并进前一章，「与下一章合并」把它并进后一章——
+                  章号不连续报在**断号后的那一章**上（第一章 → 第三章，断的是第三章那一行），
+                  所以这一行通常该「与上一章合并」。
+                </div>
+                <div className="muted import-note">
+                  拆章：在下面挑一个「疑似标题」行作为切点（作者点得到那行文字，才切得对）
+                </div>
+                <div className="import-actions">
+                  {view.candidates
+                    .filter((candidate) => !candidate.strict)
+                    .slice(0, 20)
+                    .map((candidate) => (
+                      <button
+                        key={String(candidate.index)}
+                        type="button"
+                        className="import-tag"
+                        disabled={busy}
+                        title={`第 ${String(candidate.line)} 行`}
+                        onClick={() => void correct({ kind: "split", candidateIndex: candidate.index })}
+                      >
+                        在「{candidate.text}」处切开
+                      </button>
+                    ))}
+                </div>
+              </>
+            ) : (
+              <div className="muted">没检出误切：章号连续、标题不长、字数分布均衡。</div>
+            )}
+          </div>
+
           <div className="import-block import-apply-block">
             <div className="import-block-title">确认入库</div>
             <div className="import-apply-row">
@@ -304,8 +465,8 @@ export function ImportPanel() {
           </div>
 
           <div className="import-boundary">
-            导入这条线还没做完的部分：AI 二次筛选切章、误切校正、实体抽取候选、可中断续跑
-            （对账已经做了，逐章比对预演字数与落盘字数）。
+            导入这条线还没做完的部分：实体抽取候选、可中断续跑
+            （对账已经做了，逐章比对预演字数与落盘字数；AI 二次筛选切章与误切校正已经在上面那段「切分复核」里）。
           </div>
         </>
       )}

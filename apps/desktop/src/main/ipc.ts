@@ -81,6 +81,9 @@ import {
   type IndexStatusPayload,
   type ImportApplyPayload,
   type ImportApplyResultPayload,
+type ImportAiSplitRequestPayload,
+type ImportCorrectRequestPayload,
+type ImportPlanResultPayload,
   type ImportPickPayload,
   type ImportPreviewPayload,
   type ImportPreviewRequestPayload,
@@ -168,6 +171,7 @@ import { relationGraphView } from "./graph-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
 import { applyImport, pickImportSource, previewImport } from "./import-ops.js";
+import { correctImportSplit, filterImportSplitByAi } from "./import-split-ops.js";
 import type { ProposalFile } from "@yushu/world-engine";
 
 /** 提案文件 → IPC 载荷：未决策条数在这里算，面板只负责显示（不在渲染层长出第二套判断） */
@@ -654,6 +658,17 @@ export function registerIpcHandlers(): void {
    */
   ipcMain.handle(CHANNELS.importApply, (_event, payload: ImportApplyPayload) =>
     wrapWrite<ImportApplyResultPayload>(() => applyImport(requireGateway(), payload)),
+  );
+
+  // AI 二次筛选切章（R107，I09 §3.4）：**只改计划、不写盘**（真源写仍是上面那条 import:apply），
+  // 所以与 preview 同一类——只读 wrap，并登记进写通道锁的 NON_WRITE 清单
+  ipcMain.handle(CHANNELS.importAiSplit, (_event, payload: ImportAiSplitRequestPayload) =>
+    wrap<ImportPlanResultPayload>(() => filterImportSplitByAi(requireGateway(), payload.ticket, payload)),
+  );
+
+  // 人工校正切分（R107，I09 §3.5）：同样**只改计划**（合并 / 拆分 / 重排），零写入
+  ipcMain.handle(CHANNELS.importCorrect, (_event, payload: ImportCorrectRequestPayload) =>
+    wrap<ImportPlanResultPayload>(() => correctImportSplit(requireGateway(), payload.ticket, payload)),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）

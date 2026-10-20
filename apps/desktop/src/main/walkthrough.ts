@@ -71,8 +71,7 @@ interface StepDef {
 
 const SCREENSHOT_REL_DIR = "docs/assets/m1-preview";
 
-/** T3-10 设定抽取 mock：抽取请求（系统提示含任务契约 id）返回固定候选——示例覆盖新增 / 补充 / 冲突三类 */
-const EXTRACT_MOCK_CANDIDATES = {
+/** T3-10 设定抽取 mock：抽取请求（系统提示含任务契约 id）返回固定候选——示例覆盖新增 / 补充 / 冲突三类 */const EXTRACT_MOCK_CANDIDATES = {
   candidates: [
     {
       type: "character",
@@ -123,6 +122,19 @@ const AUDIT_MOCK_ISSUES = {
   issues: [{ index: 0, kind: "hallucination", why: "该断言在设定库与出处记忆中均无支撑" }],
 };
 
+/**
+ * R107 导入·AI 二次筛选切分的 mock：从提示词里把候选序号抠出来，**只保留前两条**。
+ *
+ * 为什么要专门做这个：若 mock 一律回固定文本，这条链在预演里永远走"契约不过 ⇒ 回退正则"，
+ * **AI 真正筛过的那条路一次都跑不到**。这里让 mock 照着提示词里的候选作答，
+ * 预演才能验到"筛完章数变了"这件事。
+ */
+function splitFilterMock(raw: string): { keeps: { index: number; reason: string }[] } {
+  const indexes = [...raw.matchAll(/#(\d+)\s/g)].map((match) => Number(match[1])).filter((value) => Number.isInteger(value));
+  const kept = indexes.slice(0, 2);
+  return { keeps: kept.map((index) => ({ index, reason: "mock：保留前两条候选" })) };
+}
+
 export async function startMockOpenAI(
   delayMs = 2,
   options: MockOpenAIOptions = {},
@@ -152,7 +164,9 @@ export async function startMockOpenAI(
           ? JSON.stringify(EXTRACT_MOCK_CANDIDATES)
           : raw.includes("yushu.audit/consistency-sampling")
             ? JSON.stringify(AUDIT_MOCK_ISSUES)
-            : "非流式一次性回复";
+            : raw.includes("yushu.import/split_filter/v1")
+              ? JSON.stringify(splitFilterMock(raw))
+              : "非流式一次性回复";
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
@@ -369,21 +383,48 @@ export function buildScript(body: string): string {
 /** 没有章节标题的一份稿子：走"没切开 ⇒ 必须显式确认才允许整篇入库"那条分支 */
 const IMPORT_UI_FLAT = ["这是一段没有标题的正文。", "还是没标题，一直到最后。", "第三行也没有。"].join("\r\n");
 
+/**
+ * R107 用的"切错了"的稿子：故意留两处误切信号。
+ *
+ * ① **章号不连续**（第一章 → 第三章）：源稿自己跳了一章 ⇒ 误切检测的"章号连续性"该报；
+ * ② **章节字数离群**（第四章只有两个字）：中位数 20 多字，它只有 2 字 ⇒ "疑似切错"该报。
+ *
+ * 选它是为了让预演能真的验到误切清单——夹具若无其事，预演就只会验一张空表。
+ */
+const IMPORT_UI_MISCUT = [
+  "第一章 起",
+  "夜色压下来，林渊拔剑而起，天启界的夜色里有什么在等着他。",
+  "第三章 承",
+  "林渊走过长街，风从窗缝里灌进来，脚下的石板还是凉的。",
+  "第四章 转",
+  "停。",
+].join("\r\n");
+
 async function openImportDialogFixture(win: BrowserWindow): Promise<{ dir: string; restore(): Promise<void> }> {
   const dir = await fs.mkdtemp(join(tmpdir(), "yushu-import-ui-"));
   const utf8Path = join(dir, "旧稿-预演.txt");
   const gbkPath = join(dir, "旧稿-GBK.txt");
   const flatPath = join(dir, "旧稿-没标题.txt");
+  const miscutPath = join(dir, "旧稿-切错了.txt");
   await fs.writeFile(utf8Path, IMPORT_UI_TEXT, "utf8");
   await fs.writeFile(gbkPath, Buffer.from(IMPORT_UI_GBK));
   await fs.writeFile(flatPath, IMPORT_UI_FLAT, "utf8");
+  await fs.writeFile(miscutPath, IMPORT_UI_MISCUT, "utf8");
   const original = dialog.showOpenDialog;
   dialog.showOpenDialog = (async () => {
     const which = String(
       await win.webContents.executeJavaScript("window.__yushuPick || ''").catch(() => ""),
     );
     const picked =
-      which === "gbk" ? gbkPath : which === "utf8" ? utf8Path : which === "flat" ? flatPath : undefined;
+      which === "gbk"
+        ? gbkPath
+        : which === "utf8"
+          ? utf8Path
+          : which === "flat"
+            ? flatPath
+            : which === "miscut"
+              ? miscutPath
+              : undefined;
     return picked === undefined ? { canceled: true, filePaths: [] } : { canceled: false, filePaths: [picked] };
   }) as typeof dialog.showOpenDialog;
   return {
@@ -4705,6 +4746,108 @@ const STEPS: StepDef[] = [
         note: '批量候选=' + rows + ' 条；预算预检在屏幕上=' + budgetOk + '（' + budgetLine.slice(0, 70) + '）' +
           '；跑完候选后盘上摘要文件 ' + before + ' → ' + afterBatch + '（一个没多=' + notWritten + '）' +
           '；采纳一条→盘上摘要文件 ' + afterAdopt + '（比跑之前多 1=' + (afterAdopt === before + 1) + '）',
+      };
+    `,
+  },
+  {
+    step: 69,
+    title: '导入第二段：AI 筛一遍切分 → 章数变了；误切清单点名；人工合并后章数再变（M5/T5-7 第二段，R107）',
+    file: 'step69-import-split.png',
+    fixture: "import-dialog",
+    body: String.raw`
+      // 这一步要证「存量导入第二段」的两件事在界面上都真的接上了：
+      // ① **AI 二次筛选切分**（I09 §3.4）：点「AI 筛一遍切分」⇒ 切分来源变成 AI，
+      //    而且**章数真的变了**——只显示"AI 筛过了"不算数（那可能什么都没改）；
+      // ② **误切检测 + 人工校正**（I09 §3.5）：误切清单逐条点名，
+      //    点「与下一章合并」⇒ 章数再变（作者改的是计划，不是稿子）。
+      // 反向的牙：**盘上一个字节都没动**——这一段只改计划，真源写仍是「确认入库」那条通道。
+      await tab('稿件总览');
+      const toggle = await waitFor(() => {
+        const t = [...document.querySelectorAll('.disclosure-toggle')].find((x) => String(x.textContent).indexOf('导入存量稿件') >= 0);
+        return t || null;
+      }, 10000);
+      if (toggle === null) return { ok: false, note: '总览页没有「导入存量稿件」折叠区' };
+      // 折叠区点击要幂等（重试时上一轮可能已经展开了，再点一次会把它关掉）
+      if (String(toggle.closest('.disclosure').className).indexOf('open') < 0) {
+        toggle.click();
+        await sleep(320);
+      }
+      const chapterCount = async () => {
+        const el = [...document.querySelectorAll('.import-block-title')].find((d) => String(d.textContent).indexOf('分章预演') >= 0);
+        if (el === undefined) return -1;
+        const m = /分章预演：(\d+) 章/.exec(String(el.textContent));
+        return m === null ? -1 : Number(m[1]);
+      };
+      const aiSource = () => {
+        // 只读「切分来源」那一格：读整块 innerText 会把回退文案（"已回退到正则切分"）一起读进来，
+        // "含正则切分"就分不清是"这次是正则切的"还是"AI 筛了但回退了"。
+        // 标签「切分来源：」去掉——回执里会自己带上这个标签。
+        const el = document.querySelector('.import-source');
+        if (el === null) return '';
+        return String(el.textContent).replace(/\s+/g, ' ').replace(/^切分来源：/, '').trim();
+      };
+      const miscutRows = () => document.querySelectorAll('.import-miscut-table tbody tr').length;
+      // 选那份"切错了"的稿子（夹具按 window.__yushuPick 给；不靠调用次序）
+      window.__yushuPick = 'miscut';
+      const pickBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => String(x.textContent).indexOf('选择文件') >= 0);
+        return b || null;
+      }, 10000);
+      if (pickBtn === null) return { ok: false, note: '导入面板里没有「选择文件…」按钮' };
+      const treeBefore = await window.yushu.project.tree();
+      pickBtn.click();
+      // 失败重试时面板还留着上一轮的面板状态（切分来源已经是「AI 筛过」）：
+      // 不等「切分来源回到正则切分」就取章数，before 会读到上一轮的旧数字，
+      // 于是后面每一步都在跟一个不存在的基线比（R107 第一次跑就撞上了这个）。
+      const before = await waitFor(async () => {
+        const n = await chapterCount();
+        const src = aiSource();
+        return n > 0 && src.indexOf('正则切分') >= 0 ? n : null;
+      }, 40000);
+      if (before === null) return { ok: false, note: '预演没出分章预演表：' + pageText().slice(0, 140) };
+      const miscutsBefore = miscutRows();
+      const sourceBefore = aiSource();
+      // ① AI 筛一遍：切分来源要变成 AI，且章数真的变
+      const aiBtn = [...document.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('AI 筛一遍切分') >= 0);
+      if (aiBtn === undefined) return { ok: false, note: '面板里没有「AI 筛一遍切分」按钮' };
+      aiBtn.click();
+      const afterAi = await waitFor(async () => {
+        const n = await chapterCount();
+        const src = aiSource();
+        return n > 0 && n !== before && src.indexOf('AI 筛过') >= 0 ? n : null;
+      }, 60000);
+      if (afterAi === null) return { ok: false, note: 'AI 筛过之后章数没变（切分来源：' + aiSource() + '）' };
+      const sourceAfter = aiSource();
+      const aiOk = sourceAfter.indexOf('AI 筛过') >= 0;
+      // ② 误切清单 → 人工合并 → 章数再变
+      // 合并按钮有两个方向（与上一章 / 与下一章），没邻居的那个是**禁用**态：
+      // 找**可用的**那一个（点禁用按钮不会触发任何事，点了等于没点）。
+      const mergeButtons = [...document.querySelectorAll('.import-miscut-table button')].filter((b) => String(b.textContent).indexOf('合并') >= 0);
+      const mergeBtn = mergeButtons.find((b) => b.disabled !== true);
+      if (mergeBtn === undefined) {
+        return { ok: false, note: '误切清单里没有可用的「合并」按钮（检出 ' + String(miscutRows()) + ' 条；按钮 ' +
+          mergeButtons.map((b) => String(b.textContent).trim() + (b.disabled === true ? '(禁用)' : '')).join(' / ') + '）' };
+      }
+      const mergeLabel = String(mergeBtn.textContent).trim();
+      mergeBtn.click();
+      const afterMerge = await waitFor(async () => {
+        const n = await chapterCount();
+        return n > 0 && n !== afterAi ? n : null;
+      }, 40000);
+      if (afterMerge === null) return { ok: false, note: '合并之后章数没变（还是 ' + String(afterAi) + ' 章；点的是「' + mergeLabel + '」）' };
+      // 反向的牙：盘上一个字节都没动（这一段只改计划）
+      const treeAfter = await window.yushu.project.tree();
+      const diskUntouched = JSON.stringify(treeBefore) === JSON.stringify(treeAfter);
+      const target = [...document.querySelectorAll('.import-block')].find((d) => String(d.textContent).indexOf('切分复核') >= 0);
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: aiOk && miscutsBefore > 0 && afterMerge < afterAi && diskUntouched,
+        note: '正则切分=' + before + ' 章（切分来源：' + sourceBefore.slice(0, 30) + '）' +
+          '；误切清单=' + miscutsBefore + ' 条' +
+          '；AI 筛一遍→' + afterAi + ' 章（切分来源：' + sourceAfter.slice(0, 40) + '）' +
+          '；人工合并（' + mergeLabel + '）→' + afterMerge + ' 章' +
+          '；盘上真源一个字节没动=' + diskUntouched,
       };
     `,
   },

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { randomBytes } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
+import type { ImportCorrection } from "@yushu/text";
 
 /**
  * 存量导入的「挑选闸门」（M5 / T5-7 桌面侧，R77）。
@@ -31,6 +32,32 @@ interface TicketRecord {
   path: string;
   issuedAt: number;
   bytes: number;
+  /**
+   * 导入计划上下文（AI 筛过的结果 + 作者的人工校正）。
+   *
+   * **为什么跟着票据走**：预演与入库必须用**同一份**计划——
+   * "预演看到的章"与"入库写出的章"对不上，字数对账就成了自证无效。
+   * 票据在进程内（TTL 10 分钟），上下文随之生死：进程重启后 AI 的筛选结果没了，
+   * 作者重跑一次即可（明写出来，不装作还在）。
+   */
+  plan?: ImportPlanContext;
+}
+
+/** 导入计划上下文：AI 筛过哪些 + 作者校正过什么 */
+export interface ImportPlanContext {
+  /** AI 筛过后保留的候选序号（undefined = 还没让 AI 筛过，仍用正则切） */
+  keeps?: number[];
+  /** 作者的人工校正（按顺序应用） */
+  corrections: ImportCorrection[];
+  /** AI 筛选那一次的出处与丢弃 / 回退说明（面板要看得见） */
+  ai?: {
+    provider_id: string;
+    model: string;
+    /** 被丢弃的条目（越界 / 重复）逐条点名 */
+    rejected: string[];
+    /** 回退到正则切分的理由（空 = 没回退） */
+    fallback: string;
+  };
 }
 
 function baseName(path: string): string {
@@ -83,6 +110,20 @@ export class ImportGate {
   /** 用户取消导入：立刻作废这张票 */
   revoke(ticket: string): void {
     this.tickets.delete(ticket);
+  }
+
+  /** 读这张票的计划上下文（没有就是空计划） */
+  planOf(ticket: string): ImportPlanContext {
+    const record = typeof ticket === "string" ? this.tickets.get(ticket) : undefined;
+    if (record === undefined) throw new Error("E_IMPORT_TICKET：票据无效或已撤销（请重新选择文件）");
+    return record.plan ?? { corrections: [] };
+  }
+
+  /** 改这张票的计划上下文（AI 筛完 / 作者校正后调用） */
+  setPlan(ticket: string, plan: ImportPlanContext): void {
+    const record = typeof ticket === "string" ? this.tickets.get(ticket) : undefined;
+    if (record === undefined) throw new Error("E_IMPORT_TICKET：票据无效或已撤销（请重新选择文件）");
+    record.plan = plan;
   }
 
   /** 当前有效票数（只给测试与诊断用，不进任何对外文案） */

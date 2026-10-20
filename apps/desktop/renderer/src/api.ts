@@ -34,6 +34,9 @@ import type {
   ImportPreviewRequestPayload,
   ImportApplyPayload,
   ImportApplyResultPayload,
+  ImportAiSplitRequestPayload,
+  ImportCorrectRequestPayload,
+  ImportPlanResultPayload,
   ProposalPayload,
   AiCostPayload,
   AiStartResult,
@@ -251,6 +254,10 @@ export interface YushuApi {
     pick: () => Promise<ImportPickPayload | null>;
     preview: (payload: ImportPreviewRequestPayload) => Promise<ImportPreviewPayload>;
     apply: (payload: ImportApplyPayload) => Promise<ImportApplyResultPayload>;
+    /** AI 二次筛选切章（R107，I09 §3.4）：只改计划，不写盘 */
+    aiSplit: (payload: ImportAiSplitRequestPayload) => Promise<ImportPlanResultPayload>;
+    /** 人工校正切分（R107，I09 §3.5）：只改计划，不写盘 */
+    correct: (payload: ImportCorrectRequestPayload) => Promise<ImportPlanResultPayload>;
   };
   export: {
     preview: (payload?: ExportPreviewRequest) => Promise<ExportPreviewPayload>;

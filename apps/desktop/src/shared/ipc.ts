@@ -80,6 +80,10 @@ export const CHANNELS = {
   importPreview: "import:preview",
   /** 存量导入·入库（M5/T5-7，R79）：**真源写操作**，走 wrapWrite；建卷 + 建章纲 + 写草稿 + 逐章对账 */
   importApply: "import:apply",
+  /** 存量导入·AI 二次筛选切章（M5/T5-7 第二段，R107）：**只读**——只改计划，不写盘 */
+  importAiSplit: "import:aiSplit",
+  /** 存量导入·人工校正切分（M5/T5-7 第二段，R107）：**只读**——只改计划，不写盘 */
+  importCorrect: "import:correct",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -2999,12 +3003,98 @@ export interface ImportPreviewPayload {
   };
   chapters: ImportChapterPreviewPayload[];
   totalChars: number;
+  /**
+   * 海选候选（I09 §3.4 的「规则海选」）：疑似章节标题的行。
+   *
+   * AI 只能指认这批候选的**序号**（不给行号、不给原文），
+   * 作者也靠它来挑"该在这里切开"的位置。
+   */
+  candidates: ImportCandidatePayload[];
+  /** 误切异常（I09 §3.5 的三类校验）：章号连续性 / 标题长度 / 章节字数分布 */
+  miscuts: ImportMiscutPayload[];
+  /** 这次的切分是"正则切的"还是"AI 筛过的"，以及回退理由 */
+  ai: ImportAiSplitPayload;
+}
+
+/** 一条海选候选 */
+export interface ImportCandidatePayload {
+  /** 候选序号（0 起）：AI 只报这个 */
+  index: number;
+  /** 行号（1 起） */
+  line: number;
+  /** 候选行原文 */
+  text: string;
+  /** 命中的海选规则 id */
+  rule: string;
+  /** 严筛（正则）也认它 ⇒ 这条已经是确定的章标题 */
+  strict: boolean;
+}
+
+/** 一处误切异常 */
+export interface ImportMiscutPayload {
+  /** 章在预演清单里的序号 */
+  index: number;
+  title: string;
+  chars: number;
+  issues: { code: string; message: string }[];
+}
+
+/** AI 筛选的状态：面板要看得见"现在是正则切的还是 AI 切的" */
+export interface ImportAiSplitPayload {
+  /** 这次切分是不是 AI 筛出来的 */
+  used: boolean;
+  provider_id: string;
+  model: string;
+  /** 保留了几条候选 */
+  kept: number;
+  /** 被丢弃的条目（越界 / 重复）逐条点名 */
+  rejected: string[];
+  /** 回退到正则切分的理由（空 = 没回退） */
+  fallback: string;
+  /** 人工校正的条数 */
+  corrections: number;
 }
 
 /** 预演请求：票据必填；规则是**追加**在默认规则之后的自定义正则 */
 export interface ImportPreviewRequestPayload {
   ticket: string;
   rules?: { id: string; pattern: string }[];
+}
+
+/** AI 二次筛选切章的请求（只读；只改计划） */
+export interface ImportAiSplitRequestPayload {
+  ticket: string;
+  /**
+   * 当前生效的自定义清洗规则（追加在默认规则之后）。
+   *
+   * **必须与预演用的是同一套**：清洗会删行 ⇒ 候选行号会变。
+   * 规则对不上，AI 认下的"第 N 行"就指到了别的文字上，作者在界面上看到的候选却是按另一套算的。
+   */
+  rules?: { id: string; pattern: string }[];
+}
+
+/** 人工校正的请求（只读；只改计划） */
+export interface ImportCorrectRequestPayload {
+  ticket: string;
+  /** 与 AI 筛选同一套自定义清洗规则（见 `ImportAiSplitRequestPayload.rules`） */
+  rules?: { id: string; pattern: string }[];
+  /**
+   * 校正动作：
+   * - `merge`：把第 at 章与第 at+1 章合并；
+   * - `split`：在第 candidateIndex 条海选候选所在处切开；
+   * - `move`：把第 from 章挪到第 to 位。
+   */
+  correction:
+    | { kind: "merge"; at: number }
+    | { kind: "split"; candidateIndex: number }
+    | { kind: "move"; from: number; to: number };
+}
+
+/** AI 筛选 / 人工校正的结果：回一份新的预演（面板直接换上去） */
+export interface ImportPlanResultPayload {
+  preview: ImportPreviewPayload;
+  /** 这一步做了什么（面板回执原话） */
+  note: string;
 }
 
 /**

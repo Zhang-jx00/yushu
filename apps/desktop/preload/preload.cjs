@@ -122,6 +122,10 @@ contextBridge.exposeInMainWorld("yushu", {
     pick: () => invoke("import:pick"),
     preview: (payload) => invoke("import:preview", payload),
     apply: (payload) => invoke("import:apply", payload),
+    /** AI 二次筛选切章（R107）：只改计划，不写盘 */
+    aiSplit: (payload) => invoke("import:aiSplit", payload),
+    /** 人工校正切分（R107）：只改计划，不写盘 */
+    correct: (payload) => invoke("import:correct", payload),
   },
   export: {
     preview: (payload) => invoke("export:preview", payload),

@@ -1,13 +1,21 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { countWords, makeId, YushuError } from "@yushu/core";
 import {
+  applyImportCorrections,
   cleanImportedText,
   decodeImportedText,
   detectSourceEncoding,
+  detectMiscuts,
+  findChapterCandidates,
+  isStrictChapterTitle,
   splitImportedChapters,
+  splitImportedChaptersAt,
+  type ChapterCandidate,
   type CleanReport,
   type CleanRule,
   type EncodingProbe,
+  type ImportCorrection,
+  type MiscutRow,
   type SplitResult,
 } from "@yushu/text";
 import {
@@ -24,13 +32,14 @@ import {
   type Outline,
   type OutlineVolume,
 } from "@yushu/world-engine";
-import { importGate, type ImportGate } from "./import-gate.js";
+import { importGate, type ImportGate, type ImportPlanContext } from "./import-gate.js";
 import type { ProjectGateway } from "./file-gateway.js";
 import { takePreDestructiveSnapshot } from "./snapshot-ops.js";
 import type {
   ImportAppliedChapterPayload,
   ImportApplyPayload,
   ImportApplyResultPayload,
+  ImportMiscutPayload,
   ImportPickPayload,
   ImportPreviewPayload,
   ImportRulePayload,
@@ -135,6 +144,16 @@ async function planFromTicket(
   chapters: { title: string; body: string; chars: number }[];
   preambleChars: number;
   totalChars: number;
+  /** 海选候选（AI 筛与人工校正的共同依据） */
+  candidates: ChapterCandidate[];
+  /** 严筛认下的候选序号（面板要能说清"这几条已经是确定的章标题"） */
+  strictIndexes: number[];
+  /** AI 筛过后保留的候选序号（undefined = 还没让 AI 筛过） */
+  keeps: number[] | undefined;
+  /** AI 筛选那一次的出处与丢弃 / 回退说明 */
+  aiState: ImportPlanContext["ai"];
+  /** 已应用的人工校正条数 */
+  correctionCount: number;
 }> {
   if (custom.length > MAX_CUSTOM_RULES) {
     throw new Error(`E_IMPORT_RULES：自定义清洗规则 ${String(custom.length)} 条，超过上限 ${String(MAX_CUSTOM_RULES)} 条`);
@@ -149,8 +168,24 @@ async function planFromTicket(
   const decoded = decodeImportedText(bytes, encoding);
   // 坏正则在引擎里就地抛错（由 wrap 还原成错误信封），这里不吞——吞掉等于作者以为清洗过了
   const { text, report } = cleanImportedText(decoded, { rules: [...DEFAULT_IMPORT_CLEAN_RULES, ...custom] });
-  const split = splitImportedChapters(text);
-  const chapters = split.chapters.map((chapter) => ({
+
+  // 海选（I09 §3.4 的前半段）：捞出疑似章节标题的行；严筛再从中挑出"确定的章标题"
+  const candidates = findChapterCandidates(text);
+  const textLines = text.split("\n");
+  const strictIndexes = candidates
+    .map((item, index) => (isStrictChapterTitle(textLines[item.line - 1] ?? "") ? index : -1))
+    .filter((index) => index >= 0);
+
+  // 计划上下文跟着票据走（AI 筛过的结果 + 作者的校正）——预演与入库必须是同一份
+  const context = gate.planOf(ticket);
+  const keeps = context.keeps;
+  const aiLines =
+    keeps === undefined
+      ? undefined
+      : keeps.map((index) => candidates[index]?.line).filter((line): line is number => line !== undefined);
+  const split = aiLines === undefined ? splitImportedChapters(text) : splitImportedChaptersAt(text, aiLines);
+  const corrected = applyImportCorrections(split.chapters, context.corrections);
+  const chapters = corrected.map((chapter) => ({
     title: chapter.title,
     body: chapter.body,
     // 与编辑器 / 导出同一个 countWords 口径——对账要靠它对得上
@@ -166,7 +201,22 @@ async function planFromTicket(
     chapters,
     preambleChars,
     totalChars: chapters.reduce((acc, chapter) => acc + chapter.chars, 0) + preambleChars,
+    candidates,
+    strictIndexes,
+    keeps,
+    aiState: context.ai,
+    correctionCount: context.corrections.length,
   };
+}
+
+/** 误切清单（I09 §3.5 的三类校验）→ 面板载荷 */
+function toMiscutPayload(rows: MiscutRow[]): ImportMiscutPayload[] {
+  return rows.map((row) => ({
+    index: row.index,
+    title: row.title,
+    chars: row.chars,
+    issues: row.issues.map((issue) => ({ code: issue.code, message: issue.message })),
+  }));
 }
 
 /** 预演：凭票读字节算编码 / 清洗 / 分章三份报告；零写入 */
@@ -204,7 +254,10 @@ export async function previewImport(
     split: {
       hardSplit: plan.split.hardSplit,
       note: plan.split.note,
-      chapterCount: plan.split.chapters.length,
+      // **用校正后的章数**（`plan.chapters`），不是原始切分的章数：
+      // 人工合并 / 拆分 / 重排都只改计划，界面上那个"分章预演：N 章"必须跟着变——
+      // 数字不动 ⇒ 作者以为自己合并了，其实什么都没发生（R107 预演当场抓到过这个）。
+      chapterCount: plan.chapters.length,
       volumeHints: plan.split.volumeHints,
       hasPreamble: plan.split.preamble !== null,
       preambleChars: plan.preambleChars,
@@ -217,6 +270,25 @@ export async function previewImport(
       excerpt: excerptOf(chapter.body),
     })),
     totalChars: plan.totalChars,
+    // 海选候选：AI 只能指认这批的序号；作者也靠它挑"该在这里切开"的位置
+    candidates: plan.candidates.map((item, index) => ({
+      index,
+      line: item.line,
+      text: item.text,
+      rule: item.rule,
+      strict: plan.strictIndexes.includes(index),
+    })),
+    // 误切清单：三类校验的异常，逐条点名
+    miscuts: toMiscutPayload(detectMiscuts(plan.chapters)),
+    ai: {
+      used: plan.keeps !== undefined,
+      provider_id: plan.aiState?.provider_id ?? "",
+      model: plan.aiState?.model ?? "",
+      kept: plan.keeps === undefined ? 0 : plan.keeps.length,
+      rejected: plan.aiState?.rejected ?? [],
+      fallback: plan.aiState?.fallback ?? "",
+      corrections: plan.correctionCount,
+    },
   };
 }
 
