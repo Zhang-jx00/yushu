@@ -498,29 +498,35 @@ const STEPS: StepDef[] = [
     title: "起源工作台逐步建档 5 张设定卡",
     file: "step2-genesis.png",
     body: String.raw`
-      for (let i = 1; i <= 5; i += 1) {
+      // 幂等 + 等按钮（v224 实撞，两条独立原因）：
+      // ① 保存瞬间按钮文案会变成「保存中…」（GenesisView: busy ? '保存中…' : '保存并继续 →'），
+      //    一次性查按钮就会在那个窗口里扑空 ⇒ 改成**等**文案变回来的那一刻。
+      // ② 失败重试时工作台已经停在第 3 步，从 i=1 重来会把第 3 步的卡写成「测试设定1」，
+      //    越错越远 ⇒ 从**已完成的那一步**接着做（每次保存推进一格，done 数 +1 = 当前步）。
+      const doneCount = () => document.querySelectorAll('.step-item.done').length;
+      for (let i = doneCount() + 1; i <= 5; i += 1) {
         const form = await waitFor(() => document.querySelector('.step-form'), 10000);
         if (!form) return { ok: false, note: '第 ' + i + ' 张卡：找不到 .step-form ｜ ' + pageText() };
         const field = form.querySelector('input, textarea');
         if (!field) return { ok: false, note: '第 ' + i + ' 张卡：表单无输入框' };
         setV(field, '测试设定' + i);
-        const btn = [...form.querySelectorAll('button')].find((b) => b.textContent.includes('保存并继续'));
+        const btn = await waitFor(() => {
+          const b = [...document.querySelectorAll('.step-form button')].find((x) => String(x.textContent).indexOf('保存并继续') >= 0);
+          return b || null;
+        }, 10000);
         if (!btn) return { ok: false, note: '第 ' + i + ' 张卡：找不到「保存并继续」按钮' };
         btn.click();
-        const done = await waitFor(
-          () => (document.querySelectorAll('.step-item.done').length >= i ? document.querySelectorAll('.step-item.done').length : null),
-          12000,
-        );
+        const done = await waitFor(() => (doneCount() >= i ? doneCount() : null), 12000);
         if (done === null) {
           const foot = document.querySelector('.wizard-foot');
-          return { ok: false, note: '第 ' + i + ' 张卡保存未生效（已完成 ' + document.querySelectorAll('.step-item.done').length + '）：' + lines(foot) };
+          return { ok: false, note: '第 ' + i + ' 张卡保存未生效（已完成 ' + doneCount() + '）：' + lines(foot) };
         }
         await sleep(120);
       }
       const counter = document.querySelector('.genesis aside .panel-title');
       return {
-        ok: document.querySelectorAll('.step-item.done').length >= 5,
-        note: '已完成步骤 ' + document.querySelectorAll('.step-item.done').length + ' / 5；计数文本：' + lines(counter),
+        ok: doneCount() >= 5,
+        note: '已完成步骤 ' + doneCount() + ' / 5；计数文本：' + lines(counter),
       };
     `,
   },
@@ -2729,34 +2735,56 @@ const STEPS: StepDef[] = [
         return {
           panel: panel ? Math.round(panel.getBoundingClientRect().height) : -1,
           content: body ? Math.round(body.scrollHeight) : -1,
+          body: body ? Math.round(body.getBoundingClientRect().height) : -1,
         };
       };
+      // 幂等（R104 修，v223 实撞）：失败重试时上一轮可能把这段留在了展开态，
+      // 于是第二次 attempt 量到的是**收起**这条路径（收起高=236 起、终值高=0、aria true→false），
+      // 判据读的根本不是同一样东西。先回源到收起态再量——与 step55 的「折叠态要幂等」同一手法。
+      const toggleEl = document.querySelector('.extensions .disclosure-toggle');
+      if (toggleEl.getAttribute('aria-expanded') === 'true') {
+        toggleEl.click();
+        await waitFor(() => (measure().panel === 0 ? true : null), 4000);
+      }
       const before = measure();
       const caretBefore = String(getComputedStyle(document.querySelector('.extensions .disclosure-caret')).transform);
       const expandedBefore = document.querySelector('.extensions .disclosure-toggle').getAttribute('aria-expanded');
+      // 连续采样：动效是 grid-template-rows 0fr→1fr 的真实过渡（--motion-base 240ms）。
+      // 要证的是「存在中间态」，那就**逐帧采到中间值**（rAF），
+      // 而不是「第 60ms 恰好落在中间」——那只是运气：慢机器上 60ms 才 3px，快机器上直接到终值。
+      const samples = [];
+      let sampling = true;
+      const sampler = () => {
+        if (!sampling) return;
+        samples.push(measure().panel);
+        requestAnimationFrame(sampler);
+      };
+      requestAnimationFrame(sampler);
       document.querySelector('.extensions .disclosure-toggle').click();
-      // 中途取样：瞬间弹出（无过渡）会直接跳到终值，这里就会落在 0 或终值上
-      await sleep(60);
-      const mid = measure();
-      const target = await waitFor(() => {
+      // 等动效**落定**再量：0fr→1fr 过渡期间正文本来就是被裁的（那正是动效本身），
+      // 在半路取样会把「正在过渡」误判成「内容被裁掉」（v223 实撞：终值高=235、内容高=236 就被判了被裁）。
+      const settled = await waitFor(() => {
         const now = measure();
-        return now.panel > 0 && Math.abs(now.panel - now.content) <= 2 ? now : null;
-      }, 4000);
-      const after = target || measure();
+        return now.panel > 0 && Math.abs(now.panel - now.content) <= 2 && Math.abs(now.body - now.content) <= 2 ? now : null;
+      }, 6000);
+      sampling = false;
+      const after = settled || measure();
+      // 「中间态」要真的在中间：离终值不到 4px 的那几帧不算（否则只采到终值前一帧也叫"中间态"）
+      const intermediates = samples.filter((h) => h > 0 && h <= after.panel - 4);
       const caretAfter = String(getComputedStyle(document.querySelector('.extensions .disclosure-caret')).transform);
       const expandedAfter = document.querySelector('.extensions .disclosure-toggle').getAttribute('aria-expanded');
-      const clipped = (() => {
-        const body = document.querySelector('.extensions .disclosure-body');
-        return body ? Math.abs(body.getBoundingClientRect().height - body.scrollHeight) > 2 : true;
-      })();
+      const clipped = Math.abs(measure().body - after.content) > 2;
       const panel = document.querySelector('.extensions');
       if (panel) panel.scrollIntoView({ block: 'center' });
       await sleep(150);
       return {
-        ok: before.panel === 0 && mid.panel > 0 && mid.panel < after.panel && after.panel > 0 && !clipped &&
+        ok: before.panel === 0 && after.panel > 0 && intermediates.length > 0 && !clipped &&
           expandedBefore === 'false' && expandedAfter === 'true' && caretBefore !== caretAfter,
-        note: '收起高=' + before.panel + '；60ms 中途高=' + mid.panel + '；终值高=' + after.panel +
-          '；内容高=' + after.content + '；被裁=' + clipped +
+        note: '收起高=' + before.panel + '；终值高=' + after.panel +
+          '；内容高=' + after.content + '；正文高=' + after.body +
+          '；逐帧采样 ' + samples.length + ' 帧·中间态 ' + intermediates.length + ' 个' +
+          (intermediates.length > 0 ? '（最高 ' + String(Math.max.apply(null, intermediates)) + 'px）' : '') +
+          '；被裁=' + clipped +
           '；aria ' + expandedBefore + '→' + expandedAfter + '；箭头 ' + caretBefore.slice(0, 26) + ' → ' + caretAfter.slice(0, 26),
       };
     `,
@@ -4200,6 +4228,287 @@ const STEPS: StepDef[] = [
           '；体检表新增该条=' + (appeared !== null) + '；出处=' + (originOk ? originText : '(未找到该行)') +
           '；清空=' + cleared + '；再体检后该条消失=' + (gone !== null) + '；盘上恢复原状=' + restored +
           '；第三次重新登记并回到该行=' + (reRegistered && !!finalRow),
+      };
+    `,
+  },
+  {
+    step: 65,
+    title: '黄金三章：章纲七要素填满 → 全书体检少一条，清掉一项 → 又多回来（M4/T4-2 第五批·第一段，R104）',
+    file: 'step65-opening-brief.png',
+    body: String.raw`
+      // 这一步要证「黄金三章」那条链在界面上是通的，而且**两个方向都动**：
+      // ① 判据回源 F02 §5（章纲七要素）与 F11 §3（开局窗口逐章必填，缺项黄牌）：
+      //    开局窗口（默认前三章）里章纲七要素缺项 ⇒ 报 open-brief-incomplete（info，结论落在章纲条目上）。
+      //    「新设定名词 ≤3」不在本步——那条由 R103 的 vis-first-appearance-overload 同阈值负责，
+      //    同一件事发两个 id 会让作者在表里看见两行同样的话（引擎侧同一个理由）。
+      // ② 「填满 → 体检表少一条」证明这条结论**跟着真源走**，不是一张静态表；
+      // ③ 「清掉一项 → 又多回来」是**反向的牙**：只验"少一条"分不清"表没刷新"与"真判没了"，
+      //    两边都动才排得掉"读到旧表"这种最体面的假绿灯（与 step64 同一条纪律）。
+      // 真源一律从盘上读（章纲条目的 id、标题、七项当前值），不猜夹具形状、不信界面数字。
+      const LABELS = ['谁', '在哪', '目标', '阻碍', '转折', '结果', '钩子'];
+      const yaml = String((await window.yushu.doc.read('outline/outline.yaml')).content);
+      const coMatch = /- id: (co-[a-z0-9]+)[\s\S]{0,200}?title: ([^\n]*)/.exec(yaml);
+      if (coMatch === null) return { ok: false, note: '盘上大纲里抠不出第一个章纲条目' };
+      const coId = coMatch[1];
+      const chapTitle = String(coMatch[2]).trim();
+      const blockOf = (text) => {
+        const m = new RegExp('- id: ' + coId + '\\n([\\s\\S]*?)(?=\\n[ \\t]*- id: |$)').exec(text);
+        return m === null ? '' : m[1];
+      };
+      const briefHook = (text) => {
+        const block = blockOf(text);
+        const idx = block.indexOf('brief:');
+        if (idx < 0) return '(没有 brief 段)';
+        const m = /^[ \t]*hook:[ \t]*(.*)$/m.exec(block.slice(idx + 6));
+        return m === null ? '(抠不到 hook)' : String(m[1]).trim().replace(/^"|"$/g, '');
+      };
+      // 界面：把第 1 章的细纲七项按 values 填一遍并保存大纲（values 里没给的键清空）
+      const setBrief = async (values) => {
+        await tab('三级大纲');
+        const volLi = await waitFor(() => document.querySelector('.volume-list li'), 20000);
+        if (!volLi) return '没有卷列表';
+        volLi.click();
+        await sleep(320);
+        const chapLi = await waitFor(() => {
+          // 章纲标题渲染在 <input class="chapter-title"> 里（受控输入），**不在 textContent 里**
+          // ——v224 实撞：按 textContent 找标题永远找不到（读的是 input 的 value）。
+          const hit = [...document.querySelectorAll('.chapter-list li')].find((li) => {
+            const input = li.querySelector('input.chapter-title');
+            return input !== null && String(input.value) === chapTitle;
+          });
+          return hit || null;
+        }, 20000);
+        if (!chapLi) return '列表里找不到章纲：' + chapTitle;
+        const toggle = [...chapLi.querySelectorAll('button')].find((b) => {
+          const t = String(b.textContent);
+          return t.indexOf('细纲') >= 0 || t.indexOf('收起细纲') >= 0;
+        });
+        if (!toggle) return '章纲没有「细纲」按钮';
+        if (String(toggle.textContent).indexOf('收起细纲') < 0) {
+          toggle.click();
+          await sleep(300);
+        }
+        const fields = [...chapLi.querySelectorAll('.brief-grid .field')];
+        if (fields.length === 0) return '细纲里没有输入框';
+        const byLabel = new Map();
+        for (const field of fields) {
+          const label = String((field.querySelector('span') || {}).textContent || '').trim();
+          const input = field.querySelector('input');
+          if (label !== '' && input) byLabel.set(label, input);
+        }
+        for (const label of LABELS) {
+          const input = byLabel.get(label);
+          if (!input) return '细纲里没有「' + label + '」这一项';
+          setV(input, values[label] === undefined ? '' : values[label]);
+          await sleep(70);
+        }
+        await sleep(260);
+        const saveBtn = [...document.querySelectorAll('.outline-foot button')].find((b) => String(b.textContent).indexOf('保存大纲') >= 0);
+        if (!saveBtn) return '没有「保存大纲」按钮';
+        if (saveBtn.disabled) return '「保存大纲」不可点（dirty 判定没接上）';
+        saveBtn.click();
+        const saved = await waitFor(() => {
+          const outs = [...document.querySelectorAll('.outline-foot .muted')].map((el) => String(el.textContent || ''));
+          return outs.some((t) => t.indexOf('大纲已保存') >= 0) ? true : null;
+        }, 20000);
+        if (saved === null) return '保存后没有回执：' + pageText().slice(0, 120);
+        return 'ok';
+      };
+      // 全书体检：点一次重算（manual 时机必重算，不吃缓存），并**等到期待的那一行出现/消失**为止。
+      // 连续两次体检的期待状态必须相反，等待才是真的"等到了新表"——否则读到的就是上一次的旧表。
+      const audit = async (expectPresent) => {
+        await tab('规则');
+        const btn = await waitFor(() => document.querySelector('.consistency-manual'), 20000);
+        if (!btn) return null;
+        btn.click();
+        let lastRows = [];
+        const hit = await waitFor(() => {
+          const rows = [...document.querySelectorAll('.consistency-table tbody tr')].map((tr) => {
+            const tds = [...tr.querySelectorAll('td')];
+            return {
+              severity: String((tds[0] || {}).textContent || '').trim(),
+              rule: String((tds[1] || {}).textContent || '').trim(),
+              subject: String((tds[2] || {}).textContent || '').trim().split(' ')[0],
+              origin: String((tds[5] || {}).textContent || '').trim(),
+            };
+          });
+          lastRows = rows;
+          // 空表不算"这条消失了"（空对空）：表还没渲染出来时是空的，那不是判定结果
+          if (rows.length === 0) return null;
+          const mine = rows.some((r) => r.rule === 'open-brief-incomplete' && r.subject === coId);
+          return mine === expectPresent ? { rows } : null;
+        }, 60000);
+        const summary = [...document.querySelectorAll('.consistency-summary')].map((el) => String(el.textContent || '').replace(/\s+/g, ' ')).join('');
+        return { rows: hit === null ? lastRows : hit.rows, summary, timedOut: hit === null };
+      };
+      const mineOf = (res) => res === null ? null : res.rows.find((r) => r.rule === 'open-brief-incomplete' && r.subject === coId);
+      // ① 现状：夹具里第 1 章的章纲七要素是空的 ⇒ 体检表里应有这一条（主体 = 这一条章纲）
+      const first = await audit(true);
+      if (first === null) return { ok: false, note: '第一次体检没跑出表来' };
+      const beforeRows = first.rows.filter((r) => r.rule === 'open-brief-incomplete').length;
+      const firstMine = mineOf(first);
+      if (firstMine === undefined) {
+        return { ok: false, note: '体检表里没有这一章的 open-brief-incomplete（前提不成立：章纲七要素可能已被填满）：' + first.summary };
+      }
+      const originOk = String(firstMine.origin).indexOf('黄金三章核对') >= 0;
+      const severityOk = firstMine.severity === 'info';
+      // ② 修好：七项填满 ⇒ 这一条必须消失
+      const filled = {};
+      for (const label of LABELS) filled[label] = '预演·' + label;
+      const fillResult = await setBrief(filled);
+      if (fillResult !== 'ok') return { ok: false, note: '填满七项失败：' + fillResult };
+      const afterFill = await audit(false);
+      if (afterFill === null) return { ok: false, note: '填满后体检没跑出表来' };
+      const goneWhenFilled = mineOf(afterFill) === undefined;
+      const diskFilled = briefHook(String((await window.yushu.doc.read('outline/outline.yaml')).content));
+      // ③ 反向：清掉「钩子」⇒ 这一条必须又回来（只验"少一条"分不清新表与旧表）
+      const cleared = {};
+      for (const label of LABELS) cleared[label] = '预演·' + label;
+      cleared['钩子'] = '';
+      const clearResult = await setBrief(cleared);
+      if (clearResult !== 'ok') return { ok: false, note: '清空钩子失败：' + clearResult };
+      const afterClear = await audit(true);
+      if (afterClear === null) return { ok: false, note: '清空后体检没跑出表来' };
+      const backWhenCleared = mineOf(afterClear) !== undefined;
+      const diskCleared = briefHook(String((await window.yushu.doc.read('outline/outline.yaml')).content));
+      // 收尾：把那一行滚进视口（R58 的截图纪律：证据要拍在被断言的那一段）
+      const target = [...document.querySelectorAll('.consistency-table tbody tr')].find((tr) => {
+        const tds = [...tr.querySelectorAll('td')];
+        return String((tds[1] || {}).textContent || '').trim() === 'open-brief-incomplete' &&
+          String((tds[2] || {}).textContent || '').trim().split(' ')[0] === coId;
+      });
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: originOk && severityOk && goneWhenFilled && backWhenCleared,
+        note: '章纲 ' + coId + '（' + chapTitle + '）：体检表 open-brief-incomplete 共 ' + beforeRows +
+          ' 条·这一条在场=true；级别=' + firstMine.severity + '；出处=' + (originOk ? firstMine.origin : '(未找到)') +
+          '；填满七项→该条消失=' + goneWhenFilled + '（盘上 hook=' + diskFilled + '）' +
+          '；清空钩子→该条又回来=' + backWhenCleared + '（盘上 hook=' + diskCleared + '）' +
+          '；收尾状态=钩子空着（截图里这一行在场）',
+      };
+    `,
+  },
+  {
+    step: 66,
+    title: '注入门控：门控指向不存在的章 → 全书体检多出该条，改成真实章 → 该条消失（M4/T4-2 第五批·第二段，R104）',
+    file: 'step66-gate-check.png',
+    body: String.raw`
+      // 这一步要证「注入门控」那条链在**全书体检表**里是通的，而且两个方向都动：
+      // ① 判据回源 docs/03 §10.1（reveal_gate：早于该章不注入）与 J05/A08（防剧透）：
+      //    门控指向一章**大纲里不存在**的章 ⇒ 注入计划按「门控无法解析 ⇒ 保守不注入」处理，
+      //    于是这条内容在任何一章都不会进上下文，而记忆页上那行「门控 ch-xxx」看着像已经配好了。
+      //    静默失效比报错更难发现 ⇒ 报 gate-chapter-unknown（warn，主体 = 那条事实）。
+      // ② 改成大纲里真实存在的章 ⇒ 该条必须消失（证明不是"有门控就报"）。
+      //
+      // **为什么这一条只能从真源造**（当场查出来的，不是猜的）：
+      //    记忆页的门控下拉（.memory-fact-gate）选项来自记忆层的章目标，
+      //    而记忆层章目标与「大纲里已回填 chapter_id 的章序」**同源**
+      //    （memory-ops.ts 的 targets 与 doc-readers.ts 的 outlineChapterOrder 都取自大纲）
+      //    ⇒ 从界面选出来的门控**永远**是一条存在的章，界面上根本造不出悬空门控。
+      //    所以本步用产品自己的写通道（window.yushu.doc.write → FileGateway，不是任何测试后门）
+      //    造一条事实记录。记录不带 source ⇒ 记忆页会有一条「事实缺少出处」的 warn（如实说明，不藏）。
+      const factPath = 'memory/facts/fact-walkthrough-gate.md';
+      const factId = 'fact-walkthrough-gate';
+      const badGate = 'ch-walkthrough-not-exists';
+      const worldText = String((await window.yushu.doc.read('world/world.yaml')).content);
+      const pidMatch = /^id:[ \t]*(\S+)/m.exec(worldText);
+      if (pidMatch === null) return { ok: false, note: 'world.yaml 里抠不出项目 id' };
+      const projectId = pidMatch[1];
+      const outlineText = String((await window.yushu.doc.read('outline/outline.yaml')).content);
+      const realMatch = /chapter_id:[ \t]*(ch-[a-z0-9]+)/.exec(outlineText);
+      if (realMatch === null) return { ok: false, note: '大纲里没有已回填 chapter_id 的章（造不出"真实章"那一侧）' };
+      const realChapter = realMatch[1];
+      const factText = (gate) => [
+        '---',
+        'format_version: 1',
+        'layer: fact',
+        'id: ' + factId,
+        'project_id: ' + projectId,
+        'keys:',
+        '  - 预演门控样本',
+        'updated_at: 2026-10-20T00:00:00.000Z',
+        'injection:',
+        '  mode: trigger',
+        '  priority: 50',
+        '  position: near_end',
+        '  budget_tokens: 400',
+        '  reveal_gate: ' + gate,
+        '---',
+        '',
+        '预演用事实：门控指向一章不存在的章，注入计划会保守地不注入它。',
+        ''
+      ].join('\n');
+      // 幂等写：文件已存在（失败重试）时必须带 baseHash，否则写通道按设计拒写
+      const writeFact = async (gate) => {
+        const existing = await window.yushu.doc.read(factPath).catch(() => null);
+        await window.yushu.doc.write(factPath, factText(gate), existing === null ? undefined : existing.hash);
+        const back = await window.yushu.doc.read(factPath);
+        return String(back.content).indexOf('reveal_gate: ' + gate) >= 0;
+      };
+      const audit = async (expectPresent) => {
+        await tab('规则');
+        const btn = await waitFor(() => document.querySelector('.consistency-manual'), 20000);
+        if (!btn) return null;
+        btn.click();
+        let lastRows = [];
+        const hit = await waitFor(() => {
+          const rows = [...document.querySelectorAll('.consistency-table tbody tr')].map((tr) => {
+            const tds = [...tr.querySelectorAll('td')];
+            return {
+              severity: String((tds[0] || {}).textContent || '').trim(),
+              rule: String((tds[1] || {}).textContent || '').trim(),
+              subject: String((tds[2] || {}).textContent || '').trim().split(' ')[0],
+              origin: String((tds[5] || {}).textContent || '').trim(),
+            };
+          });
+          lastRows = rows;
+          // 空表不算"这条消失了"（空对空）：表还没渲染出来时是空的，那不是判定结果
+          if (rows.length === 0) return null;
+          const mine = rows.some((r) => r.rule === 'gate-chapter-unknown' && r.subject === factId);
+          return mine === expectPresent ? { rows } : null;
+        }, 60000);
+        const summary = [...document.querySelectorAll('.consistency-summary')].map((el) => String(el.textContent || '').replace(/\s+/g, ' ')).join('');
+        return { rows: hit === null ? lastRows : hit.rows, summary, timedOut: hit === null };
+      };
+      const mineOf = (res) => res === null ? null : res.rows.find((r) => r.rule === 'gate-chapter-unknown' && r.subject === factId);
+      // ① 制造：门控指向不存在的章 ⇒ 该条必须出现
+      const wroteBad = await writeFact(badGate);
+      if (!wroteBad) return { ok: false, note: '事实记录没落成（盘上找不到 reveal_gate: ' + badGate + '）' };
+      const afterBad = await audit(true);
+      if (afterBad === null) return { ok: false, note: '第一次体检没跑出表来' };
+      const badMine = mineOf(afterBad);
+      if (badMine === undefined) {
+        return { ok: false, note: '体检表里没有 gate-chapter-unknown（门控 ' + badGate + ' 应判悬空）：' + afterBad.summary };
+      }
+      const originOk = String(badMine.origin).indexOf('注入门控核对') >= 0;
+      const severityOk = badMine.severity === 'warn';
+      // ② 修好：门控改成大纲里真实存在的章 ⇒ 该条必须消失
+      const wroteReal = await writeFact(realChapter);
+      if (!wroteReal) return { ok: false, note: '事实记录没改成真实章门控' };
+      const afterReal = await audit(false);
+      if (afterReal === null) return { ok: false, note: '改完后体检没跑出表来' };
+      const goneWhenFixed = mineOf(afterReal) === undefined;
+      // ③ 收尾：把坏门控写回去，让这一行留在截图里（R58 的截图纪律；收尾状态在回执里写明）
+      const wroteBack = await writeFact(badGate);
+      if (!wroteBack) return { ok: false, note: '收尾没把坏门控写回去' };
+      const afterBack = await audit(true);
+      if (afterBack === null) return { ok: false, note: '收尾后体检没跑出表来' };
+      const backAtEnd = mineOf(afterBack) !== undefined;
+      const target = [...document.querySelectorAll('.consistency-table tbody tr')].find((tr) => {
+        const tds = [...tr.querySelectorAll('td')];
+        return String((tds[1] || {}).textContent || '').trim() === 'gate-chapter-unknown' &&
+          String((tds[2] || {}).textContent || '').trim().split(' ')[0] === factId;
+      });
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: originOk && severityOk && goneWhenFixed && backAtEnd,
+        note: '事实 ' + factId + ' 的门控 ' + badGate + '（大纲里没有这一章）→ 体检表新增该条=true；级别=' +
+          badMine.severity + '；出处=' + (originOk ? badMine.origin : '(未找到)') +
+          '；改成真实章 ' + realChapter + ' → 该条消失=' + goneWhenFixed +
+          '；收尾写回坏门控后该条在场=' + backAtEnd +
+          '（界面下拉只给大纲章序里的章 ⇒ 这条只能从真源造；本步走的是产品自己的 doc:write 通道）',
       };
     `,
   },
