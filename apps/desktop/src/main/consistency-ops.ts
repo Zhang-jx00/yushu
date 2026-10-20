@@ -29,7 +29,9 @@ import { evaluatePackRules } from "./rule-findings.js";
 import { foreshadowReportFindings } from "./foreshadow-ops.js";
 import { povReportFindings, POV_UNREADABLE_RULE } from "./pov-ops.js";
 import { visibilityReportFindings, VIS_UNREADABLE_RULE } from "./visibility-ops.js";
-import { FORESHADOW_RULE_IDS, POWER_GATE_RULE_IDS, POV_RULE_IDS, VISIBILITY_RULE_IDS } from "@yushu/world-engine";
+import { openingReportFindings, OPEN_UNREADABLE_RULE } from "./opening-ops.js";
+import { gateReportFindings, GATE_UNREADABLE_RULE } from "./gate-ops.js";
+import { FORESHADOW_RULE_IDS, POWER_GATE_RULE_IDS, POV_RULE_IDS, VISIBILITY_RULE_IDS, OPENING_RULE_IDS, GATE_RULE_IDS } from "@yushu/world-engine";
 import { runAiAudit, type AiAuditResult } from "./ai-audit.js";
 import { projectPackIds } from "./rule-ops.js";
 import type { ProjectGateway } from "./file-gateway.js";
@@ -166,6 +168,11 @@ async function computeReport(
   const povFindings = await povReportFindings(gateway);
   // 信息可见性结论并入同一张表（R103）：判定在 `visibility-check.ts`，这里同样只投影
   const visibilityFindings = await visibilityReportFindings(gateway);
+  // 黄金三章结论并入同一张表（R104）：判定在 `opening-check.ts`；实体行表复用本次已经算好的那份，
+  // 不为"数一数第 1 章有几个人"再扫一遍全库
+  const openingFindings = await openingReportFindings(gateway, structure.entities);
+  // 注入门控结论并入同一张表（R104）：判定在 `gate-check.ts`
+  const gateFindings = await gateReportFindings(gateway);
   const allFindings = [
     ...structure.findings,
     ...packFindings,
@@ -173,6 +180,8 @@ async function computeReport(
     ...foreshadowFindings,
     ...povFindings,
     ...visibilityFindings,
+    ...openingFindings,
+    ...gateFindings,
   ];
   // 豁免清单只认**本次真的参与求值的那些 id**（内置三条 + 包里的规则 id）：
   // 仍然不许豁免一条不存在的规则，但包规则接入后不能再被这句挡在门外
@@ -198,6 +207,14 @@ async function computeReport(
     ...VISIBILITY_RULE_IDS,
     // 坏卡读不动也是桌面侧的结论（引擎只吃解析好的行）
     VIS_UNREADABLE_RULE,
+    // 黄金三章结论（R104）同口径；覆盖锁在 apps/desktop/test/opening-rule-ids.test.ts
+    ...OPENING_RULE_IDS,
+    // 开局窗口里读不动的章文件 / 坏大纲：桌面侧结论，与上面三条 unreadable 同族
+    OPEN_UNREADABLE_RULE,
+    // 注入门控结论（R104）同口径；覆盖锁在 apps/desktop/test/gate-rule-ids.test.ts
+    ...GATE_RULE_IDS,
+    // 读不动的事实文件：同上，桌面侧
+    GATE_UNREADABLE_RULE,
   ];
 
   let allow: ConsistencyAllowList | null = null;

@@ -1638,6 +1638,18 @@ export interface VisibilityUnreadablePayload {
   error: string;
 }
 
+/** 开局窗口那几章里读不动的章文件（或坏大纲）——与上面那条同形，点名对象不同 */
+export interface OpeningUnreadablePayload {
+  path: string;
+  error: string;
+}
+
+/** 门控核对扫过的事实 / 设定卡里读不动的那些（同上两条同形） */
+export interface GateUnreadablePayload {
+  path: string;
+  error: string;
+}
+
 export interface ClipboardPayload {
   stripComments?: boolean;
   stripAiMarks?: boolean;

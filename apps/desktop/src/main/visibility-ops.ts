@@ -1,15 +1,14 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import {
-  OUTLINE_PATH,
   VISIBILITY_CHECK_ORIGIN,
   checkVisibility,
-  parseOutline,
   readCardFile,
   type ReportFinding,
   type VisibilityCardRow,
 } from "@yushu/world-engine";
 import type { VisibilityUnreadablePayload } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
+import { outlineChapterOrder } from "./doc-readers.js";
 
 /**
  * 信息可见性核对的桌面侧（M4 / T4-2 第四批·第一段，R103）。
@@ -62,19 +61,9 @@ async function scanCards(
   return { rows, unreadable };
 }
 
-/** 章序：大纲里已回填 chapter_id 的那些章，按卷内顺序摊平（未建草稿的章纲没有 id 可指） */
+/** 章序：改用 doc-readers 里的单一口径（R104 收拢）——门控核对与可见性核对必须问同一份"这章存在吗" */
 async function chapterOrder(gateway: ProjectGateway): Promise<string[]> {
-  const snap = await gateway.readDoc(OUTLINE_PATH).catch(() => null);
-  if (snap === null) return [];
-  const outline = parseOutline(snap.content);
-  const ids: string[] = [];
-  for (const volume of outline.volumes) {
-    for (const chapter of volume.chapters) {
-      const id = chapter.chapter_id;
-      if (typeof id === "string" && id !== "" && !ids.includes(id)) ids.push(id);
-    }
-  }
-  return ids;
+  return outlineChapterOrder(gateway);
 }
 
 /** 读不动的卡（面板与结论都要点名它，不能让它消失在"零结论"里） */

@@ -37,7 +37,6 @@ const KNOWN_DEAD_EXPORTS: Record<string, string[]> = {
   "packages/@yushu/llm/src/batch.ts": ["BatchEligibleTask"],
   "packages/@yushu/memory/src/types.ts": ["MEMORY_API_VERSION", "MemoryLayer"],
   "packages/@yushu/world-engine/src/layout.ts": ["ASSETS_DIR", "PACKS_DIR", "SCHEMAS_DIR"],
-  "packages/@yushu/world-engine/src/outline.ts": ["BRIEF_KEYS"],
 };
 
 const DECL = /^export\s+(?:async\s+)?(?:function|const|let|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/;

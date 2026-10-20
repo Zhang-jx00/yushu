@@ -98,10 +98,13 @@ describe("手动全书体检（manual）", () => {
     const card = await gateway.readDoc(CARD_PATH);
     expect(card.content.slice(entry.span!.start, entry.span!.end)).toContain("relation: 师从");
     expect(entry.fix).toContain("config/consistency.yaml");
-    expect(report.counted.entries).toBe(2);
-    // 那条多出来的必须是可见性核对的"没核对过"，不是别的规则混进来
+    // 结构 1（ref-dangling）+ 可见性总述 1 + 开局窗口章纲缺项 2（夹具那两章是模板骨架，七要素有空项）
+    expect(report.counted.entries).toBe(4);
+    // 多出来的必须是这两族的，不是别的规则混进来
     expect(report.entries.filter((item) => item.rule !== "ref-dangling").map((item) => item.rule)).toEqual([
       "vis-no-source-registered",
+      "open-brief-incomplete",
+      "open-brief-incomplete",
     ]);
   });
 
@@ -143,9 +146,11 @@ describe("豁免与 fail-safe", () => {
       ].join("\n"),
     );
     const report = await runConsistencyCheck(gateway, { timing: "manual" });
-    // 豁免只豁免掉那条 ref-dangling；全局的可见性 info 不在豁免范围内、必须还在——
+    // 豁免只豁免掉那条 ref-dangling；全局的可见性 info 与开局那两条不在豁免范围内、必须还在——
     // "点一下豁免就把整张表清成空"是最难被发现的假干净
-    expect(report.entries.map((item) => item.rule)).toEqual(["vis-no-source-registered"]);
+    expect([...report.entries.map((item) => item.rule)].sort()).toEqual(
+      ["open-brief-incomplete", "open-brief-incomplete", "vis-no-source-registered"],
+    );
     expect(report.suppressed).toHaveLength(1);
     expect(report.suppressed[0]!.reason).toContain("第二部");
     expect(report.suppressed[0]!.decidedAt).toBe("2026-10-09T10:00:00.000Z");
@@ -167,10 +172,10 @@ describe("三态时机的范围与缓存", () => {
     expect(all.entries.filter((item) => item.rule === "ref-dangling")).toHaveLength(1);
     const light = await runConsistencyCheck(gateway, { timing: "post-generate", entityIds: ["char-haize"] });
     expect(light.entries).toEqual([]);
-    // 全源口径（R103）：结构 1 条 + 那条全局的可见性 info = 2
-    expect(light.counted.findings).toBe(2);
-    // 范围外计数含那条全局的可见性 info（它不属于任何实体，带范围时同样被滤掉并计数，不静默少掉）
-    expect(light.counted.filteredOut).toBe(2);
+    // 全源口径（R103 定、R104 续）：结构 1 + 可见性总述 1 + 开局章纲缺项 2 = 4
+    expect(light.counted.findings).toBe(4);
+    // 范围外计数含那条全局的可见性 info 与两条开局结论（它们都不属于任何实体，带范围时同样被滤掉并计数，不静默少掉）
+    expect(light.counted.filteredOut).toBe(4);
   });
 
   it("保存后异步：置脏后必须重算，未置脏时可复用缓存", async () => {
@@ -208,15 +213,16 @@ describe("采纳后即时轻校验（post-generate 的调用点）", () => {
     const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: "林渊收剑入鞘。" });
     expect(report.scopeIds).toEqual(["char-linyuan"]);
     expect(report.entries.map((e) => e.subject)).toEqual(["char-linyuan"]);
-    // 那条全局的可见性 info 也被范围滤掉（它不属于 char-linyuan），计数必须看得见
-    expect(report.counted.filteredOut).toBe(1);
+    // 那条全局的可见性 info 与两条开局结论也被范围滤掉（它们都不属于 char-linyuan），计数必须看得见
+    expect(report.counted.filteredOut).toBe(3);
   });
 
   it("正文只提到干净的实体时零结论，但范围外那条要看得见", async () => {
     const report = await runConsistencyCheck(gateway, { timing: "post-generate", scopeText: "海泽在门口等着。" });
     expect(report.scopeIds).toEqual(["char-haize"]);
     expect(report.entries).toEqual([]);
-    expect(report.counted.filteredOut).toBe(2);
+    // 范围外那条现在是 4 条：结构 1 + 可见性总述 1 + 开局章纲缺项 2（都不属于 char-haize）
+    expect(report.counted.filteredOut).toBe(4);
   });
 
   it("正文谁都没提到：范围为空、零结论，且不把全书结论倒给作者", async () => {
