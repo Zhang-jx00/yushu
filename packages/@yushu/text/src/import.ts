@@ -183,7 +183,16 @@ export function cleanImportedText(text: string, options: { rules: CleanRule[] })
   };
 }
 
-const CN_NUM = "0〇零一二三四五六七八九十百千万两";
+/**
+ * 章号的字符类：**阿拉伯数字 + 中文数字**。
+ *
+ * 补 0-9 的理由（R108 撞出来的旧缺陷）：这个类里原本只有 ASCII 的 `0`（没有 1-9），
+ * 于是「第1章」「第10章」**认不出来**——整篇稿子会被当成一章（界面只能走"没切开"那条
+ * 显式确认的路），而导出稿里这种写法很常见。更麻烦的是它与另外两处**不一致**：
+ * `chapterTitleNumber` 的正则认阿拉伯数字、R107 的海选规则也认 ⇒ 同一行"像标题"却不严，
+ * 作者在界面上看到的候选与预演的边界对不上。
+ */
+const CN_NUM = "0-9〇零一二三四五六七八九十百千万两";
 const VOLUME_RE = new RegExp(`^\\s*第\\s*[${CN_NUM}]+\\s*卷(?:\\s+\\S.{0,30})?\\s*$`);
 const CHAPTER_RE = new RegExp(`^\\s*第\\s*[${CN_NUM}]+\\s*[章节回](?:\\s+\\S.{0,40})?\\s*$|^\\s*(?:Chapter|CHAPTER)\\s+\\d+.{0,40}$`);
 
@@ -463,6 +472,13 @@ export function detectMiscuts(chapters: ReadonlyArray<{ title: string; chars: nu
   }
   return rows;
 }
+
+/**
+ * 人工校正的动作种类（**用得上的一处常量**：world-engine 的任务记录要把校正存下来供续跑重放，
+ * 那边没有依赖本包（@yushu/text 刻意零依赖），所以两边各有一份种类表，
+ * 由桌面侧的一条锁盯着两边逐字一致——新增一种动作却忘了改另一边，续跑会**静默丢掉**那一步）。
+ */
+export const IMPORT_CORRECTION_KINDS = ["merge", "split", "move"] as const;
 
 /** 人工校正的四种动作（I09 §3.5 的「合并 / 拆分 / 重排」） */
 export type ImportCorrection =

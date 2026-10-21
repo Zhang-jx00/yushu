@@ -141,6 +141,14 @@ describe("splitImportedChapters：认标题才切，认不出就不切", () => {
     expect(out.chapters).toEqual([]);
     expect(out.preamble).toBeNull();
   });
+
+  it("阿拉伯数字的章号也认（第1章 / 第10章）——导出稿里这种写法很常见", () => {
+    // R108 撞出来的旧缺陷：章号的字符类里原本只有 ASCII 的 `0`（没有 1-9），
+    // 于是「第1章」认不出来 ⇒ 整篇稿子被当成一章，而另外两处（章号解析、海选规则）都认 ⇒ 三处不一致
+    const out = splitImportedChapters(["第1章 起", "夜色压下来。", "第10章 转", "停。"].join("\n"));
+    expect(out.hardSplit).toBe(true);
+    expect(out.chapters.map((c) => c.title)).toEqual(["第1章 起", "第10章 转"]);
+  });
 });
 
 describe("确定性", () => {

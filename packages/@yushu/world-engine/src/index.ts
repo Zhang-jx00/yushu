@@ -5,6 +5,7 @@ export * from "./cards.js";
 export * from "./extract.js";
 export * from "./project-config.js";
 export * from "./outline.js";
+export * from "./import-job.js";
 export * from "./chapters.js";
 export * from "./index-input.js";
 export * from "./naming.js";
