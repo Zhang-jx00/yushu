@@ -788,3 +788,92 @@ describe("UI 重构第四批（R112）：标题层级", () => {
     expect(missing).toBe(""); // 根本没有这条规则 ⇒ 判据会红
   });
 });
+
+/**
+ * UI 重构第四批·第二段（R113）的机器判据：图标与插画的**来源登记**。
+ *
+ * 为什么图标也要有账：图标看起来最不需要交代，但它们常常是**别人做的**。
+ * 一件署了别人名字的资产混进产品里，出了事追不到源头；把自绘的当上游的用，功劳也算错了人。
+ * 所以这张表（`docs/12-图标与插画来源登记.md`）只回答三件事：谁做的、什么许可、画布多大。
+ *
+ * 规矩四条（docs/12 §3）：渲染层里的矢量图形只许出现在登记过的文件里；
+ * 上游的 path 不许改；自绘的必须写明"自绘"；许可声明跟着文件走。
+ */
+
+/** 矢量图形的判定：内联 <svg> 或 <path>（判据自检要用它，所以做成纯函数） */
+function isVectorSource(src: string): boolean {
+  return src.includes("<svg") || src.includes("<path");
+}
+
+/**
+ * 登记点名的五个文件：**三个图标类**（Lucide 图标集 / 品牌标记 / 折叠箭头）
+ * + **两个数据呈现类**（节奏曲线图 / 关系图谱图）。
+ *
+ * 为什么图表也进表：它们同样是渲染层里的矢量图形，只是画法由**数据**决定，
+ * 不是一份"资产"。不进表就会出现"这里有个 svg 却查不到出处"的糊涂账。
+ * 区别写在 docs/12 §1.3：图标类必须有 path（固定画法），图表类没有 path（数据绑定）。
+ */
+const VECTOR_FILES = ["icons.tsx", "brand.tsx", "Disclosure.tsx", "RelationGraphPanel.tsx", "StatsView.tsx"];
+/** 其中属于"图标资产"的三个（判据要求它们真的有 path） */
+const ICON_FILES = ["icons.tsx", "brand.tsx", "Disclosure.tsx"];
+
+describe("UI 重构第四批·第二段（R113）：图标与插画来源登记", () => {
+  const registry = readFileSync(join(ROOT, "docs", "12-图标与插画来源登记.md"), "utf8");
+
+  it("登记表存在，且必备小节一个不许少（少一节就是登记被掏空）", () => {
+    for (const heading of ["## 0. 为什么要有这张表", "## 1. 登记表", "## 2. 已知的两套口径", "## 3. 规矩", "## 4. 本轮明确没做的"]) {
+      expect(registry, `登记表缺小节：${heading}`).toContain(heading);
+    }
+  });
+
+  it("11 个 Lucide 图标**逐个**点名（漏一个 = 有一个图标没有出处）", () => {
+    // 逐行核对，**不是**整篇 contains：整篇 contains 会让别处的同名内容冒充
+    // （图标名在别处提一句就算"点名"了？那是假登记）。
+    const rows = registry.split("\n");
+    for (const name of ["layers", "list-ordered", "pen-line", "library", "sparkles", "brain", "scale", "download", "book-open", "chart-column", "folder-tree"]) {
+      const pattern = new RegExp("^\\|\\s*\\d+\\s*\\|\\s*`" + name + "`\\s*\\|");
+      expect(rows.some((row) => pattern.test(row.trim())), `登记表没有以独立一行列出图标 ${name}`).toBe(true);
+    }
+  });
+
+  it("登记了来源与许可：Lucide 的 ISC、以及自绘的「没有上游」（不许冒充上游）", () => {
+    // 许可那一行必须自己写着 ISC：整篇 contains 会让标题里的 "(ISC)" 冒充这一行的许可声明
+    const rows = registry.split("\n");
+    const licenseRow = rows.find((row) => row.includes("许可：") && row.includes("ISC"));
+    expect(licenseRow, "登记表没有在许可那一行写明 ISC").toBeTruthy();
+    expect(registry).toContain("lucide-static@1.55.0");
+    expect(registry).toContain("没有上游");
+    expect(registry).toContain("自绘");
+  });
+
+  it("渲染层里的矢量图形只许出现在**登记过的文件**里（不许内联未登记的图形）", () => {
+    const files = tsxFiles(VIEW_ROOT);
+    const holders = files
+      .filter((f) => isVectorSource(readFileSync(f, "utf8")))
+      .map((f) => f.split("\\").pop() ?? "")
+      .sort();
+    expect(holders, `渲染层里的矢量图形出现在未登记的文件里：${holders.join(" | ")}`).toEqual([...VECTOR_FILES].sort());
+    // 登记表必须把这五个文件都点名（登记与代码互为对账，不能一边改一边忘了另一边）
+    for (const name of VECTOR_FILES) {
+      expect(registry, `登记表没点名 ${name}`).toContain(name);
+    }
+  });
+
+  it("图标类文件必须真的有 path（固定画法的资产），图表类则没有（画法由数据决定）", () => {
+    for (const name of ICON_FILES) {
+      const file = tsxFiles(VIEW_ROOT).find((f) => (f.split("\\").pop() ?? "") === name);
+      expect(file, `找不到 ${name}`).toBeTruthy();
+      expect(readFileSync(file as string, "utf8"), `${name} 是图标类却没有 path`).toContain("<path");
+    }
+    for (const name of ["RelationGraphPanel.tsx", "StatsView.tsx"]) {
+      const file = tsxFiles(VIEW_ROOT).find((f) => (f.split("\\").pop() ?? "") === name);
+      expect(file, `找不到 ${name}`).toBeTruthy();
+      expect(readFileSync(file as string, "utf8"), `${name} 声明成图表类却含 path（该重分类）`).not.toContain("<path");
+    }
+  });
+
+  it("扫描器自己要能红：一处内联图形必须被抓到（防扫描器坏了 ⇒ 零命中冒充全绿）", () => {
+    expect(isVectorSource("const A = () => (<svg><path d=\"M0 0\" /></svg>);")).toBe(true);
+    expect(isVectorSource("export function Plain() { return <div>没有图形</div>; }")).toBe(false);
+  });
+});
