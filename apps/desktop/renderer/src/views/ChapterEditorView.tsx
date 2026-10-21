@@ -23,6 +23,15 @@ import { ProofreadPanel } from "./ProofreadPanel";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 
 /**
+ * 浮层进场的**兜底延迟**（R116）：窗口被遮挡 / 最小化时浏览器会暂停 `requestAnimationFrame`，
+ * 于是 `is-entered` 永远加不上、浮层永远不可见 ⇒ 另起一个定时器兜底（定时器在后台照跑）。
+ *
+ * 它**不是动效时长**（动效时长只在 `:root` 的令牌里），所以不读令牌、也不参与 `--motion-*`；
+ * 给它起个名字，是为了让「这里有一个写死的数字」这件事**看得见**（判据会点名裸数字）。
+ */
+const MENTION_ENTER_FALLBACK_MS = 50;
+
+/**
  * 章节编辑器（T2-1：CodeMirror 6 源码形态 + TipTap 富文本形态；T2-2 实体 @ 提及）。
  * - 磁盘真源始终是 chapters/<卷>/<章>.md（Markdown 文本）；两种形态是同一文本的两种视图；
  * - 富文本形态由 StarterKit 承载（标题/粗斜/引用/列表/分隔线）；检测到暂不支持的语法（表格/代码块/图片/链接/HTML）
@@ -545,11 +554,26 @@ export function ChapterEditorView({
    * 浮层进场（R111）：菜单挂载后**下一帧**才加 is-entered——
    * 过渡需要「前一帧的样式」才会播，同一帧改类不会触发动画（CSS 的基本行为）。
    * 触发点是**会话序号**而不是菜单对象：同一会话里继续打字时序号不变 ⇒ 不重播进场。
+   *
+   * **不能只靠 `requestAnimationFrame`（R116 预演 v266 实撞）**：浏览器在**窗口被遮挡或最小化**
+   * 时会暂停 rAF ⇒ `is-entered` 永远加不上 ⇒ 浮层**永远不可见**（作者把窗口放到后台
+   * 再打开 @ 菜单，就看到一片空白）。所以另加一个 `setTimeout` 兜底：
+   * 定时器在后台照跑，进场于是不再依赖"窗口可见"。
    */
   useEffect(() => {
     if (mentionMenu === null) return;
-    const raf = window.requestAnimationFrame(() => setMentionEntered(true));
-    return () => window.cancelAnimationFrame(raf);
+    let entered = false;
+    const markEntered = () => {
+      if (entered) return;
+      entered = true;
+      setMentionEntered(true);
+    };
+    const raf = window.requestAnimationFrame(markEntered);
+    const timer = window.setTimeout(markEntered, MENTION_ENTER_FALLBACK_MS);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mentionSession]);
 

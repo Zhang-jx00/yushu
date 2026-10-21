@@ -946,3 +946,123 @@ describe("UI 重构第四批·第三段（R115）：状态图标集与空/错态
     expect(src, "状态提示组件里内联了 path（图标就有了第二套画法）").not.toContain("<path");
   });
 });
+
+/**
+ * UI 重构第五批（R116）的机器判据：颜色令牌**两层化** + 默认色板**逐字不变**。
+ *
+ * 为什么要分层：换主题时只改 **primitive（调色板）** 一层，
+ * semantic（用途：`--bg` / `--panel` / `--ink` / `--muted` / `--accent` / …）一个字都不用动。
+ * 分层做歪了有两种典型坏法：① semantic 里又写起字面色值 ⇒ 两层形同虚设；
+ * ② 顺手把色板改了 ⇒ "改版"变成了"重设计"。所以这两条都要钉住。
+ *
+ * 口径见 `docs/13-暗色主题口径.md`（本轮只记口径，不动色板）。
+ */
+
+/** 默认色板的基线（R116 改版前的原值，逐字）：semantic → 当时的字面值 */
+const PALETTE_BASELINE: Record<string, string> = {
+  "--bg": "#f7f4ee",
+  "--panel": "#fffdf8",
+  "--panel-2": "#f2ece1",
+  "--ink": "#2b2620",
+  "--muted": "#8a8175",
+  "--accent": "#8c5a2b",
+  "--accent-soft": "#f0e2ce",
+  "--border": "#e4dccf",
+  "--good": "#2f7d4f",
+  "--bad": "#b3402e",
+  "--warn": "#a06a12",
+  "--ink-on-accent": "#fff",
+  "--bad-soft-bg": "#fbeae6",
+  "--bad-soft-border": "#f0d4cd",
+  "--bad-tint-bg": "#fdf0ee",
+  "--good-soft-bg": "#e6f2e9",
+  "--warn-soft-bg": "#fdf7e8",
+  "--warn-tint-bg": "#fdf6e9",
+  "--heat-l1": "#d9e8d4",
+  "--heat-l2": "#a9cfa4",
+  "--heat-l3": "#6faa74",
+};
+
+/** 取 :root 块里某个令牌的声明值 */
+function rootToken(block: string, name: string): string | null {
+  const m = new RegExp(`^\\s*${name.replace(/-/g, "\\-")}\\s*:\\s*([^;]+);`, "m").exec(block);
+  return m ? (m[1] ?? "").trim() : null;
+}
+
+/** 默认 :root 块（不带属性选择器的那一块；密度档块是 :root[data-density=…]） */
+function defaultRootBlock(): string {
+  return /:root \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+}
+
+/** 高对比媒体块的内容 */
+function highContrastBlock(): string {
+  const m = /@media \(prefers-contrast: more\) \{([\s\S]*?)\n\}/.exec(css);
+  return m?.[1] ?? "";
+}
+
+describe("UI 重构第五批（R116）：颜色令牌两层化", () => {
+  it("每个 semantic 颜色都**引用 primitive**，语义层里不许再写字面色值", () => {
+    const root = defaultRootBlock();
+    expect(root, "没解析出默认 :root 块").not.toBe("");
+    const offenders: string[] = [];
+    for (const name of Object.keys(PALETTE_BASELINE)) {
+      const value = rootToken(root, name);
+      expect(value, `默认 :root 里没有 ${name}`).not.toBeNull();
+      if (value === null) continue;
+      if (!/^var\(--c-[a-z0-9-]+\)$/.test(value)) offenders.push(`${name}=${value}`);
+    }
+    expect(offenders, `这些语义色没有引用 primitive：${offenders.join(" | ")}`).toEqual([]);
+  });
+
+  it("**默认色板一个像素都没动**（逐字比对基线表；primitive 的取值就是改版前的原值）", () => {
+    const root = defaultRootBlock();
+    const wrong: string[] = [];
+    for (const [name, expected] of Object.entries(PALETTE_BASELINE)) {
+      const semantic = rootToken(root, name) ?? "";
+      const ref = /^var\((--c-[a-z0-9-]+)\)$/.exec(semantic);
+      if (ref === null) {
+        wrong.push(`${name} 不是引用`);
+        continue;
+      }
+      const primitive = rootToken(root, ref[1] as string);
+      if (primitive !== expected) wrong.push(`${name}（${ref[1]}）= ${primitive ?? "(无)"} ≠ 基线 ${expected}`);
+    }
+    expect(wrong, `色板被改动了：${wrong.join(" | ")}`).toEqual([]);
+  });
+
+  it("高对比模式覆盖的是 **primitive** 一层（覆盖点集中在一处，semantic 自动跟着变）", () => {
+    const block = highContrastBlock();
+    expect(block, "没找到 prefers-contrast 块").not.toBe("");
+    const semanticInBlock = Object.keys(PALETTE_BASELINE).filter((name) =>
+      new RegExp(`^\\s*${name.replace(/-/g, "\\-")}\\s*:`, "m").test(block),
+    );
+    expect(semanticInBlock, `高对比块里覆盖了 semantic：${semanticInBlock.join(" | ")}`).toEqual([]);
+    expect(block, "高对比块没有覆盖 primitive").toMatch(/--c-[a-z0-9-]+\s*:/);
+  });
+
+  it("暗色主题口径文档存在，且必备小节一个不许少（少一节就是口径被掏空）", () => {
+    const doc = readFileSync(join(ROOT, "docs", "13-暗色主题口径.md"), "utf8");
+    for (const heading of ["## 1. 令牌分两层", "## 2. 换暗底时**不能直接反相**的三样东西", "## 3. 对比度底线", "## 4. 与「高对比模式」的区别", "## 6. 本轮明确没做的"]) {
+      expect(doc, `暗色主题口径缺小节：${heading}`).toContain(heading);
+    }
+    expect(doc).toContain("本轮只记口径，不动色板");
+  });
+
+  it("解析器自己能红：把语义色改回字面值，判据必须点名（防解析器坏了 ⇒ 零命中冒充全绿）", () => {
+    const root = defaultRootBlock();
+    expect(rootToken(root, "--bg")).toBe("var(--c-paper)");
+    expect(rootToken(root, "--not-a-token")).toBeNull();
+    expect(rootToken(root, "--ink-on-accent")).toBe("var(--c-on-accent)");
+  });
+
+  it("浮层进场**不能只靠 rAF**（窗口被遮挡 / 最小化时 rAF 会暂停 ⇒ 浮层永远不可见）", () => {
+    // 预演 v266 实撞：两次 attempt 的终值 opacity 都是 0，根因是当时窗口被遮挡
+    // （同一步的第 1 轮截图报 UnknownVizError），浏览器暂停了 rAF ⇒ is-entered 永远不加。
+    // 作者把窗口放到后台再打开 @ 菜单，看到的就是一片空白。
+    const src = readFileSync(join(VIEW_ROOT, "views", "ChapterEditorView.tsx"), "utf8");
+    expect(src).toContain("requestAnimationFrame");
+    expect(src, "浮层进场没有定时器兜底（窗口被遮挡时 rAF 暂停 ⇒ 浮层永远不进场）").toMatch(
+      /setTimeout\(markEntered, MENTION_ENTER_FALLBACK_MS\)/,
+    );
+  });
+});

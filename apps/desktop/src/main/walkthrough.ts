@@ -5554,6 +5554,12 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   console.log(`[walkthrough] 开始：项目目录 ${options.dir}；mock ${options.mock.baseUrl}`);
   for (const def of STEPS) {
     const stepStart = Date.now();
+    // 窗口被遮挡时浏览器会**暂停 rAF**、**不插值 CSS 过渡** ⇒ 预演的逐帧采样器采不到中间态
+    // （v266 / v267 / v268 实撞：step74「终值对、中间态 0 帧」；同一步的截图还报 UnknownVizError）。
+    // `moveTop` 救不了"被别的窗口盖住"（置顶不等于可见），所以预演期间让窗口**始终置顶**——
+    // 它本来就该是屏幕上唯一被看的东西。判据没有放松，是环境不对。
+    win.setAlwaysOnTop(true);
+    win.moveTop();
     // R111：有的步骤要在「系统要求减少动效」下跑（主进程侧 CDP 模拟——渲染进程改不了自己的媒体查询）。
     // 放在 attempt 循环**外面**：重试时仍在同一个媒体环境里，不会第二次 attempt 换了环境。
     const media = def.emulateReducedMotion === true ? await applyReducedMotion(win, true) : null;

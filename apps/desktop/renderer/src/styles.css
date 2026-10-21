@@ -1,15 +1,45 @@
 :root {
-  --bg: #f7f4ee;
-  --panel: #fffdf8;
-  --panel-2: #f2ece1;
-  --ink: #2b2620;
-  --muted: #8a8175;
-  --accent: #8c5a2b;
-  --accent-soft: #f0e2ce;
-  --border: #e4dccf;
-  --good: #2f7d4f;
-  --bad: #b3402e;
-  --warn: #a06a12;
+  /* ---------- 颜色令牌：两层（primitive → semantic），R116 ---------- */
+  /* 第一层 **primitive（调色板）**：只说"这是什么颜色"，不说"用在哪"。
+     第二层 **semantic（用途）**：只说"用在哪"，值一律引用 primitive。
+     为什么要分两层：**换主题时只改 primitive 一层**，semantic 那一整套（用途）一个字都不用动——
+     这正是暗色主题的第一段（口径见 docs/13-暗色主题口径.md）。
+     **本轮默认色板一个像素都没动**：primitive 的取值就是改版前的原值。 */
+
+  --c-paper: #f7f4ee;
+  --c-paper-raised: #fffdf8;
+  --c-paper-sunken: #f2ece1;
+  --c-ink: #2b2620;
+  --c-ink-soft: #8a8175;
+  --c-accent: #8c5a2b;
+  --c-accent-soft: #f0e2ce;
+  --c-line: #e4dccf;
+  --c-good: #2f7d4f;
+  --c-bad: #b3402e;
+  --c-warn: #a06a12;
+  --c-on-accent: #fff;
+  --c-bad-soft-bg: #fbeae6;
+  --c-bad-soft-border: #f0d4cd;
+  --c-bad-tint-bg: #fdf0ee;
+  --c-good-soft-bg: #e6f2e9;
+  --c-warn-soft-bg: #fdf7e8;
+  --c-warn-tint-bg: #fdf6e9;
+  --c-heat-1: #d9e8d4;
+  --c-heat-2: #a9cfa4;
+  --c-heat-3: #6faa74;
+
+  /* 第二层 **semantic（用途）**：全部引用第一层，不写字面色值 */
+  --bg: var(--c-paper);
+  --panel: var(--c-paper-raised);
+  --panel-2: var(--c-paper-sunken);
+  --ink: var(--c-ink);
+  --muted: var(--c-ink-soft);
+  --accent: var(--c-accent);
+  --accent-soft: var(--c-accent-soft);
+  --border: var(--c-line);
+  --good: var(--c-good);
+  --bad: var(--c-bad);
+  --warn: var(--c-warn);
   /* 动效令牌（R63·Premium 调性，用户已确认）：时长与缓动只在这一处定义，组件里不写魔法数。
      Premium 的 350-600ms 是「揭示」区间；工作台场景把 standard 压到 240ms、慢档只给面板揭示，
      微反馈一律 140ms——同一套曲线不同时长，既不显拖沓也不丢克制。 */
@@ -35,16 +65,16 @@
      三层重构（primitive→semantic→component）在这个体量上收益不抵一次全表改写的风险。
      注意：--bad-soft-bg 与 --bad-tint-bg、--warn-soft-bg 与 --warn-tint-bg 是**两种不同的浅底**
      （深浅不同、用于不同组件），刻意不合并——合并会改变画面。 */
-  --ink-on-accent: #fff;
-  --bad-soft-bg: #fbeae6;
-  --bad-soft-border: #f0d4cd;
-  --bad-tint-bg: #fdf0ee;
-  --good-soft-bg: #e6f2e9;
-  --warn-soft-bg: #fdf7e8;
-  --warn-tint-bg: #fdf6e9;
-  --heat-l1: #d9e8d4;
-  --heat-l2: #a9cfa4;
-  --heat-l3: #6faa74;
+  --ink-on-accent: var(--c-on-accent);
+  --bad-soft-bg: var(--c-bad-soft-bg);
+  --bad-soft-border: var(--c-bad-soft-border);
+  --bad-tint-bg: var(--c-bad-tint-bg);
+  --good-soft-bg: var(--c-good-soft-bg);
+  --warn-soft-bg: var(--c-warn-soft-bg);
+  --warn-tint-bg: var(--c-warn-tint-bg);
+  --heat-l1: var(--c-heat-1);
+  --heat-l2: var(--c-heat-2);
+  --heat-l3: var(--c-heat-3);
   /* 间距令牌（R96·设计契约 §2）。基准是 **2px 网格**而不是常见的 4/8px：
      普查 styles.css 得到 :root 外 710 处长度字面量，取值确实铺在 2px 步进上
      （4×41 / 6×81 / 8×109 / 10×67 / 12×76 / 14×19 / 16×17 / 18×12 / 20×5）。
@@ -2905,15 +2935,17 @@ table,
 }
 
 /* 高对比（Windows 辅助功能「高对比度」会触发）：只加深颜色，不动版式与尺寸，
-   免得和 prefers-reduced-motion 那类副作用叠在一起排查困难 */
+   免得和 prefers-reduced-motion 那类副作用叠在一起排查困难。
+   R116：这里覆盖的是 **primitive（调色板）**，不是 semantic（用途）——
+   覆盖点只有一处，semantic 那一整套自动跟着变（这正是分层的用处）。 */
 @media (prefers-contrast: more) {
   :root {
-    --ink: #14100b;
-    --muted: #554f46;
-    --border: #b9ad98;
-    --accent: #6d4218;
-    --bg: #ffffff;
-    --panel: #ffffff;
+    --c-ink: #14100b;
+    --c-ink-soft: #554f46;
+    --c-line: #b9ad98;
+    --c-accent: #6d4218;
+    --c-paper: #ffffff;
+    --c-paper-raised: #ffffff;
   }
 }
 

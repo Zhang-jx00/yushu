@@ -169,7 +169,7 @@ describe("CSS 令牌棘轮（R83：字面量只降不升，例外逐条登记）
   it("高对比那组覆盖必须逐条对应 :root 里已有的令牌（覆盖一个不存在的变量=静默失效）", () => {
     const contrastBlock = RANGES
       .map(([a, b]) => lines.slice(a - 1, b).join("\n"))
-      .find((block) => block.includes("--ink: #14100b"));
+      .find((block) => block.includes("--c-ink: #14100b"));
     expect(contrastBlock, "没找到高对比 :root 覆盖块（被删了？那就是无障碍回归）").toBeTruthy();
     const overridden = [...(contrastBlock as string).matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string);
     expect(overridden.length).toBeGreaterThanOrEqual(6);
