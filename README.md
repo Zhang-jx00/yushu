@@ -23,6 +23,8 @@
 - [docs/03-开发规划方案.md](docs/03-开发规划方案.md) —— 架构、数据模型、派系包规范、技术选型
 - [docs/04-开发计划.md](docs/04-开发计划.md) —— 里程碑、任务拆解与开源运营
 - [docs/09-进度与待做清单.md](docs/09-进度与待做清单.md) —— 已完成 / 还剩多少的一页快照（派生自 docs/04）
+- [docs/10-前端设计契约.md](docs/10-前端设计契约.md) —— 前端判据源（令牌 / 中文排版 / 动效 / 键盘可达）
+- [docs/11-UI重构调研与设计规范.md](docs/11-UI重构调研与设计规范.md) —— UI 重构的调研清单（189 个来源）与设计规范、实施批次
 - [docs/05-流派总表.md](docs/05-流派总表.md) —— 市面流派穷尽式搜集（持续增补）
 - [docs/research/](docs/research/README.md) —— 125 个知识领域 × 8 类来源的创作与工程调研库
 
@@ -66,11 +68,12 @@ pnpm --filter @yushu/desktop dev      # Electron + Vite 热更新
 ## 怎么验（四连门禁，缺一项不算完成）
 
 ```bash
-pnpm test                # 单元/集成测试：1674 例 / 156 文件
+pnpm test                # 单元/集成测试：1685 例 / 156 文件
 pnpm typecheck           # 9 个包 + 2 个应用零错误（内含全量构建）
 pnpm --filter @yushu/desktop e2e     # 离线 mock LLM 的端到端全链路，逐条具名断言
-pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 70 步 UI 预演 + 逐步截图取证
+pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 72 步 UI 预演 + 逐步截图取证
 # 前端改动的判据：docs/10-前端设计契约.md（令牌 / 中文排版 / 动效 / 键盘可达），由 ui-contract.test.ts 钉住
+# UI 重构的调研与规范：docs/11-UI重构调研与设计规范.md（189 个来源 + 五批实施计划）
 ```
 
 另有 `kill-test`（强杀进程不丢稿实测）与 `perf-test`（百万字性能实测）两个专项探针。
