@@ -207,3 +207,60 @@ describe("反漂移：账本里已动过的里程碑，对外文档不许写「�
     expect((claim?.[3] ?? "").split("、").map((id) => id.trim()).sort()).toEqual(open.slice().sort());
   });
 });
+
+  /**
+   * **台账基线漂移锁**（R119，UI 重构五批总复核的机器化产出）。
+   *
+   * 为什么要有它：本项目的对外数字散在**多处**（docs/08 的 §1 门禁表与 §7 验收基线、
+   * README、docs/09 的当前基线、根交接文档 §2 门禁表）。此前的锁只查 README ↔ docs/08 两处
+   * ⇒ 另外几处漂了没人知道。而**数字漂移不会让任何东西变红**，只会让读者拿到假数字。
+   *
+   * R119 的总复核当场抓到：docs/08 的 §1 门禁表写着「预演 76/76（v262）」，
+   * 而**同一份** docs/08 的 §7 验收基线写着「78/78（v271）」——一份文件内部就自相矛盾。
+   *
+   * 口径：**只查"当前基线"那几处**，历史轮次记录里的旧数字（1290/1456、1690/156 …）**不动**
+   * ——那是历史，不是当前值。把历史一起锁死，等于逼着大家抹掉历史，那更糟。
+   */
+  it("台账基线（单测条数 + 文件数）四处必须逐字一致", () => {
+    const d08 = read("docs/08-交接文档-给QoderCN.md");
+    const readme = read("README.md");
+    const d09 = read("docs/09-进度与待做清单.md");
+    const handover = read("御书-交接文档.md");
+    const a = /\| 单测 \| \*\*(\d+)\/\d+ 全绿\*\*（(\d+) 个测试文件）/.exec(d08);
+    const b = /单元\/集成测试：(\d+) 例 \/ (\d+) 文件/.exec(readme);
+    const c = /当前验证基线[^`]*`pnpm test` \*\*(\d+)\/\d+（(\d+) 文件）\*\*/.exec(d09);
+    const e = /\| 单测 \| `pnpm test` \| \*\*(\d+)\/\d+（(\d+) 文件）\*\*/.exec(handover);
+    expect(a && b && c && e, "四处基线有一处解析不出来（漂移锁自己坏了？）").toBeTruthy();
+    const seen = [`${a?.[1]}/${a?.[2]}`, `${b?.[1]}/${b?.[2]}`, `${c?.[1]}/${c?.[2]}`, `${e?.[1]}/${e?.[2]}`];
+    expect(new Set(seen).size, `台账基线不一致：${seen.join(" vs ")}`).toBe(1);
+  });
+
+  it("台账基线（UI 预演步数 + 目录号）五处必须逐字一致", () => {
+    /**
+     * 预演基线散在**五处**：README 的「N 步 UI 预演」、docs/08 §1 门禁表、docs/08 §7 验收基线、
+     * docs/09 §二 当前基线、根交接 §2 门禁表。少改一处，读者拿到的就是另一轮的目录号。
+     *
+     * 每一处都用**该处自己的句子**去取（不整篇搜），否则同一份文件里的历史轮次记录
+     * 会冒充当前基线——这正是本项目吃过亏的"匹配范围比被测对象宽"。
+     */
+    const d08 = read("docs/08-交接文档-给QoderCN.md");
+    const readme = read("README.md");
+    const d09 = read("docs/09-进度与待做清单.md");
+    const handover = read("御书-交接文档.md");
+    const line = (src: string, needle: string): string =>
+      src.split("\n").find((row) => row.includes(needle)) ?? "";
+    const a = /\| UI 预演 \| \*\*(\d+)\/\d+ 全绿\*\*（最近一次新目录 \*\*v(\d+)\*\*/.exec(d08);
+    const b = /(\d+) 步 UI 预演（最近一次 v(\d+)）/.exec(readme);
+    const c = /UI 预演 (\d+)\/\d+（v(\d+)/.exec(line(d08, "验收基线数字"));
+    const d = /UI 预演 (\d+)\/\d+（v(\d+)/.exec(line(d09, "当前验证基线"));
+    const e = /\| UI 预演 \|.*?\*\*v(\d+) = (\d+)\/\d+/.exec(handover);
+    expect(a && b && c && d && e, "五处预演基线有一处解析不出来（漂移锁自己坏了？）").toBeTruthy();
+    const seen = [
+      `${a?.[1]}/${a?.[2]}`,
+      `${b?.[1]}/${b?.[2]}`,
+      `${c?.[1]}/${c?.[2]}`,
+      `${d?.[1]}/${d?.[2]}`,
+      `${e?.[2]}/${e?.[1]}`,
+    ];
+    expect(new Set(seen).size, `预演基线不一致：${seen.join(" vs ")}`).toBe(1);
+  });
