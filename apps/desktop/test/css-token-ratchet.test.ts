@@ -132,11 +132,13 @@ describe("CSS 令牌棘轮（R83：字面量只降不升，例外逐条登记）
     expect(declaredTokens().length).toBeGreaterThanOrEqual(26);
   });
 
-  it("字面颜色棘轮：:root 之外只许有那一道阴影", () => {
+  it("字面颜色棘轮：:root 之外**一处都不许有**（R111 把浮层阴影收进了 --elev-overlay）", () => {
     const colors = literalsOutsideRoot(HEX).concat(literalsOutsideRoot(COLOR_FN));
-    // 上限 1（当前实测恰好 1）：新增任何一处硬写颜色都会红
-    expect(colors.length).toBeLessThanOrEqual(1);
-    expect(colors).toEqual([".mention-menu=rgba(0,0,0,0.12)"]);
+    // R111 之前上限是 1（.mention-menu 手写的浮层阴影 rgba(0,0,0,0.12)）。
+    // 浮层阴影是**唯一**该用 overlay 级的地方（契约 §4），它现在走 --elev-overlay ⇒ 上限收紧到 0：
+    // 新增任何一处硬写颜色都会红，而已登记的那处也已经归位。
+    expect(colors.length).toBeLessThanOrEqual(0);
+    expect(colors).toEqual([]);
   });
 
   it("字面时长例外逐条登记：进度条两档刻意不同 + reduced-motion 的 0.01ms 惯用值", () => {

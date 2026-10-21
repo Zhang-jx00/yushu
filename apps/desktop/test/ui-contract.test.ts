@@ -486,7 +486,7 @@ describe("UI 重构调研与设计规范（docs/11，R109）", () => {
       "## 4. 交互",
       "## 5. 图标与品牌",
       "## 6. 开屏",
-      "## 7. 三批实施计划",
+      "## 7. 五批实施计划",
       "## 8. 本轮明确没做的",
       "## 9. 附录：调研清单",
     ]) {
@@ -504,5 +504,191 @@ describe("UI 重构调研与设计规范（docs/11，R109）", () => {
     for (const item of ["排版改版", "持久化", "世界地图"]) {
       expect(section).toContain(item);
     }
+  });
+});
+
+/**
+ * UI 重构第三批（R111）的机器判据：动效族落地。
+ *
+ * 这一批把 docs/11 §3 的四族语义（进场 / 退场 / 状态 / 揭示）真正接进组件，
+ * 给唯一的浮层（@ 候选菜单）补上**进退场**、给列表项补上**微反馈**。
+ *
+ * 三条纪律落在判据上：
+ * ① **退场比进场快**不是口号：浮层的退场族时长必须**短于**进场族（从 :root 解析实际值比较）。
+ * ② **时长只有一个来源**：别名指向既有三档（不新增时长值），组件只许引用别名；
+ *    退场的延时也必须从令牌读，不许在组件里写死毫秒数。
+ * ③ **每个扫描器都要能红**：R110 栽过"三份样本各缺两项 ⇒ 放松任一条都看不出来"，
+ *    所以这里每个判据都配一份"违规样本"，样本必须被判红——恒绿的锁比没锁更坏。
+ */
+
+/** 四族语义别名 → 它们指向的既有三档（docs/11 §3.1） */
+const MOTION_ALIASES: Record<string, string> = {
+  "--motion-exit": "--motion-quick",
+  "--motion-state": "--motion-quick",
+  "--motion-enter": "--motion-base",
+  "--motion-reveal": "--motion-slow",
+};
+
+/** 取 :root 里某令牌的声明值（跨多个 :root 块合并，后写的覆盖先写的） */
+function rootTokenValue(token: string): string | null {
+  let value: string | null = null;
+  const escaped = token.replace(/[-]/g, "\\-");
+  for (const [start, end] of RANGES) {
+    for (let i = start - 1; i < end; i += 1) {
+      const m = new RegExp(`^\\s*${escaped}\\s*:\\s*([^;]+);`).exec(masked[i] ?? "");
+      if (m) value = (m[1] ?? "").trim();
+    }
+  }
+  return value;
+}
+
+/** 把令牌值解析成毫秒（支持 var(--x) 引用与 ms/s） */
+function resolveMs(token: string, depth = 0): number | null {
+  if (depth > 4) return null;
+  const raw = rootTokenValue(token);
+  if (raw === null) return null;
+  const ref = /^var\((--[a-z0-9-]+)\)$/.exec(raw);
+  if (ref) return resolveMs(ref[1] as string, depth + 1);
+  const num = /^(\d+(?:\.\d+)?)(ms|s)$/.exec(raw);
+  if (!num) return null;
+  const n = Number(num[1]);
+  return num[2] === "s" ? n * 1000 : n;
+}
+
+/** :root 之外引用了哪些动效令牌（去重，按出现顺序） */
+function motionRefsOutsideRoot(source: string[], isInRoot: (lineNo: number) => boolean): string[] {
+  const hits: string[] = [];
+  for (let i = 0; i < source.length; i += 1) {
+    if (isInRoot(i + 1)) continue;
+    for (const m of (source[i] ?? "").matchAll(/var\((--motion-[a-z0-9-]+)\)/g)) {
+      const token = m[1] as string;
+      if (!hits.includes(token)) hits.push(token);
+    }
+  }
+  return hits;
+}
+
+/** 取一条规则块的内容（选择器精确匹配；source 传剥过注释的全文） */
+function ruleBlock(source: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(?:^|[}\\n])\\s*${escaped}\\s*\\{([^}]*)\\}`, "m");
+  return re.exec(source)?.[1] ?? "";
+}
+
+/** 退场时长必须短于进场时长（docs/11 §3.2 第 1 条：退场比进场快） */
+function exitFasterThanEnter(enterMs: number | null, exitMs: number | null): boolean {
+  if (enterMs === null || exitMs === null) return false;
+  return exitMs < enterMs;
+}
+
+/**
+ * 取出某个媒体查询块的内容（大括号配对，不写死行数）。
+ * 用剥过注释的全文当源：注释里可能也有花括号，计深度会算错。
+ */
+function mediaBlock(source: string, condition: string): string {
+  const start = source.indexOf(condition);
+  if (start < 0) return "";
+  const open = source.indexOf("{", start);
+  if (open < 0) return "";
+  let depth = 0;
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(open + 1, i);
+    }
+  }
+  return "";
+}
+
+/**
+ * 媒体块里，**覆盖了某个选择器的那些规则**的内容（一条规则一块）。
+ *
+ * 为什么不能只看"块里有没有 transition: none"：reduced-motion 块里有多处
+ * `transition: none`（开屏那组、浮层那组）——只做整块 contains 的话，
+ * **别处的 none 会冒充浮层的**，那条判据就恒绿了。
+ * 这正是 R110 栽过的那一类："三份样本各缺两项 ⇒ 放松任一条都看不出来"。
+ */
+function reducedRulesCovering(block: string, selector: string): string[] {
+  const out: string[] = [];
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(block)) !== null) {
+    if ((m[1] ?? "").includes(selector)) out.push(m[2] ?? "");
+  }
+  return out;
+}
+
+describe("UI 重构第三批（R111）：动效族落地", () => {
+  const bare = masked.join("\n");
+  const editor = readFileSync(join(VIEW_ROOT, "views", "ChapterEditorView.tsx"), "utf8");
+
+  it("四族语义别名齐备，且都指向既有三档（别名是引用，不是新的时长值）", () => {
+    for (const [alias, base] of Object.entries(MOTION_ALIASES)) {
+      expect(rootTokenValue(alias), `缺别名 ${alias}`).toBe(`var(${base})`);
+    }
+    // 底层三档仍在、取值没动过（别名不新增时长 ⇒ R83 的时长例外清单一条不变）
+    expect(resolveMs("--motion-quick")).toBe(140);
+    expect(resolveMs("--motion-base")).toBe(240);
+    expect(resolveMs("--motion-slow")).toBe(380);
+  });
+
+  it("组件规则只许用四族语义别名，不许再直接引用「快/中/慢」三档（扫描器自检：违规样本必须被点名）", () => {
+    const offenders = motionRefsOutsideRoot(masked, insideRoot).filter(
+      (token) => !Object.keys(MOTION_ALIASES).includes(token),
+    );
+    expect(offenders, `组件仍在直接引用三档：${offenders.join(" | ")}`).toEqual([]);
+    // 自检：扫描器坏了 ⇒ 零命中会伪装成全绿，所以先证明它抓得住
+    const sample = ["button { transition: transform var(--motion-base) linear; }"];
+    expect(motionRefsOutsideRoot(sample, () => false)).toEqual(["--motion-base"]);
+  });
+
+  it("浮层的退场比进场快（进场用 --motion-enter、退场用 --motion-exit，实际时长更短）", () => {
+    const enterBlock = ruleBlock(bare, ".mention-menu");
+    const leaveBlock = ruleBlock(bare, ".mention-menu.is-leaving");
+    expect(enterBlock, "浮层没有进场过渡").toContain("var(--motion-enter)");
+    expect(leaveBlock, "浮层没有退场态").toContain("var(--motion-exit)");
+    const enterMs = resolveMs("--motion-enter");
+    const exitMs = resolveMs("--motion-exit");
+    expect(exitFasterThanEnter(enterMs, exitMs), `进场 ${String(enterMs)}ms / 退场 ${String(exitMs)}ms`).toBe(true);
+    // 自检：退场与进场同长时必须判红（否则这条判据就是恒绿的）
+    expect(exitFasterThanEnter(240, 240)).toBe(false);
+    expect(exitFasterThanEnter(null, 140)).toBe(false);
+  });
+
+  it("面板揭示族也分进退（展开走 --motion-reveal、收起走 --motion-exit）", () => {
+    expect(ruleBlock(bare, ".disclosure-panel")).toContain("var(--motion-exit)");
+    expect(ruleBlock(bare, ".disclosure.open .disclosure-panel")).toContain("var(--motion-reveal)");
+  });
+
+  it("浮层的退场是真的实现了（组件里有退场态，且延时取自令牌而不是写死毫秒）", () => {
+    expect(editor).toContain("is-leaving");
+    expect(editor, "退场延时必须从 --motion-exit 读").toContain("--motion-exit");
+    expect(editor, "退场延时不许写死数字（时长只有一个来源）").not.toMatch(/setTimeout\([^,]*,\s*\d+\s*\)/);
+    // 自检：写死的延时必须被抓到——扫描器恒绿等于没有扫描器
+    expect(/setTimeout\([^,]*,\s*\d+\s*\)/.test("setTimeout(() => { a(); b(); }, 140)")).toBe(true);
+  });
+
+  it("reduced-motion 把浮层的过渡整个关掉（只关 animation 等于没关）", () => {
+    const reduced = mediaBlock(bare, "@media (prefers-reduced-motion: reduce)");
+    const rules = reducedRulesCovering(reduced, ".mention-menu");
+    const ok = rules.length > 0 && rules.every((body) => body.includes("transition: none"));
+    expect(ok, "reduced-motion 没有关掉浮层的过渡").toBe(true);
+    // 自检：**别处**的 `transition: none` 不许冒充浮层的覆盖——
+    // 少了这一条，"整块 contains" 写法会让本判据恒绿（恒绿的锁比没锁更坏）。
+    const decoy = "@media (prefers-reduced-motion: reduce) {\n  .welcome h1 { transition: none; }\n  .mention-menu { opacity: 1; }\n}\n";
+    const decoyRules = reducedRulesCovering(mediaBlock(decoy, "@media (prefers-reduced-motion: reduce)"), ".mention-menu");
+    expect(decoyRules.length).toBe(1);
+    expect(decoyRules.every((body) => body.includes("transition: none")), "别处的 none 冒充了浮层的覆盖").toBe(false);
+  });
+
+  it("列表项的微反馈走状态族（hover 与高亮都有过渡，且走 --motion-state）", () => {
+    const liBlock = ruleBlock(bare, ".mention-menu li");
+    expect(liBlock, "候选行没有微反馈过渡").toContain("var(--motion-state)");
+    expect(liBlock).toContain("transition");
+  });
+
+  it("浮层的阴影走 --elev-overlay 令牌（:root 之外不许再写字面量阴影）", () => {
+    expect(ruleBlock(bare, ".mention-menu")).toContain("var(--elev-overlay)");
   });
 });
