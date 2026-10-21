@@ -24,6 +24,11 @@ const ROOTS = [
   "../src",
 ];
 
+/** 剥掉注释（块注释 + 行注释）——注释里写的 `from "./outline"` 是在举例，不是代码 */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
 /** 只认 src 下的文件：`test/` 由 vitest 加载（它会补后缀），不进交付物，管它是白管 */
 function isShippedSource(path: string): boolean {
   const normalized = path.replace(/\\/g, "/");
@@ -81,5 +86,47 @@ describe("Node ESM 相对导入的后缀（R104）", () => {
 
   it("相对导入一律带 .js 后缀：漏一处就是给交付物埋一颗只在运行时炸的雷", () => {
     expect(offenders()).toEqual([]);
+  });
+
+  /**
+   * 第三块扫描范围（R119 新增）：**`apps/desktop/test/**`**。
+   *
+   * 起因是**两轮假绿**：R117 新写的 `test/density-prefs.test.ts` 把渲染层模块导成了
+   * `from "../renderer/src/density-prefs"`（**没有 `.js` 后缀**）——
+   * 桌面端 tsconfig 是 `module/moduleResolution: NodeNext`，而 `tsconfig.test.json`
+   * **把 test 目录也纳进来** ⇒ `tsc` 报 TS2835（TS2835: Relative import paths need
+   * explicit file extensions）。而 **vitest 不在乎后缀**（它会补）⇒ **单测全绿** ⇒
+   * R117、R118 两轮台账写的「typecheck TC=0」**当时是假的**。
+   *
+   * 为什么渲染层源码自己不用写 `.js`、这里却要写：渲染层走 vite 打包（后缀由打包器解析），
+   * 但**从 test 目录导入渲染层源码**时，这段代码归**桌面端的 NodeNext tsconfig** 管 ⇒ 必须带后缀。
+   * 两条口径不冲突：**谁解析，谁要求**。
+   */
+  it("test 目录里的相对导入也要带 .js 后缀（R117 那两轮假绿就出在这里）", () => {
+    const root = fileURLToPath(new URL("./", import.meta.url));
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir)) {
+        if (entry === "node_modules") continue;
+        const path = join(dir, entry);
+        if (statSync(path).isDirectory()) walk(path);
+        else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts")) files.push(path);
+      }
+    };
+    walk(root);
+    expect(files.length, "一个 test 文件都没扫到 ⇒ 这条锁是空的").toBeGreaterThan(20);
+    const bad: string[] = [];
+    for (const file of files) {
+      const text = stripComments(readFileSync(file, "utf8"));
+      for (const match of text.matchAll(SPEC)) {
+        const spec = match[1] ?? "";
+        if (spec.endsWith(".js") || spec.endsWith(".json")) continue;
+        bad.push(`${file.replace(/\\/g, "/").split("/test/").pop() ?? file} → ${spec}`);
+      }
+    }
+    expect(
+      bad,
+      `这些相对导入没有 .js 后缀（桌面端 tsconfig 是 NodeNext ⇒ tsc 会报 TS2835）：\n${bad.join("\n")}`,
+    ).toEqual([]);
   });
 });

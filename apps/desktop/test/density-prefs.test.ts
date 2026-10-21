@@ -7,7 +7,7 @@ import {
   loadDensityPref,
   readDensityPref,
   saveDensityPref,
-} from "../renderer/src/density-prefs";
+} from "../renderer/src/density-prefs.js";
 
 /**
  * 密度档持久化（R117）的单测。
