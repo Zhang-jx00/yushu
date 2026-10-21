@@ -16,6 +16,16 @@
   --motion-quick: 140ms;
   --motion-base: 240ms;
   --motion-slow: 380ms;
+  /* 动效语义别名（R111 UI 重构第三批）：四族 = 进场 / 退场 / 状态 / 揭示。
+     别名**指向既有三档**，不新增任何时长值 ⇒ R83 的时长例外清单一条不变（棘轮不涨）。
+     为什么要有别名：此前组件里写的是「快 / 中 / 慢」三档，改版时只能凭手感挑一个，
+     挑错就看不出差别。有了语义别名，"这是退场"就明写出来了——
+     **退场比进场快**这条口径（docs/11 §3.2 第 1 条）才落得了地，
+     而且四族的取值以后要调，只改 :root 这一处。 */
+  --motion-exit: var(--motion-quick);
+  --motion-state: var(--motion-quick);
+  --motion-enter: var(--motion-base);
+  --motion-reveal: var(--motion-slow);
   --ease-premium: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
   /* 语义底色令牌（R83 普查后补）。此前这些颜色散在组件规则里写成字面量，共 17 处：
@@ -235,10 +245,10 @@ button {
   cursor: pointer;
   font: inherit;
   transition:
-    transform var(--motion-quick) var(--ease-premium),
-    border-color var(--motion-quick) linear,
-    color var(--motion-quick) linear,
-    background var(--motion-quick) linear;
+    transform var(--motion-state) var(--ease-premium),
+    border-color var(--motion-state) linear,
+    color var(--motion-state) linear,
+    background var(--motion-state) linear;
 }
 
 /* 抬起 1px、按下收到 0.97：幅度小到不会让人注意到「有动画」，但手感的差别是实打实的 */
@@ -341,7 +351,8 @@ textarea:focus {
 
 /* 开屏入场（R109）：**一次**过渡，不是 @keyframes。
    契约 §5 把 @keyframes 数量锁在 1（"不做全站入场表演"）——开屏这一下是**一次性身份表达**，
-   不是每个元素都在表演，所以用过渡（不进那个名额），而且只动 opacity 与 transform（不触发布局）。 */
+   不是每个元素都在表演，所以用过渡（不进那个名额），而且只动 opacity 与 transform（不触发布局）。
+   R111：归入「进场」族（--motion-enter 240ms）——开屏就是进场；380ms 那一档留给「揭示」。 */
 .welcome-mark,
 .welcome h1,
 .welcome > p,
@@ -350,8 +361,8 @@ textarea:focus {
   opacity: 0;
   transform: translateY(var(--space-3));
   transition:
-    opacity var(--motion-slow) var(--ease-enter),
-    transform var(--motion-slow) var(--ease-enter);
+    opacity var(--motion-enter) var(--ease-enter),
+    transform var(--motion-enter) var(--ease-enter);
 }
 
 .welcome.is-entered .welcome-mark,
@@ -2286,8 +2297,27 @@ select {
   border: 1px solid var(--border);
   border-radius: var(--radius-5);
   background: var(--panel);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  /* 浮层阴影只有一个来源（契约 §4：只有浮层允许 overlay 级）——
+     此前这里手写了一份字面量，和 :root 的 --elev-overlay 各走各的。 */
+  box-shadow: var(--elev-overlay);
   font-size: 13px;
+  /* R111 浮层进场：**只动 opacity**，不动 transform——
+     .mention-menu.above 用 transform 做「贴底向上弹出」的定位，动 transform 会和定位打架
+     （那是既有约定，不能为了动效去改定位）。 */
+  opacity: 0;
+  transition: opacity var(--motion-enter) var(--ease-enter);
+}
+
+/* 已进场：浮层完全可见。进场是过渡，不是瞬移 */
+.mention-menu.is-entered {
+  opacity: 1;
+}
+
+/* 浮层退场（R111）：淡出，**比进场快**（140ms vs 240ms，docs/11 §3.2 第 1 条）。
+   规则写在 .is-entered 之后：同特异性下后写的赢，退场态优先。 */
+.mention-menu.is-leaving {
+  opacity: 0;
+  transition: opacity var(--motion-exit) var(--ease-premium);
 }
 
 .mention-menu.above {
@@ -2314,8 +2344,17 @@ select {
   padding: 5px 8px;
   border-radius: var(--radius-4);
   cursor: pointer;
+  /* R111 列表项微反馈：hover 与高亮都**渐变**过去，不再硬切。
+     只换底色、不动尺寸——行高抖动比没有反馈更难受（同 .slot-table 的口径）。 */
+  transition: background var(--motion-state) linear;
 }
 
+/* 悬停：极浅底色，和表格行的 hover 同一口径 */
+.mention-menu li:hover {
+  background: var(--panel-2);
+}
+
+/* 高亮项：朱色浅底。规则排在 :hover 之后 ⇒ 同特异性下高亮优先（高亮项悬停仍是高亮色） */
 .mention-menu li.on {
   background: var(--accent-soft);
 }
@@ -2546,7 +2585,8 @@ select {
 
 .disclosure-caret {
   flex: none;
-  transition: transform var(--motion-base) var(--ease-premium);
+  /* 箭头旋转是**状态切换**（既不是进场也不是退场）⇒ 走状态族 */
+  transition: transform var(--motion-state) var(--ease-premium);
 }
 
 /* 箭头与面板同源：展开转 180°，方向本身就是状态，不需要再多一句文字提示 */
@@ -2558,11 +2598,14 @@ select {
 .disclosure-panel {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--motion-base) var(--ease-premium);
+  /* R111：**收起是退场、展开是揭示**，两者的时长本来就该不同（docs/11 §3.2 第 1 条）。
+     CSS 的 transition 取**新状态**的计算值 ⇒ 收起走退场族、展开走揭示族，一套规则写两行就够。 */
+  transition: grid-template-rows var(--motion-exit) var(--ease-premium);
 }
 
 .disclosure.open .disclosure-panel {
   grid-template-rows: 1fr;
+  transition: grid-template-rows var(--motion-reveal) var(--ease-premium);
 }
 
 /* min-height:0 是让这一行真能压到 0 的关键，否则内容会把行撑住、收起时留一条缝 */
@@ -2572,13 +2615,16 @@ select {
   opacity: 0;
   transform: translateY(-2px);
   transition:
-    opacity var(--motion-base) var(--ease-premium),
-    transform var(--motion-base) var(--ease-premium);
+    opacity var(--motion-exit) var(--ease-premium),
+    transform var(--motion-exit) var(--ease-premium);
 }
 
 .disclosure.open .disclosure-body {
   opacity: 1;
   transform: none;
+  transition:
+    opacity var(--motion-reveal) var(--ease-premium),
+    transform var(--motion-reveal) var(--ease-premium);
 }
 
 /* 系统要求减少动效时直接到终态：不闪、不位移，功能一点不少 */
@@ -2601,6 +2647,21 @@ select {
   .welcome-actions,
   .welcome-hint {
     transition: none;
+  }
+
+  /* 浮层（R111）：reduce 下**直接到位**——不进也不退场。
+     同样用 `transition: none`：不引入新的字面量例外。
+     opacity 直接给 1：作者要求的是「少动效」，不是「少内容」——
+     动效可以没有，东西必须在（契约 §1.2：动效不得成为理解的前提）。 */
+  .mention-menu,
+  .mention-menu.is-entered {
+    transition: none;
+    opacity: 1;
+  }
+
+  .mention-menu.is-leaving {
+    transition: none;
+    opacity: 0;
   }
 
   /* 位移与缩放全去掉，只留 opacity 的瞬时到位：动效不再是理解的前提 */
@@ -2647,7 +2708,8 @@ select {
 section.panel,
 .ai-adopt-audit,
 .consistency-summary {
-  animation: yushu-settle var(--motion-base) var(--ease-enter) both;
+  /* R111：一次性入场也是「进场」⇒ 走进场族（数值不变：240ms） */
+  animation: yushu-settle var(--motion-enter) var(--ease-enter) both;
 }
 
 /* 规则豁免率（T4-11 / R84）：只有真判成「偏吵」的那几行才上底色。
@@ -2680,7 +2742,7 @@ section.panel,
 
 /* 表格行只换底色、不动尺寸：行高抖动比没有反馈更难受 */
 .slot-table tbody tr {
-  transition: background var(--motion-quick) linear;
+  transition: background var(--motion-state) linear;
 }
 
 .slot-table tbody tr:hover {
@@ -2690,9 +2752,9 @@ section.panel,
 /* 当前标签：底色与描边同步过渡，视线不用重新找位置 */
 .tab {
   transition:
-    background var(--motion-quick) linear,
-    color var(--motion-quick) linear,
-    border-color var(--motion-quick) linear;
+    background var(--motion-state) linear,
+    color var(--motion-state) linear,
+    border-color var(--motion-state) linear;
 }
 
 /* ---------- R64：标签图标 + 中文排版 + 阅读版心（依据与取舍见 docs/03 §17） ---------- */
@@ -2716,7 +2778,7 @@ section.panel,
 .yushu-icon {
   flex: none;
   opacity: 0.68;
-  transition: opacity var(--motion-quick) linear;
+  transition: opacity var(--motion-state) linear;
 }
 
 .tab.on .yushu-icon {

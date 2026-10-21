@@ -64,6 +64,21 @@ function excerptOf(body: string): string {
   return plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
 }
 
+/**
+ * 浮层退场延时的**唯一来源**：CSS 令牌 `--motion-exit`（R111）。
+ *
+ * 为什么不在组件里写死毫秒：契约 §1.1「一个事实只有一个来源」——
+ * 时长住在 :root 里，组件去读它；哪天要改退场时长，只改 :root 一处。
+ * 读不到令牌时返回 0（直接卸载）：宁可不播退场，也不能让作者等一个永远不结束的动画。
+ */
+function readExitDelayMs(): number {
+  if (typeof document === "undefined") return 0;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--motion-exit").trim();
+  const num = parseFloat(raw);
+  if (!Number.isFinite(num)) return 0;
+  return raw.endsWith("ms") ? num : num * 1000;
+}
+
 /** 把光标所在行滚动到视口垂直居中（打字机滚动；T2-3 切片 A） */
 function centerLine(view: EditorView): void {
   const pos = view.state.selection.main.head;
@@ -153,6 +168,23 @@ export function ChapterEditorView({
   const [mentionCards, setMentionCards] = useState<MentionCardData[]>([]);
   /** 富文本 @ 候选菜单（T2-2 富文本形态） */
   const [mentionMenu, setMentionMenu] = useState<MentionMenuState | null>(null);
+  /**
+   * R111 浮层的两个相位：进场（is-entered）与退场（is-leaving）。
+   * - 进场要等「挂载后的下一帧」才加：过渡需要前一帧的样式才会播，同帧改类不会触发动画；
+   * - 退场要等播完才卸载：组件得在 DOM 里多留一会儿，作者才看得见它离开。
+   */
+  const [mentionEntered, setMentionEntered] = useState(false);
+  const [mentionLeaving, setMentionLeaving] = useState(false);
+  /**
+   * 菜单会话序号：每次「从无到有」递增一次。
+   * 进场动画以它为触发点——同一会话里继续打字时序号不变 ⇒ 不重播进场
+   * （否则作者每敲一个字，菜单就闪一次）。
+   */
+  const [mentionSession, setMentionSession] = useState(0);
+  /** 退场计时器（延时由 CSS 令牌 --motion-exit 给出，不在组件里写死毫秒） */
+  const closeTimerRef = useRef<number | null>(null);
+  /** 是否正在退场：退场中再次关闭 ⇒ 直接返回，别把卸载一直往后推 */
+  const closingRef = useRef(false);
 
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -451,9 +483,81 @@ export function ChapterEditorView({
   }, []);
 
   /** 菜单状态写入（ref 同步 + React 状态）：键盘处理器读 ref，保证与最新一次计算一致 */
-  const applyMenu = useCallback((next: MentionMenuState | null) => {
-    mentionMenuRef.current = next;
-    setMentionMenu(next);
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    closingRef.current = false;
+  }, []);
+
+  /**
+   * 菜单关闭（R111 浮层退场）：不是立刻卸载，而是**先退场再卸载**——
+   * 告诉作者「它去哪儿了」（docs/11 §3.2：退场比进场快）。
+   * 系统要求减少动效时**立即卸载**：不播退场，也不让人干等一个动画。
+   */
+  const closeMenu = useCallback(() => {
+    if (mentionMenuRef.current === null) return; // 本来就关着 ⇒ 什么都不做
+    if (closingRef.current) return; // 已经在退场 ⇒ 别把卸载一直往后推
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) {
+      cancelClose();
+      mentionMenuRef.current = null;
+      setMentionMenu(null);
+      setMentionEntered(false);
+      setMentionLeaving(false);
+      return;
+    }
+    closingRef.current = true;
+    setMentionLeaving(true);
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      closingRef.current = false;
+      mentionMenuRef.current = null;
+      setMentionMenu(null);
+      setMentionEntered(false);
+      setMentionLeaving(false);
+    }, readExitDelayMs());
+  }, [cancelClose]);
+
+  const applyMenu = useCallback(
+    (next: MentionMenuState | null) => {
+      if (next === null) {
+        closeMenu();
+        return;
+      }
+      const wasClosed = mentionMenuRef.current === null;
+      // 退场期间又打开了（作者马上又打了 @）：取消退场，菜单直接回到在屏状态，不叠两层
+      cancelClose();
+      setMentionLeaving(false);
+      mentionMenuRef.current = next;
+      setMentionMenu(next);
+      if (wasClosed) {
+        // 新会话：从「未进场」开始，下一帧再进场
+        setMentionEntered(false);
+        setMentionSession((n) => n + 1);
+      }
+    },
+    [cancelClose, closeMenu],
+  );
+
+  /**
+   * 浮层进场（R111）：菜单挂载后**下一帧**才加 is-entered——
+   * 过渡需要「前一帧的样式」才会播，同一帧改类不会触发动画（CSS 的基本行为）。
+   * 触发点是**会话序号**而不是菜单对象：同一会话里继续打字时序号不变 ⇒ 不重播进场。
+   */
+  useEffect(() => {
+    if (mentionMenu === null) return;
+    const raf = window.requestAnimationFrame(() => setMentionEntered(true));
+    return () => window.cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mentionSession]);
+
+  /** 组件卸载时清掉退场计时（别在卸载后再动状态） */
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    };
   }, []);
 
   /**
@@ -1060,7 +1164,12 @@ export function ChapterEditorView({
                 {/* 富文本 @ 候选菜单（T2-2 富文本形态）：跟随光标定位；↑↓ / 回车 / Esc 与点击均可操作 */}
                 {mentionMenu && (
                   <div
-                    className={mentionMenu.above ? "mention-menu above" : "mention-menu"}
+                    className={
+                      "mention-menu" +
+                      (mentionMenu.above ? " above" : "") +
+                      (mentionEntered ? " is-entered" : "") +
+                      (mentionLeaving ? " is-leaving" : "")
+                    }
                     style={{ top: mentionMenu.top, left: mentionMenu.left }}
                   >
                     <div className="mention-menu-head">

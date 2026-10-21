@@ -67,6 +67,27 @@ interface StepDef {
    * 且**每次 attempt 重新起一份**——重试不会接着上一次的调用次数往下走。
    */
   fixture?: "import-dialog" | "export-dir";
+  /**
+   * 需要把渲染进程当成「系统要求减少动效」来跑的这一步（R111）。
+   *
+   * 为什么必须由主进程做：页面里的 CSS 媒体查询读的是**系统设置**，
+   * 渲染进程里的 JS 改不了它——只有浏览器进程能改，所以只能由主进程下发 CDP 命令。
+   * 契约 §5 第 3 条要求 reduced-motion 下 transition 与 animation 都被关掉，
+   * 这条口径只有真的把系统设置模拟出来才验得到。
+   */
+  emulateReducedMotion?: boolean;
+  /**
+   * 这一步之前先把**渲染进程整个重新载入**（R111）。
+   *
+   * 为什么需要：step73（开屏）走的是「新建项目 → 取消」，把界面留在**欢迎屏**——
+   * 而欢迎屏没有「返回项目」的入口（「打开已有项目」要走系统对话框，无法自动化）。
+   * 重新载入后 App 在挂载时读 project.current() ⇒ 自动回到项目页。
+   *
+   * 注意：重新载入会清掉 window.__yushuDebug，所以主进程要补设一次；
+   * 而且**下一步不许依赖只在旧页面里挂过的调试句柄**（ChapterEditorView 的
+   * __yushuEditorDebug 要等编辑器页真的挂载才会暴露）。
+   */
+  reloadBefore?: boolean;
 }
 
 const SCREENSHOT_REL_DIR = "docs/assets/m1-preview";
@@ -330,6 +351,42 @@ export async function prepareWalkthrough(dirArg: string): Promise<WalkthroughCon
 
   await fs.mkdir(join(repoRoot, SCREENSHOT_REL_DIR), { recursive: true });
   return { dir, mock };
+}
+
+/**
+ * 把渲染进程切成「系统要求减少动效」（R111）：用 CDP 的 `Emulation.setEmulatedMedia`
+ * 模拟系统的 `prefers-reduced-motion = reduce`。
+ *
+ * 为什么必须走主进程：页面里的 CSS 媒体查询读的是**系统设置**，
+ * 渲染进程里的 JS 改不了它——只有浏览器进程能改，所以只能由主进程下发 CDP 命令。
+ * 契约 §5 第 3 条要求 reduced-motion 下 transition 与 animation 都被关掉，
+ * 这条口径只有真的把系统设置模拟出来才验得到（否则只能验 CSS 里写了什么）。
+ *
+ * 失败**不静默**：ok=false 会让这一步如实报红，而不是"模拟没生效但看起来过了"。
+ */
+async function applyReducedMotion(
+  win: BrowserWindow,
+  reduce: boolean,
+): Promise<{ ok: boolean; restore: () => Promise<void> }> {
+  const dbg = win.webContents.debugger;
+  const restore = async () => {
+    await dbg.sendCommand("Emulation.setEmulatedMedia", { features: [] }).catch(() => undefined);
+    await win.webContents.executeJavaScript("window.__yushuReducedMotion = false;").catch(() => undefined);
+  };
+  try {
+    if (!dbg.isAttached()) dbg.attach("1.3");
+    await dbg.sendCommand("Emulation.setEmulatedMedia", {
+      features: reduce ? [{ name: "prefers-reduced-motion", value: "reduce" }] : [],
+    });
+    await win.webContents
+      .executeJavaScript(`window.__yushuReducedMotion = ${reduce ? "true" : "false"};`)
+      .catch(() => undefined);
+    return { ok: true, restore };
+  } catch (err) {
+    console.error("[walkthrough] reduced-motion 模拟失败：", err);
+    await win.webContents.executeJavaScript("window.__yushuReducedMotion = false;").catch(() => undefined);
+    return { ok: false, restore };
+  }
 }
 
 /** 脚本公共能力：原生 setter 驱动受控输入、等待器、标签页切换、confirm 短路 */
@@ -2808,7 +2865,7 @@ const STEPS: StepDef[] = [
       const before = measure();
       const caretBefore = String(getComputedStyle(document.querySelector('.extensions .disclosure-caret')).transform);
       const expandedBefore = document.querySelector('.extensions .disclosure-toggle').getAttribute('aria-expanded');
-      // 连续采样：动效是 grid-template-rows 0fr→1fr 的真实过渡（--motion-base 240ms）。
+      // 连续采样：动效是 grid-template-rows 0fr→1fr 的真实过渡（R111：展开走 --motion-reveal 380ms、收起走 --motion-exit 140ms）。
       // 要证的是「存在中间态」，那就**逐帧采到中间值**（rAF），
       // 而不是「第 60ms 恰好落在中间」——那只是运气：慢机器上 60ms 才 3px，快机器上直接到终值。
       const samples = [];
@@ -5202,6 +5259,188 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 74,
+    title: 'UI 重构第三批：浮层真的有进退场（进场 240ms / 退场 140ms——退场比进场快）',
+    file: 'step74-ui-motion-overlay.png',
+    reloadBefore: true,
+    body: String.raw`
+      // 这一步量的是**动效本身**：御书唯一的浮层（@ 候选菜单）真的有进退场吗？
+      // 判据五件：
+      // ① 进场的时长与曲线 = 进场族（240ms / ease-enter）；
+      // ② **退场比进场快**（退场 140ms / ease-premium）——docs/11 §3.2 第 1 条；
+      // ③ 进场与退场**都真的播了**（逐帧采到中间态，不许只有终值）；
+      // ④ 退场结束后浮层**真的从 DOM 里消失**（退场不是"停在半透明"）；
+      // ⑤ 候选行的微反馈走状态族（hover 底色有过渡，不是硬切）。
+      //
+      // 为什么这一步要 reloadBefore：上一步（step73 开屏）走的是「新建项目 → 取消」，
+      // 把界面留在**欢迎屏**，而欢迎屏没有「返回项目」的入口（「打开已有项目」走系统对话框，
+      // 没法自动化）。主进程重载渲染进程后，App 挂载时会读 project.current() 自动回到项目页。
+      const tabBar = await waitFor(() => document.querySelector('.tab'), 15000);
+      if (tabBar === null) return { ok: false, note: '没有标签栏（界面不在项目页）：' + pageText().slice(0, 120) };
+      await tab('编辑器');
+      const richBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('.mode-switch button')].find((x) => x.textContent.includes('富文本'));
+        return b === undefined ? null : b;
+      }, 15000);
+      if (richBtn === null) return { ok: false, note: '编辑器里找不到富文本切换按钮：' + pageText().slice(0, 120) };
+      richBtn.click();
+      const tiptap = await waitFor(() => document.querySelector('.tiptap-host .tiptap'), 15000);
+      if (!tiptap) return { ok: false, note: '富文本编辑器未挂载：' + pageText().slice(0, 120) };
+      await sleep(400);
+      const typeText = (text) => {
+        const el = document.querySelector('.tiptap-host .tiptap');
+        if (!el) return;
+        el.focus();
+        const last = el.lastElementChild || el;
+        const range = document.createRange();
+        range.selectNodeContents(last);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('insertText', false, text);
+      };
+      const press = (key) => {
+        const el = document.querySelector('.tiptap-host .tiptap');
+        if (!el) return false;
+        el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+        return true;
+      };
+      // 采样器**先装好再触发**：进场只有 240ms，等我们开始看它已经结束了（R109 栽过这个竞态）
+      const samples = [];
+      let sampling = true;
+      const sampler = () => {
+        if (!sampling) return;
+        const el = document.querySelector('.mention-menu');
+        if (el !== null) {
+          const cs = getComputedStyle(el);
+          samples.push({ o: Number(cs.opacity), d: cs.transitionDuration, f: cs.transitionTimingFunction });
+        }
+        requestAnimationFrame(sampler);
+      };
+      requestAnimationFrame(sampler);
+      typeText('@');
+      const menu = await waitFor(() => document.querySelector('.mention-menu'), 4000);
+      if (!menu) return { ok: false, note: '输入 @ 后未出现候选菜单：' + pageText().slice(0, 120) };
+      await sleep(400);
+      sampling = false;
+      const enterDur = getComputedStyle(menu).transitionDuration;
+      const enterFn = getComputedStyle(menu).transitionTimingFunction;
+      const enterOpacity = Number(getComputedStyle(menu).opacity);
+      const enterMid = samples.filter((s) => s.o > 0.02 && s.o < 0.98).length;
+      // ⑤ 候选行微反馈：hover 底色走状态族（有过渡）
+      const li = document.querySelector('.mention-menu li');
+      const liTransition = li === null ? '' : getComputedStyle(li).transitionDuration;
+      // 触发退场：Esc。退场采样器也先装好再触发
+      const leaveSamples = [];
+      let leaveSampling = true;
+      const leaveSampler = () => {
+        if (!leaveSampling) return;
+        const el = document.querySelector('.mention-menu');
+        if (el !== null) leaveSamples.push(Number(getComputedStyle(el).opacity));
+        requestAnimationFrame(leaveSampler);
+      };
+      requestAnimationFrame(leaveSampler);
+      press('Escape');
+      await sleep(50);
+      const leaveDur = getComputedStyle(menu).transitionDuration;
+      const leaveFn = getComputedStyle(menu).transitionTimingFunction;
+      const leaveMidOpacity = Number(getComputedStyle(menu).opacity);
+      const removed = await waitFor(() => (document.querySelector('.mention-menu') === null ? true : null), 3000);
+      leaveSampling = false;
+      const leaveMid = leaveSamples.filter((o) => o > 0.02 && o < 0.98).length;
+      const target = document.querySelector('.tiptap-host');
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      const toMs = (d) => Math.round(parseFloat(d) * (String(d).indexOf('ms') >= 0 ? 1 : 1000));
+      const enterMs = toMs(enterDur);
+      const leaveMs = toMs(leaveDur);
+      const enterOk = enterMs === 240 && enterFn.indexOf('0.05') >= 0;
+      const leaveOk = leaveMs === 140 && leaveFn.indexOf('0.4') >= 0;
+      const fasterOk = leaveMs < enterMs;
+      return {
+        ok: enterOk && leaveOk && fasterOk && enterMid > 0 && leaveMid > 0 && removed === true && enterOpacity > 0.98,
+        note: '进场 ' + enterDur + ' / ' + enterFn + '（中间态 ' + enterMid + ' 帧，终值 opacity=' + enterOpacity + '）' +
+          '；退场 ' + leaveDur + ' / ' + leaveFn + '（中间态 ' + leaveMid + ' 帧，退场中 opacity=' + leaveMidOpacity + '）' +
+          '；退场比进场快=' + fasterOk + '；退场后从 DOM 消失=' + removed +
+          '；候选行微反馈 transition=' + liTransition,
+      };
+    `,
+  },
+  {
+    step: 75,
+    title: 'UI 重构第三批：系统要求减少动效时动效确实为 0（浮层直接到位，退场不拖泥带水）',
+    file: 'step75-ui-motion-reduced.png',
+    emulateReducedMotion: true,
+    body: String.raw`
+      // 这一步在「系统要求减少动效」下跑（主进程已用 CDP 模拟该系统设置）。
+      // 判据四件：
+      // ① 媒体环境真的切过来了（matchMedia 对得上，且主进程如实报了"已模拟"）；
+      // ② 浮层的过渡**为 0**（不是 0.24s）——契约 §5 第 3 条；
+      // ③ 浮层**直接可见**（作者要求的是少动效，不是少内容：动效不得成为理解的前提）；
+      // ④ 退场**立即**完成（不播那 140ms 的退场动画）。
+      const emulated = window.__yushuReducedMotion === true;
+      const mediaMatches = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const tabBar = await waitFor(() => document.querySelector('.tab'), 15000);
+      if (tabBar === null) return { ok: false, note: '没有标签栏（界面不在项目页）：' + pageText().slice(0, 120) };
+      await tab('编辑器');
+      const richBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('.mode-switch button')].find((x) => x.textContent.includes('富文本'));
+        return b === undefined ? null : b;
+      }, 15000);
+      if (richBtn === null) return { ok: false, note: '编辑器里找不到富文本切换按钮：' + pageText().slice(0, 120) };
+      richBtn.click();
+      const tiptap = await waitFor(() => document.querySelector('.tiptap-host .tiptap'), 15000);
+      if (!tiptap) return { ok: false, note: '富文本编辑器未挂载：' + pageText().slice(0, 120) };
+      await sleep(400);
+      const typeText = (text) => {
+        const el = document.querySelector('.tiptap-host .tiptap');
+        if (!el) return;
+        el.focus();
+        const last = el.lastElementChild || el;
+        const range = document.createRange();
+        range.selectNodeContents(last);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('insertText', false, text);
+      };
+      const press = (key) => {
+        const el = document.querySelector('.tiptap-host .tiptap');
+        if (!el) return false;
+        el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+        return true;
+      };
+      typeText('@');
+      const menu = await waitFor(() => document.querySelector('.mention-menu'), 4000);
+      if (!menu) return { ok: false, note: '输入 @ 后未出现候选菜单：' + pageText() };
+      await sleep(150);
+      const dur = getComputedStyle(menu).transitionDuration;
+      const opacity = Number(getComputedStyle(menu).opacity);
+      const durMs = Math.round(parseFloat(dur) * (String(dur).indexOf('ms') >= 0 ? 1 : 1000));
+      // 退场：reduce 下必须**立即**消失（细粒度轮询量真实耗时，不用 waitFor 的 100ms 粗粒度）
+      const t0 = Date.now();
+      press('Escape');
+      let elapsed = -1;
+      for (let i = 0; i < 200; i += 1) {
+        if (document.querySelector('.mention-menu') === null) { elapsed = Date.now() - t0; break; }
+        await sleep(5);
+      }
+      const immediate = elapsed >= 0 && elapsed < 80;
+      const target = document.querySelector('.tiptap-host');
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: emulated && mediaMatches && durMs === 0 && opacity > 0.98 && immediate,
+        note: '模拟已生效=' + emulated + '；媒体查询对得上=' + mediaMatches +
+          '；浮层过渡=' + dur + '（0 才算对）' +
+          '；浮层直接可见 opacity=' + opacity +
+          '；退场耗时=' + String(elapsed) + 'ms（reduce 下必须立刻消失，不等 140ms）=' + immediate,
+      };
+    `,
+  },
 ];
 
 /**
@@ -5276,6 +5515,19 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
   console.log(`[walkthrough] 开始：项目目录 ${options.dir}；mock ${options.mock.baseUrl}`);
   for (const def of STEPS) {
     const stepStart = Date.now();
+    // R111：有的步骤要在「系统要求减少动效」下跑（主进程侧 CDP 模拟——渲染进程改不了自己的媒体查询）。
+    // 放在 attempt 循环**外面**：重试时仍在同一个媒体环境里，不会第二次 attempt 换了环境。
+    const media = def.emulateReducedMotion === true ? await applyReducedMotion(win, true) : null;
+    // R111：有的步骤开跑前要把渲染进程**整个重新载入**（step73 把界面留在欢迎屏，
+    // 而欢迎屏没有「返回项目」的入口）。重载后要补设调试标志——它随页面一起没了。
+    if (def.reloadBefore === true) {
+      const loaded = new Promise<void>((resolve) => {
+        win.webContents.once("did-finish-load", () => resolve());
+      });
+      win.webContents.reload();
+      await loaded;
+      await win.webContents.executeJavaScript("window.__yushuDebug = true;").catch(() => undefined);
+    }
     // 失败步骤最多重试一次（R55，docs/06 §七：step17 / step21 偶发抖动根因未定）。
     // 重试不是为了"跑绿"，而是把抖动变成可审计的记录：flaky 进报告、第一次的失败说明进 detail，
     // 两次都失败仍算失败。真正一次过的步骤 attempts=1、flaky=false，不会被误标。
@@ -5348,6 +5600,8 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
       `[walkthrough] step${def.step} ${ok ? (outcome.flaky ? "FLAKY" : "OK  ") : "FAIL"} ${ms}ms ` +
         `（执行 ${attempts.length} 次）— ${def.title} :: ${detail}`,
     );
+    // 还原媒体环境（放在截图之后：截图要反映这一步真实的运行条件）
+    if (media !== null) await media.restore();
   }
 
   const finishedAt = new Date().toISOString();
