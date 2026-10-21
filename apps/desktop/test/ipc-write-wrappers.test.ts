@@ -86,6 +86,10 @@ const NON_WRITE_CHANNELS = [
   // 写盘仍是 import:apply 那条 ⇒ 只读包装器是有意的（"只改计划"不是"只读通道"的许可证）。
   "importAiSplit",
   "importCorrect",
+  // R108 导入·取消与任务清单：`import:cancel` 作废票据 + 记一次取消标记（不碰真源，
+  // 真正被改的是运行期的票据与标记）；`import:jobs` 只读任务记录。两条都不写真源 ⇒ 只读包装器。
+  "importCancel",
+  "importJobs",
 ] as const;
 
 /** 解析每个 `ipcMain.handle(CHANNELS.x, …)` 块，返回通道 → 所用包装器 */

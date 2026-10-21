@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
  *
  * 本轮把 `codePointCompareBy` 与 `isValidLocalId` 删了（确认全仓库零引用、且无文档价值），
  * 剩下的 12 个**有意留着**：它们是数据模型词表（`Relation` / `Storyline` / `MemoryLayer`）、
- * 布局常量（`ASSETS_DIR` 等，K03 布局的词汇表）与未接线的取消口（`cancelImport`，T5-7 的"可中断续跑"要用）。
+ * 布局常量（`ASSETS_DIR` 等，K03 布局的词汇表）。R108 起「未接线的取消口」也不在其中了：
+ * `cancelImport` 接上了「取消导入」那条通道（`import:cancel`），T5-7 的"可中断续跑"用上了它。
  * 留着是判断，不是遗漏——所以把它变成机器判据：**新增零引用导出一律红**，删掉一个就把它从名单里划掉。
  *
  * 两条实现教训（第一版扫描器就是踩了这两个坑，把 75 条误报成"死代码"）：
@@ -31,7 +32,8 @@ const SCAN_ROOTS = [
 
 /** 已知且有意保留的零引用导出：文件 → 符号名 */
 const KNOWN_DEAD_EXPORTS: Record<string, string[]> = {
-  "apps/desktop/src/main/import-ops.ts": ["cancelImport"],
+  // R108 起 `cancelImport` 不再是零引用：它接上了「取消导入」那条通道（`import:cancel`），
+  // 名单里这一条随之删掉——棘轮是**只降不升**的，接上一条就少一条。
   "packages/@yushu/core/src/types.ts": ["Relation", "Storyline"],
   "packages/@yushu/genre-engine/src/rule-dsl.ts": ["RULE_OPERATORS", "forbiddenOperatorHint"],
   "packages/@yushu/llm/src/batch.ts": ["BatchEligibleTask"],

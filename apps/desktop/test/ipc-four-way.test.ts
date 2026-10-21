@@ -231,6 +231,18 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(typed.has("import.correct")).toBe(true);
   });
 
+  it("导入·取消与任务清单两条通道在四处齐备（R108 新增：可中断续跑那两半）", () => {
+    expect(channels.get("importCancel")).toBe("import:cancel");
+    expect(channels.get("importJobs")).toBe("import:jobs");
+    expect(registered).toContain("importCancel");
+    expect(registered).toContain("importJobs");
+    expect(literals.invoke.has("import:cancel")).toBe(true);
+    expect(literals.invoke.has("import:jobs")).toBe(true);
+    const typed = memberPaths(apiTs, /export interface YushuApi \{/);
+    expect(typed.has("import.cancel")).toBe(true);
+    expect(typed.has("import.jobs")).toBe(true);
+  });
+
   it("入库通道在四处齐备（R79 新增：这条是真源写，与上面两条只读的不是一类）", () => {
     expect(channels.get("importApply")).toBe("import:apply");
     expect(registered).toContain("importApply");
