@@ -692,3 +692,99 @@ describe("UI 重构第三批（R111）：动效族落地", () => {
     expect(ruleBlock(bare, ".mention-menu")).toContain("var(--elev-overlay)");
   });
 });
+
+/**
+ * UI 重构第四批（R112）的机器判据：标题层级靠**字重与留白**，不靠更多字号。
+ *
+ * 改版前的实况（2026-10-21 复核，不是印象）：
+ * - `h2` 与 `h4` **根本没有规则** ⇒ 靠浏览器默认（h2 = 1.5em ≈ 19.5px / h4 = 1em），
+ *   和别处的 14px 标题对不上；
+ * - `.panel-title`（面板标题条，12.5px）**比它块内的 `.panel h3`（14px）还小** ⇒ 层级是反的；
+ * - 同一个视觉位置（面板标题条）有时放 `<h3>`、有时放纯文字 ⇒ **同一层级两种字号**。
+ *
+ * 口径（docs/11 §2「靠字重与留白，不靠更多字号」）：
+ * 三级 = 页面标题（h2）/ 区块标题（h3）/ 次级标题（h4）；
+ * 面板标题条（`.panel-title`）与区块标题**同档**（它本来就是"这一块的标题"，
+ * 不是"这一页的标题"）⇒ 消灭"同一位置两种字号"。
+ */
+
+/** 解析字号令牌的��际 px（只认 px；标题层级只用 px 档位） */
+function tokenPx(token: string): number | null {
+  const raw = rootTokenValue(token);
+  if (raw === null) return null;
+  const m = /^(\d+(?:\.\d+)?)px$/.exec(raw);
+  return m ? Number(m[1]) : null;
+}
+
+/** 某条标题规则里 font-size / font-weight 的实际取值（都走令牌） */
+function titleMetrics(selector: string): { size: number | null; weight: number | null; block: string } {
+  const block = ruleBlock(BARE, selector);
+  const sizeTok = /font-size:\s*var\((--[a-z0-9-]+)\)/.exec(block);
+  const size = sizeTok ? tokenPx(sizeTok[1] as string) : null;
+  const wm = /font-weight:\s*(\d+)/.exec(block);
+  const weight = wm ? Number(wm[1]) : null;
+  return { size, weight, block };
+}
+
+/** 剥过注释的全文（模块级：R112 的工具函数定义在 describe 外，取不到组内变量） */
+const BARE = masked.join("\n");
+
+describe("UI 重构第四批（R112）：标题层级", () => {
+  it("h2 / h3 / h4 三级都有显式规则（不许靠浏览器默认：h2 默认 1.5em，和别处对不上）", () => {
+    for (const tag of ["h2", "h3", "h4"]) {
+      const { block } = titleMetrics(tag);
+      expect(block, `${tag} 没有显式规则（靠浏览器默认 = 层级失控）`).not.toBe("");
+      expect(block, `${tag} 没定字号`).toContain("font-size");
+      expect(block, `${tag} 没定字重`).toContain("font-weight");
+    }
+  });
+
+  it("层级单调：字号与字重都不许随层级下降而变大（页面 → 区块 → 次级）", () => {
+    const page = titleMetrics("h2");
+    const block = titleMetrics("h3");
+    const sub = titleMetrics("h4");
+    expect(page.size, "h2 的字号解析不出来").not.toBeNull();
+    expect(block.size, "h3 的字号解析不出来").not.toBeNull();
+    expect(sub.size, "h4 的字号解析不出来").not.toBeNull();
+    expect(page.weight).toBeGreaterThanOrEqual(block.weight ?? 0);
+    expect(block.weight).toBeGreaterThanOrEqual(sub.weight ?? 0);
+    expect(page.size).toBeGreaterThan(block.size ?? 0);
+    expect(block.size).toBeGreaterThan(sub.size ?? 0);
+  });
+
+  it("标题的字号与字重只许走令牌（不许新增字号档，也不许硬写 px）", () => {
+    for (const tag of ["h2", "h3", "h4"]) {
+      const { block } = titleMetrics(tag);
+      expect(block, `${tag} 里有硬写的字号`).not.toMatch(/font-size:\s*\d/);
+      expect(block, `${tag} 的字号没走令牌`).toMatch(/font-size:\s*var\(--text-/);
+    }
+  });
+
+  it("面板标题条只有一种呈现：`.panel-title` 与它里面的 h3 必须同档（同位置不许两种字号）", () => {
+    const panel = titleMetrics(".panel-title");
+    const inner = titleMetrics(".panel-title h3");
+    expect(panel.size, "面板标题条没有走字号令牌").not.toBeNull();
+    expect(inner.block, "`.panel-title h3` 没有重置规则（面板标题条里会出现两种字号）").not.toBe("");
+    expect(inner.block).toContain("font-size: inherit");
+    expect(inner.block).toContain("font-weight: inherit");
+    // 面板标题条与块内区块标题同档
+    const h3 = titleMetrics("h3");
+    expect(panel.size).toBe(h3.size);
+  });
+
+  it("局部覆盖标题层级的写法一个都不许有（层级只能由那三条全局规则决定）", () => {
+    for (const sel of [".panel h2", ".panel h3", ".panel h4"]) {
+      expect(BARE, `${sel} 局部覆盖了标题层级`).not.toContain(sel + " {");
+      expect(BARE, `${sel} 局部覆盖了标题层级`).not.toContain(sel + ",");
+    }
+  });
+
+  it("扫描器自己要能红：把某级的显式规则删掉，判据必须点名（防解析器坏了 ⇒ 零命中冒充全绿）", () => {
+    const broken = "h2 {\n  font-size: var(--text-lg);\n}\n";
+    const block = ruleBlock(broken, "h2");
+    expect(block).not.toBe("");
+    expect(block).not.toContain("font-weight"); // 缺字重 ⇒ 判据会红
+    const missing = ruleBlock("h3 { font-size: var(--text-base); }", "h4");
+    expect(missing).toBe(""); // 根本没有这条规则 ⇒ 判据会红
+  });
+});
