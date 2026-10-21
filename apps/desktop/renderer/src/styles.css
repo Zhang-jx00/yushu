@@ -478,9 +478,33 @@ textarea:focus {
   min-height: 0;
 }
 
-.panel h3 {
+/* ---------- 标题层级（R112）：三级，靠字重与留白，不靠更多字号 ---------- */
+
+/* 改版前的实况（2026-10-21 复核，不是印象）：`h2` 与 `h4` **根本没有规则**，
+   靠的是浏览器默认（h2 = 1.5em ≈ 19.5px、h4 = 1em），和别处的 14px 标题对不上；
+   而面板标题条 `.panel-title`（12.5px）**比它块内的 h3（14px）还小**——层级是反的。
+   现在定三级：页面标题（h2）/ 区块标题（h3）/ 次级标题（h4）。
+   字号沿用既有档位（--text-lg / --text-base / --text-sm）⇒ **不新增字号档**，
+   「一屏字号档数 ≤ 4」不被破坏；字重只用 600 / 700 两档
+   （Windows 静态字体不支持 500，"中等粗细"会随机落到 400 或 700 ⇒ 不用）。 */
+h2 {
+  margin: 0 0 var(--space-6);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+}
+
+h3 {
   margin: 0 0 var(--space-5);
-  font-size: var(--text-md);
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+}
+
+h4 {
+  margin: var(--space-5) 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 600;
   line-height: var(--leading-tight);
 }
 
@@ -680,7 +704,18 @@ textarea:focus {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 8px;
-  font-size: 12.5px;
+  /* R112：面板标题条与块内区块标题**同档**（--text-base / 600）——
+     它本来就是"这一块的标题"，不是"这一页的标题"。 */
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+/* 面板标题条里有的放 `<h3>`、有的放纯文字 ⇒ 同一个视觉位置会出现**两种字号**。
+   统一：条内的 h3 继承条本身的呈现（**语义仍是标题**，可访问性不受影响）。 */
+.panel-title h3 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
 }
 
 .tree {

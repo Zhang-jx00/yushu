@@ -129,7 +129,7 @@ export function GenesisView() {
 
       <section>
         <div className="wizard-head">
-          <h2>{step.title}</h2>
+          <h3>{step.title}</h3>
           <span className="muted">{step.intro}</span>
         </div>
 
