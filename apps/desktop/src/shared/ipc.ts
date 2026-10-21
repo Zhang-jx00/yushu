@@ -84,6 +84,10 @@ export const CHANNELS = {
   importAiSplit: "import:aiSplit",
   /** 存量导入·人工校正切分（M5/T5-7 第二段，R107）：**只读**——只改计划，不写盘 */
   importCorrect: "import:correct",
+  /** 存量导入·取消（M5/T5-7 第三段，R108）：作废票据 + 记一次取消（正在入库的话在章的边界上停） */
+  importCancel: "import:cancel",
+  /** 存量导入·任务清单（M5/T5-7 第三段，R108）：**只读**——可续跑的任务记录 */
+  importJobs: "import:jobs",
   /** 主进程 → 渲染层的流式事件（单向推送，非 invoke） */
   aiEvent: "ai:event",
   exportPreview: "export:preview",
@@ -3014,6 +3018,23 @@ export interface ImportPreviewPayload {
   miscuts: ImportMiscutPayload[];
   /** 这次的切分是"正则切的"还是"AI 筛过的"，以及回退理由 */
   ai: ImportAiSplitPayload;
+  /**
+   * 续跑线索：这份稿子有一份**可续跑**的任务记录（主进程按源文件指纹核对出来的——
+   * 渲染层不自己判"是不是同一份"，判错了续跑就会把两本书接在一起）。
+   */
+  resume: ImportResumePayload | null;
+}
+
+/** 续跑线索：上次导到哪、还剩多少 */
+export interface ImportResumePayload {
+  /** 任务记录 id（入库时带回，主进程凭它续跑） */
+  job_id: string;
+  /** 源文件名（只 basename） */
+  source_name: string;
+  /** 上次已落盘的章数 */
+  last_chapter: number;
+  /** 这一批一共有几章 */
+  total_chapters: number;
 }
 
 /** 一条海选候选 */
@@ -3113,6 +3134,39 @@ export interface ImportApplyPayload {
   confirmSingleChapter?: boolean;
   /** 确认时读到的 outline.yaml hash；不一致即拒（不覆盖别人的改动） */
   baseHash?: string;
+  /**
+   * 续跑：凭这张任务记录接着写（I09 §2.7 的断点续跑）。
+   *
+   * 主进程会核对三件事，任一不成立即拒：**同一份稿子**（指纹）、**同一份切分**（章数与字数）。
+   * 不传 = 全新导入（会新建一卷）。
+   */
+  jobId?: string;
+}
+
+/** 取消这次导入的请求（票据是渲染层唯一能拿到的把手） */
+export interface ImportCancelRequestPayload {
+  ticket: string;
+}
+
+/** 取消的结果：告诉作者"停下"还是"这次放弃了" */
+export interface ImportCancelResultPayload {
+  /** 这次取消有没有让**正在跑的入库**停下 */
+  stopped: boolean;
+  /** 票据是否已作废（作废后不能再用它入库） */
+  revoked: boolean;
+  note: string;
+}
+
+/** 一条可续跑的导入任务（面板上要让作者看见"上次那稿子没导完"） */
+export interface ImportJobSummaryPayload {
+  id: string;
+  /** 源文件名（只 basename） */
+  source_name: string;
+  status: string;
+  /** 上次已落盘的章数 */
+  last_chapter: number;
+  /** 这一批一共有几章 */
+  total_chapters: number;
 }
 
 /** 一章的入库结果：预演字数与落盘字数并排放，对不上就是 `reconciled: false` */
@@ -3141,5 +3195,13 @@ export interface ImportApplyResultPayload {
   preamble: { chars: number; excerpt: string } | null;
   totalExpectedChars: number;
   totalWrittenWords: number;
+  /** 这次导入的任务记录 id（断点续跑靠它） */
+  jobId: string;
+  /** true = 作者中途取消了（只写了一部分，剩下的可续跑） */
+  stopped: boolean;
+  /** 已经写进盘上的章数 */
+  writtenChapters: number;
+  /** 这一批一共有几章 */
+  totalChapters: number;
   note: string;
 }

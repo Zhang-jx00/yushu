@@ -400,16 +400,32 @@ const IMPORT_UI_MISCUT = [
   "停。",
 ].join("\r\n");
 
+/**
+ * R108 用的长稿子：40 章。
+ *
+ * 为什么要这么长：**入库途中点「停下」要能点得到**。三章的稿子入库只花几毫秒，
+ * 渲染层那一次点击根本赶不上（点晚了入库已经结束 ⇒ 这一步就变成"看运气"的抖动证据）。
+ * 40 章 ⇒ 入库要写 40 份草稿 + 40 次断点落盘 ⇒ 窗口足够宽，**停下来停在哪一章都行**
+ * （断言只要求"停在章的边界上、断点落盘、剩下的可续"）。
+ */
+const IMPORT_UI_LONG = Array.from(
+  { length: 40 },
+  (_unused, index) =>
+    `第${String(index + 1)}章 测试章${String(index + 1)}\r\n这是第 ${String(index + 1)} 章的正文，用来把入库的窗口拉宽一些。`,
+).join("\r\n");
+
 async function openImportDialogFixture(win: BrowserWindow): Promise<{ dir: string; restore(): Promise<void> }> {
   const dir = await fs.mkdtemp(join(tmpdir(), "yushu-import-ui-"));
   const utf8Path = join(dir, "旧稿-预演.txt");
   const gbkPath = join(dir, "旧稿-GBK.txt");
   const flatPath = join(dir, "旧稿-没标题.txt");
   const miscutPath = join(dir, "旧稿-切错了.txt");
+  const longPath = join(dir, "旧稿-长稿.txt");
   await fs.writeFile(utf8Path, IMPORT_UI_TEXT, "utf8");
   await fs.writeFile(gbkPath, Buffer.from(IMPORT_UI_GBK));
   await fs.writeFile(flatPath, IMPORT_UI_FLAT, "utf8");
   await fs.writeFile(miscutPath, IMPORT_UI_MISCUT, "utf8");
+  await fs.writeFile(longPath, IMPORT_UI_LONG, "utf8");
   const original = dialog.showOpenDialog;
   dialog.showOpenDialog = (async () => {
     const which = String(
@@ -424,7 +440,9 @@ async function openImportDialogFixture(win: BrowserWindow): Promise<{ dir: strin
             ? flatPath
             : which === "miscut"
               ? miscutPath
-              : undefined;
+              : which === "long"
+                ? longPath
+                : undefined;
     return picked === undefined ? { canceled: true, filePaths: [] } : { canceled: false, filePaths: [picked] };
   }) as typeof dialog.showOpenDialog;
   return {
@@ -4848,6 +4866,142 @@ const STEPS: StepDef[] = [
           '；AI 筛一遍→' + afterAi + ' 章（切分来源：' + sourceAfter.slice(0, 40) + '）' +
           '；人工合并（' + mergeLabel + '）→' + afterMerge + ' 章' +
           '；盘上真源一个字节没动=' + diskUntouched,
+      };
+    `,
+  },
+  {
+    step: 70,
+    title: '导入可中断续跑：入库途中停下 → 断点落盘 → 重选同一份稿子 → 续跑补齐剩下的（M5/T5-7 第三段，R108）',
+    file: 'step70-import-resume.png',
+    fixture: "import-dialog",
+    body: String.raw`
+      // 这一步要证 I09 §2.7 的「可中断 + 断点续跑」在界面上真的走得通：
+      // ① **入库途中能停**：点「停下（剩下的可续跑）」⇒ 盘上留下一份任务记录，断点写着最后成功章号；
+      // ② **重选同一份稿子 ⇒ 界面摆出「可续跑」**（主进程按源文件指纹核对出来的）；
+      // ③ **续跑把剩下的补齐**，已写好的那几章**不动**；
+      // ④ **还没入库时的「取消导入」真的作废票据**（面板回到初始态）。
+      await tab('稿件总览');
+      const toggle = await waitFor(() => {
+        const t = [...document.querySelectorAll('.disclosure-toggle')].find((x) => String(x.textContent).indexOf('导入存量稿件') >= 0);
+        return t || null;
+      }, 10000);
+      if (toggle === null) return { ok: false, note: '总览页没有「导入存量稿件」折叠区' };
+      if (String(toggle.closest('.disclosure').className).indexOf('open') < 0) {
+        toggle.click();
+        await sleep(320);
+      }
+      const panel = await waitFor(() => document.querySelector('.import-panel'), 10000);
+      if (panel === null) return { ok: false, note: '没有导入面板：' + pageText().slice(0, 140) };
+      const btn = (label) => [...panel.querySelectorAll('button')].find((b) => String(b.textContent).indexOf(label) >= 0);
+      // 等**长稿那一份**的预演：面板上可能还留着上一步的旧预演（step69 选的是"切错了"那份），
+      // 只等"分章预演"这几个字会立刻返回 ⇒ 后面每一步都在对着一份过期的视图操作。
+      const longPreview = async () => {
+        for (let i = 0; i < 200; i += 1) {
+          const el = [...panel.querySelectorAll('.import-block-title')].find((d) => String(d.textContent).indexOf('分章预演') >= 0);
+          if (el !== undefined) {
+            const text = String(el.textContent);
+            if (text.indexOf('40 章') >= 0) return text;
+          }
+          await sleep(100);
+        }
+        return null;
+      };
+      const draftCount = async () => {
+        const tree = await window.yushu.project.tree();
+        return tree.filter((item) => item.type === 'file' && item.path.indexOf('chapters/') === 0).length;
+      };
+
+      // ① 还没入库时先取消一次：票据作废 ⇒ 面板回到初始态（这一条不依赖任何时序）
+      window.__yushuPick = 'long';
+      let pickBtn = await waitFor(() => btn('选择文件') || null, 10000);
+      if (pickBtn === undefined || pickBtn === null) return { ok: false, note: '面板里没有「选择文件…」按钮' };
+      pickBtn.click();
+      const previewed = await longPreview();
+      if (previewed === null) return { ok: false, note: '预演没出长稿那一份分章预演表：' + pageText().slice(0, 140) };
+      // 等按钮**可点**再点：预演渲染完成与 busy 复位不一定同拍，
+      // 点一个还禁用的按钮等于没点（这一条曾让本步抖动过一次）。
+      const cancelBtn = await waitFor(() => {
+        const b = btn('取消导入');
+        return b !== undefined && b.disabled !== true ? b : null;
+      }, 10000);
+      if (cancelBtn === null) return { ok: false, note: '面板里没有可点的「取消导入」按钮' };
+      cancelBtn.click();
+      const backToStart = await waitFor(() => (btn('选择文件') !== undefined && panel.innerText.indexOf('分章预演') < 0 ? true : null), 15000);
+      const cancelOk = backToStart !== null;
+      // 取消这一段的诊断：回执原话 + 面板上的错误 + 面板里还剩什么
+      const cancelDiag =
+        '回执=[' + String(panel.querySelector('.import-note') === null ? '' : String(panel.querySelector('.import-note').textContent || '')).slice(0, 60) + ']' +
+        ' 错误=[' + String(panel.querySelector('.error-text') === null ? '' : String(panel.querySelector('.error-text').textContent || '')).slice(0, 80) + ']' +
+        ' 面板=[' + panel.innerText.replace(/\s+/g, ' ').slice(0, 120) + ']';
+
+      // ② 入库途中点「停下」：用的是 40 章的长稿（窗口够宽，停下来停在哪一章都行）
+      pickBtn = await waitFor(() => btn('选择文件') || null, 10000);
+      if (pickBtn === undefined || pickBtn === null) return { ok: false, note: '取消后没有回到可再选文件的状态' };
+      pickBtn.click();
+      const previewed2 = await longPreview();
+      if (previewed2 === null) return { ok: false, note: '第二次预演没出长稿那一份分章预演表' };
+      const applyBtn = await waitFor(() => {
+        const b = btn('确认入库');
+        return b !== undefined && b.disabled !== true ? b : null;
+      }, 10000);
+      if (applyBtn === null) return { ok: false, note: '面板里没有可点的「确认入库」按钮' };
+      // 回执块的内容（用来判"入库这一轮结束了"）：等**内容变了**而不是等某个词
+      // ——按钮文案里就有「停下」，等字会立刻返回，入库其实还在跑
+      const resultText = () => {
+        const el = panel.querySelector('.import-result');
+        return el === null ? '' : String(el.textContent || '').replace(/\s+/g, ' ');
+      };
+      const beforeApply = resultText();
+      const beforeDrafts = await draftCount();
+      applyBtn.click();
+      const stopBtn = await waitFor(() => btn('停下') || null, 20000, 5);
+      if (stopBtn === undefined || stopBtn === null) return { ok: false, note: '入库途中没有出现「停下」按钮' };
+      stopBtn.click();
+      const stopAck = await waitFor(() => (panel.innerText.indexOf('已请求停下') >= 0 ? true : null), 20000, 20);
+      const resultShown = await waitFor(() => (resultText() !== beforeApply ? true : null), 60000, 50);
+      if (resultShown === null) return { ok: false, note: '点了「停下」但没有入库回执：' + panel.innerText.slice(0, 200) };
+      const afterStopDrafts = await draftCount();
+      // 断点落盘：有一份可续跑的任务记录，且它记的章数与盘上的章数对得上
+      const jobs = await window.yushu.import.jobs();
+      const job = jobs.length > 0 ? jobs[0] : null;
+      const jobOk = job !== null && job.last_chapter === afterStopDrafts - beforeDrafts && job.total_chapters === 40;
+      const partial = afterStopDrafts - beforeDrafts < 40;
+
+      // ③ 重选同一份稿子 ⇒ 界面摆出「可续跑」⇒ 续跑补齐剩下的
+      pickBtn = await waitFor(() => btn('选择文件') || null, 10000);
+      if (pickBtn === undefined || pickBtn === null) return { ok: false, note: '停下之后没有回到可再选文件的状态' };
+      pickBtn.click();
+      const banner = await waitFor(() => (panel.innerText.indexOf('这稿子上次没导完') >= 0 ? true : null), 40000, 20);
+      if (banner === null) return { ok: false, note: '重选同一份稿子后没有出现「可续跑」提示：' + panel.innerText.slice(0, 200) };
+      const resumeBtn = await waitFor(() => {
+        const b = btn('续跑并入库');
+        return b !== undefined && b.disabled !== true ? b : null;
+      }, 10000);
+      if (resumeBtn === null) return { ok: false, note: '面板里没有可点的「续跑并入库」按钮' };
+      const beforeResume = resultText();
+      resumeBtn.click();
+      const done = await waitFor(() => (resultText() !== beforeResume ? true : null), 60000, 50);
+      if (done === null) return { ok: false, note: '续跑之后没有入库回执：' + panel.innerText.slice(0, 200) };
+      const finalDrafts = await draftCount();
+      const jobsAfter = await window.yushu.import.jobs();
+      const allWritten = finalDrafts - beforeDrafts === 40;
+      const noResumableLeft = jobsAfter.length === 0;
+
+      const target = [...panel.querySelectorAll('.import-block')].find((d) => String(d.textContent).indexOf('没导完') >= 0);
+      if (target) target.scrollIntoView({ block: 'center' });
+      else {
+        const res = [...panel.querySelectorAll('div')].find((d) => String(d.textContent).indexOf('已入库') >= 0);
+        if (res) res.scrollIntoView({ block: 'center' });
+      }
+      await sleep(240);
+      return {
+        ok: cancelOk && jobOk && partial && allWritten && noResumableLeft,
+        note: '取消导入后回到初始态=' + cancelOk + (cancelOk ? '' : '（' + cancelDiag + '）') +
+          '；停下回执=' + String(stopAck !== null) +
+          '；停下时已落盘 ' + String(afterStopDrafts - beforeDrafts) + '/40 章' +
+          '；断点记录（已写 ' + String(job === null ? -1 : job.last_chapter) + ' / 共 ' + String(job === null ? -1 : job.total_chapters) + ' 章）=' + jobOk +
+          '；续跑后盘上共 ' + String(finalDrafts - beforeDrafts) + ' 章=' + allWritten +
+          '；没有可续跑的任务残留=' + noResumableLeft,
       };
     `,
   },

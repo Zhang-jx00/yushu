@@ -53,6 +53,14 @@ function createWindow(): BrowserWindow {
   registerCloseCoordinator(webContentsId, coordinator);
   win.on("close", (event) => coordinator.handleClose(event));
   win.on("closed", () => unregisterCloseCoordinator(webContentsId));
+  // 渲染进程意外退出（崩溃 / OOM / 被杀）⇒ 窗口会跟着关掉，app 随即退出（退出码 0）。
+  // 那在预演里表现为「**跑到某一步就静默中止**」——本仓台账记过两次（v186 与 R108 的 v247）。
+  // 记一条日志，下一次再犯就不是"没线索的静默中止"了。
+  win.webContents.on("render-process-gone", (_event, details) => {
+    console.error(
+      `[renderer] 渲染进程退出：原因 ${details.reason}（exitCode=${String(details.exitCode)}）`,
+    );
+  });
 
   // 开发模式：加载 Vite dev server（scripts/dev.mjs 注入）；生产：加载构建产物
   const devServerUrl = process.env["VITE_DEV_SERVER_URL"];

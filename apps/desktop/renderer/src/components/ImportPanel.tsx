@@ -116,6 +116,56 @@ export function ImportPanel() {
   const canApply = view !== null && !busy && !applying && (!needsConfirm || confirmSingle);
 
   /**
+   * 取消这次导入（R108，I09 §2.7 的"可中断"那半边）。
+   *
+   * 两种情形一句话说清：
+   * ① **还没入库** ⇒ 放弃这次导入（票据作废，选中的文件不会再被读到）；
+   * ② **正在入库** ⇒ 请求在**章的边界**上停下（半章写进去是半个章），
+   *    断点落盘，剩下的可以续跑。
+   */
+  const cancel = async () => {
+    if (picked === null) return;
+    try {
+      setError("");
+      const done = await api().import.cancel({ ticket: picked.ticket });
+      setNotice(done.note);
+      // 放弃（没在入库）⇒ 回到初始态；只是"请求停下"⇒ 面板留着，等入库那边回执
+      if (!done.stopped) {
+        setPicked(null);
+        setView(null);
+        setConfirmSingle(false);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  /** 续跑：带上任务 id 入库（主进程会核对源文件指纹与切分，核不过就拒） */
+  const applyAsResume = async () => {
+    if (picked === null || view === null || view.resume === null) return;
+    try {
+      setError("");
+      setApplying(true);
+      const done = await api().import.apply({
+        ticket: picked.ticket,
+        jobId: view.resume.job_id,
+        ...(rules.length > 0 ? { rules } : {}),
+        ...(volumeTitle.trim() !== "" ? { volumeTitle: volumeTitle.trim() } : {}),
+        ...(view.split.hardSplit ? {} : { confirmSingleChapter: true }),
+        ...(view.outlineHash === null ? {} : { baseHash: view.outlineHash }),
+      });
+      setResult(done);
+      setPicked(null);
+      setView(null);
+      setConfirmSingle(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  /**
    * AI 二次筛选切分（R107）：只改计划，不写盘。
    *
    * 回执原话直接显示——**回退到正则切分时必须让作者看见**，
@@ -187,6 +237,11 @@ export function ImportPanel() {
         )}
         {picked === null && (
           <span className="muted">路径不进渲染层：选中的文件由主进程登记成一张票据，这里只显示文件名。</span>
+        )}
+        {picked !== null && (
+          <button type="button" onClick={() => void cancel()} disabled={busy}>
+            取消导入
+          </button>
         )}
       </div>
 
@@ -457,6 +512,13 @@ export function ImportPanel() {
               <button type="button" className="primary import-apply-btn" disabled={!canApply} onClick={() => void apply()}>
                 {applying ? "正在建卷建章…" : "确认入库"}
               </button>
+              {/* 正在入库时给一个"停下"的入口：断点会落盘，剩下的可以续跑
+                  （半章写进去是半个章 ⇒ 主进程在**章的边界**上才停） */}
+              {applying && (
+                <button type="button" onClick={() => void cancel()}>
+                  停下（剩下的可续跑）
+                </button>
+              )}
             </div>
             <div className="muted import-rule-note">
               入库写的是真源：新建一卷 + 每章一条章纲 + 每章一个草稿文件，写之前强制留一份可撤销的快照。
@@ -464,9 +526,29 @@ export function ImportPanel() {
             </div>
           </div>
 
+          {/* 断点续跑（R108，I09 §2.7）：主进程按**源文件指纹**核对出来的——
+              渲染层不自己判"是不是同一份"，判错了续跑会把两本书接在一起。 */}
+          {view.resume !== null && (
+            <div className="import-block">
+              <div className="import-block-title">
+                这稿子上次没导完：已落盘 {String(view.resume.last_chapter)} / {String(view.resume.total_chapters)} 章
+              </div>
+              <div className="muted import-note">
+                续跑会接着写剩下的那几章，**已经写好的那几章不动**（主进程会核对你选的还是不是同一份文件、
+                同一份切分，核不过就拒）。
+              </div>
+              <div className="import-actions">
+                <button type="button" className="primary" disabled={busy || applying} onClick={() => void applyAsResume()}>
+                  {applying ? "正在续跑…" : "续跑并入库"}
+                </button>
+                <span className="muted">不想接着上次？直接点下面的「确认入库」会另起一卷。</span>
+              </div>
+            </div>
+          )}
+
           <div className="import-boundary">
-            导入这条线还没做完的部分：实体抽取候选、可中断续跑
-            （对账已经做了，逐章比对预演字数与落盘字数；AI 二次筛选切章与误切校正已经在上面那段「切分复核」里）。
+            导入这条线还没做完的部分：实体抽取候选
+            （对账已经做了，逐章比对预演字数与落盘字数；AI 二次筛选切章、误切校正与断点续跑已经在上面那几段里）。
           </div>
         </>
       )}
@@ -474,7 +556,17 @@ export function ImportPanel() {
       {result !== null && (
         <div className="import-result">
           <div className="import-block-title">
-            已入库：{result.volumeTitle}（{String(result.created.length)} 章 · {String(result.totalWrittenWords)} 字）
+            {/* 中途停下与导完是**两回事**：停下时"已入库 0 章"这句话会骗人
+                （章数是"这次写了几章"，不是"总共几章"）——分开说。 */}
+            {result.stopped ? (
+              <>
+                已停下：写入了 {String(result.writtenChapters)} / {String(result.totalChapters)} 章，剩下的可以续跑
+              </>
+            ) : (
+              <>
+                已入库：{result.volumeTitle}（{String(result.created.length)} 章 · {String(result.totalWrittenWords)} 字）
+              </>
+            )}
           </div>
           <div className="muted">{result.note}</div>
           {result.mismatched.length > 0 && (

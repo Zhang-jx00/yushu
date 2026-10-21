@@ -35,7 +35,10 @@ import type {
   ImportApplyPayload,
   ImportApplyResultPayload,
   ImportAiSplitRequestPayload,
+  ImportCancelRequestPayload,
+  ImportCancelResultPayload,
   ImportCorrectRequestPayload,
+  ImportJobSummaryPayload,
   ImportPlanResultPayload,
   ProposalPayload,
   AiCostPayload,
@@ -258,6 +261,10 @@ export interface YushuApi {
     aiSplit: (payload: ImportAiSplitRequestPayload) => Promise<ImportPlanResultPayload>;
     /** 人工校正切分（R107，I09 §3.5）：只改计划，不写盘 */
     correct: (payload: ImportCorrectRequestPayload) => Promise<ImportPlanResultPayload>;
+    /** 取消这次导入（R108，I09 §2.7）：作废票据 + 记一次取消 */
+    cancel: (payload: ImportCancelRequestPayload) => Promise<ImportCancelResultPayload>;
+    /** 可续跑的导入任务（R108）：只读 */
+    jobs: () => Promise<ImportJobSummaryPayload[]>;
   };
   export: {
     preview: (payload?: ExportPreviewRequest) => Promise<ExportPreviewPayload>;

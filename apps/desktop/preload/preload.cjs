@@ -126,6 +126,10 @@ contextBridge.exposeInMainWorld("yushu", {
     aiSplit: (payload) => invoke("import:aiSplit", payload),
     /** 人工校正切分（R107）：只改计划，不写盘 */
     correct: (payload) => invoke("import:correct", payload),
+    /** 取消这次导入（R108）：作废票据 + 记一次取消（正在入库的话在章的边界上停） */
+    cancel: (payload) => invoke("import:cancel", payload),
+    /** 可续跑的导入任务（R108）：只读 */
+    jobs: () => invoke("import:jobs"),
   },
   export: {
     preview: (payload) => invoke("export:preview", payload),

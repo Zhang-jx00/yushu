@@ -82,7 +82,10 @@ import {
   type ImportApplyPayload,
   type ImportApplyResultPayload,
 type ImportAiSplitRequestPayload,
+type ImportCancelRequestPayload,
+type ImportCancelResultPayload,
 type ImportCorrectRequestPayload,
+type ImportJobSummaryPayload,
 type ImportPlanResultPayload,
   type ImportPickPayload,
   type ImportPreviewPayload,
@@ -170,7 +173,13 @@ import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
-import { applyImport, pickImportSource, previewImport } from "./import-ops.js";
+import {
+  applyImport,
+  decideImportCancel,
+  listResumableImportJobs,
+  pickImportSource,
+  previewImport,
+} from "./import-ops.js";
 import { correctImportSplit, filterImportSplitByAi } from "./import-split-ops.js";
 import type { ProposalFile } from "@yushu/world-engine";
 
@@ -665,10 +674,30 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNELS.importAiSplit, (_event, payload: ImportAiSplitRequestPayload) =>
     wrap<ImportPlanResultPayload>(() => filterImportSplitByAi(requireGateway(), payload.ticket, payload)),
   );
-
   // 人工校正切分（R107，I09 §3.5）：同样**只改计划**（合并 / 拆分 / 重排），零写入
   ipcMain.handle(CHANNELS.importCorrect, (_event, payload: ImportCorrectRequestPayload) =>
     wrap<ImportPlanResultPayload>(() => correctImportSplit(requireGateway(), payload.ticket, payload)),
+  );
+
+  // 取消这次导入（R108，I09 §2.7 的"可中断"那半边）：作废票据 + 记一次取消。
+  // 正在入库的话，写盘循环会在**章的边界**上停 ⇒ 断点落盘，剩下的可续跑。
+  // 这条通道不碰真源（作废的是票据、记的是运行期标记），所以走只读包装器。
+  ipcMain.handle(CHANNELS.importCancel, (_event, payload: ImportCancelRequestPayload) =>
+    wrap<ImportCancelResultPayload>(() => decideImportCancel(payload.ticket)),
+  );
+
+  // 可续跑的导入任务（R108）：**只读**——任务记录在 .yushu/imports/ 下，不是项目内容
+  ipcMain.handle(CHANNELS.importJobs, () =>
+    wrap<ImportJobSummaryPayload[]>(async () => {
+      const jobs = await listResumableImportJobs(requireGateway());
+      return jobs.map((job) => ({
+        id: job.id,
+        source_name: job.source.name,
+        status: job.status,
+        last_chapter: job.checkpoint.last_chapter,
+        total_chapters: job.chapters.length,
+      }));
+    }),
   );
 
   // 候选拒绝原因（T3-11，J15）：记录到 .yushu/ai-feedback.jsonl 并回传统计（记录失败不阻断）
