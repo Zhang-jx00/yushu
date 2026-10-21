@@ -303,3 +303,118 @@ describe("可点选的必须是键盘能到的控件（契约 §6）", () => {
     expect(statSync(join(VIEW_ROOT, "icons.tsx")).isFile()).toBe(true);
   });
 });
+
+/**
+ * UI 重构第一轮（R109）的机器判据：密度档 + 品牌标记。
+ *
+ * 两条都盯"看起来是小事、其实是作者每天的体验"的地方：
+ * ① **默认档必须等于改版前的取值**——密度档是个**开关**，不是"我们顺手把画面改了"；
+ * ② **品牌标记只有一个来源**——标记散落两份就等于有两枚不同的印，署名与识别都失守。
+ */
+describe("UI 重构第一轮（R109）：密度档与品牌标记", () => {
+  const brand = readFileSync(join(VIEW_ROOT, "brand.tsx"), "utf8");
+
+  it("密度三档齐备，且**默认档 cozy 的取值就是改版前的样子**（不许偷偷改默认画面）", () => {
+    const rootBlock = css.slice(css.indexOf(":root {"));
+    const cozy = rootBlock.slice(0, rootBlock.indexOf("}") + 1);
+    // 改版前 `.slot-table th/td` 的 padding 是 `4px 8px` ⇒ 默认档必须还是它
+    expect(cozy).toContain("--density-cell-pad-y: 4px;");
+    expect(cozy).toContain("--density-cell-pad-x: 8px;");
+    expect(cozy).toContain("--density-text: 12.5px;");
+    for (const id of ["compact", "roomy"]) {
+      expect(css, `缺密度档 ${id}`).toContain(`:root[data-density="${id}"]`);
+    }
+  });
+
+  it("表格内距必须走密度令牌（不许再写 px 字面量，否则切档对表格无效）", () => {
+    const tableBlock = /\.slot-table th,\s*\.slot-table td \{[^}]*\}/.exec(css)?.[0] ?? "";
+    expect(tableBlock).toContain("var(--density-cell-pad-y)");
+    expect(tableBlock).toContain("var(--density-cell-pad-x)");
+    // 只看 **padding 那一条**（同一块里还有 `border-bottom: 1px`，那是描边不是内距）
+    const paddingLine = tableBlock.split("\n").find((row) => row.includes("padding:")) ?? "";
+    expect(paddingLine).not.toMatch(/\d+px/);
+  });
+
+  it("密度档的三档取值都只出现在 :root 里（棘轮口径：字面量不许散在别处）", () => {
+    // 两档覆盖块必须写成 :root[data-density=...]：令牌就是 :root 级的
+    expect(css).not.toMatch(/html\[data-density=/);
+    const densityBlocks = [...css.matchAll(/:root\[data-density="[a-z]+"\] \{[^}]*\}/g)].map((m) => m[0]);
+    expect(densityBlocks.length).toBe(2);
+  });
+
+  it("品牌标记只有一个来源：path 只许出现在 brand.tsx，组件里不许内联第二份", () => {
+    expect(brand).toContain("BRAND_MARK_PATHS");
+    expect(brand).toContain("BRAND_MARK_SEAL");
+    // 标记的形状是"一卷书 + 右下角一枚朱印"⇒ 两条 path 里的特征串
+    const fingerprint = "M6 4h12a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z";
+    const files = tsxFiles(VIEW_ROOT);
+    const holders = files
+      .filter((file) => readFileSync(file, "utf8").includes(fingerprint))
+      .map((file) => file.split(/[\\/]/).slice(-2).join("/"));
+    expect(holders, "品牌标记的 path 出现在多个文件里").toEqual(["src/brand.tsx"]);
+  });
+
+  it("品牌标记是**自绘**的（不抄图标库），且声明了来源与改动规矩", () => {
+    expect(brand).toContain("自绘");
+    expect(brand).toContain("不许随手改 path");
+    expect(brand).toContain("24×24");
+  });
+
+  it("开屏的入场用**过渡**而不是 @keyframes（契约 §5 把 @keyframes 锁在 1）", () => {
+    // 用剥了注释的 css 数（注释里提到 "@keyframes" 不算一条规则）
+    const keyframes = [...masked.join("\n").matchAll(/@keyframes/g)].length;
+    expect(keyframes).toBeLessThanOrEqual(1);
+    expect(css).toContain(".welcome.is-entered");
+  });
+
+  it("reduced-motion 必须把开屏那组过渡也关掉（只关 animation 等于没关）", () => {
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(reduced).toContain(".welcome-mark");
+    expect(reduced).toContain("transition: none;");
+  });
+});
+
+/**
+ * UI 重构调研与设计规范（docs/11，R109 第一轮）的机器判据。
+ *
+ * 调研这一段最容易被"写完就烂在文档里"⇒ 所以把**用户提的那条硬指标**（百款以上）
+ * 与必备小节都变成判据：条目数掉了要红，小节被掏空要红。
+ */
+describe("UI 重构调研与设计规范（docs/11，R109）", () => {
+  const doc = readFileSync(join(ROOT, "docs", "11-UI重构调研与设计规范.md"), "utf8");
+
+  it("调研清单**百款以上**（用户提的硬指标，掉了就要红）", () => {
+    const urls = [...doc.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)].map((m) => m[1]);
+    const unique = new Set(urls);
+    expect(unique.size, `调研条目只有 ${String(unique.size)} 条`).toBeGreaterThanOrEqual(100);
+  });
+
+  it("必备小节一个不许少（少一节就是规范被掏空）", () => {
+    for (const heading of [
+      "## 0. 怎么调研的",
+      "## 1. 视觉语言",
+      "## 2. 排版与密度",
+      "## 3. 动效",
+      "## 4. 交互",
+      "## 5. 图标与品牌",
+      "## 6. 开屏",
+      "## 7. 三批实施计划",
+      "## 8. 本轮明确没做的",
+      "## 9. 附录：调研清单",
+    ]) {
+      expect(doc, `规范缺小节：${heading}`).toContain(heading);
+    }
+  });
+
+  it("写清「只取口径不抄代码」的边界与反参照（否则将来有人手痒）", () => {
+    expect(doc).toContain("不复制任何闭源产品");
+    expect(doc).toContain("反参照");
+  });
+
+  it("明写本轮没做的（不许被读成已做）", () => {
+    const section = doc.slice(doc.indexOf("## 8. 本轮明确没做的"));
+    for (const item of ["排版改版", "持久化", "世界地图"]) {
+      expect(section).toContain(item);
+    }
+  });
+});

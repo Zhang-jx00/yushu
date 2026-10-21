@@ -5005,6 +5005,123 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 71,
+    title: 'UI 重构第一轮：品牌标记在屏上 + 界面密度档真的改变行高（切回默认值不改画面）',
+    file: 'step71-ui-brand-density.png',
+    body: String.raw`
+      // 这一步要证两件**看得见**的事（R109 UI 重构第一轮）：
+      // ① **品牌标记**在屏上（顶栏的标记 + 字标），而且它不是一张图、是一段**本项目自绘**的矢量；
+      // ② **界面密度档**是**真的开关**：切到「紧凑」⇒ 表格单元格的行内距真的变小（行更密），
+      //    切回「标准」⇒ **逐字恢复**（默认档的取值 = 改版前的样子，一个像素都不许差）。
+      //    只验"选择器存在"是自欺欺人：密度档的全部价值就在"行真的变密了"。
+      // 页面选「规则」：它的结论表是**真表格**（.slot-table）。
+      // 稿件总览的章节列表是**虚拟列表**（没有 table）⇒ 在那儿量不到行高。
+      await tab('规则');
+      const topbar = await waitFor(() => document.querySelector('.topbar'), 10000);
+      if (topbar === null) return { ok: false, note: '没有顶栏：' + pageText().slice(0, 120) };
+      // ① 品牌标记
+      const mark = topbar.querySelector('.brand-mark');
+      const markBox = mark === null ? null : mark.getBoundingClientRect();
+      const markOk = mark !== null && markBox !== null && markBox.width > 0 && markBox.height > 0;
+      const wordmark = String(topbar.querySelector('.brand')?.textContent ?? '');
+      const wordmarkOk = wordmark.indexOf('御书') >= 0;
+      // 标记是**矢量**（能缩放、不糊）⇒ 它是 <svg>，不是位图
+      const isVector = mark !== null && String(mark.tagName).toLowerCase() === 'svg';
+
+      // ② 密度档：改前后量同一个单元格的 computed padding
+      const cell = await waitFor(() => {
+        const td = document.querySelector('.slot-table tbody td');
+        return td === null ? null : td;
+      }, 10000);
+      if (cell === null) return { ok: false, note: '稿件总览里没有表格，量不到行高：' + pageText().slice(0, 120) };
+      const padOf = (el) => {
+        const cs = getComputedStyle(el);
+        return { top: cs.paddingTop, left: cs.paddingLeft };
+      };
+      const padCozy = padOf(cell);
+      const picker = topbar.querySelector('.density-picker select');
+      if (picker === null) return { ok: false, note: '顶栏里没有密度档选择器' };
+      const setDensity = async (value) => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+        setter.call(picker, value);
+        picker.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(180);
+      };
+      await setDensity('compact');
+      const padCompact = padOf(document.querySelector('.slot-table tbody td') ?? cell);
+      const compactOk = parseFloat(padCompact.top) < parseFloat(padCozy.top) && parseFloat(padCompact.left) < parseFloat(padCozy.left);
+      // 切回默认档：必须**逐字恢复**（默认档 = 改版前的取值）
+      await setDensity('cozy');
+      const padBack = padOf(document.querySelector('.slot-table tbody td') ?? cell);
+      const restored = padBack.top === padCozy.top && padBack.left === padCozy.left;
+
+      const target = topbar.querySelector('.brand-lockup');
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: markOk && wordmarkOk && isVector && compactOk && restored,
+        note: '品牌标记在屏上=' + markOk + '（' + (markBox === null ? 0 : Math.round(markBox.width)) + 'px，矢量=' + isVector + '）' +
+          '；字标="' + wordmark + '"=' + wordmarkOk +
+          '；密度档：标准 ' + padCozy.top + '/' + padCozy.left + ' → 紧凑 ' + padCompact.top + '/' + padCompact.left +
+          '（真的更密=' + compactOk + '）→ 切回 ' + padBack.top + '/' + padBack.left + '（逐字恢复=' + restored + '）',
+      };
+    `,
+  },
+  {
+    step: 72,
+    title: '开屏：欢迎屏有品牌标记，入场是**一次过渡**（中间态可测，reduced-motion 口径在契约里）',
+    file: 'step72-ui-splash.png',
+    body: String.raw`
+      // 这一步证「开屏」这件事：欢迎屏（作者真正看到的第一屏）有品牌标记，
+      // 而且它的入场是**一次过渡**——不是每个元素都在表演（契约 §5 的反参照）。
+      // 判据三件：① 标记在屏上；② 入场**有中间态**（逐帧采样，量到 opacity 在 0 与 1 之间），
+      // ③ 终值是**完全可见**（opacity = 1，不是停在半透明）。
+      // 走到欢迎屏的路：顶栏「新建项目」⇒ 向导 ⇒「取消」⇒ 回到欢迎屏（真实交互，不是改状态）。
+      // **先装采样器再触发导航**：380ms 的过渡一眨眼就过去了，
+      // 等我们开始采样时它已经结束（v252 采到 9 帧、v253 采到 0 帧，就是这个竞态）。
+      window.__opacSamples = [];
+      window.__opacOn = true;
+      (function sampleLoop() {
+        if (!window.__opacOn) return;
+        const el = document.querySelector('.welcome h1');
+        if (el !== null) window.__opacSamples.push(Number(getComputedStyle(el).opacity));
+        requestAnimationFrame(sampleLoop);
+      })();
+      const topbar = await waitFor(() => document.querySelector('.topbar'), 10000);
+      if (topbar === null) return { ok: false, note: '没有顶栏：' + pageText().slice(0, 120) };
+      const newBtn = [...topbar.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('新建项目') >= 0);
+      if (newBtn === undefined) return { ok: false, note: '顶栏里没有「新建项目」按钮' };
+      newBtn.click();
+      const cancelBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => String(x.textContent).trim() === '取消');
+        return b === undefined ? null : b;
+      }, 10000);
+      if (cancelBtn === null) return { ok: false, note: '向导里没有「取消」按钮' };
+      cancelBtn.click();
+      const welcome = await waitFor(() => document.querySelector('.welcome'), 10000);
+      if (welcome === null) return { ok: false, note: '没有回到欢迎屏：' + pageText().slice(0, 120) };
+      // 等过渡跑完（终值必须完全可见）
+      await sleep(600);
+      window.__opacOn = false;
+      const mark = welcome.querySelector('.welcome-mark');
+      const markBox = mark === null ? null : mark.getBoundingClientRect();
+      const markOk = mark !== null && markBox !== null && markBox.width > 0;
+      const samples = Array.isArray(window.__opacSamples) ? window.__opacSamples : [];
+      const midStates = samples.filter((v) => v > 0.02 && v < 0.98).length;
+      const finalOpacity = Number(getComputedStyle(document.querySelector('.welcome h1')).opacity);
+      const transitionOn = getComputedStyle(document.querySelector('.welcome h1')).transitionDuration;
+      const target = welcome.querySelector('.welcome-mark');
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: markOk && midStates > 0 && finalOpacity > 0.98,
+        note: '欢迎屏的品牌标记在屏上=' + markOk + '（' + (markBox === null ? 0 : Math.round(markBox.width)) + 'px）' +
+          '；入场中间态帧数=' + midStates + '/' + String(samples.length) + '（transition=' + transitionOn + '）' +
+          '；终值 opacity=' + finalOpacity,
+      };
+    `,
+  },
 ];
 
 /**
