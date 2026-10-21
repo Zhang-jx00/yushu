@@ -107,12 +107,19 @@ export function GenesisView() {
                 ]
                   .filter(Boolean)
                   .join(" ")}
-                onClick={() => setStepIndex(index)}
               >
-                <span className="dot">{state === "done" ? "✓" : index + 1}</span>
-                <span>{item.title}</span>
-                {closed && <span className="muted">（本层已关闭）</span>}
-                {state === "skipped" && <span className="muted">已跳过</span>}
+                {/* 键盘可达（R110）：清单行是**真按钮**（照记忆页的约定），
+                    选中态用 aria-current 标出——"只有鼠标能碰到"在本项目是债。 */}
+                <button
+                  type="button"
+                  aria-current={index === stepIndex ? "true" : undefined}
+                  onClick={() => setStepIndex(index)}
+                >
+                  <span className="dot">{state === "done" ? "✓" : index + 1}</span>
+                  <span>{item.title}</span>
+                  {closed && <span className="muted">（本层已关闭）</span>}
+                  {state === "skipped" && <span className="muted">已跳过</span>}
+                </button>
               </li>
             );
           })}

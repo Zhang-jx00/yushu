@@ -801,8 +801,9 @@ export function MemoryView() {
                   <tr>
                     <th>槽位</th>
                     <th>模式</th>
-                    <th>条目</th>
-                    <th>token / cap</th>
+                    {/* 数字列右对齐（R110）：标 .num 就右对齐 + 等宽数位（一个事实一个来源） */}
+                    <th className="num">条目</th>
+                    <th className="num">token / cap</th>
                     <th>状态</th>
                   </tr>
                 </thead>
@@ -811,8 +812,8 @@ export function MemoryView() {
                     <tr key={slot.slot} className="assembly-slot-row">
                       <td>{slot.slot}</td>
                       <td className="muted">{slot.mode}</td>
-                      <td>{slot.items.length}</td>
-                      <td>
+                      <td className="num">{slot.items.length}</td>
+                      <td className="num">
                         {slot.tokens} / {slot.cap_tokens}
                       </td>
                       <td>{slot.truncated ? "截断" : slot.items.length === 0 ? "—" : "ok"}</td>

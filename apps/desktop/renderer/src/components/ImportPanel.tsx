@@ -284,7 +284,7 @@ export function ImportPanel() {
                   {view.clean.removed.map((item) => (
                     <tr key={item.rule}>
                       <td>{item.rule}</td>
-                      <td className="import-num">{String(item.count)}</td>
+                      <td className="num">{String(item.count)}</td>
                       <td className="muted">{item.sample === "" ? "（空行）" : item.sample}</td>
                     </tr>
                   ))}
@@ -358,16 +358,16 @@ export function ImportPanel() {
                   <tr>
                     <th>#</th>
                     <th>标题</th>
-                    <th>字数</th>
+                    <th className="num">字数</th>
                     <th>摘录</th>
                   </tr>
                 </thead>
                 <tbody>
                   {view.chapters.slice(0, CHAPTER_ROWS).map((chapter) => (
                     <tr key={chapter.index}>
-                      <td className="import-num">{String(chapter.index + 1)}</td>
+                      <td className="num">{String(chapter.index + 1)}</td>
                       <td>{chapter.title === "" ? "（无标题）" : chapter.title}</td>
-                      <td className="import-num">{String(chapter.chars)}</td>
+                      <td className="num">{String(chapter.chars)}</td>
                       <td className="muted">{chapter.excerpt}</td>
                     </tr>
                   ))}
@@ -418,7 +418,7 @@ export function ImportPanel() {
                     <tr>
                       <th>#</th>
                       <th>标题</th>
-                      <th>字数</th>
+                      <th className="num">字数</th>
                       <th>问题</th>
                       <th>校正</th>
                     </tr>
@@ -426,9 +426,9 @@ export function ImportPanel() {
                   <tbody>
                     {view.miscuts.map((row) => (
                       <tr key={`${String(row.index)}`}>
-                        <td className="import-num">{String(row.index + 1)}</td>
+                        <td className="num">{String(row.index + 1)}</td>
                         <td>{row.title === "" ? "（无标题）" : row.title}</td>
-                        <td className="import-num">{String(row.chars)}</td>
+                        <td className="num">{String(row.chars)}</td>
                         <td className="muted">{row.issues.map((issue) => issue.message).join("；")}</td>
                         <td>
                           <button

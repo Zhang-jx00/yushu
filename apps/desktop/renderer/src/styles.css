@@ -95,6 +95,11 @@
      outline 在 Windows 高对比 / forced-colors 下会跟着系统色走，box-shadow 不会。 */
   --focus-width: 2px;
   --focus-offset: 1px;
+  /* 阅读型长文块的行长（R110）：比**写作版面**短。
+     两种版面是两种用法——写作是"扫"（眼跳多、行可以宽），阅读是"读"（眼跳少、行要短）。
+     写作面版的 44em 是 R64 刻意定的（"再窄就变成看小说的宽度了"），**不动**。
+     34em @13px ≈ 34 字/行，落在常见中文阅读器的 35–45 区间下沿。 */
+  --prose-measure-narrow: 34em;
 }
 
 /* 密度档的另两档（R109）：它们只**重定义令牌**，不改任何一条规则——
@@ -380,6 +385,25 @@ textarea:focus {
 .welcome-hint {
   font-size: 13px;
   margin-top: 18px;
+}
+
+/* 阅读型长文块（面板里的说明性段落）：行长上限比写作版面更短。
+   写作版面（编辑器正文）在 .chapter-editor > .editor-body > .tiptap-host / .cm-host 下，
+   **不在 .panel 里** ⇒ 这条碰不到它（R64 定的 44em 不受影响）。 */
+.panel p {
+  max-width: var(--prose-measure-narrow);
+}
+
+/* 数字格（R110）：右对齐 + 等宽数位。
+   左对齐的数字列"能看但不好比"，右对齐才能竖着比。
+   CSS 没法自己认出"这一格是数字"⇒ **由视图给数字格标 .num**（一个事实一个来源：
+   标在哪由视图说，样式只管怎么排）。导入面板原先用的是 .import-num，R110 统一成 .num。 */
+.num,
+.slot-table th.num,
+.slot-table td.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
 
 /* ---------- 向导 ---------- */
@@ -986,7 +1010,7 @@ textarea:focus {
   background: var(--accent-soft);
 }
 
-.card-list li > div {
+.card-list li > button > div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -1312,7 +1336,7 @@ select {
   background: var(--accent-soft);
 }
 
-.draft-list li > div {
+.draft-list li > button > div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -2032,6 +2056,62 @@ select {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* 清单行的可点目标是**真按钮**（R110 键盘可达）。
+   这一组规则把按钮还原成"原来那一行"的样子：按钮自带的边框 / 底色 / 居中 / 字号会让它看起来像另一种东西。
+   每一处都对着该列表原来的排版写（行内 flex、pill、整行块），**版式不许变**。 */
+.step-item > button,
+.card-list li > button,
+.draft-list li > button,
+.tree li > button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 步骤行本来是一行 flex（圆点 + 标题 + 备注）⇒ 按钮要接管这行 flex */
+.step-item > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* pill 里的按钮是"文字本身"（pill 的边框在 li 上）⇒ 不要撑满 */
+.name-list li > button,
+.volume-list li > button {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 清单行按钮**不吃全局按钮的悬浮位移**：那一行原本不是按钮，
+   悬浮时整行换底色（li:hover）就够了，按钮再抬 1px 会变成"两层反馈"。 */
+.step-item > button:hover,
+.step-item > button:active,
+.card-list li > button:hover,
+.card-list li > button:active,
+.draft-list li > button:hover,
+.draft-list li > button:active,
+.tree li > button:hover,
+.tree li > button:active,
+.name-list li > button:hover,
+.name-list li > button:active,
+.volume-list li > button:hover,
+.volume-list li > button:active {
+  color: inherit;
+  transform: none;
 }
 
 /* ---------- 章节编辑器（T2-1 切片 A：CodeMirror 源码形态） ---------- */
@@ -3072,12 +3152,6 @@ table,
 
 .import-table td {
   line-break: strict;
-}
-
-.import-num {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
 }
 
 .import-warn {

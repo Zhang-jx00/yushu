@@ -93,7 +93,22 @@ export function RelationGraphPanel() {
                 const at = places.get(node.id);
                 if (!at) return null;
                 return (
-                  <g key={node.id} className="graph-node" onClick={() => setFocus(node.id)}>
+                  // 键盘可达（R110）：SVG 里放不了 HTML 按钮 ⇒ 这个 <g> 自己当按钮
+                  // （role + tabIndex + 回车/空格），并给它一个可读的名字。
+                  <g
+                    key={node.id}
+                    className="graph-node"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`聚焦节点 ${node.name}`}
+                    onClick={() => setFocus(node.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setFocus(node.id);
+                      }
+                    }}
+                  >
                     <circle cx={at.x} cy={at.y} r={Math.min(11, 4 + node.degree)} fill={NET_COLOR[node.net]} fillOpacity={focus === node.id ? 1 : 0.82} />
                     <text x={at.x} y={at.y - 14} textAnchor="middle">
                       {node.name}

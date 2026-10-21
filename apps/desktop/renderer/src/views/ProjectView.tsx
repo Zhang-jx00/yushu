@@ -364,18 +364,24 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
               </div>
               <ul>
                 {searchResult.entities.map((entity) => (
-                  <li key={entity.id} onClick={() => void openDoc(entity.filePath)}>
-                    <strong>{entity.name}</strong>
-                    <span className="muted"> {cardTypeLabel(entity.type)} · {layerLabel(entity.layer)}</span>
+                  <li key={entity.id}>
+                    {/* 键盘可达（R110）：真按钮 */}
+                    <button type="button" onClick={() => void openDoc(entity.filePath)}>
+                      <strong>{entity.name}</strong>
+                      <span className="muted"> {cardTypeLabel(entity.type)} · {layerLabel(entity.layer)}</span>
+                    </button>
                   </li>
                 ))}
                 {searchResult.chunks.map((chunk) => (
-                  <li key={chunk.chunkId} onClick={() => void openDoc(chunk.path)}>
-                    <span className="muted">{chunk.snippet}</span>
-                    <div className="muted">
-                      {chunk.path} · 第 {chunk.charStart + 1}-{chunk.charEnd} 字符
-                      {chunk.entities.length > 0 ? ` · 涉及 ${chunk.entities.join("、")}` : ""}
-                    </div>
+                  <li key={chunk.chunkId}>
+                    {/* 键盘可达（R110）：真按钮 */}
+                    <button type="button" onClick={() => void openDoc(chunk.path)}>
+                      <span className="muted">{chunk.snippet}</span>
+                      <div className="muted">
+                        {chunk.path} · 第 {chunk.charStart + 1}-{chunk.charEnd} 字符
+                        {chunk.entities.length > 0 ? ` · 涉及 ${chunk.entities.join("、")}` : ""}
+                      </div>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -538,9 +544,20 @@ export function ProjectView({ snapshot }: { snapshot: ProjectSnapshot }) {
               key={entry.path}
               className={[entry.type, doc?.path === entry.path ? "active" : ""].filter(Boolean).join(" ")}
               title={entry.path}
-              onClick={entry.type === "file" ? () => void openDoc(entry.path) : undefined}
             >
-              {entry.type === "dir" ? `▸ ${entry.path}` : entry.path}
+              {/* 键盘可达（R110）：只有**文件**行可点（目录行不可点）⇒ 放真按钮；
+                  目录行保持纯文本，别给一个点不动的按钮充数。 */}
+              {entry.type === "file" ? (
+                <button
+                  type="button"
+                  aria-current={doc?.path === entry.path ? "true" : undefined}
+                  onClick={() => void openDoc(entry.path)}
+                >
+                  {entry.path}
+                </button>
+              ) : (
+                `▸ ${entry.path}`
+              )}
             </li>
           ))}
         </ul>

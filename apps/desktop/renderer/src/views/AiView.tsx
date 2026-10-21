@@ -1000,14 +1000,21 @@ export function AiView() {
             {drafts.map((draft) => {
               const key = `${draft.volumeId}:${draft.chapterId}`;
               return (
-                <li key={key} className={key === selectedKey ? "on" : ""} onClick={() => void selectTarget(key)}>
-                  <div>
-                    <strong>{draft.title}</strong>
-                    <span className="muted">{draft.volumeTitle}</span>
-                  </div>
-                  <div className="muted">
-                    {draft.chapterPath} · {draft.wordCount} 字{draft.hasBody ? "" : "（空正文）"}
-                  </div>
+                <li key={key} className={key === selectedKey ? "on" : ""}>
+                  {/* 键盘可达（R110）：真按钮 + aria-current 标选中态 */}
+                  <button
+                    type="button"
+                    aria-current={key === selectedKey ? "true" : undefined}
+                    onClick={() => void selectTarget(key)}
+                  >
+                    <div>
+                      <strong>{draft.title}</strong>
+                      <span className="muted">{draft.volumeTitle}</span>
+                    </div>
+                    <div className="muted">
+                      {draft.chapterPath} · {draft.wordCount} 字{draft.hasBody ? "" : "（空正文）"}
+                    </div>
+                  </button>
                 </li>
               );
             })}

@@ -212,8 +212,11 @@ export function ArchiveView({
               <div className="muted naming-pattern">{namingResult.pattern}</div>
               <ul className="name-list">
                 {namingResult.names.map((name) => (
-                  <li key={name} onClick={() => void copyName(name)} title="点击复制">
-                    {name}
+                  <li key={name}>
+                    {/* 键盘可达（R110）：真按钮（照记忆页的约定） */}
+                    <button type="button" onClick={() => void copyName(name)} title="点击复制">
+                      {name}
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -233,19 +236,25 @@ export function ArchiveView({
             <li
               key={card.path}
               className={card.path === selected ? "on" : ""}
-              onClick={() => openCard(card.path)}
             >
-              <div>
-                <strong>{card.name}</strong>
-                <span className="muted">
-                  {cardTypeLabel(card.type)} · {layerLabel(card.layer)}
-                </span>
-              </div>
-              <div className="muted">
-                {card.id}
-                {card.visibility && ` · ${card.visibility}`}
-              </div>
-              {card.error && <div className="error-text">{card.error}</div>}
+              {/* 键盘可达（R110）：真按钮 + aria-current 标选中态 */}
+              <button
+                type="button"
+                aria-current={card.path === selected ? "true" : undefined}
+                onClick={() => openCard(card.path)}
+              >
+                <div>
+                  <strong>{card.name}</strong>
+                  <span className="muted">
+                    {cardTypeLabel(card.type)} · {layerLabel(card.layer)}
+                  </span>
+                </div>
+                <div className="muted">
+                  {card.id}
+                  {card.visibility && ` · ${card.visibility}`}
+                </div>
+                {card.error && <div className="error-text">{card.error}</div>}
+              </button>
             </li>
           ))}
         </ul>

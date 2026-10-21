@@ -367,12 +367,20 @@ export function OutlineView() {
                 <li
                   key={`${volume.id || "new"}:${index}`}
                   className={volume.id === selectedVolumeId ? "on" : ""}
-                  onClick={() => setSelectedVolumeId(volume.id)}
                 >
                   <div className="volume-row">
                     <span>
-                      <strong>{volume.title}</strong>
-                      <span className="muted"> · {volume.act}</span>
+                      {/* 键盘可达（R110）：可点的是**标题这一块**，它是一个真按钮；
+                          整行当按钮不行——行里还嵌着上移/下移/删除三个按钮（按钮不能套按钮）。 */}
+                      <button
+                        type="button"
+                        className="volume-pick"
+                        aria-current={volume.id === selectedVolumeId ? "true" : undefined}
+                        onClick={() => setSelectedVolumeId(volume.id)}
+                      >
+                        <strong>{volume.title}</strong>
+                        <span className="muted"> · {volume.act}</span>
+                      </button>
                     </span>
                     <span className="volume-tools">
                       <button
