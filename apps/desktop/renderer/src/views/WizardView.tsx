@@ -9,6 +9,7 @@ import type {
 import { api } from "../api";
 import { AxisPicker } from "../components/AxisPicker";
 import { FusionReportView } from "../components/FusionReportView";
+import { StateNote } from "../components/StateNote";
 
 interface Props {
   onCancel: () => void;
@@ -172,6 +173,10 @@ export function WizardView({ onCancel, onCreated }: Props) {
           <h3>融合预演</h3>
           {fuseError ? (
             <div className="error-text">{fuseError}</div>
+          ) : selected.length === 0 ? (
+            <StateNote kind="empty" title="还没选派系包" artSize={36}>
+              选一个派系包，这里会给出四维融合的预演（冲突解决前不会写入项目）。
+            </StateNote>
           ) : (
             <FusionReportView preview={preview} />
           )}

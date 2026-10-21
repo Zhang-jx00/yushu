@@ -5,6 +5,7 @@ import { api } from "./api";
 import { BrandMark, BrandWordmark } from "./brand";
 import { DENSITIES, loadDensityPref, saveDensityPref, type DensityId } from "./density-prefs";
 import { YushuIcon } from "./icons";
+import { StateArt } from "./components/StateArt";
 import { flushEditorIfAny } from "./editor-flush";
 import { ProjectScreen } from "./views/ProjectScreen";
 import { WizardView } from "./views/WizardView";
@@ -156,6 +157,7 @@ export function App() {
 
       {error && (
         <div className="error-bar">
+          <StateArt kind="error" size={16} />
           <YushuIcon name="circle-x" size={14} />
           <span>{error}</span>
         </div>

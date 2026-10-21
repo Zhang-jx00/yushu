@@ -751,15 +751,28 @@ h4 {
   font-weight: inherit;
 }
 
-/* ---------- 空状态 / 错误态（StateNote，R115）---------- */
+/* ---------- 空状态 / 错误态（StateNote + StateArt，R115 / R118）---------- */
 
-/* 三段式：图标（哪一类状态）+ 标题（是什么）+ 说明（怎么办）。
-   图标只用 YushuIcon（唯一来源，见 docs/12）——状态图标不许在组件里内联 path。 */
+/* 结构：插画（这里将来会有什么）+ 一行「状态图标 + 标题与说明」。
+   插画是自绘线稿（24×24 画布 / 2px 描边 / 单色 currentColor，见 docs/12），
+   放大靠尺寸缩放，不改 viewBox ⇒ 缩到任何尺寸线宽比例都一样。 */
 .state-note {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
   gap: var(--space-3);
   color: var(--muted);
+}
+
+.state-note-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.state-art {
+  flex: none;
+  opacity: 0.55;
 }
 
 .state-note .yushu-icon {
@@ -784,6 +797,10 @@ h4 {
 
 .state-note-error {
   color: var(--bad);
+}
+
+.state-note-error .state-art {
+  opacity: 0.75;
 }
 
 .state-note-error .state-note-text {

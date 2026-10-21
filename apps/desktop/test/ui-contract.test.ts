@@ -813,7 +813,14 @@ function isVectorSource(src: string): boolean {
  * 不是一份"资产"。不进表就会出现"这里有个 svg 却查不到出处"的糊涂账。
  * 区别写在 docs/12 §1.3：图标类必须有 path（固定画法），图表类没有 path（数据绑定）。
  */
-const VECTOR_FILES = ["icons.tsx", "brand.tsx", "Disclosure.tsx", "RelationGraphPanel.tsx", "StatsView.tsx"];
+const VECTOR_FILES = [
+  "icons.tsx",
+  "brand.tsx",
+  "Disclosure.tsx",
+  "RelationGraphPanel.tsx",
+  "StatsView.tsx",
+  "StateArt.tsx", // R118：自绘的空/错态插画（登记在 docs/12 §1.4）
+];
 /** 其中属于"图标资产"的三个（判据要求它们真的有 path） */
 const ICON_FILES = ["icons.tsx", "brand.tsx", "Disclosure.tsx"];
 
@@ -1064,5 +1071,43 @@ describe("UI 重构第五批（R116）：颜色令牌两层化", () => {
     expect(src, "浮层进场没有定时器兜底（窗口被遮挡时 rAF 暂停 ⇒ 浮层永远不进场）").toMatch(
       /setTimeout\(markEntered, MENTION_ENTER_FALLBACK_MS\)/,
     );
+  });
+});
+
+/**
+ * UI 重构第四批·第四段（R118）的机器判据：空状态 / 错误态的**插画**。
+ *
+ * 插画与图标是**分工**：图标（Lucide `inbox` / `circle-x`）说"这是哪一类状态"，
+ * 插画（自绘的稿纸）说"这里将来会有什么"。插画是**自绘、没有上游**的，
+ * 所以它登记的不是出处而是**画法口径**——并立一条锁：画法不许走样。
+ */
+describe("UI 重构第四批·第四段（R118）：空/错态插画", () => {
+  const art = readFileSync(join(VIEW_ROOT, "components", "StateArt.tsx"), "utf8");
+
+  it("插画画法与品牌标记同族：24×24 画布 / 2px 描边 / 不填色 / 单色 currentColor", () => {
+    // **逐行核对**（不是整文件 contains）：注释里写着 `fill="none"` 时，
+    // 整文件 contains 会让**注释冒充属性** ⇒ 把插画改成填色也照样绿（恒绿的锁比没锁更坏）。
+    expect(art, "viewBox 不是 24×24").toMatch(/^\s*viewBox="0 0 24 24"\s*$/m);
+    expect(art, "描边不是 2px").toMatch(/^\s*strokeWidth="2"\s*$/m);
+    expect(art, "插画被填色了（线稿不该填色）").toMatch(/^\s*fill="none"\s*$/m);
+    expect(art, "颜色不是 currentColor").toMatch(/^\s*stroke="currentColor"\s*$/m);
+    // 插画是线稿 ⇒ 不许写死任何颜色
+    expect(art, "插画里写死了颜色").not.toMatch(/#[0-9a-fA-F]{3,8}/);
+    expect(art, "插画里写死了颜色").not.toMatch(/rgb\(/);
+  });
+
+  it("插画必须登记进 docs/12（自绘的也要写明「没有上游」）", () => {
+    const doc = readFileSync(join(ROOT, "docs", "12-图标与插画来源登记.md"), "utf8");
+    expect(doc, "登记表没提 StateArt.tsx").toContain("StateArt.tsx");
+    expect(doc, "登记表没写「自绘插画」").toContain("自绘插画");
+    expect(doc, "登记表没写「没有上游」").toContain("没有上游");
+  });
+
+  it("插画只在状态组件里出现（不许散落到各处各画一份）", () => {
+    const holders = tsxFiles(VIEW_ROOT)
+      .filter((f) => readFileSync(f, "utf8").includes("StateArt"))
+      .map((f) => f.split("\\").pop() ?? "")
+      .sort();
+    expect(holders).toEqual(["App.tsx", "StateArt.tsx", "StateNote.tsx"]);
   });
 });
