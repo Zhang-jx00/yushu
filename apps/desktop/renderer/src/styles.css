@@ -64,6 +64,15 @@
   --radius-6: 10px;
   --radius-pill: 999px;
   --radius-full: 50%;
+  /* 密度档（R109 UI 重构第一轮）：**默认档 cozy 的取值就是今天的样子**（一个像素都不改），
+     紧凑 / 宽松是给作者的选择，不是我们替作者定的默认值。
+     契约 §2 说"把密度压成 4px 基准是另一次要带截图对照的改版"——那一版留到第二批；
+     这一版先把**档位这件事本身**做出来、做得可切换、可观测，改版时才有对照的基线。 */
+  --density-cell-pad-y: 4px;
+  --density-cell-pad-x: 8px;
+  --density-block-pad: 12px;
+  --density-row-gap: 8px;
+  --density-text: 12.5px;
   /* 字号 / 行高令牌（契约 §3）。中文正文行高 1.65 落在"1.4–1.7 更适读"的区间里；
      12.5px 与 11.5px 是表格里已经在用的两档，收进令牌但不合并——
      合并会在几十张表里同时改变行数与截断位置。 */
@@ -86,6 +95,29 @@
      outline 在 Windows 高对比 / forced-colors 下会跟着系统色走，box-shadow 不会。 */
   --focus-width: 2px;
   --focus-offset: 1px;
+}
+
+/* 密度档的另两档（R109）：它们只**重定义令牌**，不改任何一条规则——
+   组件里写的是 var(--density-*)，所以切档即刻生效，不必给每张表写一遍覆盖。
+   写 :root[data-density=...] 而不是 html[...]：令牌就是 :root 级的，"值只许出现在 :root 里"
+   （R83 棘轮）这条规矩在密度档上也照样成立。 */
+
+/* 紧凑档：行更密，一屏多看几条线索（笔记本小屏） */
+:root[data-density="compact"] {
+  --density-cell-pad-y: 2px;
+  --density-cell-pad-x: 6px;
+  --density-block-pad: 8px;
+  --density-row-gap: 6px;
+  --density-text: 12px;
+}
+
+/* 宽松档：行更松，长时间读不累（大屏 / 视力疲劳时） */
+:root[data-density="roomy"] {
+  --density-cell-pad-y: 7px;
+  --density-cell-pad-x: 12px;
+  --density-block-pad: 16px;
+  --density-row-gap: 12px;
+  --density-text: 13px;
 }
 
 * {
@@ -132,6 +164,42 @@ body {
   font-size: var(--text-lg);
   /* 唯一的字距例外：两字品牌标，不是正文。正文一律不加 letter-spacing（契约 §3）。 */
   letter-spacing: 0.08em;
+}
+
+/* 品牌锁定（标记 + 字标，R109）：标记是**本项目自绘**的（见 brand.tsx），
+   不用外部图标库——品牌标记没有上游，抄一份别人的 logo 当自己的品牌是署名事故。
+   形态与界面图标同源（24 画布 / 2px 描边 / 圆头圆角），所以它和别的图标是"一家人"。 */
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.brand-mark {
+  color: var(--accent);
+  flex: none;
+}
+
+/* 密度档选择器（R109）：它是**壳层控件**，不是表单控件——
+   标签小一号、选框紧挨着，别让它在顶栏里抢戏。 */
+.density-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.density-label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.density-picker select {
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .sub,
@@ -258,6 +326,36 @@ textarea:focus {
   gap: 14px;
   text-align: center;
   padding: 40px;
+}
+
+/* 品牌标记（开屏，R109） */
+.welcome-mark {
+  color: var(--accent);
+  line-height: 0;
+}
+
+/* 开屏入场（R109）：**一次**过渡，不是 @keyframes。
+   契约 §5 把 @keyframes 数量锁在 1（"不做全站入场表演"）——开屏这一下是**一次性身份表达**，
+   不是每个元素都在表演，所以用过渡（不进那个名额），而且只动 opacity 与 transform（不触发布局）。 */
+.welcome-mark,
+.welcome h1,
+.welcome > p,
+.welcome-actions,
+.welcome-hint {
+  opacity: 0;
+  transform: translateY(var(--space-3));
+  transition:
+    opacity var(--motion-slow) var(--ease-enter),
+    transform var(--motion-slow) var(--ease-enter);
+}
+
+.welcome.is-entered .welcome-mark,
+.welcome.is-entered h1,
+.welcome.is-entered > p,
+.welcome.is-entered .welcome-actions,
+.welcome.is-entered .welcome-hint {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .welcome h1 {
@@ -1234,7 +1332,8 @@ select {
 .slot-table th,
 .slot-table td {
   text-align: left;
-  padding: 4px 8px;
+  /* 密度档（R109）：默认档的取值 = 改版前的 `4px 8px`，**逐字不变** */
+  padding: var(--density-cell-pad-y) var(--density-cell-pad-x);
   border-bottom: 1px solid var(--border);
 }
 
@@ -2413,6 +2512,17 @@ select {
     transition-duration: 0.01ms;
   }
 
+  /* 开屏入场（R109）：过渡也要被关掉——只关 animation 等于没关（R63 实测踩过）。
+     用 `transition: none` 而不是 `0.01ms`：前者不引入新的字面量例外（棘轮只降不升），
+     效果一样（状态变化即刻到位），而且不会在 R83 的例外清单里多一条。 */
+  .welcome-mark,
+  .welcome h1,
+  .welcome > p,
+  .welcome-actions,
+  .welcome-hint {
+    transition: none;
+  }
+
   /* 位移与缩放全去掉，只留 opacity 的瞬时到位：动效不再是理解的前提 */
   section.panel,
   .ai-adopt-audit,
@@ -2427,6 +2537,15 @@ select {
 
   .disclosure-body {
     opacity: 1;
+    transform: none;
+  }
+
+  /* 开屏（R109）：位移去掉，只留 opacity 的瞬时到位——动效不再是理解的前提 */
+  .welcome-mark,
+  .welcome h1,
+  .welcome > p,
+  .welcome-actions,
+  .welcome-hint {
     transform: none;
   }
 }

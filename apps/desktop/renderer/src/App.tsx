@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import type { AppFlushDonePayload, ProjectSnapshot } from "../../src/shared/ipc";
 import { api } from "./api";
+import { BrandMark, BrandWordmark } from "./brand";
 import { flushEditorIfAny } from "./editor-flush";
 import { ProjectScreen } from "./views/ProjectScreen";
 import { WizardView } from "./views/WizardView";
@@ -11,9 +12,73 @@ type Screen =
   | { kind: "wizard" }
   | { kind: "project"; snapshot: ProjectSnapshot };
 
+/**
+ * 界面密度档（R109 UI 重构第一轮）。
+ *
+ * 为什么有这一档：御书是作者**每天坐八小时**的工作台，表格与列表的行高决定了
+ * 一屏能看到多少条线索。密度不能只有一种：笔记本小屏要紧凑，大屏要舒展。
+ *
+ * 三档的**默认档 `cozy` 的取值就是今天的样子**——所以开这个开关**一个像素都不改**，
+ * 改版要与"改版前"的截图逐字可比（契约 §2 的纪律）。紧凑/宽松是**给作者的选择**，
+ * 不是我们替作者定的默认值。
+ *
+ * **本轮只做会话内**（不落盘）：写进项目真源要新增一条 IPC 与一份配置，
+ * 而"界面偏好"算不算项目内容还没定论——先把三档做对、看得见，再决定要不要持久化。
+ */
+const DENSITIES = [
+  { id: "compact", label: "紧凑" },
+  { id: "cozy", label: "标准" },
+  { id: "roomy", label: "宽松" },
+] as const;
+
+type DensityId = (typeof DENSITIES)[number]["id"];
+
+/**
+ * 欢迎屏 = **开屏**（R109 UI 重构第一轮）。
+ *
+ * 单独拆成一个组件，是为了"入场状态"**每次挂载都是新的**：
+ * 写在 App 里的话，从向导退回欢迎屏时那个状态还留着（`entered` 已是 true），
+ * 类名一上来就是 `is-entered` ⇒ **过渡根本没跑**（预演 step72 抓到的就是这条）。
+ *
+ * 入场用**过渡**而不是 @keyframes（契约 §5 把 @keyframes 锁在 1——"不做全站入场表演"）：
+ * 下一帧再切到"已入场"，浏览器才认得出这是一次**状态变化**，过渡才会跑。
+ */
+function WelcomeScreen(props: { onNewProject: () => void; onOpenExisting: () => void }) {
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div className={`welcome ${entered ? "is-entered" : ""}`.trim()}>
+      <div className="welcome-mark">
+        <BrandMark size={56} className="welcome-mark-svg" />
+      </div>
+      <h1>从起源构建世界</h1>
+      <p className="muted">
+        每一部小说都不单单是一篇文字，而是要创作出另一个世界——文化完整，有历史，有生态，有人文，有地理的完整世界。
+      </p>
+      <div className="welcome-actions">
+        <button className="primary" onClick={props.onNewProject}>
+          新建项目
+        </button>
+        <button onClick={props.onOpenExisting}>打开已有项目</button>
+      </div>
+      <div className="welcome-hint muted">
+        新建项目向导：选择派系包（四维多选）→ 查看融合预演 → 确认创建世界
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [screen, setScreen] = useState<Screen>({ kind: "welcome" });
   const [error, setError] = useState<string | null>(null);
+  const [density, setDensity] = useState<DensityId>("cozy");
+
+  useEffect(() => {
+    document.documentElement.dataset["density"] = density;
+  }, [density]);
 
   // 挂载时同步主进程已挂载的项目（正常启动返回 null；UI 预演模式直接进入项目页）
   useEffect(() => {
@@ -69,10 +134,24 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <strong className="brand">御书</strong>
+        <BrandWordmark size={20} />
         <span className="sub">M1 世界基座</span>
         <span className="spacer" />
         {screen.kind === "project" && <span className="muted path">{screen.snapshot.root}</span>}
+        <label className="density-picker">
+          <span className="density-label">界面密度</span>
+          <select
+            value={density}
+            aria-label="界面密度"
+            onChange={(event) => setDensity(event.target.value as DensityId)}
+          >
+            {DENSITIES.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button onClick={() => setScreen({ kind: "wizard" })}>新建项目</button>
         <button onClick={openExisting}>打开项目</button>
       </header>
@@ -80,21 +159,10 @@ export function App() {
       {error && <div className="error-bar">{error}</div>}
 
       {screen.kind === "welcome" && (
-        <div className="welcome">
-          <h1>从起源构建世界</h1>
-          <p className="muted">
-            每一部小说都不单单是一篇文字，而是要创作出另一个世界——文化完整，有历史，有生态，有人文，有地理的完整世界。
-          </p>
-          <div className="welcome-actions">
-            <button className="primary" onClick={() => setScreen({ kind: "wizard" })}>
-              新建项目
-            </button>
-            <button onClick={openExisting}>打开已有项目</button>
-          </div>
-          <div className="welcome-hint muted">
-            新建项目向导：选择派系包（四维多选）→ 查看融合预演 → 确认创建世界
-          </div>
-        </div>
+        <WelcomeScreen
+          onNewProject={() => setScreen({ kind: "wizard" })}
+          onOpenExisting={openExisting}
+        />
       )}
 
       {screen.kind === "wizard" && (
