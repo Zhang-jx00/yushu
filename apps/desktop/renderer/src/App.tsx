@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { AppFlushDonePayload, ProjectSnapshot } from "../../src/shared/ipc";
 import { api } from "./api";
 import { BrandMark, BrandWordmark } from "./brand";
+import { DENSITIES, loadDensityPref, saveDensityPref, type DensityId } from "./density-prefs";
 import { YushuIcon } from "./icons";
 import { flushEditorIfAny } from "./editor-flush";
 import { ProjectScreen } from "./views/ProjectScreen";
@@ -26,13 +27,6 @@ type Screen =
  * **本轮只做会话内**（不落盘）：写进项目真源要新增一条 IPC 与一份配置，
  * 而"界面偏好"算不算项目内容还没定论——先把三档做对、看得见，再决定要不要持久化。
  */
-const DENSITIES = [
-  { id: "compact", label: "紧凑" },
-  { id: "cozy", label: "标准" },
-  { id: "roomy", label: "宽松" },
-] as const;
-
-type DensityId = (typeof DENSITIES)[number]["id"];
 
 /**
  * 欢迎屏 = **开屏**（R109 UI 重构第一轮）。
@@ -75,10 +69,13 @@ function WelcomeScreen(props: { onNewProject: () => void; onOpenExisting: () => 
 export function App() {
   const [screen, setScreen] = useState<Screen>({ kind: "welcome" });
   const [error, setError] = useState<string | null>(null);
-  const [density, setDensity] = useState<DensityId>("cozy");
+  const [density, setDensity] = useState<DensityId>(() => loadDensityPref(window.localStorage));
 
   useEffect(() => {
     document.documentElement.dataset["density"] = density;
+    // 持久化（R117）：密度档是**用户级偏好**，存 localStorage（不进项目真源，
+    // 导出/迁移时不会把界面偏好混进作者的作品里）
+    saveDensityPref(window.localStorage, density);
   }, [density]);
 
   // 挂载时同步主进程已挂载的项目（正常启动返回 null；UI 预演模式直接进入项目页）

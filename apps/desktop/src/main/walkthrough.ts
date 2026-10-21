@@ -5480,6 +5480,34 @@ const STEPS: StepDef[] = [
     `,
   },
 
+
+  {
+    step: 78,
+    title: 'UI 重构：密度档持久化（切档写进用户级偏好，重开应用仍是这一档）',
+    file: 'step78-ui-density-persist.png',
+    body: String.raw`
+      // 这一步证 R117：密度档**跨会话保留**。
+      // 它是**用户级偏好**（存 localStorage，**不进项目真源**）——作者在 A 机器选的密度，
+      // 关掉应用再打开还在；而导出 / 迁移时，界面偏好不会被混进作者的作品里。
+      const key = 'yushu.ui.density';
+      const before = window.localStorage.getItem(key);
+      const picker = document.querySelector('.density-picker select');
+      if (picker === null) return { ok: false, note: '顶栏里没有密度档选择器' };
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(picker, 'compact');
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(300);
+      const stored = window.localStorage.getItem(key);
+      const applied = document.documentElement.dataset['density'];
+      const label = String(picker.options[picker.selectedIndex] ? picker.options[picker.selectedIndex].textContent : '');
+      return {
+        ok: stored === 'compact' && applied === 'compact',
+        note: '切到紧凑：偏好里存的是=' + String(stored) + '；界面生效的是=' + String(applied) +
+          '（下拉显示「' + label + '」）；本步之前偏好里是=' + String(before),
+      };
+    `,
+  },
+
 ];
 
 /**
