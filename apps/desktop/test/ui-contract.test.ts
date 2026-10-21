@@ -106,6 +106,44 @@ function tsxFiles(dir: string): string[] {
 /** 可交互元素必须是原生控件：找 `onClick=` 前面最近的标签名 */
 const NATIVE_INTERACTIVE = new Set(["button", "a", "input", "select", "textarea", "summary", "label"]);
 
+/**
+ * **键盘可达**的例外（只在它同时具备这三样时才算数）：
+ * `role="button"` + `tabIndex={0}` + 一个 `onKeyDown`。
+ *
+ * 为什么需要这个例外：SVG 里放不了 HTML 按钮（`<g>` 只能是图形元素），
+ * 而关系图的节点是**真的可点**的。把它做成"键盘可达的图形按钮"（可聚焦 + 回车/空格触发）
+ * 才符合契约 §1.3 的原话——"任何可点的东西必须**可用键盘完成**"，
+ * 而不是"必须用 `<button>` 标签"（那只是手段）。
+ *
+ * 三样缺一就不算数 ⇒ 只挂 `role` 的、只挂 `tabIndex` 的、只写 `onKeyDown` 的，一律算债。
+ */
+function declaresKeyboardReachable(openTag: string): boolean {
+  return (
+    /role=["']button["']/.test(openTag) &&
+    /tabIndex=\{?0\}?/.test(openTag) &&
+    /onKeyDown=/.test(openTag)
+  );
+}
+
+/** 取某个 onClick 所在元素的**开标签**（`>` 出现在 `=>` 里不算结尾，属性顺序无关） */
+function openingTagOf(source: string, onClickIndex: number): string {
+  const before = source.slice(0, onClickIndex);
+  const start = before.lastIndexOf("<");
+  if (start < 0) return "";
+  let depth = 0;
+  for (let k = onClickIndex; k < source.length; k += 1) {
+    const ch = source[k];
+    if (ch === "=" && source[k + 1] === ">") {
+      k += 1;
+      continue;
+    }
+    if (ch === "{") depth += 1;
+    else if (ch === "}") depth -= 1;
+    else if (ch === ">" && depth <= 0) return source.slice(start, k + 1);
+  }
+  return source.slice(start);
+}
+
 function clickTargetsOutsideNativeControls(source: string): string[] {
   const hits: string[] = [];
   let i = 0;
@@ -113,7 +151,9 @@ function clickTargetsOutsideNativeControls(source: string): string[] {
     const before = source.slice(0, i);
     const tag = /<([a-zA-Z][\w-]*)[^<]*$/.exec(before);
     if (tag !== null && tag[1] !== undefined && !NATIVE_INTERACTIVE.has(tag[1])) {
-      hits.push(`${tag[1]} @ 第 ${before.split("\n").length} 行`);
+      if (!declaresKeyboardReachable(openingTagOf(source, i))) {
+        hits.push(`${tag[1]} @ 第 ${before.split("\n").length} 行`);
+      }
     }
     i += 8;
   }
@@ -250,7 +290,7 @@ describe("可点选的必须是键盘能到的控件（契约 §6）", () => {
     expect(clickTargetsOutsideNativeControls(ok)).toEqual([]);
   });
 
-  it("渲染层的键盘债登记在案：只许降不许升，逐文件点名", () => {
+  it("渲染层的键盘债**归零**（R110：9 → 0；SVG 节点按「键盘可达」算，缺一不算）", () => {
     const files = tsxFiles(VIEW_ROOT);
     expect(files.length).toBeGreaterThanOrEqual(20);
     const debt: Record<string, number> = {};
@@ -262,16 +302,23 @@ describe("可点选的必须是键盘能到的控件（契约 §6）", () => {
       debt[rel] = hits.length;
       total += hits.length;
     }
-    // R96 起 12 → 10（记忆页 2 处），R97 再修掉编辑器草稿章节表 1 处 ⇒ 9。要降必须真的改画面。
-    expect(total).toBeLessThanOrEqual(9);
-    expect(debt).toEqual({
-      "apps/desktop/renderer/src/components/RelationGraphPanel.tsx": 1,
-      "apps/desktop/renderer/src/views/AiView.tsx": 1,
-      "apps/desktop/renderer/src/views/ArchiveView.tsx": 2,
-      "apps/desktop/renderer/src/views/GenesisView.tsx": 1,
-      "apps/desktop/renderer/src/views/OutlineView.tsx": 1,
-      "apps/desktop/renderer/src/views/ProjectView.tsx": 3,
-    });
+    // R96 起 12 → 10（记忆页 2 处），R97 再修掉编辑器草稿章节表 1 处 ⇒ 9，
+    // **R110 归零**：8 处清单行改成真按钮，1 处 SVG 节点改成键盘可达的图形按钮。
+    // 要降必须真的改画面。
+    expect(total, `键盘债还剩 ${String(total)} 处：${JSON.stringify(debt)}`).toBe(0);
+    expect(debt).toEqual({});
+  });
+
+  it("扫描器自己能红：缺 role / tabIndex / onKeyDown 任一项都不算键盘可达", () => {
+    // 三份样本各自**只缺一项**（早先三份各缺两项 ⇒ 放松任何一条都看不出来，那个自检是漏的）
+    const lacksKeyDown = '<g className="x" role="button" tabIndex={0} onClick={() => {}}';
+    const lacksTabIndex = '<g className="x" role="button" onKeyDown={() => {}} onClick={() => {}}';
+    const lacksRole = '<g className="x" tabIndex={0} onKeyDown={() => {}} onClick={() => {}}';
+    const all = '<g className="x" role="button" tabIndex={0} onKeyDown={() => {}} onClick={() => {}}';
+    expect(clickTargetsOutsideNativeControls(lacksKeyDown).length, "缺 onKeyDown 仍被当成可达").toBe(1);
+    expect(clickTargetsOutsideNativeControls(lacksTabIndex).length, "缺 tabIndex 仍被当成可达").toBe(1);
+    expect(clickTargetsOutsideNativeControls(lacksRole).length, "缺 role 仍被当成可达").toBe(1);
+    expect(clickTargetsOutsideNativeControls(all).length, "三样齐全却还被算债").toBe(0);
   });
 
   it("记忆页的列表行已经是真按钮（本轮修的那两处不许悄悄退回去）", () => {
@@ -371,6 +418,47 @@ describe("UI 重构第一轮（R109）：密度档与品牌标记", () => {
     const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
     expect(reduced).toContain(".welcome-mark");
     expect(reduced).toContain("transition: none;");
+  });
+});
+
+/**
+ * UI 重构第二批（R110）的机器判据：键盘债归零 + 排版口径。
+ *
+ * 这一批动的都是**画面**，所以判据必须是"量得到的东西"：
+ * 键盘债用扫描器数（不是靠人肉确认），行长与对齐用 CSS 令牌钉住。
+ */
+describe("UI 重构第二批（R110）：键盘债与排版口径", () => {
+  it("键盘债必须为 0（清单行是真按钮；SVG 节点按「键盘可达」算）", () => {
+    const files = tsxFiles(VIEW_ROOT);
+    const debt: Record<string, number> = {};
+    let total = 0;
+    for (const f of files) {
+      const hits = clickTargetsOutsideNativeControls(readFileSync(f, "utf8"));
+      if (hits.length === 0) continue;
+      const rel = f.split("\\").join("/").replace(ROOT.split("\\").join("/") + "/", "");
+      debt[rel] = hits.length;
+      total += hits.length;
+    }
+    expect(total, `键盘债还剩 ${String(total)} 处：${JSON.stringify(debt)}`).toBe(0);
+  });
+
+  it("写作面版的行长**不动**（R64 刻意的 44em：写作是扫，不是读）", () => {
+    expect(css).toContain("--prose-measure: 44em;");
+    expect(css).toMatch(/\.cm-host,\s*\.tiptap-host \{[^}]*max-width: var\(--prose-measure\)/);
+  });
+
+  it("阅读型长文块另有更短的上限（两种版面是两种用法）", () => {
+    expect(css).toContain("--prose-measure-narrow: 34em;");
+    expect(css).toMatch(/\.panel p \{[^}]*max-width: var\(--prose-measure-narrow\)/);
+  });
+
+  it("数字格统一走 .num（右对齐 + 等宽数位），导入面板不再单开一个类", () => {
+    expect(css).toMatch(/\.num \{[^}]*text-align: right/);
+    expect(css).toMatch(/\.num \{[^}]*font-variant-numeric: tabular-nums/);
+    expect(css, "旧的 .import-num 应当并入 .num").not.toContain(".import-num {");
+    const panel = readFileSync(join(VIEW_ROOT, "components", "ImportPanel.tsx"), "utf8");
+    expect(panel).not.toContain("import-num");
+    expect(panel).toContain('className="num"');
   });
 });
 

@@ -4198,7 +4198,9 @@ const STEPS: StepDef[] = [
       const chapterId = matched[1];
       const row = [...archive.querySelectorAll('li')].find((li) => String(li.textContent).indexOf(target.id) >= 0);
       if (!row) return { ok: false, note: '列表里找不到那张卡：' + target.id };
-      row.click();
+      // R110 之后清单行的可点目标是**行内的真按钮**（按钮铺满整行 ⇒ 真人点哪儿都一样，
+    // 但程序化点 <li> 不会触发按钮的处理器 ⇒ 这里要点按钮本身）
+    (row.querySelector('button') ?? row).click();
       // 载入是异步的（card:read → setDoc）：在旧 doc 上改值会被随后到达的载入结果整片盖掉，
       // 更糟的是"保存"会写给**上一张还开着的卡**（v217/v218 实测：界面回"已保存"、目标卡盘上却没有那一行）。
       // 所以先等编辑区的面板标题真的换成这张卡的路径（.panel-title 在侧栏也有一个，必须限定在 .editor 里）。
@@ -4250,7 +4252,7 @@ const STEPS: StepDef[] = [
       if (archive2 === null) return { ok: false, note: '回到档案页失败' };
       const row2 = [...archive2.querySelectorAll('li')].find((li) => String(li.textContent).indexOf(target.id) >= 0);
       if (!row2) return { ok: false, note: '回来后列表里找不到那张卡：' + target.id };
-      row2.click();
+      (row2.querySelector('button') ?? row2).click();
       if ((await loadedInto(target.path)) === null) return { ok: false, note: '回来后没载入这张卡' };
       const box2 = await waitFor(() => document.querySelector('.card-source-chapters'), 20000);
       if (box2 === null) return { ok: false, note: '回来后没有来源章节输入框' };
@@ -4268,7 +4270,7 @@ const STEPS: StepDef[] = [
       const archive3 = await waitFor(() => document.querySelector('.archive'), 20000);
       const row3 = archive3 === null ? null : [...archive3.querySelectorAll('li')].find((li) => String(li.textContent).indexOf(target.id) >= 0);
       if (!row3) return { ok: false, note: '第三次回不到那张卡' };
-      row3.click();
+      (row3.querySelector('button') ?? row3).click();
       if ((await loadedInto(target.path)) === null) return { ok: false, note: '第三次没载入这张卡' };
       const box3 = await waitFor(() => document.querySelector('.card-source-chapters'), 20000);
       if (box3 === null) return { ok: false, note: '第三次没有输入框' };
@@ -5070,8 +5072,86 @@ const STEPS: StepDef[] = [
   },
   {
     step: 72,
+    title: 'UI 重构第二批：清单行键盘可达 + 数字列右对齐 + 阅读行长收窄（写作版面不动）',
+    file: 'step72-ui-typography-keyboard.png',
+    fixture: "import-dialog",
+    body: String.raw`
+      // 这一步量四件**量得到**的事（这一批动的都是画面 ⇒ 判据必须能被观察）：
+      // ① **数字列右对齐**：导入面板「字数」列右对齐（能竖着比），
+      //    且它走的是统一的 .num（不是导入面板自己那套）；
+      // ② **键盘可达**：设定卡清单行是**真按钮**（能聚焦），
+      //    关系图的 SVG 节点是**可聚焦的图形按钮**（tabindex=0 + role=button + 有可读名）；
+      // ③ **阅读行长**：面板里的说明段落一行不超过约 34 字；
+      // ④ **写作版面不动**：编辑器的行长还是 44em（≈44 字/行，R64 刻意的）——
+      //    **写作是"扫"、阅读是"读"**，两种版面两个上限，不能一起收窄。
+      // 数字列要先在导入面板里看（那是唯一常驻的带数字列的表）⇒ 用夹具选一份稿子。
+      window.__yushuPick = 'utf8';
+      await tab('稿件总览');
+      const pickBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => String(x.textContent).indexOf('选择文件') >= 0);
+        return b === undefined ? null : b;
+      }, 10000);
+      if (pickBtn === null) return { ok: false, note: '导入面板里没有「选择文件…」按钮' };
+      pickBtn.click();
+      const chapterTable = await waitFor(() => {
+        const t = document.querySelector('.import-table');
+        return t === null ? null : t;
+      }, 40000);
+      if (chapterTable === null) return { ok: false, note: '预演没出分章表：' + pageText().slice(0, 140) };
+      const numCells = [...document.querySelectorAll('.import-panel .num')];
+      const rightAligned = numCells.filter((c) => getComputedStyle(c).textAlign === 'right').length;
+      const numericOk = numCells.length > 0 && rightAligned === numCells.length;
+
+      // ② 键盘可达：设定卡清单行是真按钮（能聚焦）
+      await tab('世界观档案');
+      const cardButtons = [...document.querySelectorAll('.card-list li > button')];
+      let focusable = 0;
+      for (const b of cardButtons) {
+        b.focus();
+        if (document.activeElement === b) focusable += 1;
+      }
+      const graphNodes = [...document.querySelectorAll('g.graph-node')];
+      const nodeOk = graphNodes.filter((n) =>
+        n.getAttribute('tabindex') === '0' &&
+        n.getAttribute('role') === 'button' &&
+        String(n.getAttribute('aria-label') || '').length > 0).length;
+      const keyboardOk = cardButtons.length > 0 && focusable === cardButtons.length && nodeOk === graphNodes.length;
+
+      // ③ 阅读行长：当前页最长的一段说明文字，一行不超过约 34 字
+      await tab('规则');
+      const prose = [...document.querySelectorAll('.panel p')]
+        .filter((p) => String(p.textContent || '').trim().length > 40)
+        .map((p) => {
+          const cs = getComputedStyle(p);
+          const size = parseFloat(cs.fontSize) || 13;
+          return { chars: Math.round(p.getBoundingClientRect().width / size), size };
+        })
+        .sort((a, b) => b.chars - a.chars);
+      const worst = prose[0];
+      const measureOk = worst !== undefined && worst.chars <= 36;
+
+      // ④ 写作版面不动：还是 44em（R64 的定论）
+      await tab('编辑器');
+      const host = await waitFor(() => document.querySelector('.cm-host') || null, 5000);
+      const writingMax = host === null ? 0 : Math.round(parseFloat(getComputedStyle(host).maxWidth || '0'));
+      const writingOk = writingMax >= 560 && writingMax <= 720;
+
+      const target = document.querySelector('.cm-host');
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: numericOk && keyboardOk && measureOk && writingOk,
+        note: '数字列：' + numCells.length + ' 格，右对齐 ' + rightAligned + ' 格=' + numericOk +
+          '；键盘可达：设定卡按钮 ' + cardButtons.length + ' 个（可聚焦 ' + focusable + '）、图节点 ' + graphNodes.length + ' 个（可聚焦 ' + nodeOk + '）=' + keyboardOk +
+          '；阅读行长：最长一段约 ' + (worst === undefined ? -1 : worst.chars) + ' 字/行（上限 36）=' + measureOk +
+          '；写作版面：' + writingMax + 'px（44em，不动）=' + writingOk,
+      };
+    `,
+  },
+  {
+    step: 73,
     title: '开屏：欢迎屏有品牌标记，入场是**一次过渡**（中间态可测，reduced-motion 口径在契约里）',
-    file: 'step72-ui-splash.png',
+    file: 'step73-ui-splash.png',
     body: String.raw`
       // 这一步证「开屏」这件事：欢迎屏（作者真正看到的第一屏）有品牌标记，
       // 而且它的入场是**一次过渡**——不是每个元素都在表演（契约 §5 的反参照）。
