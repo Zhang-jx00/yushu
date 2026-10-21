@@ -29,3 +29,4 @@ export * from "./opening-check.js";
 export * from "./gate-check.js";
 export * from "./import-split.js";
 export * from "./publish.js";
+export * from "./world-map.js";
