@@ -751,34 +751,30 @@ h4 {
   font-weight: inherit;
 }
 
-/* ---------- 空状态 / 错误态（StateNote + StateArt，R115 / R118）---------- */
+/* ---------- 空状态 / 错误态（StateNote + StateArt，R115 / R118 / R119）---------- */
 
-/* 结构：插画（这里将来会有什么）+ 一行「状态图标 + 标题与说明」。
+/* 结构（R119 改版）：**插画与文案并排** —— 插画（这里将来会有什么）| 标题与说明（怎么办）。
+   改版前是「插画单独一行 + 状态图标一行」：40px 的插画孤悬在文案上方，既不对齐也不成组。
+   R119 把它放大到 56px 并与文案并排、顶端对齐；状态图标整个撤掉（插画已承担状态表达）。
    插画是自绘线稿（24×24 画布 / 2px 描边 / 单色 currentColor，见 docs/12），
    放大靠尺寸缩放，不改 viewBox ⇒ 缩到任何尺寸线宽比例都一样。 */
 .state-note {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: flex-start;
   gap: var(--space-3);
   color: var(--muted);
 }
 
-.state-note-line {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
+/* 文案块吃掉剩余宽度；min-width: 0 让长句能正常换行，不把插画挤扁 */
+.state-note-body {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .state-art {
   flex: none;
   opacity: 0.55;
-}
-
-.state-note .yushu-icon {
-  flex: none;
-  margin-top: 2px;
-  opacity: 0.8;
 }
 
 .state-note-title {

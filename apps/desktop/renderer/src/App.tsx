@@ -5,7 +5,6 @@ import { api } from "./api";
 import { BrandMark, BrandWordmark } from "./brand";
 import { DENSITIES, loadDensityPref, saveDensityPref, type DensityId } from "./density-prefs";
 import { YushuIcon } from "./icons";
-import { StateArt } from "./components/StateArt";
 import { flushEditorIfAny } from "./editor-flush";
 import { ProjectScreen } from "./views/ProjectScreen";
 import { WizardView } from "./views/WizardView";
@@ -157,7 +156,9 @@ export function App() {
 
       {error && (
         <div className="error-bar">
-          <StateArt kind="error" size={16} />
+          {/* R119：只留一个信号。原先这里是「16px 插画 + 14px 叉号圆」并排——
+              同一个"错误"说了两遍，而线稿缩到 16px 只剩噪点（折角都看不出来）。
+              错误条只有一个字高 ⇒ 放不下插画，用 Lucide 图标；插画留给区块级空/错态。 */}
           <YushuIcon name="circle-x" size={14} />
           <span>{error}</span>
         </div>

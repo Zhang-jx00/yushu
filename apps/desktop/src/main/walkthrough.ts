@@ -5547,6 +5547,35 @@ const STEPS: StepDef[] = [
     `,
   },
 
+  {
+    step: 80,
+    title: 'UI 重构五批总复核：空态插画与文案并排且顶端对齐（不再是孤悬一行）',
+    file: 'step80-ui-state-layout.png',
+    body: String.raw`
+      // 这一步证 R119 的**版式**：插画与文案**并排**、**顶端对齐**。
+      // 判据量的是**几何**，不是"有没有插画"——有插画不等于摆对了。
+      // 改版前：40px 的插画独占一行（孤悬），文案在下面另起一行 ⇒ 视线要跳两次。
+      const art = document.querySelector('.state-art');
+      if (art === null) return { ok: false, note: '屏上没有 .state-art（空态插画）' };
+      const note = art.closest('.state-note');
+      const body = note === null ? null : note.querySelector('.state-note-body');
+      if (body === null) return { ok: false, note: '插画不在 .state-note 里，或文案块 .state-note-body 不见了' };
+      const a = art.getBoundingClientRect();
+      const b = body.getBoundingClientRect();
+      const dy = Math.abs(a.top - b.top);
+      const sideBySide = a.right <= b.left + 1;
+      const bigEnough = a.width >= 56;
+      const ok = sideBySide && bigEnough && dy <= 4;
+      note.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: ok,
+        note: '空态版式：插画 ' + Math.round(a.width) + '×' + Math.round(a.height) +
+          'px（≥56=' + String(bigEnough) + '）；与文案并排=' + String(sideBySide) +
+          '；顶端错位=' + Math.round(dy) + 'px（≤4）；文案在插画右侧=' + String(b.left >= a.right - 1),
+      };
+    `,
+  },
 ];
 
 /**

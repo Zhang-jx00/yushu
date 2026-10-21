@@ -174,7 +174,7 @@ export function WizardView({ onCancel, onCreated }: Props) {
           {fuseError ? (
             <div className="error-text">{fuseError}</div>
           ) : selected.length === 0 ? (
-            <StateNote kind="empty" title="还没选派系包" artSize={36}>
+            <StateNote kind="empty" title="还没选派系包">
               选一个派系包，这里会给出四维融合的预演（冲突解决前不会写入项目）。
             </StateNote>
           ) : (

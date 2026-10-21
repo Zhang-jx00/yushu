@@ -487,7 +487,7 @@ describe("UI 重构调研与设计规范（docs/11，R109）", () => {
       "## 5. 图标与品牌",
       "## 6. 开屏",
       "## 7. 五批实施计划",
-      "## 8. 本轮明确没做的",
+      "## 8. 明确还没做的",
       "## 9. 附录：调研清单",
     ]) {
       expect(doc, `规范缺小节：${heading}`).toContain(heading);
@@ -499,10 +499,16 @@ describe("UI 重构调研与设计规范（docs/11，R109）", () => {
     expect(doc).toContain("反参照");
   });
 
-  it("明写本轮没做的（不许被读成已做）", () => {
-    const section = doc.slice(doc.indexOf("## 8. 本轮明确没做的"));
-    for (const item of ["排版改版", "持久化", "世界地图"]) {
+  it("明写还没做的（不许被读成已做，也不许把已完成的塞回来）", () => {
+    const section = doc.slice(doc.indexOf("## 8. 明确还没做的"));
+    // R119 起只钉**真的还没做**的那些：排版改版（R110 已做）与密度档持久化（R117 已做）
+    // 已经不在「还没做的」名单里了——继续钉它们等于逼着人说假话。
+    for (const item of ["暗色色板", "世界地图", "插画"]) {
       expect(section).toContain(item);
+    }
+    // 反向也钉一条：**已经做掉的，不许再写进「还没做的」**（R119 清台账时最怕的就是这种）。
+    for (const done of ["排版改版（行长", "密度档的持久化"]) {
+      expect(section).not.toContain(done);
     }
   });
 });
@@ -828,7 +834,8 @@ describe("UI 重构第四批·第二段（R113）：图标与插画来源登记"
   const registry = readFileSync(join(ROOT, "docs", "12-图标与插画来源登记.md"), "utf8");
 
   it("登记表存在，且必备小节一个不许少（少一节就是登记被掏空）", () => {
-    for (const heading of ["## 0. 为什么要有这张表", "## 1. 登记表", "## 2. 已知的两套口径", "## 3. 规矩", "## 4. 本轮明确没做的"]) {
+    // §4 的标题 R119 起改成「明确还没做的」——这是份长期有效的登记表，"本轮"指向不明。
+    for (const heading of ["## 0. 为什么要有这张表", "## 1. 登记表", "## 2. 已知的两套口径", "## 3. 规矩", "## 4. 明确还没做的"]) {
       expect(registry, `登记表缺小节：${heading}`).toContain(heading);
     }
   });
@@ -922,7 +929,8 @@ describe("UI 重构第四批·第三段（R115）：状态图标集与空/错态
   it("图标登记表与代码**双向对账**（代码有而表里没 = 查不到出处；表里有而代码没 = 死图标）", () => {
     const code = iconNamesFromSource();
     const table = registeredIconNames(registry);
-    expect(code.length, "没解析出任何图标名（解析器坏了？）").toBeGreaterThanOrEqual(13);
+    // 下限 12：R115 时是 13 枚，R119 回收了没有落点的 `inbox`（见 R119 组的「只留一个信号」）
+    expect(code.length, "没解析出任何图标名（解析器坏了？）").toBeGreaterThanOrEqual(12);
     const missing = code.filter((name) => !table.includes(name));
     expect(missing, `代码里用了但登记表没点名：${missing.join(" | ")}`).toEqual([]);
     const dead = table.filter((name) => !code.includes(name));
@@ -931,7 +939,8 @@ describe("UI 重构第四批·第三段（R115）：状态图标集与空/错态
 
   it("状态族图标在界面上**真的有落点**（登记了却没人用 = 死图标）", () => {
     const files = tsxFiles(VIEW_ROOT).filter((f) => !f.endsWith("icons.tsx"));
-    for (const name of ["inbox", "circle-x"]) {
+    // R119 起只剩 `circle-x`：区块级空/错态由自绘插画承担状态表达 ⇒ `inbox` 没了落点，已回收
+    for (const name of ["circle-x"]) {
       const hit = files.some((f) => readFileSync(f, "utf8").includes(`"${name}"`));
       expect(hit, `状态族图标 ${name} 在界面上一个落点都没有`).toBe(true);
     }
@@ -945,9 +954,10 @@ describe("UI 重构第四批·第三段（R115）：状态图标集与空/错态
     }
   });
 
-  it("StateNote 是三段式：图标 + 标题 + 说明；图标只走 YushuIcon，**不许内联 path**", () => {
+  it("StateNote 是三段式：矢量图形 + 标题 + 说明；**不许内联 path**", () => {
     const src = readFileSync(join(VIEW_ROOT, "components", "StateNote.tsx"), "utf8");
-    expect(src).toContain("YushuIcon");
+    // R119：第三段之前是「图标」，现在改由自绘插画承担（R119 组另有专门一条锁钉住"不再挂图标"）
+    expect(src).toContain("StateArt");
     expect(src).toContain("state-note-title");
     expect(src).toContain("state-note-text");
     expect(src, "状态提示组件里内联了 path（图标就有了第二套画法）").not.toContain("<path");
@@ -1108,6 +1118,76 @@ describe("UI 重构第四批·第四段（R118）：空/错态插画", () => {
       .filter((f) => readFileSync(f, "utf8").includes("StateArt"))
       .map((f) => f.split("\\").pop() ?? "")
       .sort();
-    expect(holders).toEqual(["App.tsx", "StateArt.tsx", "StateNote.tsx"]);
+    // R119：错误条里的 16px 插画撤掉了（与图标重复表达）⇒ App.tsx 不再出现 StateArt
+    expect(holders).toEqual(["StateArt.tsx", "StateNote.tsx"]);
+  });
+});
+
+/**
+ * UI 重构五批总复核（R119）：**每个地方只留一个信号** + 空态版式。
+ *
+ * 为什么要有它：R111–R118 每一轮都在**加**东西（动效别名、标题层级、图标登记、颜色两层、
+ * 密度持久化、空态插画）。加的东西一多，就会开始**互相打架**——R119 的总复核抓到两处真问题：
+ * ① 区块级空态里「插画」与「状态图标」表达的是**同一件事**（空 = 没东西，坏 = 坏了），
+ *    而全局错误条里「16px 插画」与「14px 叉号圆」并排，同一个"错误"说了两遍；
+ * ② 40px 的插画**孤悬在文案上方一行**，既不对齐也不成组，看着像随手放的小图。
+ *
+ * 判据要点：**先剥注释再核对**——否则注释里写着的同名字面量会冒充属性，
+ * 这类锁会变成"恒绿"，比没锁更坏（项目里已经吃过三次这种亏）。
+ */
+describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
+  /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
+  const stripComments = (src: string): string =>
+    src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  const noteSrc = readFileSync(join(VIEW_ROOT, "components", "StateNote.tsx"), "utf8");
+  const appSrc = readFileSync(join(VIEW_ROOT, "App.tsx"), "utf8");
+  const cssSrc = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+
+  it("全局错误条不许同时挂插画与图标（同一个『错误』不说两遍）", () => {
+    // 只取 error-bar 那一段：整文件 contains 会让别处的 StateArt 冒充。
+    const bar = /<div className="error-bar">([\s\S]*?)<\/div>/.exec(appSrc)?.[1] ?? "";
+    expect(bar, "App.tsx 里找不到 error-bar 那一段（判据自己坏了？）").not.toBe("");
+    expect(bar, "错误条里还挂着插画（线稿缩到 16px 只剩噪点，还和图标重复表达）").not.toContain("StateArt");
+    expect(bar, "错误条里没有错误图标了").toContain('name="circle-x"');
+    // 连 import 都不能留 —— 留着就等着下一个人把它塞回去。
+    expect(stripComments(appSrc), "App.tsx 还 import 着 StateArt（错误条已经不用它了）").not.toMatch(
+      /import \{ StateArt \}/,
+    );
+  });
+
+  it("区块级空态只由插画承担状态表达（不许再挂第二枚状态图标）", () => {
+    const code = stripComments(noteSrc);
+    expect(code, "StateNote 里又挂上了状态图标（它与插画说的是同一句话）").not.toContain("YushuIcon");
+    expect(code, "StateNote 没有用登记过的插画").toContain("StateArt");
+    // 三段式还在：插画（哪一类状态）+ 标题（是什么）+ 说明（怎么办）
+    expect(code).toContain("state-note-title");
+    expect(code).toContain("state-note-text");
+  });
+
+  it("插画默认 56px（区块级空态配得上一个示意尺寸），不许改小", () => {
+    const m = /artSize \?\? (\d+)/.exec(stripComments(noteSrc));
+    expect(m, "StateNote 里找不到插画默认尺寸（判据自己坏了？）").not.toBeNull();
+    expect(Number(m?.[1]), "插画默认尺寸被改小了").toBeGreaterThanOrEqual(56);
+  });
+
+  it("版式：插画与文案**并排**且顶端对齐（不许插画孤悬一行）", () => {
+    // 只取 `.state-note { ... }` 这一块：`.state-note-body` / `.state-note-error` 不该被误读进来。
+    const block = /\.state-note \{([\s\S]*?)\}/.exec(cssSrc)?.[1] ?? "";
+    expect(block, "styles.css 里找不到 .state-note 这一块（判据自己坏了？）").not.toBe("");
+    expect(block, "插画还在单独一行（column）——改版前那个孤悬的样子").not.toContain("flex-direction: column");
+    expect(block, "插画与文案没有并排（row）").toContain("flex-direction: row");
+    expect(block, "没有顶端对齐").toContain("align-items: flex-start");
+    // 文案块要能换行，不能把插画挤扁
+    const body = /\.state-note-body \{([\s\S]*?)\}/.exec(cssSrc)?.[1] ?? "";
+    expect(body, "文案块没有 min-width: 0（长句会把插画挤扁）").toContain("min-width: 0");
+  });
+
+  it("分工口径要写进 docs/12（不然下一个人还会把图标挂回空态里）", () => {
+    const doc = readFileSync(join(ROOT, "docs", "12-图标与插画来源登记.md"), "utf8");
+    expect(doc, "登记表没写明『每个地方只留一个信号』的分工口径").toContain("只留一个信号");
+    // 只看编号登记表那几行（其它小节的表格不带编号）
+    const rows = doc.split("\n").filter((row) => /^\|\s*\d+\s*\|/.test(row.trim()));
+    expect(rows.join("\n"), "登记表里还留着 `inbox`（R119 已回收：它没有落点了）").not.toContain("inbox");
   });
 });
