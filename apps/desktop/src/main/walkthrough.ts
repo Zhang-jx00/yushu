@@ -5369,44 +5369,6 @@ const STEPS: StepDef[] = [
     `,
   },
   {
-    step: 76,
-    title: 'UI 重构第四批：标题层级在运行时真的分三级（面板标题条与块内区块标题同档）',
-    file: 'step76-ui-title-hierarchy.png',
-    body: String.raw`
-      // 这一步量的是**标题层级在运行时是不是真的按新口径渲染**：
-      // ① 面板标题条（.panel-title）与块内区块标题（h3）**同档**——
-      //    改版前是标题条 12.5px、块内 h3 14px，**层级是反的**，而且同一个视觉位置
-      //    （面板标题条）有时放 h3、有时放纯文字 ⇒ 同一层级两种字号；
-      // ② 这几页出现的**标题字号档数 ≤ 3**（docs/11 §2「一屏字号档数 ≤ 4」的口径，
-      //    标题这一族自己再收紧一档：页面 / 区块 / 次级）。
-      const sizeOf = (el) => Math.round(parseFloat(getComputedStyle(el).fontSize) * 10) / 10;
-      const tiers = new Set();
-      let panelSize = -1;
-      let blockH3Size = -1;
-      let blockH3Seen = 0;
-      for (const label of ['世界观档案', '记忆', '规则', 'AI 副驾', '稿件总览']) {
-        await tab(label);
-        const pt = document.querySelector('.panel-title');
-        if (pt !== null) { panelSize = sizeOf(pt); tiers.add(panelSize); }
-        for (const el of document.querySelectorAll('h2, h3, h4')) tiers.add(sizeOf(el));
-        // 只看**不在面板标题条里**的 h3：条内的 h3 是继承条本身的呈现（那正是本轮的修复）
-        const plain = [...document.querySelectorAll('h3')].find((el) => el.closest('.panel-title') === null);
-        if (plain !== null) { blockH3Size = sizeOf(plain); blockH3Seen += 1; }
-      }
-      const sameTier = panelSize > 0 && blockH3Size > 0 && panelSize === blockH3Size;
-      const tierCount = tiers.size;
-      const target = document.querySelector('.panel-title');
-      if (target) target.scrollIntoView({ block: 'center' });
-      await sleep(200);
-      return {
-        ok: sameTier && blockH3Seen > 0 && tierCount > 0 && tierCount <= 3,
-        note: '面板标题条=' + panelSize + 'px；块内区块标题(h3，不在标题条里)=' + blockH3Size +
-          'px（见到 ' + blockH3Seen + ' 处；同档=' + sameTier + '）' +
-          '；这几页出现的标题字号档数=' + tierCount + '（≤3）',
-      };
-    `,
-  },
-  {
     step: 75,
     title: 'UI 重构第三批：系统要求减少动效时动效确实为 0（浮层直接到位，退场不拖泥带水）',
     file: 'step75-ui-motion-reduced.png',
@@ -5479,6 +5441,45 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 76,
+    title: 'UI 重构第四批：标题层级在运行时真的分三级（面板标题条与块内区块标题同档）',
+    file: 'step76-ui-title-hierarchy.png',
+    body: String.raw`
+      // 这一步量的是**标题层级在运行时是不是真的按新口径渲染**：
+      // ① 面板标题条（.panel-title）与块内区块标题（h3）**同档**——
+      //    改版前是标题条 12.5px、块内 h3 14px，**层级是反的**，而且同一个视觉位置
+      //    （面板标题条）有时放 h3、有时放纯文字 ⇒ 同一层级两种字号；
+      // ② 这几页出现的**标题字号档数 ≤ 3**（docs/11 §2「一屏字号档数 ≤ 4」的口径，
+      //    标题这一族自己再收紧一档：页面 / 区块 / 次级）。
+      const sizeOf = (el) => Math.round(parseFloat(getComputedStyle(el).fontSize) * 10) / 10;
+      const tiers = new Set();
+      let panelSize = -1;
+      let blockH3Size = -1;
+      let blockH3Seen = 0;
+      for (const label of ['世界观档案', '记忆', '规则', 'AI 副驾', '稿件总览']) {
+        await tab(label);
+        const pt = document.querySelector('.panel-title');
+        if (pt !== null) { panelSize = sizeOf(pt); tiers.add(panelSize); }
+        for (const el of document.querySelectorAll('h2, h3, h4')) tiers.add(sizeOf(el));
+        // 只看**不在面板标题条里**的 h3：条内的 h3 是继承条本身的呈现（那正是本轮的修复）
+        const plain = [...document.querySelectorAll('h3')].find((el) => el.closest('.panel-title') === null);
+        if (plain !== null && plain !== undefined) { blockH3Size = sizeOf(plain); blockH3Seen += 1; }
+      }
+      const sameTier = panelSize > 0 && blockH3Size > 0 && panelSize === blockH3Size;
+      const tierCount = tiers.size;
+      const target = document.querySelector('.panel-title');
+      if (target) target.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: sameTier && blockH3Seen > 0 && tierCount > 0 && tierCount <= 3,
+        note: '面板标题条=' + panelSize + 'px；块内区块标题(h3，不在标题条里)=' + blockH3Size +
+          'px（见到 ' + blockH3Seen + ' 处；同档=' + sameTier + '）' +
+          '；这几页出现的标题字号档数=' + tierCount + '（≤3）',
+      };
+    `,
+  },
+
 ];
 
 /**
