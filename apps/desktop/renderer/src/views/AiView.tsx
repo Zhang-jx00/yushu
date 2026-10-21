@@ -19,6 +19,7 @@ import type {
 } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { Disclosure } from "../components/Disclosure";
+import { StateNote } from "../components/StateNote";
 import { TypewriterBuffer, type TypewriterMode } from "../typewriter-buffer";
 import { diffSentences, mergeSelected, splitSentences } from "../candidate-diff";
 import { REJECT_REASON_PRESETS, type AiFeedbackState } from "../../../src/shared/ipc";
@@ -992,9 +993,9 @@ export function AiView() {
             生成目标 <span className="muted">{drafts.length} 个草稿章节</span>
           </h3>
           {drafts.length === 0 && (
-            <p className="muted">
-              尚无草稿章节：请先在「三级大纲」为章纲点击「创建草稿章节」，采纳才有可写入的正文文件。
-            </p>
+            <StateNote kind="empty" title="尚无草稿章节">
+              请先在「三级大纲」为章纲点击「创建草稿章节」，采纳才有可写入的正文文件。
+            </StateNote>
           )}
           <ul className="draft-list">
             {drafts.map((draft) => {
@@ -1384,7 +1385,11 @@ export function AiView() {
           <h3>
             AI 使用记录 <span className="muted">.yushu/ai-usage.jsonl（证据链，T1-17）</span>
           </h3>
-          {usageList.length === 0 && <p className="muted">尚无记录：每次生成与采纳会各留一条事件。</p>}
+          {usageList.length === 0 && (
+            <StateNote kind="empty" title="尚无使用记录">
+              每次生成与采纳会各留一条事件。
+            </StateNote>
+          )}
           <ul className="usage-list">
             {usageList.map((entry) => (
               <li key={`${entry.id}-${entry.time}`}>

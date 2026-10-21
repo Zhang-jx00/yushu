@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { AppFlushDonePayload, ProjectSnapshot } from "../../src/shared/ipc";
 import { api } from "./api";
 import { BrandMark, BrandWordmark } from "./brand";
+import { YushuIcon } from "./icons";
 import { flushEditorIfAny } from "./editor-flush";
 import { ProjectScreen } from "./views/ProjectScreen";
 import { WizardView } from "./views/WizardView";
@@ -156,7 +157,12 @@ export function App() {
         <button onClick={openExisting}>打开项目</button>
       </header>
 
-      {error && <div className="error-bar">{error}</div>}
+      {error && (
+        <div className="error-bar">
+          <YushuIcon name="circle-x" size={14} />
+          <span>{error}</span>
+        </div>
+      )}
 
       {screen.kind === "welcome" && (
         <WelcomeScreen

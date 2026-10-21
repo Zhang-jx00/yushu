@@ -34,7 +34,10 @@ export type YushuIconName =
   | "download"
   | "book-open"
   | "chart-column"
-  | "folder-tree";
+  | "folder-tree"
+  // 界面级状态 / 操作族（R115，第四批余下）：空状态与错误
+  | "inbox"
+  | "circle-x";
 
 const ICONS: Record<YushuIconName, ReactNode> = {
   // 起源工作台：世界是分层建起来的（创世起源→法则→地理→生态→历史→文明→社会现状）
@@ -135,6 +138,22 @@ const ICONS: Record<YushuIconName, ReactNode> = {
       <path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" />
       <path d="M3 5a2 2 0 0 0 2 2h3" />
       <path d="M3 3v13a2 2 0 0 0 2 2h3" />
+    </>
+  ),
+  // —— 界面级状态 / 操作族（R115，第四批余下）——
+  // 空状态：收件箱（"还没有东西"，不是"坏了"）
+  inbox: (
+    <>
+      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    </>
+  ),
+  // 错误：叉号圆（失败 / 校验不过）
+  "circle-x": (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m15 9-6 6" />
+      <path d="m9 9 6 6" />
     </>
   ),
 };

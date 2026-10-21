@@ -9,6 +9,7 @@ import type {
   OutlineVolumePayload,
 } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { StateNote } from "../components/StateNote";
 
 /**
  * 三级大纲（T1-10 / T1-11 / T1-12）：
@@ -436,11 +437,9 @@ export function OutlineView() {
       <section>
         {!doc && (
           <div className="panel">
-            <h3>尚无大纲</h3>
-            <p className="muted">
-              选择左侧派系包模板一键生成「总纲 → 卷纲 → 章纲」骨架；生成后全部字段均可自由修改，
-              模板只作为起点（生成≠写死）。
-            </p>
+            <StateNote kind="empty" title="尚无大纲">
+              选择左侧派系包模板一键生成「总纲 → 卷纲 → 章纲」骨架；生成后全部字段均可自由修改，模板只作为起点（生成≠写死）。
+            </StateNote>
           </div>
         )}
 

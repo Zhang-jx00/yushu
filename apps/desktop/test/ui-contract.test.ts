@@ -877,3 +877,72 @@ describe("UI 重构第四批·第二段（R113）：图标与插画来源登记"
     expect(isVectorSource("export function Plain() { return <div>没有图形</div>; }")).toBe(false);
   });
 });
+
+/**
+ * UI 重构第四批·第三段（R115）的机器判据：界面级状态/操作图标集 + 空状态与错误态。
+ *
+ * 两条要治的毛病：
+ * ① **空状态散落各处、写法各不相同**——有的只是一句灰字，作者分不出「还没写」还是「坏了」；
+ *    有的干脆混在正文里。统一成三段式：图标（哪一类状态）+ 标题（是什么）+ 说明（怎么办）。
+ * ② **图标与登记表可能各说各话**——登记表点名了但代码里没有（死图标），
+ *    或者代码里有了但登记表没点名（查不到出处）。所以要**双向对账**。
+ *
+ * 图标的**唯一来源**是 `icons.tsx`（Lucide 原件 path，见 `docs/12-图标与插画来源登记.md`），
+ * 状态提示组件里不许内联 path——散落一份就等于有两套画法，且没人说得清那份从哪儿来。
+ */
+
+/** 代码里声明的图标名（YushuIconName 联合类型） */
+function iconNamesFromSource(): string[] {
+  const src = readFileSync(join(VIEW_ROOT, "icons.tsx"), "utf8");
+  const m = /export type YushuIconName =([\s\S]*?);/.exec(src);
+  if (m === null) return [];
+  return [...(m[1] ?? "").matchAll(/"([^"]+)"/g)].map((x) => x[1] as string);
+}
+
+/** 登记表里逐条点名的图标名（表格第一列的行） */
+function registeredIconNames(registry: string): string[] {
+  const out: string[] = [];
+  for (const row of registry.split("\n")) {
+    const m = /^\|\s*\d+\s*\|\s*`([^`]+)`\s*\|/.exec(row.trim());
+    if (m !== null) out.push(m[1] as string);
+  }
+  return out;
+}
+
+describe("UI 重构第四批·第三段（R115）：状态图标集与空/错态", () => {
+  const registry = readFileSync(join(ROOT, "docs", "12-图标与插画来源登记.md"), "utf8");
+
+  it("图标登记表与代码**双向对账**（代码有而表里没 = 查不到出处；表里有而代码没 = 死图标）", () => {
+    const code = iconNamesFromSource();
+    const table = registeredIconNames(registry);
+    expect(code.length, "没解析出任何图标名（解析器坏了？）").toBeGreaterThanOrEqual(13);
+    const missing = code.filter((name) => !table.includes(name));
+    expect(missing, `代码里用了但登记表没点名：${missing.join(" | ")}`).toEqual([]);
+    const dead = table.filter((name) => !code.includes(name));
+    expect(dead, `登记表点名了但代码里没有（死图标）：${dead.join(" | ")}`).toEqual([]);
+  });
+
+  it("状态族图标在界面上**真的有落点**（登记了却没人用 = 死图标）", () => {
+    const files = tsxFiles(VIEW_ROOT).filter((f) => !f.endsWith("icons.tsx"));
+    for (const name of ["inbox", "circle-x"]) {
+      const hit = files.some((f) => readFileSync(f, "utf8").includes(`"${name}"`));
+      expect(hit, `状态族图标 ${name} 在界面上一个落点都没有`).toBe(true);
+    }
+  });
+
+  it("空状态必须走 StateNote（不许再写一句灰字打发了）", () => {
+    for (const rel of ["views/AiView.tsx", "views/OutlineView.tsx"]) {
+      const src = readFileSync(join(VIEW_ROOT, rel), "utf8");
+      expect(src, `${rel} 还有裸的空状态灰字`).not.toMatch(/className="muted">\s*尚无/);
+      expect(src, `${rel} 没用 StateNote`).toContain("StateNote");
+    }
+  });
+
+  it("StateNote 是三段式：图标 + 标题 + 说明；图标只走 YushuIcon，**不许内联 path**", () => {
+    const src = readFileSync(join(VIEW_ROOT, "components", "StateNote.tsx"), "utf8");
+    expect(src).toContain("YushuIcon");
+    expect(src).toContain("state-note-title");
+    expect(src).toContain("state-note-text");
+    expect(src, "状态提示组件里内联了 path（图标就有了第二套画法）").not.toContain("<path");
+  });
+});
