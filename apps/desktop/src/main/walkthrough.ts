@@ -5508,6 +5508,45 @@ const STEPS: StepDef[] = [
     `,
   },
 
+
+  {
+    step: 79,
+    title: 'UI 重构第四批余下：空状态的插画真的画在屏上（自绘线稿：24 画布 / 2px 描边 / 不填色）',
+    file: 'step79-ui-state-art.png',
+    body: String.raw`
+      // 这一步证 R118：**空状态的插画真的画出来了**，而且画法守住了口径。
+      // 落点选「新建项目 → 融合预演」：还没选派系包时那里就是空态，
+      // 而这一步**不需要系统对话框**（选目录是最后一步才要的）⇒ 预演能自动化。
+      const newBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('.topbar button')].find((x) => String(x.textContent).indexOf('新建项目') >= 0);
+        return b || null;
+      }, 10000);
+      if (newBtn === null) return { ok: false, note: '顶栏里没有「新建项目」按钮' };
+      newBtn.click();
+      const art = await waitFor(() => document.querySelector('.state-art'), 15000);
+      if (art === null) return { ok: false, note: '进到向导后没看到 .state-art（空态插画）：' + pageText().slice(0, 120) };
+      const box = art.closest('.state-note');
+      const titleEl = box === null ? null : box.querySelector('.state-note-title');
+      const textEl = box === null ? null : box.querySelector('.state-note-text');
+      const titleText = titleEl === null ? '' : String(titleEl.textContent || '').trim();
+      const noteText = textEl === null ? '' : String(textEl.textContent || '').trim();
+      const vb = art.getAttribute('viewBox') || '';
+      const sw = art.getAttribute('stroke-width') || '';
+      const fill = art.getAttribute('fill') || '';
+      const stroke = art.getAttribute('stroke') || '';
+      const ok = vb === '0 0 24 24' && sw === '2' && fill === 'none' && stroke === 'currentColor' &&
+        titleText.length > 0 && noteText.length > 0;
+      const target = box === null ? art : box;
+      target.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: ok,
+        note: '空态插画在屏上：viewBox=' + vb + ' / 描边=' + sw + ' / 填色=' + fill + ' / 颜色=' + stroke +
+          '；标题=「' + titleText + '」；说明=' + noteText.slice(0, 30),
+      };
+    `,
+  },
+
 ];
 
 /**
