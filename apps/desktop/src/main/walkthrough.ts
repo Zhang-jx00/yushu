@@ -6350,6 +6350,63 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 94,
+    title: '世界观档案：时空联动（点锚点跳到事件 / 选事件定位到锚点，K08 §3.8 后半句）（R132）',
+    file: 'step94-time-map-link.png',
+    body: String.raw`
+      // 这一步证 R132 的**双向**联动：
+      // ① 地图那边点锚点 ⇒ 时间线里那一行**高亮**（同一件事在两处都看得见）；
+      // ② 时间线那边点「地图上有锚点」⇒ 地图**滚到眼前**（作者不用自己找）。
+      //
+      // 关键：两个方向靠**同一个事件 id**串起来 ⇒ 时间线那行的高亮与地图那锚点的高亮
+      // 必须指向**同一个事件**（两套状态会对不上 ⇒ 联动看起来像坏了）。
+      await tab('世界观档案');
+      await sleep(700);
+      // **先把联动状态归零**（R132 补）：失败步骤会自动重试一次，而**上一轮的状态还在**
+      // （第一次尝试的最后一步已经点亮了联动）⇒ 第二次尝试会"因为残留状态"而通过
+      // ⇒ 变异的点击失效就被盖住了，判据看起来是绿的（实测：这样跑，变异抓不到）。
+      // 切走再切回 ⇒ 页面组件重挂载 ⇒ 联动状态回到"还没选"。
+      await tab('规则');
+      await tab('世界观档案');
+      await sleep(700);
+      const anchor = await waitFor(() => document.querySelector('.map-panel .map-anchor[data-event]') || null, 8000);
+      if (anchor === null) return { ok: false, note: '地图上没有事件锚点（先跑 step93）' };
+      const eventRef = String(anchor.getAttribute('data-event') || '');
+      // 时间线那一行必须**自带**「地图上有锚点」的入口（父组件知道这个事件在地图上）
+      const row = document.querySelector('.timeline-table tr[data-event="' + eventRef + '"]');
+      const linkBtn = row === null ? null : row.querySelector('.timeline-map-link');
+      if (row === null || linkBtn === null) {
+        return { ok: false, note: '时间线里没有事件 ' + eventRef + ' 这一行（或它没有「地图上有锚点」入口）' };
+      }
+      // ① 点锚点 ⇒ 时间线那一行高亮
+      anchor.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await sleep(400);
+      const rowLinked = String(row.className || '').indexOf('is-linked') >= 0;
+      const anchorLinked = String(anchor.getAttribute('class') || '').indexOf('is-linked') >= 0;
+      // ② 点时间线里的入口 ⇒ 地图滚到眼前（作者不用自己找）
+      const mapPanel = document.querySelector('.map-panel');
+      linkBtn.click();
+      await sleep(600);
+      const inView = (() => {
+        if (mapPanel === null) return false;
+        const r = mapPanel.getBoundingClientRect();
+        return r.bottom > 0 && r.top < window.innerHeight;
+      })();
+      const anchorLinkedAfter = String(anchor.getAttribute('class') || '').indexOf('is-linked') >= 0;
+      const svg = document.querySelector('.map-panel .map-svg');
+      if (svg !== null) svg.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: rowLinked && anchorLinked && inView && anchorLinkedAfter && eventRef !== '',
+        note: '事件=' + eventRef +
+          '；点锚点后时间线那行高亮=' + String(rowLinked) +
+          '；锚点自身高亮=' + String(anchorLinked) +
+          '；点时间线入口后地图在视野内=' + String(inView) +
+          '；锚点仍高亮（同一件事）=' + String(anchorLinkedAfter),
+      };
+    `,
+  },
 ];
 
 /**

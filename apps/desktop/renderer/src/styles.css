@@ -3775,6 +3775,31 @@ table,
   opacity: 0.5;
 }
 
+/* 时空联动（R132）：被选中的那一行 / 那个锚点要**一眼**看得出来
+   （联动是"跨面板"的 ⇒ 视线要能从一处跳到另一处 ⇒ 高亮得够显眼）。 */
+.map-anchor.is-linked circle {
+  stroke-width: 3;
+}
+
+.timeline-table tr.is-linked td {
+  background: var(--panel-2);
+}
+
+.timeline-table tr.is-linked td:first-child {
+  box-shadow: inset var(--space-2) 0 0 var(--accent);
+}
+
+.timeline-map-link {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-1);
+  background: var(--panel);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
 .map-anchors {
   margin: var(--space-2) 0 0;
   padding-left: var(--space-6);

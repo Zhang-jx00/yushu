@@ -1154,7 +1154,7 @@ describe("世界地图（M5/T5-1，R120）：坐标空间 + 标注 + 图层显�
   it("地图面板挂在世界观档案页（不挂 = 界面根本到不了这张图）", () => {
     // **只看 JSX 里的挂载**：只查"出现过 WorldMapPanel"是恒绿的——
     // import 那一行还在的话，把面板从页面里摘掉也照样绿（变异 M5 实测抓到的）。
-    expect(archive).toMatch(/<WorldMapPanel\s*\/>/);
+    expect(archive).toMatch(/<WorldMapPanel[^>]*\/>/);
   });
 
   it("标注用归一化坐标落位（坐标空间那一层不许自己换算像素）", () => {
@@ -1787,13 +1787,48 @@ describe("事件锚点（R131）：K08 §3.8 的事件挂坐标", () => {
     // 认**真的遍历了锚点**（`map.anchors.map(`），不认类名——类名留着、遍历没了，锚点照样画不出来
     expect(panel, "地图面板没有遍历锚点").toMatch(/map\.anchors\.map\(/);
     // 还要认**画布上那处**（条件表达式里的类名）：名单与画布是两处，只有一处被删掉时上面那条仍会绿
-    expect(panel, "地图面板没有在画布上画锚点").toMatch(/className=\{"map-anchor" \+/);
+    expect(panel, "地图面板没有在画布上画锚点").toMatch(/className=\{\s*"map-anchor"\s*\+/);
     expect(panel, "地图面板没有列锚点").toContain("map-anchors");
   });
 
   it("锚点的**形状**与地点标注区分开（形状优先于颜色：空心环 vs 实心）", () => {
     expect(css, "锚点没有独立的样式").toMatch(/\.map-anchor circle \{[^}]*fill: none/);
     expect(panel, "锚点没有独立的中心点").toContain("map-anchor-core");
+  });
+});
+
+/**
+ * 时空联动（R132；K08 §3.8 后半句：选事件定位地图锚点 / 点 marker 跳到时间轴对应事件）。
+ *
+ * 两个方向靠**同一个事件 id**串起来 ⇒ 判据也要盯住"同一个 id"这件事，
+ * 而不是"两处都高亮了"（两处高亮的是不同事件，联动照样是坏的）。
+ */
+describe("时空联动（R132）：锚点 ↔ 时间线双向定位", () => {
+  const archive = readFileSync(join(VIEW_ROOT, "views", "ArchiveView.tsx"), "utf8");
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+
+  it("地图面板把锚点**上报**并接受「被选中的事件」（父组件据此联动）", () => {
+    expect(panel, "地图面板没有上报锚点").toContain("onAnchors");
+    expect(panel, "地图面板没有接受被选中的事件").toContain("linkedEvent");
+    expect(panel, "锚点不可点（点它去不了时间线）").toMatch(/onClick=\{\(\) => pickAnchor\(anchor\.eventRef\)\}/);
+  });
+
+  it("时间线那边给「地图上有锚点」的入口，并按**同一个事件 id**高亮", () => {
+    expect(archive, "时间线没有「地图上有锚点」的入口").toContain("timeline-map-link");
+    expect(archive, "时间线没有按事件 id 找锚点").toMatch(/mapAnchors\.find\(\(item\) => item\.eventRef === row\.id\)/);
+    // **一个**事件 id 贯穿两头（两套状态会对不上 ⇒ 联动看起来像坏了）
+    expect(archive, "联动用了不止一个状态").toContain("linkedEvent");
+    expect(archive, "地图与时间线没有接上").toContain("linkedEvent={linkedEvent}");
+  });
+
+  it("被选中的那一行 / 那个锚点**看得见**（跨面板的高亮得够显眼）", () => {
+    // 判据要认**高亮与普通行不是同一个底色**——只认"规则存在"的话，
+    // 把高亮写成和普通行一样的底色它照样绿（实测：这就是恒绿）
+    expect(css, "时间线那一行没有高亮样式").toMatch(
+      /\.timeline-table tr\.is-linked td \{[^}]*background: var\(--panel-2\)/,
+    );
+    expect(css, "锚点没有高亮样式").toMatch(/\.map-anchor\.is-linked circle \{/);
   });
 });
 

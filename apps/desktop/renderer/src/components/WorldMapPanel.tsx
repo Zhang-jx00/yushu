@@ -38,7 +38,25 @@ const FALLBACK_CANVAS = { width: 1000, height: 700 };
 /** 网格线：五等分，够看出"这是个坐标系"，又不至于密成噪点 */
 const GRID_STEPS = 5;
 
-export function WorldMapPanel() {
+/**
+ * 世界地图面板（M5 / T5-1，R120）。
+ *
+ * **联动三个 props 都是必填**（R132 时空联动）：
+ * - `linkedEvent`：被选中的事件 ⇒ 对应的锚点高亮；
+ * - `onAnchorPick`：点锚点 ⇒ 上报它挂的事件（父组件去时间线那边定位）；
+ * - `onAnchors`：把锚点清单上报给父组件（父组件要知道哪个事件在地图上）。
+ *
+ * 为什么必填而不是可选：锚点**始终**是键盘可达的按钮（契约 §6 的键盘债是 0），
+ * 若"有时能点有时不能点"，扫描器与作者都要靠猜 ⇒ 这里让组件只有一个形态。
+ */
+export function WorldMapPanel(props: {
+  /** 被选中的事件（时间线那边点过来的）⇒ 对应的锚点高亮 */
+  linkedEvent: string | null;
+  /** 点锚点 ⇒ 上报它挂的事件（父组件去时间线那边定位） */
+  onAnchorPick: (eventRef: string) => void;
+  /** 锚点清单上报给父组件（父组件要知道哪个事件在地图上） */
+  onAnchors: (anchors: { id: string; eventRef: string }[]) => void;
+}) {
   const [map, setMap] = useState<WorldMapViewPayload | null>(null);
   const [error, setError] = useState("");
   /** 被隐藏的图层（空 = 全显） */
@@ -110,6 +128,25 @@ export function WorldMapPanel() {
   const selectedMarker = useMemo(
     () => (map?.markers ?? []).find((marker) => marker.id === selected) ?? null,
     [map, selected],
+  );
+
+  /**
+   * R132 时空联动：把锚点清单**上报**给父组件（同一页的时间线要知道哪个事件在地图上）。
+   *
+   * 为什么上报而不是让父组件再取一次：地图取数要走 IPC 与真源解析，
+   * 同一份数据取两次 ⇒ 两个地方可能对不上（作者会看到"时间线说有锚点、地图上没有"）。
+   */
+  useEffect(() => {
+    if (map === null) return;
+    props.onAnchors(map.anchors.map((anchor) => ({ id: anchor.id, eventRef: anchor.eventRef })));
+  }, [map, props.onAnchors]);
+
+  /** 点锚点 ⇒ 告诉父组件它挂的事件（父组件去时间线那边定位并高亮） */
+  const pickAnchor = useCallback(
+    (eventRef: string) => {
+      props.onAnchorPick(eventRef);
+    },
+    [props.onAnchorPick],
   );
 
   /** 地点卡的**键值行**（R126）：和面板汇总用**同一个**组件 ⇒ 键值行的样式只有一处，
@@ -271,17 +308,35 @@ export function WorldMapPanel() {
               );
             })}
             {/* 事件锚点（R131，K08 §3.8：事件挂坐标 ⇒ 选事件能定位到地图上）：
-                画成**空心环 + 中心点**，与地点标注的实心形状区分开（形状优先于颜色）。 */}
+                画成**空心环 + 中心点**，与地点标注的实心形状区分开（形状优先于颜色）。
+                R132：锚点**可点** ⇒ 点它去时间线那边定位对应事件（时空联动的反向）。 */}
             {map.anchors.map((anchor) => {
               const inside = anchor.nx >= 0 && anchor.nx <= 1 && anchor.ny >= 0 && anchor.ny <= 1;
               const cx = Math.min(Math.max(anchor.nx, 0), 1) * width;
               const cy = Math.min(Math.max(anchor.ny, 0), 1) * height;
+              const linked = props.linkedEvent !== null && props.linkedEvent === anchor.eventRef;
               return (
                 <g
                   key={anchor.id}
-                  className={"map-anchor" + (inside ? "" : " is-outside")}
+                  className={
+                    "map-anchor" +
+                    (inside ? "" : " is-outside") +
+                    (linked ? " is-linked" : "")
+                  }
                   data-anchor={anchor.id}
                   data-event={anchor.eventRef}
+                  /* 键盘可达（R110 / 契约 §6）：SVG 里放不了 HTML 按钮 ⇒ 这个 <g> 自己当按钮。
+                     锚点**始终**是按钮（键盘债必须为 0）⇒ 三个属性都写成字面量。 */
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`事件锚点 ${anchor.label}（${anchor.eventRef}）`}
+                  onClick={() => pickAnchor(anchor.eventRef)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      pickAnchor(anchor.eventRef);
+                    }
+                  }}
                 >
                   <title>{`事件锚点 ${anchor.label}（${anchor.eventRef}）`}</title>
                   <circle cx={cx} cy={cy} r={9} />

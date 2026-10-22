@@ -32,6 +32,38 @@ export function ArchiveView({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("");
 
+  /**
+   * 时空联动（R132；K08 §3.8 后半句「选事件定位地图锚点」+「点 marker 跳到时间轴对应事件」）。
+   *
+   * 两个方向都靠**同一个事件 id**串起来：
+   * - 地图那边点锚点 ⇒ `linkedEvent` = 那个事件 ⇒ 时间线那一行高亮并滚到眼前；
+   * - 时间线那边点「地图上有锚点」⇒ `linkedEvent` = 那个事件 ⇒ 地图滚到眼前、那个锚点高亮。
+   *
+   * 为什么不用两套状态（"选中锚点" + "选中事件"）：两个状态会对不上 ⇒ 作者看到"高亮的行"
+   * 和"高亮的点"不是同一件事 ⇒ 联动看起来像坏了。**一个事件 id 贯穿两头**。
+   */
+  const [linkedEvent, setLinkedEvent] = useState<string | null>(null);
+  /** 地图上的锚点清单（由地图面板上报；时间线据此给「地图上有锚点」的入口） */
+  const [mapAnchors, setMapAnchors] = useState<{ id: string; eventRef: string }[]>([]);
+
+  /** 地图那边点锚点 ⇒ 选事件 + 把时间线那一行滚到眼前 */
+  const pickAnchor = useCallback((eventRef: string) => {
+    setLinkedEvent(eventRef);
+    requestAnimationFrame(() => {
+      const row = document.querySelector('.timeline-table tr[data-event="' + eventRef + '"]');
+      if (row !== null) row.scrollIntoView({ block: "center" });
+    });
+  }, []);
+
+  /** 时间线那边点「地图上有锚点」⇒ 选事件 + 把地图滚到眼前 */
+  const jumpToMap = useCallback((eventId: string) => {
+    setLinkedEvent(eventId);
+    requestAnimationFrame(() => {
+      const panel = document.querySelector(".map-panel");
+      if (panel !== null) panel.scrollIntoView({ block: "center" });
+    });
+  }, []);
+
   // 取名助手（本地生成，离线可用）
   const [namingKind, setNamingKind] = useState<NamingKindPayload>("character");
   const [namingCount, setNamingCount] = useState(5);
@@ -458,17 +490,31 @@ export function ArchiveView({
                   </tr>
                 </thead>
                 <tbody>
-                  {timeline.rows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.displayYear ?? "历法未识别"}</td>
-                      <td>
-                        {row.title} <span className="muted">{row.id}</span>
-                      </td>
-                      <td>{row.year}</td>
-                      <td>{row.kind ?? "—"}</td>
-                      <td>{row.location ?? "—"}</td>
-                    </tr>
-                  ))}
+                  {timeline.rows.map((row) => {
+                    const anchor = mapAnchors.find((item) => item.eventRef === row.id);
+                    const linked = linkedEvent === row.id;
+                    return (
+                      <tr key={row.id} className={linked ? "is-linked" : undefined} data-event={row.id}>
+                        <td>{row.displayYear ?? "历法未识别"}</td>
+                        <td>
+                          {row.title} <span className="muted">{row.id}</span>
+                          {/* 时空联动（R132）：这个事件在地图上有锚点 ⇒ 给一个入口跳过去 */}
+                          {anchor !== undefined && (
+                            <button
+                              type="button"
+                              className="timeline-map-link"
+                              onClick={() => jumpToMap(row.id)}
+                            >
+                              地图上有锚点
+                            </button>
+                          )}
+                        </td>
+                        <td>{row.year}</td>
+                        <td>{row.kind ?? "—"}</td>
+                        <td>{row.location ?? "—"}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -482,7 +528,7 @@ export function ArchiveView({
       <RelationGraphPanel />
       <ChronologyPanel />
       <SatisfactionPanel />
-      <WorldMapPanel />
+      <WorldMapPanel linkedEvent={linkedEvent} onAnchorPick={pickAnchor} onAnchors={setMapAnchors} />
       </div>
     </div>
   );
