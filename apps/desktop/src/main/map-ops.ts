@@ -50,6 +50,7 @@ export async function worldMapView(
       overlapClusters: [],
       outOfBoundsMarkers: [],
       entityCount: 0,
+      summary: { markers: 0, layers: 0, entities: 0, findings: 0 },
     };
   }
   let def: WorldMapDef;
@@ -69,6 +70,7 @@ export async function worldMapView(
       overlapClusters: [],
       outOfBoundsMarkers: [],
       entityCount: 0,
+      summary: { markers: 0, layers: 0, entities: 0, findings: 0 },
     };
   }
 
@@ -136,6 +138,12 @@ export async function worldMapView(
     overlapClusters: projection.overlapClusters,
     outOfBoundsMarkers: projection.outOfBoundsMarkers,
     entityCount: structure.entities.length,
+    summary: {
+      markers: markers.length,
+      layers: projection.layers.length,
+      entities: structure.entities.length,
+      findings: projection.findings.length,
+    },
   };
 }
 

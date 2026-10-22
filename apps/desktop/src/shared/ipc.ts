@@ -2917,6 +2917,11 @@ export interface WorldMapViewPayload {
   outOfBoundsMarkers: string[];
   /** 项目里的实体总数（地图只画标注过的那些） */
   entityCount: number;
+  /**
+   * **结构化摘要**（R124）：界面按行渲染这几项 ⇒ 说明不会堆成一长串。
+   * 之前是一句 `A · B；C` 的自由文本，在窄栏里会断成四五行、读起来像碎片。
+   */
+  summary: { markers: number; layers: number; entities: number; findings: number };
 }
 
 /** 编年史（M4 / T4-8，R71）：大事年表 + 同一事件的多文化"伪史书" */

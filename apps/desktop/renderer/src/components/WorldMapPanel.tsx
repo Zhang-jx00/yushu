@@ -252,9 +252,13 @@ export function WorldMapPanel() {
             })}
           </svg>
           <div className="map-caption muted">
-            坐标空间：图片像素边界 {map.bounds === null ? "（无有效边界，坐标未产出）" : `${map.bounds.x0},${map.bounds.y0} → ${map.bounds.x1},${map.bounds.y1}`}
-            ；底图：{base !== null && base.path !== null ? `${base.path}${base.size === null ? "" : `（${base.size.width}×${base.size.height}）`}` : "没有登记（world/map.yaml 的 base_image）"}
-            {base !== null && base.exists && base.dataUrl === null ? `；${base.note}` : ""}
+            <div>
+              坐标空间 {map.bounds === null ? "（无有效边界，坐标未产出）" : `${map.bounds.x0},${map.bounds.y0} → ${map.bounds.x1},${map.bounds.y1}`}
+            </div>
+            <div>
+              底图 {base !== null && base.path !== null ? `${base.path}${base.size === null ? "" : `（${base.size.width}×${base.size.height}）`}` : "没有登记"}
+              {base !== null && base.exists && base.dataUrl === null ? `：${base.note}` : ""}
+            </div>
           </div>
         </div>
 
@@ -306,7 +310,26 @@ export function WorldMapPanel() {
               {cardBody !== "" && <div className="map-card-body">{cardBody}</div>}
             </div>
           )}
-          <div className="map-summary muted">{map.note}</div>
+          {/* 摘要**按行渲染**（R124）：原先是一句「A · B；C」的自由文本，
+              在窄栏里断成四五行、读起来像碎片 ⇒ 载荷带结构，这里逐行摆。 */}
+          <dl className="map-card-rows map-summary-rows">
+            <div className="map-card-row">
+              <dt>标注</dt>
+              <dd>{map.summary.markers}</dd>
+            </div>
+            <div className="map-card-row">
+              <dt>图层</dt>
+              <dd>{map.summary.layers}</dd>
+            </div>
+            <div className="map-card-row">
+              <dt>实体</dt>
+              <dd>{map.summary.entities}</dd>
+            </div>
+            <div className="map-card-row">
+              <dt>体检</dt>
+              <dd>{map.summary.findings}</dd>
+            </div>
+          </dl>
           {map.findings.length > 0 && (
             <ul className="map-findings">
               {map.findings.map((finding, index) => (
