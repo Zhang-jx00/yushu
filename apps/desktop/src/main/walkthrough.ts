@@ -605,8 +605,17 @@ const STEPS: StepDef[] = [
     body: String.raw`
       const el = await waitFor(() => document.querySelector('.tabs'), 20000);
       if (!el) return { ok: false, note: '未自动进入项目页：' + pageText() };
+      // 预演必须跑在**已知状态**里：主题偏好是用户级的（存在 localStorage，会跨轮留下），
+      // 不归零的话这一轮可能整轮都是暗色的 ⇒ 截图不可复现、下一轮的『改前底色』也说不清。
+      const themeSel = document.querySelector('.theme-picker select');
+      if (themeSel !== null) {
+        const themeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+        themeSetter.call(themeSel, 'light');
+        themeSel.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(350);
+      }
       const path = document.querySelector('.topbar .path');
-      return { ok: true, note: '项目页已就绪，标签 ' + document.querySelectorAll('.tab').length + ' 个；root=' + (path ? path.textContent : '(未显示)') };
+      return { ok: true, note: '项目页已就绪，标签 ' + document.querySelectorAll('.tab').length + ' 个；root=' + (path ? path.textContent : '(未显示)') + '；主题归零为 ' + String(document.documentElement.dataset.theme || '') };
     `,
   },
   {
@@ -5695,6 +5704,12 @@ const STEPS: StepDef[] = [
       // ③ **主题是用户级偏好**（存 localStorage，**项目真源一个字节都没动**）。
       const themeSelect = document.querySelector('.theme-picker select');
       if (themeSelect === null) return { ok: false, note: '顶栏里没有「主题」下拉' };
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      // 先把主题**归零为浅色**再取『改前』的底色：主题偏好是用户级的（跨轮留在 localStorage），
+      // 不归零的话『改前』本来就是暗的 ⇒ 『逐字恢复』量的其实是两件事。
+      setter.call(themeSelect, 'light');
+      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(400);
       const body = document.body;
       const beforeBg = getComputedStyle(body).backgroundColor;
       const beforeFg = getComputedStyle(body).color;
@@ -5714,7 +5729,6 @@ const STEPS: StepDef[] = [
         return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
       };
 
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
       setter.call(themeSelect, 'dark');
       themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
       await sleep(400);
@@ -5751,6 +5765,60 @@ const STEPS: StepDef[] = [
           '；data-theme=' + dataset + '；偏好存的是=' + stored +
           '；切回浅色逐字恢复=' + String(restored) + '（底=' + backBg + ' 偏好=' + backStored + '）' +
           '；项目真源未动=' + String(diskUntouched) + (diskFile === null ? '（项目里没有可比对的真源文件）' : '（' + diskFile.path + '）'),
+      };
+    `,
+  },
+
+  {
+    step: 83,
+    title: '明暗对照·浅色基准：世界观档案同一屏（地图面板 + 图谱 + 爽点看板）（R122）',
+    file: 'step83-compare-light.png',
+    body: String.raw`
+      // 这一步与 **step84 成对**：同一屏、同一滚动位置，一个浅色一个深色。
+      // 这是 docs/13 §5 明写要的「逐页截图对照」——暗色色板落地后必须拿来看，
+      // 不能只靠对比度数字自证。
+      const sel = document.querySelector('.theme-picker select');
+      if (sel === null) return { ok: false, note: '顶栏里没有「主题」下拉' };
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(sel, 'light');
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(400);
+      const theme = String(document.documentElement.dataset.theme || '');
+      if (theme !== 'light') return { ok: false, note: '切不到浅色（主题=' + theme + '）' };
+      await tab('世界观档案');
+      const panel = document.querySelector('.map-panel');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(300);
+      return {
+        ok: true,
+        note: '浅色基准：主题=' + theme + '，底色=' + getComputedStyle(document.body).backgroundColor +
+          '，世界观档案同一屏已就位（与 step84 成对）',
+      };
+    `,
+  },
+  {
+    step: 84,
+    title: '明暗对照·深色：同一屏的深色版（R122）',
+    file: 'step84-compare-dark.png',
+    body: String.raw`
+      const sel = document.querySelector('.theme-picker select');
+      if (sel === null) return { ok: false, note: '顶栏里没有「主题」下拉' };
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(sel, 'dark');
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(500);
+      const theme = String(document.documentElement.dataset.theme || '');
+      const bg = getComputedStyle(document.body).backgroundColor;
+      const panel = document.querySelector('.map-panel');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(300);
+      // 错峰落位：标注应当**已经**全部可见（进场结束后 opacity = 1）
+      const markers = [...document.querySelectorAll('.map-panel .map-marker-in')];
+      const visible = markers.filter((m) => Number(getComputedStyle(m).opacity) > 0.99).length;
+      return {
+        ok: theme === 'dark' && markers.length > 0 && visible === markers.length,
+        note: '深色对照：主题=' + theme + '，底色=' + bg + '，同一屏已就位（与 step83 成对）' +
+          '；标注=' + markers.length + '，全部可见（错峰落位已结束）=' + visible,
       };
     `,
   },
