@@ -72,6 +72,8 @@ export const CHANNELS = {
   graphRelation: "graph:relation",
   /** 世界地图（M5/T5-1，R120）：**只读**（图片底图 + bounds + 分层 + 标注，K08 §3） */
   worldMapView: "map:view",
+  /** 世界地图底图（R123）：**只读**（把作者登记的底图读成 data URL，路径防护同一切片） */
+  worldMapBase: "map:base",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -2885,6 +2887,18 @@ export interface WorldMapViewMarker {
   y: number;
   label: string;
   card: WorldMapPlaceCard | null;
+}
+
+/** 世界地图底图（R123）：把作者登记的底图读成 data URL 交给渲染层铺在坐标空间上 */
+export interface WorldMapBasePayload {
+  /** 真源里登记的底图路径（相对项目根）；没有登记底图 = null */
+  path: string | null;
+  exists: boolean;
+  note: string;
+  /** data URL（image/png 之类）；读不到或超限 = null */
+  dataUrl: string | null;
+  /** 底图像素尺寸（量出来的，不是作者写的） */
+  size: { width: number; height: number } | null;
 }
 
 export interface WorldMapViewPayload {

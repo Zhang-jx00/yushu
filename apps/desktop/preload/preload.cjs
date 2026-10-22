@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld("yushu", {
   },
   map: {
     view: () => invoke("map:view"),
+    base: () => invoke("map:base"),
   },
   chronicle: {
     book: (payload) => invoke("chronicle:book", payload),

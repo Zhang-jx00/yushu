@@ -89,6 +89,17 @@ export class ProjectGateway {
     return entries;
   }
 
+  /**
+   * 读**二进制**文件（图片等）——路径防护与 readDoc 同一套（K12 防路径穿越）。
+   *
+   * 为什么单独一条：`readDoc` 按 utf8 解码，二进制会被解坏（可选项失真）。
+   */
+  async readBinary(relPath: string): Promise<{ path: string; bytes: Buffer }> {
+    const abs = this.resolveInside(relPath);
+    const bytes = await fs.readFile(abs);
+    return { path: relPath, bytes };
+  }
+
   async readDoc(relPath: string): Promise<DocSnapshot> {
     const abs = this.resolveInside(relPath);
     const content = await fs.readFile(abs, "utf8");

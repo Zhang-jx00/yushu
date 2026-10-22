@@ -32,6 +32,7 @@ import {
   type TimelineViewRequestPayload,
   type GraphViewPayload,
   type GraphViewRequestPayload,
+  type WorldMapBasePayload,
   type WorldMapViewPayload,
   type ChronicleBookPayload,
   type ChronicleBookRequestPayload,
@@ -172,7 +173,7 @@ import { applyProposal, decideProposal, listProposals, previewPropagation, propo
 import { foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
-import { worldMapView } from "./map-ops.js";
+import { worldMapBase, worldMapView } from "./map-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
 import {
@@ -626,6 +627,10 @@ export function registerIpcHandlers(): void {
   // 世界地图（T5-1，R120）：真源直算的只读投影，**不写盘** ⇒ wrap
   ipcMain.handle(CHANNELS.worldMapView, (_event) =>
     wrap<WorldMapViewPayload>(() => worldMapView(requireGateway())),
+  );
+  // 世界地图底图（R123）：只读（路径防护走 gateway，K12）⇒ wrap
+  ipcMain.handle(CHANNELS.worldMapBase, (_event) =>
+    wrap<WorldMapBasePayload>(() => worldMapBase(requireGateway())),
   );
   // 编年史（T4-8）：复用时间线刻度，只读 ⇒ wrap
   ipcMain.handle(CHANNELS.chronicleBook, (_event, payload: ChronicleBookRequestPayload) =>

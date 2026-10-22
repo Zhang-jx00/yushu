@@ -6,7 +6,7 @@ import {
   projectWorldMap,
   type WorldMapDef,
 } from "@yushu/world-engine";
-import type { WorldMapViewPayload, WorldMapViewRequestPayload } from "../shared/ipc.js";
+import type { WorldMapBasePayload, WorldMapViewPayload, WorldMapViewRequestPayload } from "../shared/ipc.js";
 import { gatewayReader } from "./index-ops.js";
 import type { ProjectGateway } from "./file-gateway.js";
 
@@ -136,5 +136,125 @@ export async function worldMapView(
     overlapClusters: projection.overlapClusters,
     outOfBoundsMarkers: projection.outOfBoundsMarkers,
     entityCount: structure.entities.length,
+  };
+}
+
+/** 底图允许的格式：只认三种位图（SVG 可能带脚本，不进 <image>） */
+const BASE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+};
+
+/** 底图体积上限：data URL 走 IPC，超过这个尺寸就别搬了（说清楚比搬不动强） */
+const BASE_MAX_BYTES = 8 * 1024 * 1024;
+
+/** PNG / JPEG / WEBP 的像素尺寸（从文件头里量，不是作者写的） */
+function imageSize(bytes: Buffer, mime: string): { width: number; height: number } | null {
+  if (mime === "image/png" && bytes.length >= 24) {
+    // PNG 的 IHDR：宽高是大端 uint32，在偏移 16 与 20
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
+  if (mime === "image/webp" && bytes.length >= 30) {
+    // WEBP 的 VP8X / VP8L / VP8 三种容器，尺寸位置不同（这一段只认 VP8X）
+    const tag = bytes.subarray(12, 16).toString("ascii");
+    if (tag === "VP8X") {
+      // VP8X 的宽高是 24 位小端（各减 1）
+      return { width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 };
+    }
+    return null;
+  }
+  if (mime === "image/jpeg" && bytes.length >= 4) {
+    // JPEG：逐段找 SOF0/SOF2 拿高宽
+    let offset = 2;
+    while (offset + 9 < bytes.length) {
+      if (bytes.readUInt8(offset) !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marker = bytes.readUInt8(offset + 1);
+      // SOF0..SOF15（跳过 DHT/JPG/DAC 三种不是尺寸的）
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { height: bytes.readUInt16BE(offset + 5), width: bytes.readUInt16BE(offset + 7) };
+      }
+      const length = bytes.readUInt16BE(offset + 2);
+      if (length < 2) break;
+      offset += 2 + length;
+    }
+  }
+  return null;
+}
+
+/**
+ * 读世界地图的**底图**（R123）：**只读**。
+ *
+ * 底图是**作者自己放进项目**的一张图（真源 `world/map.yaml` 的 `base_image` 记相对路径）
+ * ——地图登记不设表单（与其它真源 YAML 同一处置），所以这一条只负责**读**：
+ * 路径防护走 gateway（K12 防路径穿越），只认 PNG / JPEG / WEBP 三种位图。
+ *
+ * 三条不静默：没有登记底图 ⇒ 说清楚；文件读不到 ⇒ 点名路径；超出体积上限 ⇒ 说清楚多大。
+ */
+export async function worldMapBase(
+  gateway: ProjectGateway,
+  _request: WorldMapBasePayload extends never ? never : Record<string, never> = {},
+): Promise<WorldMapBasePayload> {
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) {
+    return { path: null, exists: false, note: "项目还没有世界地图", dataUrl: null, size: null };
+  }
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return {
+      path: null,
+      exists: false,
+      note: `地图读不了，取不到底图：${err instanceof Error ? err.message : String(err)}`,
+      dataUrl: null,
+      size: null,
+    };
+  }
+  if (def.baseImage === undefined) {
+    return { path: null, exists: false, note: "这张地图没有登记底图（world/map.yaml 的 base_image）", dataUrl: null, size: null };
+  }
+  const ext = def.baseImage.split(".").pop()?.toLowerCase() ?? "";
+  const mime = BASE_MIME[ext];
+  if (mime === undefined) {
+    return {
+      path: def.baseImage,
+      exists: false,
+      note: `底图格式不认：${def.baseImage}（只认 png / jpg / jpeg / webp）`,
+      dataUrl: null,
+      size: null,
+    };
+  }
+  let bytes: Buffer;
+  try {
+    bytes = (await gateway.readBinary(def.baseImage)).bytes;
+  } catch (err) {
+    return {
+      path: def.baseImage,
+      exists: false,
+      note: `底图读不到：${def.baseImage}（${err instanceof Error ? err.message : String(err)}）`,
+      dataUrl: null,
+      size: null,
+    };
+  }
+  if (bytes.length > BASE_MAX_BYTES) {
+    return {
+      path: def.baseImage,
+      exists: true,
+      note: `底图太大（${String(bytes.length)} 字节 > ${String(BASE_MAX_BYTES)}），这一段不搬它`,
+      dataUrl: null,
+      size: imageSize(bytes, mime),
+    };
+  }
+  return {
+    path: def.baseImage,
+    exists: true,
+    note: `底图 ${def.baseImage}（${mime}，${String(bytes.length)} 字节）`,
+    dataUrl: `data:${mime};base64,${bytes.toString("base64")}`,
+    size: imageSize(bytes, mime),
   };
 }

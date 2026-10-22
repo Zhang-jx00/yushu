@@ -25,6 +25,7 @@ import type {
   TimelineViewRequestPayload,
   GraphViewPayload,
   GraphViewRequestPayload,
+  WorldMapBasePayload,
   WorldMapViewPayload,
   ChronicleBookPayload,
   ChronicleBookRequestPayload,
@@ -244,6 +245,8 @@ export interface YushuApi {
   /** 世界地图（M5/T5-1，R120）：只读；图层显隐在渲染层做，所以没有入参 */
   map: {
     view: () => Promise<WorldMapViewPayload>;
+    /** 底图（R123）：作者登记的那张图，读成 data URL；没有登记 / 读不到 = dataUrl 为 null */
+    base: () => Promise<WorldMapBasePayload>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {
