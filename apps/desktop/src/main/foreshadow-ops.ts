@@ -5,7 +5,7 @@ import {
   FORESHADOW_PATH,
   type ConsistencySpan,
 } from "@yushu/world-engine";
-import type { ForeshadowBoardPayload } from "../shared/ipc.js";
+import type { ForeshadowBoardPayload, SummaryRow } from "../shared/ipc.js";
 import { readOutlineSafe } from "./doc-readers.js";
 import type { ProjectGateway } from "./file-gateway.js";
 import { locateLedgerEntrySpan } from "./ledger-spans.js";
@@ -56,6 +56,7 @@ export async function foreshadowBoard(gateway: ProjectGateway): Promise<Foreshad
       path: FORESHADOW_PATH,
       exists: false,
       note: "项目还没有伏笔台账：登记一条（id / promise / 埋设章 / 预期回收章）才谈得上未回收看板",
+      summary: [],
       chapterTotal: chapters.length,
       currentChapter,
       rows: [],
@@ -71,6 +72,7 @@ export async function foreshadowBoard(gateway: ProjectGateway): Promise<Foreshad
       path: FORESHADOW_PATH,
       exists: true,
       note: `台账读不了，本次不出结论（不静默按空台账显示）：${err instanceof Error ? err.message : String(err)}`,
+      summary: [],
       chapterTotal: chapters.length,
       currentChapter,
       rows: [],
@@ -83,6 +85,17 @@ export async function foreshadowBoard(gateway: ProjectGateway): Promise<Foreshad
     path: FORESHADOW_PATH,
     exists: true,
     note: `读到 ${ledger.entries.length} 条伏笔；当前进度按最后一章「${currentChapter ?? "（无章）"}」算`,
+    // 汇总的**结构化行**（R127）：原先界面里是「读到 N 条伏笔；…；共 N 条 · 未回收 N · 已回收 N · …」
+    // 一长串 ⇒ 窄栏里折成三四行；结构**由后端给**（不切那串自由文本）
+    summary: [
+      { label: "伏笔", value: `${String(board.stats.total ?? 0)} 条` },
+      { label: "未回收", value: `${String(board.stats.open ?? 0)} 条` },
+      { label: "已回收", value: `${String(board.stats.paid ?? 0)} 条` },
+      { label: "已放弃", value: `${String(board.stats.abandoned ?? 0)} 条` },
+      { label: "红鲱鱼", value: `${String(board.stats.redHerring ?? 0)} 条` },
+      { label: "逾期", value: `${String(board.stats.overdue ?? 0)} 条` },
+      { label: "当前章", value: currentChapter ?? "（无章）" },
+    ],
     chapterTotal: chapters.length,
     currentChapter,
     rows: board.rows,

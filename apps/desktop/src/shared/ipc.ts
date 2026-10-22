@@ -2764,6 +2764,8 @@ export interface ForeshadowBoardPayload {
   exists: boolean;
   /** 台账读不了 / 没有台账 / 章清单为空时，这里给出**不静默**的原因 */
   note: string;
+  /** 汇总的**结构化行**（R127）：界面逐行渲染，不切那串自由文本 */
+  summary: SummaryRow[];
   chapterTotal: number;
   currentChapter: string | null;
   rows: ForeshadowRowPayload[];
@@ -2952,6 +2954,8 @@ export interface ChronicleBookPayload {
   path: string;
   exists: boolean;
   note: string;
+  /** 汇总的**结构化行**（R127）：界面逐行渲染，不切那串自由文本 */
+  summary: SummaryRow[];
   calendars: { id: string; label: string; offset: number }[];
   activeCalendar: string | null;
   entries: ChronicleEntryPayload[];
@@ -3009,6 +3013,8 @@ export interface SatisfactionBoardPayload {
   path: string;
   exists: boolean;
   note: string;
+  /** 汇总的**结构化行**（R127）：界面逐行渲染，不切那串自由文本 */
+  summary: SummaryRow[];
   chapterTotal: number;
   currentChapter: string | null;
   rows: SatisfactionRowPayload[];

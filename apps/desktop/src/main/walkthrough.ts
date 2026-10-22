@@ -3026,7 +3026,10 @@ const STEPS: StepDef[] = [
       const table = await waitFor(() => document.querySelector('.foreshadow-board .foreshadow-table') || null, 4000);
       if (!table) return { ok: false, note: '伏笔台账表没渲染出来（面板可能没拿到数据或通道未通）' };
       const rows = [...table.querySelectorAll('tbody tr')];
-      const summary = (document.querySelector('.foreshadow-summary') || {}).textContent || '';
+      // 汇总现在是**结构化行**（R127）⇒ 不再读那串自由文本（那个类已经没了）
+      const summaryRows = [...document.querySelectorAll('.foreshadow-board .summary-row')];
+      const summary = summaryRows.map((r) => (r.textContent || '').replace(/\s+/g, ' ').trim()).join(' ');
+      const fsCount = /伏笔\s*(\d+)\s*条/.exec(summary);
       const findings = [...document.querySelectorAll('.foreshadow-finding')];
       const rules = findings.map((li) => {
         const span = li.querySelectorAll('span')[1];
@@ -3057,8 +3060,9 @@ const STEPS: StepDef[] = [
       await sleep(200);
       return {
         ok: rows.length === 3 && overdueShown && closedRh && contradiction && rhNotReported && !writeBack &&
-          ledgerInAudit && summary.indexOf('共 3 条') >= 0,
-        note: '行=' + rows.length + '；汇总="' + summary.slice(0, 64) + '"；逾期外显=' + overdueShown +
+          ledgerInAudit && fsCount !== null && Number(fsCount[1]) === 3,
+        note: '行=' + rows.length + '；汇总="' + summary.slice(0, 64) + '"；伏笔条数=' +
+          (fsCount === null ? '读到不到' : fsCount[1]) + '；逾期外显=' + overdueShown +
           '；红鲱鱼已闭环=' + closedRh + '；红鲱鱼未被报缺陷=' + rhNotReported +
           '；paid 无回收章报矛盾=' + contradiction + '；结论规则=' + JSON.stringify(rules) +
           '；体检同表含伏笔结论=' + ledgerInAudit + '（行="' + fsRuleShown + '"）' +
@@ -6110,6 +6114,67 @@ const STEPS: StepDef[] = [
           '；值列左边界=' + (lefts.length > 0 ? Math.round(lefts[0] ?? 0) + 'px（对齐=' + String(aligned) + '）' : '无') +
           '；值越列=' + spilling.length +
           '；孤立节点=' + count + ' 个，展开后列出=' + items.length + ' 个（列全=' + String(items.length === count) + '）',
+      };
+    `,
+  },
+  {
+    step: 90,
+    title: '世界观档案：爽点 / 编年史 / 伏笔三个面板的汇总也逐行渲染（标签一行高、值列对齐）（R127）',
+    file: 'step90-summary-panels.png',
+    body: String.raw`
+      // 这一步证 R127：三个面板的汇总**也**换成结构化行（共享组件 SummaryRows）。
+      // 量法与 step89 同一套：标签**一行高**、值列**左边界对齐**、值在标签右边、值不越列。
+      // 判据落在**运行时**（这三个面板有没有行、标签有没有被挤歪），不是看源码里有没有某个字符串。
+      await tab('世界观档案');
+      await sleep(600);
+      const targets = [
+        { name: '爽点', sel: '.satisfaction-panel' },
+        { name: '编年史', sel: '.chronology-panel' },
+        { name: '伏笔', sel: '.foreshadow-board' },
+      ];
+      const notes = [];
+      let bad = 0;
+      for (const target of targets) {
+        const panel = document.querySelector(target.sel);
+        if (panel === null) {
+          notes.push(target.name + '：面板没渲染');
+          bad += 1;
+          continue;
+        }
+        const rows = [...panel.querySelectorAll('.summary-row')];
+        const tallLabels = rows.filter((r) => {
+          const dt = r.querySelector('dt');
+          return dt !== null && dt.getBoundingClientRect().height > 28;
+        }).length;
+        const lefts = rows
+          .map((r) => {
+            const dd = r.querySelector('dd');
+            return dd === null ? null : dd.getBoundingClientRect().left;
+          })
+          .filter((v) => v !== null);
+        const aligned = lefts.length > 0 && lefts.every((v) => Math.abs((v ?? 0) - (lefts[0] ?? 0)) <= 1);
+        const stacked = rows.filter((r) => {
+          const dt = r.querySelector('dt');
+          const dd = r.querySelector('dd');
+          if (dt === null || dd === null) return false;
+          return dd.getBoundingClientRect().left < dt.getBoundingClientRect().right;
+        }).length;
+        const spilling = rows.filter((r) => {
+          const dd = r.querySelector('dd');
+          if (dd === null) return false;
+          return dd.getBoundingClientRect().right > r.getBoundingClientRect().right + 1;
+        }).length;
+        if (rows.length < 3 || tallLabels > 0 || !aligned || stacked > 0 || spilling > 0) bad += 1;
+        notes.push(target.name + '：行=' + rows.length + '（标签折行=' + tallLabels +
+          '，值列对齐=' + String(aligned) + '，上下叠=' + stacked + '，越列=' + spilling + '）');
+      }
+      // 截图要拍到正在量的那块面板 ⇒ 滚到第一个有汇总的面板
+      const first = document.querySelector('.satisfaction-panel .summary-rows');
+      if (first !== null) first.scrollIntoView({ block: 'center' });
+      await sleep(250);
+      return {
+        ok: bad === 0,
+        note: notes.join('；') + '；不合格的面板=' + bad + ' 个',
       };
     `,
   },

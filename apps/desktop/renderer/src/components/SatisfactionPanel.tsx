@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import type { SatisfactionBoardPayload, SatisfactionThresholdsPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { SummaryRows } from "./SummaryRows";
 
 /**
  * 爽点与期待感看板（M4 / T4-10，R73）：只读。
@@ -77,7 +78,13 @@ export function SatisfactionPanel() {
       {error !== "" && <div className="error-text">{error}</div>}
       {board !== null && error === "" && (
         <>
-          <div className="satisfaction-summary muted">{board.note}</div>
+          {/* 汇总**逐行渲染**（R127）：原先是一句「读到 N 个爽点 · N 条承诺 · …」的自由文本，
+              窄栏里会折成三四行；结构**由后端给**（载荷带 summary 行），这里只排版。 */}
+          {board.summary.length > 0 ? (
+            <SummaryRows rows={board.summary} />
+          ) : (
+            <div className="satisfaction-summary muted">{board.note}</div>
+          )}
           <div className="satisfaction-thresholds">
             {THRESHOLD_FIELDS.map((field) => (
               <label className="field" key={field.key} title={field.hint}>

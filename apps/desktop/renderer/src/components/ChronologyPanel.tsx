@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import type { ChronicleBookPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { SummaryRows } from "./SummaryRows";
 
 /**
  * 编年史面板（M4 / T4-8，R71）：只读。
@@ -53,7 +54,13 @@ export function ChronologyPanel() {
       {error !== "" && <div className="error-text">{error}</div>}
       {book !== null && error === "" && (
         <>
-          <div className="chronology-summary muted">{book.note}</div>
+          {/* 汇总**逐行渲染**（R127）：原先是一句「N 个事件 → N 条记载（…）」的自由文本，
+              窄栏里会折成三四行；结构**由后端给**（载荷带 summary 行），这里只排版。 */}
+          {book.summary.length > 0 ? (
+            <SummaryRows rows={book.summary} />
+          ) : (
+            <div className="chronology-summary muted">{book.note}</div>
+          )}
           {book.entries.length > 0 && (
             <table className="slot-table chronology-table">
               <thead>

@@ -7,7 +7,7 @@ import {
   type ChronicleResult,
   type TimelineFile,
 } from "@yushu/world-engine";
-import type { ChronicleBookPayload } from "../shared/ipc.js";
+import type { ChronicleBookPayload, SummaryRow } from "../shared/ipc.js";
 import type { ProjectGateway } from "./file-gateway.js";
 
 /**
@@ -22,6 +22,7 @@ import type { ProjectGateway } from "./file-gateway.js";
  */
 
 const EMPTY: Omit<ChronicleBookPayload, "path" | "exists" | "note"> = {
+  summary: [],
   calendars: [],
   activeCalendar: null,
   entries: [],
@@ -103,6 +104,13 @@ export async function chronicleBook(
     exists: true,
     note: `${built.stats.events} 个事件 → ${built.stats.entries} 条记载（${built.stats.cultures} 个文化视角）；` +
       (eras.length > 0 ? `${eras.length} 个时代分段` : "无 era 卡区间，按全书一段"),
+    // 汇总的**结构化行**（R127）：界面逐行渲染；结构**由后端给**（不切上面那句自由文本）
+    summary: [
+      { label: "事件", value: `${String(built.stats.events)} 个` },
+      { label: "记载", value: `${String(built.stats.entries)} 条` },
+      { label: "文化视角", value: `${String(built.stats.cultures)} 个` },
+      { label: "时代分段", value: eras.length > 0 ? `${String(eras.length)} 个` : "无 era 卡区间，按全书一段" },
+    ],
     calendars: doc.calendars.map((c) => ({ id: c.id, label: c.label, offset: c.offset })),
     activeCalendar: built.entries[0]?.displayYear === null ? null : (request.calendar ?? doc.timelines[0]?.calendar ?? null),
     entries: built.entries,

@@ -8,6 +8,7 @@ import { RelationGraphPanel } from "../components/RelationGraphPanel";
 import { ChronologyPanel } from "../components/ChronologyPanel";
 import { SatisfactionPanel } from "../components/SatisfactionPanel";
 import { WorldMapPanel } from "../components/WorldMapPanel";
+import { SummaryRows } from "../components/SummaryRows";
 
 const NAMING_KINDS: { kind: NamingKindPayload; label: string }[] = [
   { kind: "character", label: "角色名" },
@@ -347,10 +348,13 @@ export function ArchiveView({
         {boardError !== "" && <div className="error-text">{boardError}</div>}
         {board !== null && boardError === "" && (
           <>
-            <div className="foreshadow-summary muted">
-              {board.note}；共 {board.stats.total} 条 · 未回收 {board.stats.open} · 已回收 {board.stats.paid} ·
-              已放弃 {board.stats.abandoned} · 红鲱鱼 {board.stats.redHerring} · 逾期 {board.stats.overdue}
-            </div>
+            {/* 汇总**逐行渲染**（R127）：原先是「读到 N 条伏笔；…；共 N 条 · 未回收 N · 已回收 N · …」
+                一长串，窄栏里折成三四行；结构**由后端给**（载荷带 summary 行），这里只排版。 */}
+            {board.summary.length > 0 ? (
+              <SummaryRows rows={board.summary} />
+            ) : (
+              <div className="foreshadow-summary muted">{board.note}</div>
+            )}
             {board.findings.length > 0 && (
               <ul className="foreshadow-findings">
                 {board.findings.map((finding, index) => (

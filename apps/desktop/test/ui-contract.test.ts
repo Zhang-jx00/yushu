@@ -1413,7 +1413,7 @@ describe("世界地图底图（R123）：铺在坐标空间上 + 压暗层 + 卡
 
   it("地点卡的信息**逐行对齐**（不再用「·」串成一长串）", () => {
     // R126 起地点卡也走**共享**的键值行组件（SummaryRows）⇒ 键值行的样式只有一处
-    expect(panel, "地点卡没有逐行对齐").toContain("SummaryRows");
+    expect(panel, "地点卡没有逐行对齐").toContain("<SummaryRows");
     expect(panel, "地点卡还在用「·」串信息").not.toMatch(/entityRef\} · /);
     // 旧类名不许留在组件里：CSS 已改名（.map-card-row → .summary-row），
     // 留着旧类名 = **那些行根本没有样式**（R126 差点就这么漏过去）
@@ -1440,7 +1440,7 @@ describe("排版与动效（R124）：说明分行 + 容器查询 + 不过渡布
   it("地图的摘要由**载荷带结构**，界面按行渲染（不是切一长串自由文本）", () => {
     expect(shared, "载荷里没有结构化摘要").toMatch(/summary:\s*\{\s*markers:/);
     // R126 起地图的汇总也改用**共享**的键值行组件（SummaryRows）⇒ 这里认组件名
-    expect(panel, "面板没有把摘要排成行").toContain("SummaryRows");
+    expect(panel, "面板没有把摘要排成行").toContain("<SummaryRows");
     expect(panel, "面板还在渲染一长串自由文本摘要").not.toContain("{map.note}</div>");
   });
 
@@ -1548,7 +1548,7 @@ describe("面板汇总的结构化（R126）：后端给结构，界面只排版
   const rows = readFileSync(join(VIEW_ROOT, "components", "SummaryRows.tsx"), "utf8");
 
   it("图谱面板渲染的是**结构化行**，不是那串自由文本", () => {
-    expect(graph, "图谱面板没有用共享的键值行组件").toContain("SummaryRows");
+    expect(graph, "图谱面板没有用共享的键值行组件").toContain("<SummaryRows");
     expect(graph, "图谱面板还在渲染自由文本汇总").not.toContain("graph-summary muted");
   });
 
@@ -1584,6 +1584,47 @@ describe("面板汇总的结构化（R126）：后端给结构，界面只排版
     expect(graph, "图谱面板里还有 graph-summary").not.toContain("graph-summary");
     // 样式也不该留着没人用的 .graph-summary
     expect(css, "CSS 里还留着没人用的 .graph-summary").not.toMatch(/\.graph-summary\s*\{/);
+  });
+});
+
+/**
+ * 其余三个面板的汇总也结构化（R127）：爽点 / 编年史 / 伏笔。
+ *
+ * 口径与 R126 同一套：结构**由后端给**（载荷带 `summary` 行），界面用共享组件 `SummaryRows` 逐行渲染。
+ * 伏笔那一处原先最严重：「读到 N 条伏笔；…；共 N 条 · 未回收 N · 已回收 N · …」一长串。
+ */
+describe("其余三个面板的汇总也结构化（R127）：爽点 / 编年史 / 伏笔", () => {
+  const satisfaction = readFileSync(join(VIEW_ROOT, "components", "SatisfactionPanel.tsx"), "utf8");
+  const chronology = readFileSync(join(VIEW_ROOT, "components", "ChronologyPanel.tsx"), "utf8");
+  const archive = readFileSync(join(VIEW_ROOT, "views", "ArchiveView.tsx"), "utf8");
+  const satOps = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "satisfaction-ops.ts"), "utf8");
+  const chrOps = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "chronicle-ops.ts"), "utf8");
+  const fsOps = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "foreshadow-ops.ts"), "utf8");
+
+  it("三个面板都走**共享的键值行组件**（不许各写各的键值行样式）", () => {
+    // 认 **JSX 用法**（`<SummaryRows`）而不是组件名：`import { SummaryRows } …` 这一行
+    // 也含 "SummaryRows" ⇒ 只认名字的话，这判据在"面板早就不用了"时照样是绿的（恒绿判据）
+    expect(satisfaction, "爽点面板没有用共享组件").toContain("<SummaryRows");
+    expect(chronology, "编年史面板没有用共享组件").toContain("<SummaryRows");
+    expect(archive, "伏笔看板没有用共享组件").toContain("<SummaryRows");
+  });
+
+  it("结构由**后端**给（三个 ops 都造 summary 行；界面里不许切字符串）", () => {
+    // 认**具体那一行**（`{ label: "…" }`），不认 "summary: [" ——
+    // 后者会被 `summary: []`（空数组）满足 ⇒ 判据恒绿（实测：把行删光它照样绿）
+    expect(satOps, "爽点 ops 没有造结构化汇总").toContain('{ label: "爽点"');
+    expect(chrOps, "编年史 ops 没有造结构化汇总").toContain('{ label: "事件"');
+    expect(fsOps, "伏笔 ops 没有造结构化汇总").toContain('{ label: "伏笔"');
+    for (const [name, src] of [["爽点", satisfaction], ["编年史", chronology], ["伏笔", archive]] as const) {
+      expect(src, name + "面板在界面里切字符串了").not.toMatch(/\.split\("[·；]"\)/);
+    }
+  });
+
+  it("伏笔那串「共 N 条 · 未回收 N · 已回收 N · …」不许再出现在界面里", () => {
+    expect(archive, "伏笔汇总还在拼那串自由文本").not.toContain("未回收 {board.stats.open}");
+    expect(archive, "伏笔汇总还在拼那串自由文本").not.toContain("共 {board.stats.total} 条");
+    // 后端那串 note 仍在（它是"没有台账/读不了"时的解释），但界面不再拿它当汇总
+    expect(fsOps, "伏笔 ops 不该丢掉给作者看的解释").toContain("note:");
   });
 });
 

@@ -5,7 +5,7 @@ import {
   parseSatisfactionFile,
   type SatisfactionThresholds,
 } from "@yushu/world-engine";
-import type { SatisfactionBoardPayload, SatisfactionBoardRequestPayload } from "../shared/ipc.js";
+import type { SatisfactionBoardPayload, SatisfactionBoardRequestPayload, SummaryRow } from "../shared/ipc.js";
 import { readOutlineSafe } from "./doc-readers.js";
 import type { ProjectGateway } from "./file-gateway.js";
 
@@ -77,6 +77,7 @@ export async function satisfactionBoard(
     findings: [],
     notEvaluated: [],
     stats: { ...EMPTY },
+    summary: [] as SummaryRow[],
   };
   const snapshot = await gateway.readDoc(SATISFACTION_PATH).catch(() => null);
   if (snapshot === null) {
@@ -107,6 +108,14 @@ export async function satisfactionBoard(
     exists: true,
     note: `读到 ${String(ledger.hits.length)} 个爽点 · ${String(ledger.promises.length)} 条承诺 · `
       + `${String(ledger.scenes.length)} 个场景声明；当前进度按「${currentChapter ?? "（无章）"}」算`,
+    // 汇总的**结构化行**（R127）：界面逐行渲染 ⇒ 窄栏里不会折成一长串；
+    // 结构**由后端给**（不切上面那句自由文本 —— 切出来的"项"会丢掉句子里的限定词）
+    summary: [
+      { label: "爽点", value: `${String(ledger.hits.length)} 个` },
+      { label: "承诺", value: `${String(ledger.promises.length)} 条` },
+      { label: "场景声明", value: `${String(ledger.scenes.length)} 个` },
+      { label: "当前章", value: currentChapter ?? "（无章）" },
+    ],
     chapterTotal: chapters.length,
     currentChapter,
     rows: board.rows,
