@@ -5921,7 +5921,9 @@ const STEPS: StepDef[] = [
       if (panel2) panel2.scrollIntoView({ block: 'center' });
       await sleep(250);
       return {
-        ok: rows.length === 4 && tall.length === 0 && notAColumn && noOverflow,
+        // 摘要行数**会随功能增长**（R131 加了「事件锚点」那一行）⇒ 断言"至少这么多行"，
+        // 不写死个数（写死个数会让"多加一行摘要"这种正经改动反过来把门禁搞红）
+        ok: rows.length >= 4 && tall.length === 0 && notAColumn && noOverflow,
         note: '摘要行=' + rows.length + '（每行一行高，换行的=' + tall.length + '）' +
           '；画布宽=' + Math.round(svgW) + 'px，侧栏宽=' + Math.round(sideW) + 'px（不是窄柱=' + String(notAColumn) + '）' +
           '；页面横向溢出=' + overflow + 'px（不溢出=' + String(noOverflow) + '）',
@@ -6302,6 +6304,49 @@ const STEPS: StepDef[] = [
           '；描边对比度：默认暗色档=' + darkLineRatio.toFixed(2) + ' → 柔和高对比=' + softLineRatio.toFixed(2) +
           '（更明显=' + String(softLineRatio > darkLineRatio) + '）；data-theme=' + dataset +
           '；偏好存的是=' + stored + '；切回浅色逐字恢复=' + String(restored),
+      };
+    `,
+  },
+  {
+    step: 93,
+    title: '世界观档案：事件锚点画在地图上（K08 §3.8 事件挂坐标）+ 锚点挂的是真事件（R131）',
+    file: 'step93-map-anchors.png',
+    body: String.raw`
+      // 这一步证 R131：**事件锚点**（K08 §3.8：事件挂坐标 ⇒ 时空联动）。
+      // 判据是**运行时**的：锚点画出来了（.map-anchor）、锚点名单列出来了（.map-anchors li）、
+      // 摘要里「事件锚点」那一行数得对，而且**它挂的是真事件**（时间线里能看到同一个 event id）。
+      const current = await window.yushu.doc.read('world/map.yaml');
+      const anchorBlock = [
+        'event_anchors:',
+        '  - {id: anchor-war, event_ref: ev-war, x: 500, y: 350}',
+        '',
+      ].join('\n');
+      const next = current.content.indexOf('event_anchors:') >= 0
+        ? current.content.replace(/event_anchors:[\s\S]*$/, anchorBlock)
+        : current.content.replace(/\n*$/, '\n') + anchorBlock;
+      await window.yushu.doc.write('world/map.yaml', next, current.hash);
+      // 面板只在挂载时取数 ⇒ 先去别的页再回来，强制重挂载（R68 的教训）
+      await tab('规则');
+      await tab('世界观档案');
+      const panel = await waitFor(() => document.querySelector('.map-panel .map-anchor') || null, 8000);
+      if (panel === null) return { ok: false, note: '地图面板里没有画出事件锚点' };
+      const drawn = [...document.querySelectorAll('.map-panel .map-anchor')];
+      const listed = [...document.querySelectorAll('.map-panel .map-anchors li')];
+      const eventRef = drawn[0] === undefined ? '' : String(drawn[0].getAttribute('data-event') || '');
+      const rows = [...document.querySelectorAll('.map-panel .summary-row')];
+      const anchorRow = rows.find((r) => String((r.querySelector('dt') || {}).textContent || '') === '事件锚点');
+      const anchorCount = anchorRow === undefined ? '' : String((anchorRow.querySelector('dd') || {}).textContent || '');
+      // 锚点挂的是**真事件**：时间线里能看到同一个 event id
+      const timelineText = (document.querySelector('.timeline-view') || {}).textContent || '';
+      const onTimeline = timelineText.indexOf(eventRef) >= 0;
+      const svg = document.querySelector('.map-panel .map-svg');
+      if (svg !== null) svg.scrollIntoView({ block: 'center' });
+      await sleep(250);
+      return {
+        ok: drawn.length === 1 && listed.length === 1 && anchorCount === '1' && eventRef === 'ev-war' && onTimeline,
+        note: '画出的锚点=' + drawn.length + '；名单条目=' + listed.length +
+          '；摘要「事件锚点」=' + anchorCount + '；锚点挂的事件=' + eventRef +
+          '；时间线里能看到同一个事件=' + String(onTimeline),
       };
     `,
   },

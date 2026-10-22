@@ -3760,6 +3760,27 @@ table,
   min-width: 0;
 }
 
+.map-anchor circle {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.map-anchor .map-anchor-core {
+  fill: var(--accent);
+  stroke: none;
+}
+
+.map-anchor.is-outside {
+  opacity: 0.5;
+}
+
+.map-anchors {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-6);
+  font-size: var(--text-sm);
+}
+
 .map-card {
   padding: var(--space-4);
   border: var(--border-width) solid var(--border);

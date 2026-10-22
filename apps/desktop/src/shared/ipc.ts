@@ -2926,18 +2926,30 @@ export interface WorldMapViewPayload {
   /** 画布宽高（底图尺寸；没给 base_size 时按 bounds 推） */
   canvas: { width: number; height: number } | null;
   markers: WorldMapViewMarker[];
+  /** 事件锚点（K08 §3.8：事件挂坐标 ⇒ 选事件能定位到地图上） */
+  anchors: {
+    id: string;
+    eventRef: string;
+    x: number;
+    y: number;
+    nx: number;
+    ny: number;
+    label: string;
+  }[];
   layers: { kind: string; markerCount: number }[];
   findings: { code: string; severity: string; message: string; refs: string[] }[];
   orphanMarkers: string[];
   overlapClusters: { layer: string; members: string[] }[];
   outOfBoundsMarkers: string[];
+  /** 落在底图边界之外的事件锚点 id */
+  outOfBoundsAnchors: string[];
   /** 项目里的实体总数（地图只画标注过的那些） */
   entityCount: number;
   /**
    * **结构化摘要**（R124）：界面按行渲染这几项 ⇒ 说明不会堆成一长串。
    * 之前是一句 `A · B；C` 的自由文本，在窄栏里会断成四五行、读起来像碎片。
    */
-  summary: { markers: number; layers: number; entities: number; findings: number };
+  summary: { markers: number; layers: number; entities: number; findings: number; anchors: number };
 }
 
 /** 编年史（M4 / T4-8，R71）：大事年表 + 同一事件的多文化"伪史书" */

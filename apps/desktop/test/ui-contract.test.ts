@@ -1761,6 +1761,42 @@ describe("机器跑法不许打扰作者的桌面（R130）", () => {
   });
 });
 
+/**
+ * 事件锚点（R131；口径回源 K08 §3.8「事件挂坐标 ⇒ 时空联动」）。
+ *
+ * 与标注的差别：标注绑**地点实体**（点开是地点卡），锚点绑**事件**（选事件能定位到地图上）。
+ */
+describe("事件锚点（R131）：K08 §3.8 的事件挂坐标", () => {
+  const engine = readFileSync(join(ROOT, "packages", "@yushu", "world-engine", "src", "world-map.ts"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const shared = readFileSync(join(ROOT, "apps", "desktop", "src", "shared", "ipc.ts"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+
+  it("真源支持 `event_anchors`，且**严格解析**（未知键 / 同一个事件两个锚点 一律点名）", () => {
+    // 认**允许键列表**里的那一个名字，不是"文件里出现过 event_anchors 这几个字"——
+    // 后者会把"解析循环里还留着、但允许键没了"当成有支持（实测：那样判据是绿的）
+    expect(engine, "真源的允许键列表里没有 event_anchors").toMatch(/\["apiVersion"[^\]]*"event_anchors"/);
+    expect(engine, "照 K08 抄的未知键没有被点名").toContain("有未知键");
+    expect(engine, "同一个事件两个锚点没有拒绝").toContain("事件锚点重复");
+  });
+
+  it("载荷带锚点，界面画出来、也列出来（作者要知道哪个事件钉在地图哪一点）", () => {
+    expect(shared, "载荷里没有锚点字段").toMatch(/anchors: \{/);
+    expect(ops, "ops 没有把锚点传出去").toContain("anchors: projection.anchors.map");
+    // 认**真的遍历了锚点**（`map.anchors.map(`），不认类名——类名留着、遍历没了，锚点照样画不出来
+    expect(panel, "地图面板没有遍历锚点").toMatch(/map\.anchors\.map\(/);
+    // 还要认**画布上那处**（条件表达式里的类名）：名单与画布是两处，只有一处被删掉时上面那条仍会绿
+    expect(panel, "地图面板没有在画布上画锚点").toMatch(/className=\{"map-anchor" \+/);
+    expect(panel, "地图面板没有列锚点").toContain("map-anchors");
+  });
+
+  it("锚点的**形状**与地点标注区分开（形状优先于颜色：空心环 vs 实心）", () => {
+    expect(css, "锚点没有独立的样式").toMatch(/\.map-anchor circle \{[^}]*fill: none/);
+    expect(panel, "锚点没有独立的中心点").toContain("map-anchor-core");
+  });
+});
+
 describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
   /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
   const stripComments = (src: string): string =>

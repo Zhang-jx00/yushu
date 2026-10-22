@@ -270,6 +270,25 @@ export function WorldMapPanel() {
                 </g>
               );
             })}
+            {/* 事件锚点（R131，K08 §3.8：事件挂坐标 ⇒ 选事件能定位到地图上）：
+                画成**空心环 + 中心点**，与地点标注的实心形状区分开（形状优先于颜色）。 */}
+            {map.anchors.map((anchor) => {
+              const inside = anchor.nx >= 0 && anchor.nx <= 1 && anchor.ny >= 0 && anchor.ny <= 1;
+              const cx = Math.min(Math.max(anchor.nx, 0), 1) * width;
+              const cy = Math.min(Math.max(anchor.ny, 0), 1) * height;
+              return (
+                <g
+                  key={anchor.id}
+                  className={"map-anchor" + (inside ? "" : " is-outside")}
+                  data-anchor={anchor.id}
+                  data-event={anchor.eventRef}
+                >
+                  <title>{`事件锚点 ${anchor.label}（${anchor.eventRef}）`}</title>
+                  <circle cx={cx} cy={cy} r={9} />
+                  <circle cx={cx} cy={cy} r={2.5} className="map-anchor-core" />
+                </g>
+              );
+            })}
           </svg>
           <div className="map-caption muted">
             <div>
@@ -312,8 +331,19 @@ export function WorldMapPanel() {
               { label: "图层", value: String(map.summary.layers) },
               { label: "实体", value: String(map.summary.entities) },
               { label: "体检", value: String(map.summary.findings) },
+              { label: "事件锚点", value: String(map.summary.anchors) },
             ]}
           />
+          {/* 锚点名单（R131）：逐个列出（事件 + 坐标）——作者要知道"哪个事件钉在地图哪一点" */}
+          {map.anchors.length > 0 && (
+            <ul className="map-anchors">
+              {map.anchors.map((anchor) => (
+                <li key={anchor.id}>
+                  {anchor.label}（{anchor.eventRef}）· {anchor.x},{anchor.y}
+                </li>
+              ))}
+            </ul>
+          )}
           {map.findings.length > 0 && (
             <ul className="map-findings">
               {map.findings.map((finding, index) => (

@@ -44,13 +44,15 @@ export async function worldMapView(
       bounds: null,
       canvas: null,
       markers: [],
+      anchors: [],
       layers: [],
       findings: [],
       orphanMarkers: [],
       overlapClusters: [],
       outOfBoundsMarkers: [],
+      outOfBoundsAnchors: [],
       entityCount: 0,
-      summary: { markers: 0, layers: 0, entities: 0, findings: 0 },
+      summary: { markers: 0, layers: 0, entities: 0, findings: 0, anchors: 0 },
     };
   }
   let def: WorldMapDef;
@@ -64,13 +66,15 @@ export async function worldMapView(
       bounds: null,
       canvas: null,
       markers: [],
+      anchors: [],
       layers: [],
       findings: [],
       orphanMarkers: [],
       overlapClusters: [],
       outOfBoundsMarkers: [],
+      outOfBoundsAnchors: [],
       entityCount: 0,
-      summary: { markers: 0, layers: 0, entities: 0, findings: 0 },
+      summary: { markers: 0, layers: 0, entities: 0, findings: 0, anchors: 0 },
     };
   }
 
@@ -116,6 +120,7 @@ export async function worldMapView(
 
   const note = [
     `${markers.length} 个标注 · ${projection.layers.length} 个图层`,
+    projection.anchors.length > 0 ? `${projection.anchors.length} 个事件锚点` : "没有事件锚点",
     `项目里 ${structure.entities.length} 个实体（地图只画标注过的那些）`,
     projection.findings.length > 0 ? `${projection.findings.length} 条体检结论` : "体检无结论",
   ].join("；");
@@ -127,6 +132,16 @@ export async function worldMapView(
     bounds,
     canvas,
     markers,
+    // 事件锚点（K08 §3.8）：事件挂坐标 ⇒ 选事件能定位到地图上
+    anchors: projection.anchors.map((anchor) => ({
+      id: anchor.id,
+      eventRef: anchor.eventRef,
+      x: anchor.x,
+      y: anchor.y,
+      nx: anchor.nx,
+      ny: anchor.ny,
+      label: anchor.label ?? anchor.eventRef,
+    })),
     layers: projection.layers.map((layer) => ({ kind: layer.kind, markerCount: layer.markerCount })),
     findings: projection.findings.map((finding) => ({
       code: finding.code,
@@ -137,12 +152,14 @@ export async function worldMapView(
     orphanMarkers: projection.orphanMarkers,
     overlapClusters: projection.overlapClusters,
     outOfBoundsMarkers: projection.outOfBoundsMarkers,
+    outOfBoundsAnchors: projection.outOfBoundsAnchors,
     entityCount: structure.entities.length,
     summary: {
       markers: markers.length,
       layers: projection.layers.length,
       entities: structure.entities.length,
       findings: projection.findings.length,
+      anchors: projection.anchors.length,
     },
   };
 }

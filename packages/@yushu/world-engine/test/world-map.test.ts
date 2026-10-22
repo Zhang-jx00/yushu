@@ -245,3 +245,76 @@ describe("world/map.yaml 的严格解析（R120）", () => {
     expect(degenerate.bounds).toEqual([[0, 0], [0, 0]]);
   });
 });
+
+/**
+ * 事件锚点（R131；口径回源 K08 §3.8「事件挂坐标 ⇒ 时空联动」）。
+ *
+ * 与标注的差别：标注绑**地点实体**（点开是地点卡），锚点绑**事件**（选事件能定位到地图上）。
+ * K08 的样例写作 `xy: [420, 610]`；本项目沿用地图自己的键名口径（`x` / `y` 分开写）⇒
+ * 作者只学一套坐标写法 ⇒ 但**照 K08 抄 `xy:` 必须被点名**（静默忽略 ⇒ 作者以为坐标生效了）。
+ */
+describe("事件锚点（R131）：K08 §3.8 的事件挂坐标", () => {
+  const withAnchor = (extra: string): string =>
+    [
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 700]]",
+      "event_anchors:",
+      extra,
+    ].join("\n");
+
+  it("解析成 camelCase（event_ref → eventRef），`id` 缺省就用 event_ref", () => {
+    const def = parseMapFile(withAnchor("  - {event_ref: ev-war, x: 420, y: 610}"));
+    expect(def.eventAnchors).toHaveLength(1);
+    expect(def.eventAnchors?.[0]?.eventRef).toBe("ev-war");
+    expect(def.eventAnchors?.[0]?.id).toBe("ev-war");
+    expect(def.eventAnchors?.[0]?.x).toBe(420);
+    expect(def.eventAnchors?.[0]?.y).toBe(610);
+  });
+
+  it("照 K08 抄 `xy:` ⇒ 拒绝并点名（静默忽略会让作者以为坐标生效了）", () => {
+    expect(() => parseMapFile(withAnchor("  - {event_ref: ev-war, xy: [420, 610]}"))).toThrow(
+      /event_anchors\[0\] 有未知键「xy」/,
+    );
+  });
+
+  it("同一个事件两个锚点 ⇒ 拒绝（选事件定位到哪儿会变得不确定）", () => {
+    expect(() =>
+      parseMapFile(
+        withAnchor("  - {event_ref: ev-war, x: 10, y: 10}\n  - {event_ref: ev-war, x: 20, y: 20}"),
+      ),
+    ).toThrow(/事件锚点重复：ev-war/);
+  });
+
+  it("坐标非数字拒绝（画出来是歪的，作者却看不出）", () => {
+    expect(() => parseMapFile(withAnchor("  - {event_ref: ev-war, x: 一百, y: 10}"))).toThrow(/x 须为有限数字/);
+  });
+
+  it("投影：锚点按底图像素换算归一化坐标（渲染层直接用）", () => {
+    const def = parseMapFile(withAnchor("  - {event_ref: ev-war, x: 250, y: 350}"));
+    const projection = projectWorldMap(def, []);
+    expect(projection.anchors).toHaveLength(1);
+    expect(projection.anchors[0]?.nx).toBeCloseTo(0.25);
+    expect(projection.anchors[0]?.ny).toBeCloseTo(0.5);
+    expect(projection.outOfBoundsAnchors).toEqual([]);
+  });
+
+  it("锚点落在底图边界之外 ⇒ map-anchor-outside（warn），但仍然投影（渲染层可以裁剪）", () => {
+    const def = parseMapFile(withAnchor("  - {event_ref: ev-war, x: 2000, y: 10}"));
+    const projection = projectWorldMap(def, []);
+    expect(projection.outOfBoundsAnchors).toEqual(["ev-war"]);
+    expect(projection.findings.some((f) => f.code === "map-anchor-outside" && f.severity === "warn")).toBe(true);
+    expect(projection.anchors).toHaveLength(1);
+  });
+
+  it("没有有效边界 ⇒ 锚点**不产出坐标**（没有边界就无从归一化）", () => {
+    const degenerate = withAnchor("  - {event_ref: ev-war, x: 250, y: 350}").replace(
+      "[[0, 0], [1000, 700]]",
+      "[[0, 0], [0, 0]]",
+    );
+    const projection = projectWorldMap(parseMapFile(degenerate), []);
+    expect(projection.anchors).toHaveLength(0);
+    expect(projection.findings.some((f) => f.code === "map-bounds-missing")).toBe(true);
+  });
+});

@@ -48,6 +48,23 @@ export interface MapMarker {
   label?: string;
 }
 
+/**
+ * 事件锚点（K08 §3.8：**事件挂坐标** ⇒ 时空联动）。
+ *
+ * 与标注的差别：标注绑**地点实体**（点开是地点卡），锚点绑**事件**（选事件能定位到地图上）。
+ * K08 §3.6 的样例写作 `{event_ref: evt-0007, xy: [420, 610]}`；本项目沿用地图自己的键名口径
+ * （`x` / `y` 分开写，与 `markers` 一致）⇒ 作者只学一套坐标写法。
+ */
+export interface MapEventAnchor {
+  id: string;
+  /** 事件 id（对应 `world/timeline.yaml` 里的事件） */
+  eventRef: string;
+  /** 底图像素坐标 */
+  x: number;
+  y: number;
+  label?: string;
+}
+
 /** 地图定义（作者侧；本段只当输入，不负责解析文件与写盘） */
 export interface WorldMapDef {
   id: string;
@@ -62,6 +79,8 @@ export interface WorldMapDef {
   /** 作者声明的图层（可显隐） */
   layers?: MapLayerKind[];
   markers?: MapMarker[];
+  /** 事件锚点（K08 §3.8：事件挂坐标 ⇒ 时空联动） */
+  eventAnchors?: MapEventAnchor[];
 }
 
 export interface MapProjectedMarker extends MapMarker {
@@ -72,11 +91,18 @@ export interface MapProjectedMarker extends MapMarker {
   entityName: string;
 }
 
+/** 事件锚点的投影结果（归一化坐标） */
+export interface MapProjectedAnchor extends MapEventAnchor {
+  nx: number;
+  ny: number;
+}
+
 export type MapFindingCode =
   | "map-bounds-missing"
   | "map-marker-orphan"
   | "map-marker-overlap"
-  | "map-marker-outside";
+  | "map-marker-outside"
+  | "map-anchor-outside";
 
 export interface MapFinding {
   code: MapFindingCode;
@@ -97,6 +123,8 @@ export interface WorldMapProjection {
   bounds: MapBounds | null;
   /** 投影成功的标注（按 id 排序 ⇒ 同输入同输出） */
   markers: MapProjectedMarker[];
+  /** 投影成功的事件锚点（按 id 排序 ⇒ 同输入同输出） */
+  anchors: MapProjectedAnchor[];
   layers: MapLayerSummary[];
   findings: MapFinding[];
   /** 找不到地点实体的 marker id（逐条） */
@@ -105,6 +133,8 @@ export interface WorldMapProjection {
   overlapClusters: Array<{ layer: MapLayerKind; members: string[] }>;
   /** 落在底图边界之外的 marker id */
   outOfBoundsMarkers: string[];
+  /** 落在底图边界之外的事件锚点 id */
+  outOfBoundsAnchors: string[];
 }
 
 export interface WorldMapOptions {
@@ -266,6 +296,27 @@ export function projectWorldMap(
     }
   }
 
+  // ④ 事件锚点（K08 §3.8：事件挂坐标 ⇒ 选事件能定位到地图上）
+  //    与标注同一套"不猜"：没有有效边界 ⇒ 不产出坐标（悄悄按 0..1 归一会让"图没画对"像"图画了"）。
+  const anchorInput = [...(def.eventAnchors ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const anchors: MapProjectedAnchor[] = [];
+  const outOfBoundsAnchors: string[] = [];
+  for (const anchor of anchorInput) {
+    if (bounds === null) continue; // 没有边界 ⇒ 不产出坐标
+    const nx = (anchor.x - bounds.x0) / (bounds.x1 - bounds.x0);
+    const ny = (anchor.y - bounds.y0) / (bounds.y1 - bounds.y0);
+    if (nx < 0 || nx > 1 || ny < 0 || ny > 1) {
+      outOfBoundsAnchors.push(anchor.id);
+      findings.push({
+        code: "map-anchor-outside",
+        severity: "warn",
+        message: `事件锚点 ${anchor.id}（${anchor.eventRef}）落在底图边界之外`,
+        refs: [anchor.id, anchor.eventRef],
+      });
+    }
+    anchors.push({ ...anchor, nx, ny });
+  }
+
   // 图层清单：作者声明的 ∪ 实际出现的，按固定顺序
   const kinds = new Set<MapLayerKind>(def.layers ?? []);
   for (const marker of markers) kinds.add(marker.layer);
@@ -284,11 +335,13 @@ export function projectWorldMap(
     id: def.id,
     bounds,
     markers,
+    anchors,
     layers,
     findings,
     orphanMarkers,
     overlapClusters,
     outOfBoundsMarkers,
+    outOfBoundsAnchors,
   };
 }
 
@@ -363,7 +416,7 @@ export function parseMapFile(text: string): WorldMapDef {
   const root = asMapObject(rootRaw, "地图根");
   checkMapKeys(
     root,
-    ["apiVersion", "id", "base_image", "crs", "bounds", "base_size", "layers", "markers"],
+    ["apiVersion", "id", "base_image", "crs", "bounds", "base_size", "layers", "markers", "event_anchors"],
     "地图根",
   );
   if (root.apiVersion !== MAP_API_VERSION) {
@@ -425,5 +478,34 @@ export function parseMapFile(text: string): WorldMapDef {
     markers.push(marker);
   }
   def.markers = markers;
+
+  // 事件锚点（K08 §3.8）：`id` 可省（默认用 event_ref），但**一个事件只能有一个锚点**——
+  // 两个锚点会让"选事件定位到地图上"指向哪儿变得不确定 ⇒ 宁可拒绝加载并点名。
+  const anchors: MapEventAnchor[] = [];
+  const anchorIds = new Set<string>();
+  const anchorEvents = new Set<string>();
+  for (const [index, item] of ((root.event_anchors ?? []) as unknown[]).entries()) {
+    const label = `event_anchors[${index}]`;
+    const raw = asMapObject(item, label);
+    checkMapKeys(raw, ["id", "event_ref", "x", "y", "label"], label);
+    const eventRef = asMapString(raw.event_ref, label, "event_ref");
+    if (anchorEvents.has(eventRef)) {
+      failMap(`事件锚点重复：${eventRef}（一个事件只能有一个锚点）`);
+    }
+    anchorEvents.add(eventRef);
+    const anchorId =
+      raw.id === undefined || raw.id === null ? eventRef : asMapString(raw.id, label, "id");
+    if (anchorIds.has(anchorId)) failMap(`事件锚点 id 重复：${anchorId}`);
+    anchorIds.add(anchorId);
+    const anchor: MapEventAnchor = {
+      id: anchorId,
+      eventRef,
+      x: asMapNumber(raw.x, label, "x"),
+      y: asMapNumber(raw.y, label, "y"),
+    };
+    if (raw.label !== undefined && raw.label !== null) anchor.label = asMapString(raw.label, label, "label");
+    anchors.push(anchor);
+  }
+  if (anchors.length > 0) def.eventAnchors = anchors;
   return def;
 }
