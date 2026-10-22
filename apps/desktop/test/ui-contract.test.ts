@@ -1872,6 +1872,30 @@ describe("地点方向的联动（R133）：事件能引用地点实体（place_
   });
 });
 
+/**
+ * `place_ref` 的孤儿体检（R134）：引用了**不存在**的地点实体，要有一条**体检结论**点名。
+ *
+ * 引擎不认地点实体（它只管时间）⇒ 这条判定只能在**桌面接线**这一层做
+ * （那里能读项目的实体表）⇒ 写错 id 的地方当场被点名。
+ */
+describe("place_ref 的孤儿体检（R134）：写错了 id 要被点名", () => {
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "timeline-ops.ts"), "utf8");
+
+  it("时间线 ops 会核对 place_ref 指向的地点实体**存在吗**", () => {
+    expect(ops, "时间线 ops 没有读项目的实体表").toContain("checkStructureFromSources");
+    // 认**真的判定了**（过滤 + 产出结论），不认诊断码字符串（码字在、判定没了，它照样绿）
+    expect(ops, "没有真的判定孤儿").toMatch(
+      /filter\(\(event\) => event\.placeRef !== undefined && !entityIds\.has\(event\.placeRef\)\)/,
+    );
+  });
+
+  it("孤儿是一条 **error** 级的 `tl-place-orphan` 结论，并点名事件与地点", () => {
+    expect(ops, "没有 tl-place-orphan 这条诊断码").toContain("tl-place-orphan");
+    expect(ops, "孤儿结论不是 error 级").toMatch(/severity: "error" as const,[\s\S]{0,80}rule: "tl-place-orphan"/);
+    expect(ops, "孤儿结论没有进载荷的 findings").toMatch(/findings: \[\.\.\.view\.findings[\s\S]{0,80}placeOrphans\]/);
+  });
+});
+
 describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
   /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
   const stripComments = (src: string): string =>

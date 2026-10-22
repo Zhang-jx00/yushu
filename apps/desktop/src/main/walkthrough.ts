@@ -6423,6 +6423,8 @@ const STEPS: StepDef[] = [
       await tab('规则');
       await tab('世界观档案');
       await sleep(700);
+      // **等时间线的行真的到齐**（不靠固定 sleep）：时间线视图要多扫一遍实体表（R134 的体检）⇒ 到得比以前慢
+      await waitFor(() => document.querySelector('.timeline-table tr[data-event]') || null, 8000);
       const marker = await waitFor(() => document.querySelector('.map-panel .map-marker[data-marker]') || null, 8000);
       if (marker === null) return { ok: false, note: '地图上没有标注（先跑 step81）' };
       marker.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -6450,12 +6452,55 @@ const STEPS: StepDef[] = [
       const svg = document.querySelector('.map-panel .map-svg');
       if (svg !== null) svg.scrollIntoView({ block: 'center' });
       await sleep(200);
+      // 诊断量：把"到底哪儿没对上"写进证据行（不然只能猜）
+      const tlRows = [...document.querySelectorAll('.timeline-table tbody tr')];
+      const firstRow = tlRows[0] === undefined ? '' : String(tlRows[0].textContent || '').replace(/\s+/g, ' ').slice(0, 60);
+      const markers = [...document.querySelectorAll('.map-panel .map-marker')];
+      const markerText = markers[0] === undefined ? '' : String(markers[0].getAttribute('aria-label') || '');
       return {
         ok: block !== null && eventsOnPlace !== null && Number(eventsOnPlace[1]) > 0 &&
           placeRows.length > 0 && placeLinkBtn !== null && mapInView && markerLinked,
         note: '点标注后地图旁说「' + placeText.slice(0, 44) + '」；时间线里高亮的行=' + String(placeRows.length) +
           '；时间线的「这个地点在地图上」入口=' + String(placeLinkBtn !== null) +
-          '；点它后地图在视野内=' + String(mapInView) + '；标注高亮=' + String(markerLinked),
+          '；点它后地图在视野内=' + String(mapInView) + '；标注高亮=' + String(markerLinked) +
+          '｜诊断：时间线行数=' + tlRows.length + '（首行「' + firstRow + '」）' +
+          '；标注数=' + markers.length + '（首个「' + markerText + '」）',
+      };
+    `,
+  },
+  {
+    step: 96,
+    title: '世界观档案：place_ref 写错了 id ⇒ 体检结论当场点名（tl-place-orphan）（R134）',
+    file: 'step96-place-orphan.png',
+    body: String.raw`
+      // 这一步证 R134：**引用**了不存在的地点实体，要有一条**体检结论**点名，
+      // 而不是只让界面说"地图上没这个地点"（那让人自己猜是不是写错了）。
+      //
+      // 做法：给另一个事件挂一个**不存在的**地点 id ⇒ 结论里应当出现 tl-place-orphan（error）。
+      await tab('世界观档案');
+      await sleep(600);
+      const current = await window.yushu.doc.read('world/timeline.yaml');
+      const next = current.content.indexOf('loc-does-not-exist') >= 0
+        ? current.content
+        : current.content.replace('  - id: ev-treaty', '  - id: ev-treaty\n    place_ref: loc-does-not-exist');
+      await window.yushu.doc.write('world/timeline.yaml', next, current.hash);
+      // 面板只在挂载时取数 ⇒ 先去别的页再回来，强制重挂载
+      await tab('规则');
+      await tab('世界观档案');
+      // **等结论真的到齐**（不靠固定 sleep）：时间线视图要多扫一遍实体表 ⇒ 到得比以前慢
+      await waitFor(() => document.querySelector('.timeline-view .timeline-finding') || null, 8000);
+      await sleep(400);
+      const findings = [...document.querySelectorAll('.timeline-view .timeline-finding')];
+      const orphan = findings.find((f) => String(f.textContent || '').indexOf('tl-place-orphan') >= 0) || null;
+      const isError = orphan !== null && String(orphan.className || '').indexOf('error') >= 0;
+      const named = orphan === null ? '' : String(orphan.textContent || '');
+      const panel = document.querySelector('.timeline-view');
+      if (panel !== null) panel.scrollIntoView({ block: 'center' });
+      await sleep(250);
+      return {
+        ok: orphan !== null && isError && named.indexOf('ev-treaty') >= 0 && named.indexOf('loc-does-not-exist') >= 0,
+        note: '结论条数=' + findings.length + '；tl-place-orphan=' + String(orphan !== null) +
+          '；是 error=' + String(isError) + '；点名了事件与地点=' + String(named.indexOf('ev-treaty') >= 0 && named.indexOf('loc-does-not-exist') >= 0),
       };
     `,
   },
