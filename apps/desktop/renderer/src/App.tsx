@@ -38,7 +38,12 @@ type Screen =
  * 入场用**过渡**而不是 @keyframes（契约 §5 把 @keyframes 锁在 1——"不做全站入场表演"）：
  * 下一帧再切到"已入场"，浏览器才认得出这是一次**状态变化**，过渡才会跑。
  */
-function WelcomeScreen(props: { onNewProject: () => void; onOpenExisting: () => void }) {
+function WelcomeScreen(props: {
+  onNewProject: () => void;
+  onOpenExisting: () => void;
+  /** 有已打开的项目时给一条"回到来处"的路（R120：从向导取消回来时，欢迎屏不该是死路） */
+  onContinue?: () => void;
+}) {
   const [entered, setEntered] = useState(false);
   useEffect(() => {
     const raf = requestAnimationFrame(() => setEntered(true));
@@ -54,7 +59,12 @@ function WelcomeScreen(props: { onNewProject: () => void; onOpenExisting: () => 
         每一部小说都不单单是一篇文字，而是要创作出另一个世界——文化完整，有历史，有生态，有人文，有地理的完整世界。
       </p>
       <div className="welcome-actions">
-        <button className="primary" onClick={props.onNewProject}>
+        {props.onContinue !== undefined && (
+          <button className="primary" onClick={props.onContinue}>
+            继续当前项目
+          </button>
+        )}
+        <button className={props.onContinue === undefined ? "primary" : ""} onClick={props.onNewProject}>
           新建项目
         </button>
         <button onClick={props.onOpenExisting}>打开已有项目</button>
@@ -68,6 +78,14 @@ function WelcomeScreen(props: { onNewProject: () => void; onOpenExisting: () => 
 
 export function App() {
   const [screen, setScreen] = useState<Screen>({ kind: "welcome" });
+  /**
+   * 已打开的项目（R120）。
+   *
+   * 为什么要有它：从**已打开的项目**点「新建项目」再按「取消」，会回到欢迎屏——
+   * 而欢迎屏上原来没有任何回到项目的入口（项目还开着，标签栏却没了，像被踢出项目一样）。
+   * 记住它，欢迎屏就能给一条"回到来处"的路：**取消不是把你踢远，是把回来的门指给你**。
+   */
+  const [lastProject, setLastProject] = useState<ProjectSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [density, setDensity] = useState<DensityId>(() => loadDensityPref(window.localStorage));
 
@@ -84,7 +102,10 @@ export function App() {
     api()
       .project.current()
       .then((snapshot) => {
-        if (alive && snapshot) setScreen({ kind: "project", snapshot });
+        if (alive && snapshot) {
+          setLastProject(snapshot);
+          setScreen({ kind: "project", snapshot });
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -123,7 +144,10 @@ export function App() {
     try {
       setError(null);
       const snapshot = await api().project.open();
-      if (snapshot) setScreen({ kind: "project", snapshot });
+      if (snapshot) {
+        setLastProject(snapshot);
+        setScreen({ kind: "project", snapshot });
+      }
     } catch (err) {
       setError((err as Error).message);
     }
@@ -168,13 +192,21 @@ export function App() {
         <WelcomeScreen
           onNewProject={() => setScreen({ kind: "wizard" })}
           onOpenExisting={openExisting}
+          onContinue={
+            lastProject === null
+              ? undefined
+              : () => setScreen({ kind: "project", snapshot: lastProject })
+          }
         />
       )}
 
       {screen.kind === "wizard" && (
         <WizardView
           onCancel={() => setScreen({ kind: "welcome" })}
-          onCreated={(snapshot) => setScreen({ kind: "project", snapshot })}
+          onCreated={(snapshot) => {
+            setLastProject(snapshot);
+            setScreen({ kind: "project", snapshot });
+          }}
         />
       )}
 
