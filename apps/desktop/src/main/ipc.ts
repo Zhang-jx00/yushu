@@ -33,6 +33,7 @@ import {
   type GraphViewPayload,
   type GraphViewRequestPayload,
   type WorldMapBasePayload,
+  type WorldMapUploadBaseResult,
   type WorldMapViewPayload,
   type ChronicleBookPayload,
   type ChronicleBookRequestPayload,
@@ -173,7 +174,7 @@ import { applyProposal, decideProposal, listProposals, previewPropagation, propo
 import { foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
-import { worldMapBase, worldMapView } from "./map-ops.js";
+import { uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
 import {
@@ -631,6 +632,20 @@ export function registerIpcHandlers(): void {
   // 世界地图底图（R123）：只读（路径防护走 gateway，K12）⇒ wrap
   ipcMain.handle(CHANNELS.worldMapBase, (_event) =>
     wrap<WorldMapBasePayload>(() => worldMapBase(requireGateway())),
+  );
+  // 世界地图底图·**作者侧登记**（R135）：**写盘**（拷进项目 + 改 map.yaml）⇒ wrapWrite
+  // 原生对话框在**主进程**开：渲染层拿不到、也不需要本地路径（只回项目内的相对路径与尺寸）。
+  ipcMain.handle(CHANNELS.worldMapUploadBase, (_event) =>
+    wrapWrite<WorldMapUploadBaseResult>(() =>
+      uploadMapBase(requireGateway(), async () => {
+        const picked = await dialog.showOpenDialog({
+          title: "选一张世界地图底图",
+          properties: ["openFile"],
+          filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
+        });
+        return { canceled: picked.canceled, filePaths: picked.filePaths };
+      }),
+    ),
   );
   // 编年史（T4-8）：复用时间线刻度，只读 ⇒ wrap
   ipcMain.handle(CHANNELS.chronicleBook, (_event, payload: ChronicleBookRequestPayload) =>

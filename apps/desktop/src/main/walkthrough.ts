@@ -66,7 +66,7 @@ interface StepDef {
    * 桩只包住原生对话框，产品链路（IPC → 闸门 → 引擎 → 面板）全程真实执行，
    * 且**每次 attempt 重新起一份**——重试不会接着上一次的调用次数往下走。
    */
-  fixture?: "import-dialog" | "export-dir";
+  fixture?: "import-dialog" | "export-dir" | "map-base-dialog";
   /**
    * 需要把渲染进程当成「系统要求减少动效」来跑的这一步（R111）。
    *
@@ -591,6 +591,32 @@ const IMPORT_UI_TEXT = [
   "第三章 转",
   "剑光落下，风声停了。",
 ].join("\r\n");
+
+/**
+ * 底图登记的**原生对话框桩**（R135）：预演替作者挑那张 1×1 的 PNG。
+ *
+ * 桩只是工装（原生对话框在无人值守的预演里没法真点）⇒ **断言断的是盘上的字节**。
+ */
+async function openMapBaseDialogFixture(
+  win: BrowserWindow,
+  dir: string,
+): Promise<{ dir: string; restore(): Promise<void> }> {
+  const png = join(dir, "world", "assets", "map", "base.png");
+  const original = dialog.showOpenDialog;
+  dialog.showOpenDialog = (async () => {
+    const exists = await fs
+      .stat(png)
+      .then(() => true)
+      .catch(() => false);
+    return exists ? { canceled: false, filePaths: [png] } : { canceled: true, filePaths: [] };
+  }) as typeof dialog.showOpenDialog;
+  return {
+    dir,
+    restore: async () => {
+      dialog.showOpenDialog = original;
+    },
+  };
+}
 
 /** 1×1 的 PNG（R123 的预演底图：够小，只为验证"底图被铺在坐标空间上"这件事） */
 const BASE_PNG_BASE64 =
@@ -6504,6 +6530,53 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 97,
+    title: '世界观档案：底图登记（挑图 ⇒ 拷进项目 ⇒ 边界按量出来的尺寸自动填）（R135）',
+    file: 'step97-map-upload.png',
+    fixture: "map-base-dialog",
+    body: String.raw`
+      // 这一步证 R135 的**作者侧入口**：世界地图面板上有个「登记底图」，
+      // 挑一张图 ⇒ 工具把它**拷进项目** ⇒ 并把 base_image / base_size / bounds 写进 map.yaml，
+      // **bounds 按量出来的像素尺寸填**（作者手填边界填不对是常态 ⇒ 让工具量）。
+      // 原生对话框在主进程被**桩**掉了（预演替作者挑那张 1×1 的 PNG）——桩是工装，**断言断的是盘上的字节**。
+      await tab('规则');
+      await tab('世界观档案');
+      await sleep(700);
+      // 先把之前登记的底图三行**去掉**（这一轮验的是"第一次登记"）
+      const current = await window.yushu.doc.read('world/map.yaml');
+      const stripped = current.content
+        .split('\n')
+        .filter((line) => !/^base_image:/.test(line) && !/^base_size:/.test(line) && !/^bounds:/.test(line))
+        .join('\n');
+      await window.yushu.doc.write('world/map.yaml', stripped, current.hash);
+      await tab('规则');
+      await tab('世界观档案');
+      await sleep(800);
+      const btn = [...document.querySelectorAll('.map-panel .map-upload-btn')]
+        .find((b) => String(b.textContent || '').indexOf('登记底图') >= 0) || null;
+      if (btn === null) return { ok: false, note: '地图面板上没有「登记底图」的按钮' };
+      btn.click();
+      await sleep(1500);
+      const note = String((document.querySelector('.map-panel .map-upload-note') || {}).textContent || '');
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const hasBase = after.content.indexOf('base_image:') >= 0;
+      const hasSize = after.content.indexOf('base_size:') >= 0;
+      const hasBounds = after.content.indexOf('bounds: [[0, 0], [1, 1]]') >= 0;
+      const keptMarkers = after.content.indexOf('entity_ref: loc-map-probe') >= 0;
+      // 把地图恢复成"正常"的样子（这张 1×1 的底图只是验登记用的）⇒ 免得后面的截图是一张塌掉的图
+      await window.yushu.doc.write('world/map.yaml', current.content, after.hash);
+      await tab('规则');
+      await tab('世界观档案');
+      await sleep(700);
+      return {
+        ok: hasBase && hasSize && hasBounds && keptMarkers && note.indexOf('底图已登记') >= 0,
+        note: '回执「' + note.slice(0, 56) + '」；盘上：base_image=' + String(hasBase) +
+          '，base_size=' + String(hasSize) + '，bounds=量出来的 1×1=' + String(hasBounds) +
+          '；作者的标注原样留着=' + String(keptMarkers),
+      };
+    `,
+  },
 ];
 
 /**
@@ -6612,7 +6685,9 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
           ? await openImportDialogFixture(win)
           : def.fixture === "export-dir"
             ? await openExportDirFixture()
-            : null;
+            : def.fixture === "map-base-dialog"
+              ? await openMapBaseDialogFixture(win, options.dir)
+              : null;
       if (fixture) {
         await win.webContents.executeJavaScript(
           `window.__yushuImportFixture = ${JSON.stringify(JSON.stringify({ dir: fixture.dir }))};`,

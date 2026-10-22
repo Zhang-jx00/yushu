@@ -26,6 +26,7 @@ import type {
   GraphViewPayload,
   GraphViewRequestPayload,
   WorldMapBasePayload,
+  WorldMapUploadBaseResult,
   WorldMapViewPayload,
   ChronicleBookPayload,
   ChronicleBookRequestPayload,
@@ -247,6 +248,12 @@ export interface YushuApi {
     view: () => Promise<WorldMapViewPayload>;
     /** 底图（R123）：作者登记的那张图，读成 data URL；没有登记 / 读不到 = dataUrl 为 null */
     base: () => Promise<WorldMapBasePayload>;
+    /**
+     * 底图登记（R135）：**写盘**——主进程弹原生对话框挑一张图，拷进项目，
+     * 并把 base_image / base_size / bounds 写进 map.yaml（bounds 按**量出来的**像素尺寸填）。
+     * 渲染层**拿不到也拿不到需要**本地路径：只回项目内的相对路径与尺寸。
+     */
+    uploadBase: () => Promise<WorldMapUploadBaseResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

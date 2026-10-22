@@ -74,6 +74,8 @@ export const CHANNELS = {
   worldMapView: "map:view",
   /** 世界地图底图（R123）：**只读**（把作者登记的底图读成 data URL，路径防护同一切片） */
   worldMapBase: "map:base",
+  /** 世界地图底图·**作者侧登记**（R135）：**写盘**（挑一张图 ⇒ 拷进项目 ⇒ bounds 按量出来的像素尺寸自动填） */
+  worldMapUploadBase: "map:uploadBase",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -2878,6 +2880,25 @@ export interface GraphViewRequestPayload {
  * 图层显隐是**纯显示动作**，放在渲染层做（切层不必等一次 IPC 往返，动效才跟手，R111 的口径）。
  * 所以这条通道没有入参——将来做「事件锚点」（K08 §3.8）时再加。
  */
+/** 底图登记的结果（R135）：**路径不出主进程**，只回项目内的相对路径与量出来的尺寸 */
+export interface WorldMapUploadBaseResult {
+  /** 作者取消了（没挑文件） */
+  canceled: boolean;
+  /** 成功时：项目内的相对路径（`world/assets/map/…`） */
+  path: string | null;
+  /** 量出来的像素尺寸（bounds 就是按它填的 ⇒ 作者再也填不对） */
+  size: { width: number; height: number } | null;
+  /** 给作者看的一句话（成功 / 没做 / 为什么没做） */
+  note: string;
+  /**
+   * 作者**要自己改**的那三行（已有底图登记时不给写 ⇒ 把该改的给作者看），
+   * 以及写盘时用的 map.yaml 相对路径。
+   */
+  snippet: string | null;
+  /** map.yaml 的相对路径（作者要改的就是这个文件） */
+  mapPath: string;
+}
+
 export type WorldMapViewRequestPayload = Record<string, never>;
 
 /** 标注绑定的地点卡摘要（K08 §3.7：标注即地点卡） */

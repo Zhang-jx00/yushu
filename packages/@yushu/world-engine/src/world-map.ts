@@ -362,6 +362,39 @@ export function projectWorldMap(
 
 export const MAP_API_VERSION = "map-v1";
 
+/**
+ * 把底图登记**并进**地图文件（R135）：只加 `base_image` / `base_size` / `bounds` 三行，
+ * 标注、图层、事件锚点**原样留着**。
+ *
+ * 为什么不是"重写整个文件"：那要一个序列化器（会把作者写的注释与排版抹掉），
+ * 而作者在意的恰恰是那些标注与顺序 ⇒ 只**追加**三行。
+ *
+ * 已经登记过底图 ⇒ **拒绝**（不覆盖）：换底图是作者的决定，旧的那张也还在项目里。
+ *
+ * `bounds` 用**量出来的像素尺寸**填（不是作者手填）⇒ 作者再也填不对边界。
+ */
+export function appendMapBase(
+  text: string,
+  base: { baseImage: string; width: number; height: number },
+): { content: string | null; reason: string | null } {
+  const lines = text.split("\n");
+  const hasKey = (key: string): boolean => lines.some((line) => new RegExp(`^${key}:`).test(line));
+  const existing = ["base_image", "base_size", "bounds"].filter(hasKey);
+  if (existing.length > 0) {
+    return {
+      content: null,
+      reason: `地图文件里已经有 ${existing.join(" / ")} ⇒ 不替你改（换底图是作者的决定）`,
+    };
+  }
+  const head = text.replace(/\n*$/, "");
+  const added = [
+    `base_image: ${base.baseImage}`,
+    `base_size: {width: ${base.width}, height: ${base.height}}`,
+    `bounds: [[0, 0], [${base.width}, ${base.height}]]`,
+  ];
+  return { content: `${head}\n${added.join("\n")}\n`, reason: null };
+}
+
 function failMap(message: string): never {
   throw new YushuError("E_MAP_PARSE", message);
 }

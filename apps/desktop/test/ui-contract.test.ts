@@ -1172,11 +1172,19 @@ describe("世界地图（M5/T5-1，R120）：坐标空间 + 标注 + 图层显�
     expect(panel, "地点卡读不出来（点标注只能看个名字）").toContain("card.read");
   });
 
-  it("地图通道是只读的（渲染层不写盘）", () => {
-    // 逐行核对：地图 ops 里不许出现写通道的调用
-    for (const line of ops.split("\n")) {
-      expect(line, "地图 ops 里出现了写盘调用").not.toMatch(/card\.write|doc\.write|writeDoc/);
+  it("地图的**读**通道是只读的（渲染层不写盘）；写盘只有「底图登记」这一条（R135）", () => {
+    // 逐行核对：**读**的那两个 ops（worldMapView / worldMapBase）里不许出现写盘调用
+    const readOps = [
+      /export async function worldMapView\(([\s\S]*?)\n}\n/.exec(ops)?.[0] ?? "",
+      /export async function worldMapBase\(([\s\S]*?)\n}\n/.exec(ops)?.[0] ?? "",
+    ].join("\n");
+    expect(readOps, "没找到两个读通道").not.toBe("");
+    for (const line of readOps.split("\n")) {
+      expect(line, "地图的读通道里出现了写盘调用").not.toMatch(/card\.write|doc\.write|writeDoc|writeBinary/);
     }
+    // 写盘**只有**「底图登记」这一条（作者把图放进去），而且它明确写盘
+    expect(ops, "底图登记没有写盘").toMatch(/writeBinary\(/);
+    expect(ops, "底图登记没有写 map.yaml").toMatch(/writeDoc\(MAP_PATH/);
   });
 });
 
@@ -1869,6 +1877,45 @@ describe("地点方向的联动（R133）：事件能引用地点实体（place_
       /\{pickedPlace !== null && placeEvents\.length > 0 && \([\s\S]{0,80}map-place-events/,
     );
     expect(archive, "没有把地点与事件的关联算出来").toContain("placeEvents");
+  });
+});
+
+/**
+ * 底图登记（R135）：**作者的入口**——挑一张图 ⇒ 拷进项目 ⇒ **边界按量出来的尺寸自动填**。
+ *
+ * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → …」的第一段。
+ * 为什么值得做：作者手填 `bounds` 填不对是常态（`map-bounds-missing` 那条诊断码就是这么来的）。
+ */
+describe("底图登记（R135）：作者的入口 + 写盘纪律", () => {
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+  const ipc = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "ipc.ts"), "utf8");
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const engine = readFileSync(join(ROOT, "packages", "@yushu", "world-engine", "src", "world-map.ts"), "utf8");
+
+  it("这条通道是**写通道**（写完索引要刷、上一轮结论要置脏）", () => {
+    expect(ipc, "底图登记没有走 wrapWrite").toMatch(/CHANNELS\.worldMapUploadBase[\s\S]{0,200}wrapWrite/);
+  });
+
+  it("**路径不出主进程**（原生对话框在主进程开；渲染层只拿项目内的相对路径与尺寸）", () => {
+    expect(ipc, "原生对话框不在主进程开").toContain("dialog.showOpenDialog");
+    expect(panel, "渲染层自己接触了本地路径").not.toContain("filePaths");
+  });
+
+  it("边界**按量出来的尺寸**填（作者手填边界填不对是常态 ⇒ 让工具量）", () => {
+    expect(ops, "bounds 不是按量出来的尺寸填的").toMatch(
+      /bounds: \[\[0, 0\], \[\$\{size\.width\}, \$\{size\.height\}\]\]/,
+    );
+    expect(engine, "引擎没有「追加那三行」的那个函数").toContain("appendMapBase");
+  });
+
+  it("地图面板给作者一个**按钮**（不是只读面板里加一句说明）", () => {
+    expect(panel, "地图面板没有登记底图的调用").toContain("map.uploadBase()");
+    // 认**按钮的绑定**（`onClick` 真的调了登记）——只认"文件里出现过这个调用"的话，
+    // 按钮没了、调用还留在函数里，它照样绿（实测）
+    expect(panel, "登记底图的按钮没有绑上").toMatch(/onClick=\{\(\) => void uploadBase\(\)\}/);
+    // 认**完整的类名**（`className="map-upload-btn"`）——`toContain("map-upload-btn")`
+    // 会被 `map-upload-btn-x` 满足（实测：改名后它照样绿）
+    expect(panel, "地图面板没有那个按钮").toMatch(/className="map-upload-btn"/);
   });
 });
 

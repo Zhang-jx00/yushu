@@ -1,14 +1,22 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { readFile } from "node:fs/promises";
 import {
   MAP_PATH,
+  appendMapBase,
   checkStructureFromSources,
   parseMapFile,
   projectWorldMap,
   type WorldMapDef,
 } from "@yushu/world-engine";
-import type { WorldMapBasePayload, WorldMapViewPayload, WorldMapViewRequestPayload } from "../shared/ipc.js";
+import type {
+  WorldMapBasePayload,
+  WorldMapUploadBaseResult,
+  WorldMapViewPayload,
+  WorldMapViewRequestPayload,
+} from "../shared/ipc.js";
 import { gatewayReader } from "./index-ops.js";
 import type { ProjectGateway } from "./file-gateway.js";
+import type { PickDialog } from "./import-ops.js";
 
 /**
  * 世界地图的桌面接线（M5 / T5-1，R120）：**只读**。
@@ -171,7 +179,6 @@ const BASE_MIME: Record<string, string> = {
   jpeg: "image/jpeg",
   webp: "image/webp",
 };
-
 /** 底图体积上限：data URL 走 IPC，超过这个尺寸就别搬了（说清楚比搬不动强） */
 const BASE_MAX_BYTES = 8 * 1024 * 1024;
 
@@ -281,5 +288,131 @@ export async function worldMapBase(
     note: `底图 ${def.baseImage}（${mime}，${String(bytes.length)} 字节）`,
     dataUrl: `data:${mime};base64,${bytes.toString("base64")}`,
     size: imageSize(bytes, mime),
+  };
+}
+
+/** 底图在项目里放的目录（作者的项目内容都在真源下 ⇒ 底图也是） */
+const BASE_DIR = "world/assets/map";
+
+function baseName(path: string): string {
+  const parts = path.split(/[/\\]/);
+  return parts[parts.length - 1] ?? "base.png";
+}
+
+/** 同名不覆盖：换个名字（覆盖 = 悄悄换掉作者的那张图） */
+async function uniqueAssetPath(gateway: ProjectGateway, rel: string): Promise<string> {
+  const exists = async (candidate: string): Promise<boolean> =>
+    gateway.readBinary(candidate).then(
+      () => true,
+      () => false,
+    );
+  let candidate = rel;
+  let n = 2;
+  while (await exists(candidate)) {
+    const dot = rel.lastIndexOf(".");
+    candidate = dot > 0 ? `${rel.slice(0, dot)}-${String(n)}${rel.slice(dot)}` : `${rel}-${String(n)}`;
+    n += 1;
+  }
+  return candidate;
+}
+
+/**
+ * **底图登记**（R135）：**写盘**——作者挑一张图，工具把它拷进项目、并把
+ * `base_image` / `base_size` / `bounds` 三行写进 `world/map.yaml`。
+ *
+ * 口径回源 K08 §5「地图编辑器：**上传底图 → 框定 bounds** → 放 marker/区域/行程线 → 绑定实体」——
+ * 这一轮做**第一步**（上传 + 边界），且**边界按量出来的像素尺寸自动填**：
+ * 作者手填 bounds 填不对是常态（`map-bounds-missing` 那条诊断码就是这么来的）⇒
+ * 让工具量 ⇒ 作者填不错。
+ *
+ * 三条不静默 / 不越权：
+ * ① **路径不出主进程**：渲染层只拿到项目内的相对路径与尺寸（原生对话框在主进程开）；
+ * ② **只追加那三行**：标注、图层、事件锚点**原样留着**（不重写整个文件 ⇒ 不抹作者的注释与排版）；
+ * ③ **已经有底图登记 ⇒ 拒绝并把该改的三行给作者看**：换底图是作者的决定，工具不替他换。
+ *
+ * 写盘带 baseHash ⇒ 作者在别处改过 map.yaml 时**报冲突**，不覆盖。
+ */
+export async function uploadMapBase(
+  gateway: ProjectGateway,
+  pick: PickDialog,
+): Promise<WorldMapUploadBaseResult> {
+  const picked = await pick();
+  const source = picked.canceled ? undefined : picked.filePaths[0];
+  if (source === undefined) {
+    return {
+      canceled: true,
+      path: null,
+      size: null,
+      note: "没有挑文件（已取消）",
+      snippet: null,
+      mapPath: MAP_PATH,
+    };
+  }
+  const ext = source.split(".").pop()?.toLowerCase() ?? "";
+  const mime = BASE_MIME[ext];
+  if (mime === undefined) {
+    return {
+      canceled: false,
+      path: null,
+      size: null,
+      note: `底图格式不认：${baseName(source)}（只认 png / jpg / jpeg / webp）`,
+      snippet: null,
+      mapPath: MAP_PATH,
+    };
+  }
+  const bytes = await readFile(source);
+  if (bytes.length > BASE_MAX_BYTES) {
+    return {
+      canceled: false,
+      path: null,
+      size: null,
+      note: `底图太大（${String(bytes.length)} 字节 > ${String(BASE_MAX_BYTES)}），这一段不搬它`,
+      snippet: null,
+      mapPath: MAP_PATH,
+    };
+  }
+  const size = imageSize(bytes, mime);
+  if (size === null) {
+    return {
+      canceled: false,
+      path: null,
+      size: null,
+      note: "量不出这张图的像素尺寸（文件头不认）",
+      snippet: null,
+      mapPath: MAP_PATH,
+    };
+  }
+  // 拷进项目（同名不覆盖）
+  const rel = await uniqueAssetPath(gateway, `${BASE_DIR}/${baseName(source)}`);
+  await gateway.writeBinary(rel, bytes);
+  const snippet = [
+    `base_image: ${rel}`,
+    `base_size: {width: ${size.width}, height: ${size.height}}`,
+    `bounds: [[0, 0], [${size.width}, ${size.height}]]`,
+  ].join("\n");
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  const current =
+    snapshot === null
+      ? ["apiVersion: map-v1", "id: map-world", "crs: simple", ""].join("\n")
+      : snapshot.content;
+  const merged = appendMapBase(current, { baseImage: rel, width: size.width, height: size.height });
+  if (merged.content === null) {
+    return {
+      canceled: false,
+      path: rel,
+      size,
+      note: `底图已拷进项目，但${merged.reason ?? "地图文件里已有底图登记"} ⇒ 没有替你改`,
+      snippet,
+      mapPath: MAP_PATH,
+    };
+  }
+  await gateway.writeDoc(MAP_PATH, merged.content, snapshot?.hash);
+  return {
+    canceled: false,
+    path: rel,
+    size,
+    note: `底图已登记：${rel}（${String(size.width)}×${String(size.height)}，bounds 按量出来的尺寸填好了）`,
+    snippet: null,
+    mapPath: MAP_PATH,
   };
 }

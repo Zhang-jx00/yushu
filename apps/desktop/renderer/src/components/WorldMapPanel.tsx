@@ -126,6 +126,44 @@ export function WorldMapPanel(props: {
     setHidden((prev) => (prev.includes(kind) ? prev.filter((item) => item !== kind) : [...prev, kind]));
   }, []);
 
+  /**
+   * R135 底图登记（作者的入口）：挑一张图 ⇒ 拷进项目 ⇒ **边界按量出来的像素尺寸自动填**。
+   *
+   * 为什么值得做这一步：作者手填 `bounds` 填不对是常态（`map-bounds-missing` 那条诊断码就是这么来的）
+   * ⇒ 让工具量 ⇒ 作者填不错。
+   */
+  const [uploadNote, setUploadNote] = useState("");
+  const [uploadSnippet, setUploadSnippet] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  /** 重新取数（地图 + 底图）：登记完底图要立刻看见它 */
+  const reloadMap = useCallback(() => {
+    void api()
+      .map.view()
+      .then((payload) => setMap(payload))
+      .catch(() => undefined);
+    void api()
+      .map.base()
+      .then((payload) => setBase(payload))
+      .catch(() => undefined);
+  }, []);
+
+  const uploadBase = useCallback(async () => {
+    setUploading(true);
+    setUploadNote("");
+    setUploadSnippet(null);
+    try {
+      const result = await api().map.uploadBase();
+      setUploadNote(result.note);
+      setUploadSnippet(result.snippet);
+      if (!result.canceled) reloadMap();
+    } catch (err: unknown) {
+      setUploadNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  }, [reloadMap]);
+
   const canvas = map?.canvas ?? FALLBACK_CANVAS;
   const width = canvas.width > 0 ? canvas.width : FALLBACK_CANVAS.width;
   const height = canvas.height > 0 ? canvas.height : FALLBACK_CANVAS.height;
@@ -220,13 +258,42 @@ export function WorldMapPanel(props: {
         <StateNote kind="empty" title="还没有世界地图">
           {map.note}
         </StateNote>
+        <div className="map-upload">
+          <button type="button" className="map-upload-btn" onClick={() => void uploadBase()} disabled={uploading}>
+            {uploading ? "正在登记…" : "登记底图"}
+          </button>
+          <span className="muted">
+            挑一张图 ⇒ 拷进项目 ⇒ 边界按**量出来的**像素尺寸自动填（作者手填边界填不对是常态）
+          </span>
+          {uploadNote !== "" && <div className="map-upload-note">{uploadNote}</div>}
+        </div>
       </section>
     );
   }
 
   return (
     <section className="panel map-panel">
-      <div className="panel-title">世界地图（只读 · 由真源直算）</div>
+      <div className="panel-title">
+        世界地图（只读 · 由真源直算）
+        <button
+          type="button"
+          className="map-upload-btn"
+          onClick={() => void uploadBase()}
+          disabled={uploading}
+        >
+          {uploading ? "正在登记…" : base !== null && base.exists ? "换底图" : "登记底图"}
+        </button>
+      </div>
+      {uploadNote !== "" && (
+        <div className="map-upload-note">
+          {uploadNote}
+          {uploadSnippet !== null && (
+            <pre className="map-upload-snippet">
+              {uploadSnippet}
+            </pre>
+          )}
+        </div>
+      )}
 
       <div className="map-layers" role="group" aria-label="图层显隐">
         {map.layers.length === 0 && <span className="muted">这张图还没有声明图层</span>}

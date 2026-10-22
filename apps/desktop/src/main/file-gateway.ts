@@ -135,6 +135,30 @@ export class ProjectGateway {
     return { path: relPath, content, hash: sha256(content) };
   }
 
+  /**
+   * 写**二进制**文件（图片等）——路径防护与 writeDoc 同一套（K12 防路径穿越），
+   * 写入也是**原子**的（临时文件 + rename）。
+   *
+   * 为什么需要它：底图是**图片**（二进制）⇒ `writeDoc` 按 utf8 解码会把它**写坏**
+   * （可选项失真）⇒ 只能另开一条（同 `readBinary` 的理由）。
+   *
+   * 不覆盖已有文件（除非调用方自己判断）⇒ 底图同名时由调用方先决定要不要换名。
+   */
+  async writeBinary(relPath: string, bytes: Buffer): Promise<{ path: string; bytes: number }> {
+    const abs = this.resolveInside(relPath, true);
+    await fs.mkdir(dirname(abs), { recursive: true });
+    const tmp = `${abs}.${randomUUID().slice(0, 8)}.tmp`;
+    const handle = await fs.open(tmp, "w");
+    try {
+      await handle.writeFile(bytes);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(tmp, abs);
+    return { path: relPath, bytes: bytes.length };
+  }
+
   private async atomicWriteAbs(abs: string, content: string): Promise<void> {
     await fs.mkdir(dirname(abs), { recursive: true });
     const tmp = `${abs}.${randomUUID().slice(0, 8)}.tmp`;

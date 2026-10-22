@@ -52,6 +52,9 @@ const WRITE_CHANNELS = [
   // （"只提醒不代替平台发布"是语义，不是"只读通道"的许可证）
   "publishSetStatus",
   "publishSchedule",
+  // R135 底图登记：把图**拷进项目**（world/assets/map/…）+ 改 `world/map.yaml`
+  // ⇒ 真源写 ⇒ 必须与上面同一类（写完索引要刷、上一轮体检结论要置脏）
+  "worldMapUploadBase",
 ] as const;
 
 /** 写盘但不写真源（派生物 / 索引器排除文件 / .git 内部）——走只读包装器是有意的 */
