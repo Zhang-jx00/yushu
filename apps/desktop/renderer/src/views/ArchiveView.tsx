@@ -418,10 +418,13 @@ export function ArchiveView({
         {timelineError !== "" && <div className="error-text">{timelineError}</div>}
         {timeline !== null && timelineError === "" && (
           <>
-            <div className="timeline-summary muted">
-              {timeline.note}
-              {timeline.activeCalendar !== null && timeline.exists ? `；当前显示按「${timeline.activeCalendar}」` : ""}
-            </div>
+            {/* 汇总**逐行渲染**（R128）：原先是「N 条事件 · 锚定「X」= Year 0 · 历法 M 套」一长串，
+                窄栏里折成三四行；结构**由后端给**（载荷带 summary 行），这里只排版。 */}
+            {timeline.summary.length > 0 ? (
+              <SummaryRows rows={timeline.summary} />
+            ) : (
+              <div className="timeline-summary muted">{timeline.note}</div>
+            )}
             {timeline.findings.length > 0 && (
               <ul className="timeline-findings">
                 {timeline.findings.map((finding, index) => (

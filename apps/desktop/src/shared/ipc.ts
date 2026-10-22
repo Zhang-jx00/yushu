@@ -2804,6 +2804,8 @@ export interface TimelineViewPayload {
   path: string;
   exists: boolean;
   note: string;
+  /** 汇总的**结构化行**（R128）：界面逐行渲染，不切那串自由文本 */
+  summary: SummaryRow[];
   calendars: { id: string; label: string; offset: number }[];
   activeCalendar: string | null;
   rows: TimelineRowPayload[];

@@ -1628,6 +1628,29 @@ describe("其余三个面板的汇总也结构化（R127）：爽点 / 编年史
   });
 });
 
+/**
+ * 时间线面板的汇总也结构化（R128）：**最后一个还在用自由文本的面板**。
+ *
+ * 到这一轮为止，「世界观档案」页上五个带汇总的面板（图谱 / 爽点 / 编年史 / 伏笔 / 时间线）
+ * 全部走共享组件 `SummaryRows`，结构全部由后端给。
+ */
+describe("时间线面板的汇总也结构化（R128）：最后一个还在用自由文本的面板", () => {
+  const archive = readFileSync(join(VIEW_ROOT, "views", "ArchiveView.tsx"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "timeline-ops.ts"), "utf8");
+
+  it("时间线面板走共享组件，且后端造结构化行", () => {
+    expect(archive, "时间线面板没有用共享组件").toContain("<SummaryRows");
+    expect(ops, "时间线 ops 没有造结构化汇总").toContain('{ label: "事件"');
+  });
+
+  it("时间线面板不再自己拼那句自由文本（连「当前显示按…」也是后端给的行）", () => {
+    // 认**"当前显示按"这几个字**（而不是带插值的长串）：修好之后那串长文本本来就不在了 ⇒
+    // 拿长串当判据 = 恒绿（变异动不到它）——实测踩过
+    expect(archive, "时间线汇总还在自己拼历法那句").not.toContain("当前显示按");
+    expect(ops, "后端没有给「当前显示」那一行").toContain('{ label: "当前显示"');
+  });
+});
+
 describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
   /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
   const stripComments = (src: string): string =>

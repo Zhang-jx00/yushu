@@ -21,6 +21,7 @@ import type { ProjectGateway } from "./file-gateway.js";
  */
 
 const EMPTY: Omit<TimelineViewPayload, "path" | "exists" | "note"> = {
+  summary: [],
   calendars: [],
   activeCalendar: null,
   rows: [],
@@ -59,6 +60,15 @@ export async function timelineView(
     path: TIMELINE_PATH,
     exists: true,
     note: `${parsed.events.length} 条事件 · 锚定「${parsed.anchor_event}」= Year 0 · 历法 ${parsed.calendars.length} 套`,
+    // 汇总的**结构化行**（R128）：界面逐行渲染；结构**由后端给**（不切上面那句自由文本）
+    summary: [
+      { label: "事件", value: `${String(parsed.events.length)} 条` },
+      { label: "锚定", value: `「${parsed.anchor_event}」= Year 0` },
+      { label: "历法", value: `${String(parsed.calendars.length)} 套` },
+      ...(view.rows[0]?.calendar === undefined
+        ? []
+        : [{ label: "当前显示", value: `按「${view.rows[0]?.calendar}」` }]),
+    ],
     calendars: parsed.calendars.map((c) => ({ id: c.id, label: c.label, offset: c.offset })),
     activeCalendar: view.rows[0]?.calendar ?? null,
     rows: view.rows,

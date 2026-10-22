@@ -6178,6 +6178,54 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 91,
+    title: '世界观档案：时间线面板的汇总也逐行渲染（标签一行高、值列对齐）——最后一个自由文本汇总（R128）',
+    file: 'step91-timeline-summary.png',
+    body: String.raw`
+      // 这一步证 R128：时间线面板的汇总也换成结构化行（共享组件 SummaryRows）。
+      // 量法与 step89/step90 同一套：标签**一行高**、值列**左边界对齐**、值在标签右边、值不越列。
+      await tab('世界观档案');
+      await sleep(600);
+      const panel = document.querySelector('.timeline-view');
+      if (panel === null) return { ok: false, note: '时间线面板没渲染出来' };
+      const rows = [...panel.querySelectorAll('.summary-row')];
+      const tallLabels = rows.filter((r) => {
+        const dt = r.querySelector('dt');
+        return dt !== null && dt.getBoundingClientRect().height > 28;
+      }).length;
+      const lefts = rows
+        .map((r) => {
+          const dd = r.querySelector('dd');
+          return dd === null ? null : dd.getBoundingClientRect().left;
+        })
+        .filter((v) => v !== null);
+      const aligned = lefts.length > 0 && lefts.every((v) => Math.abs((v ?? 0) - (lefts[0] ?? 0)) <= 1);
+      const stacked = rows.filter((r) => {
+        const dt = r.querySelector('dt');
+        const dd = r.querySelector('dd');
+        if (dt === null || dd === null) return false;
+        return dd.getBoundingClientRect().left < dt.getBoundingClientRect().right;
+      }).length;
+      const spilling = rows.filter((r) => {
+        const dd = r.querySelector('dd');
+        if (dd === null) return false;
+        return dd.getBoundingClientRect().right > r.getBoundingClientRect().right + 1;
+      }).length;
+      const text = rows.map((r) => (r.textContent || '').replace(/\s+/g, ' ').trim()).join(' ');
+      // 锚定事件与历法套数必须**看得见**（原先藏在那句自由文本里）
+      const anchored = /锚定/.test(text) && /Year 0/.test(text);
+      const calendars = /历法/.test(text);
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(250);
+      return {
+        ok: rows.length >= 3 && tallLabels === 0 && aligned && stacked === 0 && spilling === 0 && anchored && calendars,
+        note: '时间线：行=' + rows.length + '（标签折行=' + tallLabels + '，值列对齐=' + String(aligned) +
+          '，上下叠=' + stacked + '，越列=' + spilling + '）；锚定事件看得见=' + String(anchored) +
+          '；历法套数看得见=' + String(calendars) + '；汇总="' + text.slice(0, 80) + '"',
+      };
+    `,
+  },
 ];
 
 /**
