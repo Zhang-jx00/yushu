@@ -1909,13 +1909,20 @@ describe("底图登记（R135）：作者的入口 + 写盘纪律", () => {
   });
 
   it("地图面板给作者一个**按钮**（不是只读面板里加一句说明）", () => {
-    expect(panel, "地图面板没有登记底图的调用").toContain("map.uploadBase()");
+    expect(panel, "地图面板没有登记底图的调用").toContain("map.uploadBase(");
     // 认**按钮的绑定**（`onClick` 真的调了登记）——只认"文件里出现过这个调用"的话，
     // 按钮没了、调用还留在函数里，它照样绿（实测）
     expect(panel, "登记底图的按钮没有绑上").toMatch(/onClick=\{\(\) => void uploadBase\(\)\}/);
     // 认**完整的类名**（`className="map-upload-btn"`）——`toContain("map-upload-btn")`
     // 会被 `map-upload-btn-x` 满足（实测：改名后它照样绿）
     expect(panel, "地图面板没有那个按钮").toMatch(/className="map-upload-btn"/);
+  });
+
+  it("**换**底图与**第一次登记**走的是同一个入口（按钮按有没有登记过给不同的模式）", () => {
+    // 模式由**有没有登记过**决定（不是两个按钮）：作者点"换底图"就是换
+    expect(panel, "没有按有没有登记过区分模式").toMatch(/mode: hasBase \? "replace" : "register"/);
+    // 换之前的那三行要给作者看（他要换回去就贴回去）
+    expect(panel, "换之前的三行没给作者看").toContain("uploadPrevious");
   });
 });
 

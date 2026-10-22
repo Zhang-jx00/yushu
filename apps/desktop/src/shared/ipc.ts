@@ -2880,6 +2880,11 @@ export interface GraphViewRequestPayload {
  * 图层显隐是**纯显示动作**，放在渲染层做（切层不必等一次 IPC 往返，动效才跟手，R111 的口径）。
  * 所以这条通道没有入参——将来做「事件锚点」（K08 §3.8）时再加。
  */
+/** 底图登记的请求（R136）：`register` = 第一次登记（已有登记 ⇒ 拒绝）；`replace` = 换底图（替换那三行） */
+export type WorldMapUploadBaseRequestPayload = {
+  mode: "register" | "replace";
+};
+
 /** 底图登记的结果（R135）：**路径不出主进程**，只回项目内的相对路径与量出来的尺寸 */
 export interface WorldMapUploadBaseResult {
   /** 作者取消了（没挑文件） */
@@ -2895,6 +2900,11 @@ export interface WorldMapUploadBaseResult {
    * 以及写盘时用的 map.yaml 相对路径。
    */
   snippet: string | null;
+  /**
+   * 换底图（R136）时**换之前**的那三行 ⇒ 作者想换回去，把它们贴回去即可
+   * （旧的图片文件也**留在项目里**，没被删）。
+   */
+  previous: string[];
   /** map.yaml 的相对路径（作者要改的就是这个文件） */
   mapPath: string;
 }

@@ -376,23 +376,28 @@ export const MAP_API_VERSION = "map-v1";
 export function appendMapBase(
   text: string,
   base: { baseImage: string; width: number; height: number },
-): { content: string | null; reason: string | null } {
+  mode: "register" | "replace" = "register",
+): { content: string | null; reason: string | null; previous: string[] } {
   const lines = text.split("\n");
   const hasKey = (key: string): boolean => lines.some((line) => new RegExp(`^${key}:`).test(line));
   const existing = ["base_image", "base_size", "bounds"].filter(hasKey);
-  if (existing.length > 0) {
+  const previous = lines.filter((line) => /^(base_image|base_size|bounds):/.test(line));
+  if (existing.length > 0 && mode !== "replace") {
     return {
       content: null,
       reason: `地图文件里已经有 ${existing.join(" / ")} ⇒ 不替你改（换底图是作者的决定）`,
+      previous,
     };
   }
-  const head = text.replace(/\n*$/, "");
+  // 「换」模式：把**旧的那几行**去掉再写新的（作者的标注、图层、注释**原样留着**）
+  const kept = mode === "replace" ? lines.filter((line) => !/^(base_image|base_size|bounds):/.test(line)) : lines;
+  const head = kept.join("\n").replace(/\n*$/, "");
   const added = [
     `base_image: ${base.baseImage}`,
     `base_size: {width: ${base.width}, height: ${base.height}}`,
     `bounds: [[0, 0], [${base.width}, ${base.height}]]`,
   ];
-  return { content: `${head}\n${added.join("\n")}\n`, reason: null };
+  return { content: `${head}\n${added.join("\n")}\n`, reason: null, previous };
 }
 
 function failMap(message: string): never {

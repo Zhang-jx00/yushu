@@ -116,7 +116,7 @@ contextBridge.exposeInMainWorld("yushu", {
     view: () => invoke("map:view"),
     base: () => invoke("map:base"),
     /** 底图登记（R135）：主进程弹原生对话框挑一张图 ⇒ 拷进项目 ⇒ 写 map.yaml；**路径不出主进程** */
-    uploadBase: () => invoke("map:uploadBase"),
+    uploadBase: (payload) => invoke("map:uploadBase", payload),
   },
   chronicle: {
     book: (payload) => invoke("chronicle:book", payload),

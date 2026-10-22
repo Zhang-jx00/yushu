@@ -335,6 +335,7 @@ async function uniqueAssetPath(gateway: ProjectGateway, rel: string): Promise<st
 export async function uploadMapBase(
   gateway: ProjectGateway,
   pick: PickDialog,
+  mode: "register" | "replace" = "register",
 ): Promise<WorldMapUploadBaseResult> {
   const picked = await pick();
   const source = picked.canceled ? undefined : picked.filePaths[0];
@@ -345,6 +346,7 @@ export async function uploadMapBase(
       size: null,
       note: "没有挑文件（已取消）",
       snippet: null,
+      previous: [],
       mapPath: MAP_PATH,
     };
   }
@@ -357,6 +359,7 @@ export async function uploadMapBase(
       size: null,
       note: `底图格式不认：${baseName(source)}（只认 png / jpg / jpeg / webp）`,
       snippet: null,
+      previous: [],
       mapPath: MAP_PATH,
     };
   }
@@ -368,6 +371,7 @@ export async function uploadMapBase(
       size: null,
       note: `底图太大（${String(bytes.length)} 字节 > ${String(BASE_MAX_BYTES)}），这一段不搬它`,
       snippet: null,
+      previous: [],
       mapPath: MAP_PATH,
     };
   }
@@ -379,6 +383,7 @@ export async function uploadMapBase(
       size: null,
       note: "量不出这张图的像素尺寸（文件头不认）",
       snippet: null,
+      previous: [],
       mapPath: MAP_PATH,
     };
   }
@@ -395,7 +400,7 @@ export async function uploadMapBase(
     snapshot === null
       ? ["apiVersion: map-v1", "id: map-world", "crs: simple", ""].join("\n")
       : snapshot.content;
-  const merged = appendMapBase(current, { baseImage: rel, width: size.width, height: size.height });
+  const merged = appendMapBase(current, { baseImage: rel, width: size.width, height: size.height }, mode);
   if (merged.content === null) {
     return {
       canceled: false,
@@ -403,6 +408,7 @@ export async function uploadMapBase(
       size,
       note: `底图已拷进项目，但${merged.reason ?? "地图文件里已有底图登记"} ⇒ 没有替你改`,
       snippet,
+      previous: merged.previous,
       mapPath: MAP_PATH,
     };
   }
@@ -411,8 +417,12 @@ export async function uploadMapBase(
     canceled: false,
     path: rel,
     size,
-    note: `底图已登记：${rel}（${String(size.width)}×${String(size.height)}，bounds 按量出来的尺寸填好了）`,
+    note:
+      mode === "replace"
+        ? `底图已换成：${rel}（${String(size.width)}×${String(size.height)}，bounds 按量出来的尺寸填好了；旧图还留在项目里）`
+        : `底图已登记：${rel}（${String(size.width)}×${String(size.height)}，bounds 按量出来的尺寸填好了）`,
     snippet: null,
+    previous: merged.previous,
     mapPath: MAP_PATH,
   };
 }

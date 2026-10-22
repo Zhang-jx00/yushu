@@ -134,6 +134,8 @@ export function WorldMapPanel(props: {
    */
   const [uploadNote, setUploadNote] = useState("");
   const [uploadSnippet, setUploadSnippet] = useState<string | null>(null);
+  /** 换底图（R136）时**换之前**的那三行 ⇒ 作者想换回去，把它们贴回去即可 */
+  const [uploadPrevious, setUploadPrevious] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
 
   /** 重新取数（地图 + 底图）：登记完底图要立刻看见它 */
@@ -152,17 +154,21 @@ export function WorldMapPanel(props: {
     setUploading(true);
     setUploadNote("");
     setUploadSnippet(null);
+    setUploadPrevious([]);
     try {
-      const result = await api().map.uploadBase();
+      // 已经有底图登记 ⇒ 这一下就是**换**（作者点了"换底图"）；否则是**第一次登记**
+      const hasBase = base !== null && base.exists;
+      const result = await api().map.uploadBase({ mode: hasBase ? "replace" : "register" });
       setUploadNote(result.note);
       setUploadSnippet(result.snippet);
+      setUploadPrevious(result.previous);
       if (!result.canceled) reloadMap();
     } catch (err: unknown) {
       setUploadNote(err instanceof Error ? err.message : String(err));
     } finally {
       setUploading(false);
     }
-  }, [reloadMap]);
+  }, [base, reloadMap]);
 
   const canvas = map?.canvas ?? FALLBACK_CANVAS;
   const width = canvas.width > 0 ? canvas.width : FALLBACK_CANVAS.width;
@@ -291,6 +297,14 @@ export function WorldMapPanel(props: {
             <pre className="map-upload-snippet">
               {uploadSnippet}
             </pre>
+          )}
+          {uploadPrevious.length > 0 && (
+            <>
+              <div>换回去就贴回这三行（旧图也还在项目里）：</div>
+              <pre className="map-upload-snippet">
+                {uploadPrevious.join("\n")}
+              </pre>
+            </>
           )}
         </div>
       )}

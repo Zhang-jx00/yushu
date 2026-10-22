@@ -6577,6 +6577,51 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 98,
+    title: '世界观档案：换底图（替换那三行、旧图留着、换之前的三行给作者看）（R136）',
+    file: 'step98-map-replace.png',
+    fixture: "map-base-dialog",
+    body: String.raw`
+      // 这一步证 R136：**换底图**。R135 只做"第一次登记"（已有登记 ⇒ 拒绝并把该改的三行给作者看）；
+      // 这一轮让作者能**一键换**：挑一张新图 ⇒ 那三行被替换 ⇒ **旧的图片文件还在项目里**，
+      // 而且**换之前的三行显示在面板上**（他要换回去，把它们贴回去即可）。
+      await tab('规则');
+      await tab('世界观档案');
+      await sleep(700);
+      const before = await window.yushu.doc.read('world/map.yaml');
+      const beforeLine = (before.content.split('\n').find((l) => l.indexOf('base_image:') === 0) || '');
+      const beforePath = beforeLine.replace('base_image: ', '').trim();
+      const btn = [...document.querySelectorAll('.map-panel .map-upload-btn')]
+        .find((b) => String(b.textContent || '').indexOf('换底图') >= 0) || null;
+      if (btn === null) return { ok: false, note: '地图面板上没有「换底图」的按钮' };
+      btn.click();
+      await sleep(1500);
+      const note = String((document.querySelector('.map-panel .map-upload-note') || {}).textContent || '');
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const afterLine = (after.content.split('\n').find((l) => l.indexOf('base_image:') === 0) || '');
+      const afterPath = afterLine.replace('base_image: ', '').trim();
+      const changed = afterPath !== '' && afterPath !== beforePath;
+      // 旧图**还在项目里**（换错了能改回去）
+      let oldKept = false;
+      try {
+        await window.yushu.doc.read(beforePath);
+        oldKept = true;
+      } catch (err) {
+        oldKept = false;
+      }
+      // 换之前的三行给作者看
+      const snippetShown = document.querySelectorAll('.map-panel .map-upload-snippet').length > 0;
+      // 标注原样留着
+      const keptMarkers = after.content.indexOf('entity_ref: loc-map-probe') >= 0;
+      return {
+        ok: changed && oldKept && snippetShown && keptMarkers && note.indexOf('底图已换成') >= 0,
+        note: '换之前=' + beforePath + ' → 换之后=' + afterPath + '（换了=' + String(changed) +
+          '）；旧图还在=' + String(oldKept) + '；换之前的三行给作者看=' + String(snippetShown) +
+          '；标注原样留着=' + String(keptMarkers),
+      };
+    `,
+  },
 ];
 
 /**

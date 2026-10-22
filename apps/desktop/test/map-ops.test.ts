@@ -119,4 +119,35 @@ describe("底图登记（R135）：挑图 ⇒ 拷进项目 ⇒ 边界按量出�
     const old = await gateway.readBinary("world/assets/map/picked.png");
     expect(old.bytes.equals(PNG_1x1)).toBe(true);
   });
+
+  it("**换底图**（replace 模式）：替换那三行，标注留着，**换之前的三行给作者看**（换回去贴回去即可）", async () => {
+    await gateway.writeBinary("world/assets/map/old.png", PNG_1x1);
+    await gateway.writeDoc(
+      "world/map.yaml",
+      [
+        "apiVersion: map-v1",
+        "id: map-world",
+        "crs: simple",
+        "base_image: world/assets/map/old.png",
+        "base_size: {width: 1, height: 1}",
+        "bounds: [[0, 0], [1, 1]]",
+        "markers:",
+        "  - {id: m-1, layer: place, entity_ref: loc-a, x: 250, y: 175}",
+        "",
+      ].join("\n"),
+    );
+    const result = await uploadMapBase(gateway, pick(), "replace");
+    expect(result.canceled).toBe(false);
+    expect(result.path).toBe("world/assets/map/picked.png");
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).toContain("base_image: world/assets/map/picked.png");
+    expect(content).not.toContain("base_image: world/assets/map/old.png");
+    // 标注**原样留着**（换的是底图，不是整张地图）
+    expect(content).toContain("entity_ref: loc-a");
+    // 旧图**还在项目里**（换错了可以改回去）
+    await expect(gateway.readBinary("world/assets/map/old.png")).resolves.toBeTruthy();
+    // 换之前的三行给作者看（他要换回去就贴回去）
+    expect(result.previous).toContain("base_image: world/assets/map/old.png");
+    expect(result.previous).toHaveLength(3);
+  });
 });
