@@ -71,7 +71,7 @@ pnpm --filter @yushu/desktop dev      # Electron + Vite 热更新
 pnpm test                # 单元/集成测试：1788 例 / 159 文件
 pnpm typecheck           # 9 个包 + 2 个应用零错误（内含全量构建）
 pnpm --filter @yushu/desktop e2e     # 离线 mock LLM 的端到端全链路，逐条具名断言
-pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 86 步 UI 预演（最近一次 v285）+ 逐步截图取证
+pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 87 步 UI 预演（最近一次 v286）+ 逐步截图取证
 # 前端改动的判据：docs/10-前端设计契约.md（令牌 / 中文排版 / 动效 / 键盘可达），由 ui-contract.test.ts 钉住
 # UI 重构的调研与规范：docs/11-UI重构调研与设计规范.md（189 个来源 + 五批实施计划）
 ```
