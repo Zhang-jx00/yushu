@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeBounds, projectWorldMap, type WorldMapDef } from "../src/world-map.js";
+import { normalizeBounds, parseMapFile, projectWorldMap, type WorldMapDef } from "../src/world-map.js";
 import type { IndexEntityRow } from "../src/index-input.js";
 
 /**
@@ -173,5 +173,75 @@ describe("世界地图投影（R114 引擎侧）", () => {
     expect(source).not.toMatch(/from "node:fs"/);
     expect(source).not.toMatch(/Date\.now|new Date\(/);
     expect(source).not.toMatch(/Math\.random/);
+  });
+});
+
+/**
+ * 世界地图真源文件的严格解析（R120）。
+ *
+ * 为什么解析也要严格：**地图错了不会当场显形**——画布照样出得来，只是地点摆错了位置，
+ * 作者往往看不出"这张图是歪的"，几天后才在正文里发现对不上。
+ * 所以拼错的键、认不出的图层名、非数字的坐标一律拒绝加载并点名，
+ * 而不是"忽略这个字段继续画"（那会让作者以为边界设了，其实在画纸上）。
+ */
+describe("world/map.yaml 的严格解析（R120）", () => {
+  const good = [
+    "apiVersion: map-v1",
+    "id: map-world",
+    "crs: simple",
+    "bounds: [[0, 0], [1000, 700]]",
+    "base_size: {width: 1000, height: 700}",
+    "layers: [place, political]",
+    "markers:",
+    "  - {id: m-1, layer: place, entity_ref: loc-1, x: 120, y: 240}",
+    "",
+  ].join("\n");
+
+  it("正常文件解析成投影可直接吃的形状（键名 snake_case → 引擎 camelCase）", () => {
+    const def = parseMapFile(good);
+    expect(def.id).toBe("map-world");
+    expect(def.crs).toBe("simple");
+    expect(def.bounds).toEqual([[0, 0], [1000, 700]]);
+    expect(def.baseSize).toEqual({ width: 1000, height: 700 });
+    expect(def.layers).toEqual(["place", "political"]);
+    expect(def.markers).toHaveLength(1);
+    expect(def.markers?.[0]?.entityRef).toBe("loc-1");
+    expect(def.markers?.[0]?.x).toBe(120);
+  });
+
+  it("未知键拒绝并点名（拼错的键被静默忽略 ⇒ 作者以为边界设了，其实在画纸上）", () => {
+    expect(() => parseMapFile(good + "boudns: [[0,0],[10,10]]\n")).toThrow(/未知键「boudns」/);
+  });
+
+  it("apiVersion 不对就拒绝（不拿旧版文件当新版画）", () => {
+    expect(() => parseMapFile(good.replace("apiVersion: map-v1", "apiVersion: map-v0"))).toThrow(/apiVersion 须为 map-v1/);
+  });
+
+  it("crs 只认 simple（虚构地图没有真实经纬度）", () => {
+    expect(() => parseMapFile(good.replace("crs: simple", "crs: EPSG3857"))).toThrow(/crs 只认 simple/);
+  });
+
+  it("坐标非数字拒绝（x/y 写错时画出来是歪的，作者却看不出）", () => {
+    expect(() => parseMapFile(good.replace("x: 120", "x: 一百二十"))).toThrow(/x 须为有限数字/);
+  });
+
+  it("标注 id 重复拒绝（两个标注抢同一个 id ⇒ 点开是哪一个说不清）", () => {
+    const dup = good + "  - {id: m-1, layer: place, entity_ref: loc-2, x: 10, y: 10}\n";
+    expect(() => parseMapFile(dup)).toThrow(/标注 id 重复：m-1/);
+  });
+
+  it("图层名认不出就拒绝并把可选值列出来（不是静默归到 other）", () => {
+    expect(() => parseMapFile(good.replace("layers: [place, political]", "layers: [place, terran]"))).toThrow(
+      /图层名认不出/,
+    );
+  });
+
+  it("bounds 形状不对就拒绝（宽高为正与否交给体检，解析不越权）", () => {
+    expect(() => parseMapFile(good.replace("bounds: [[0, 0], [1000, 700]]", "bounds: [0, 0, 1000, 700]"))).toThrow(
+      /bounds 须写成/,
+    );
+    // 宽高为 0 不是解析错误——它由 normalizeBounds 归"无有效边界"并报 map-bounds-missing
+    const degenerate = parseMapFile(good.replace("[[0, 0], [1000, 700]]", "[[0, 0], [0, 0]]"));
+    expect(degenerate.bounds).toEqual([[0, 0], [0, 0]]);
   });
 });

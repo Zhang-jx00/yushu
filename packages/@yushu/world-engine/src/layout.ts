@@ -45,6 +45,14 @@ export const FORESHADOW_PATH = `${WORLD_DIR}/foreshadow.yaml`;
 export const TIMELINE_PATH = `${WORLD_DIR}/timeline.yaml`;
 
 /**
+ * 世界地图（M5 / T5-1，可选文件；**图片底图 + bounds + 分层 + 标注**，K08 §3.6）。
+ *
+ * 坐标是**图片像素 / 归一化坐标**，不是经纬度——虚构地图没有真实地理坐标（K08 §2.5）。
+ * 底图图片由作者上传，路径记在文件里（`base_image`），图片本身不进项目。
+ */
+export const MAP_PATH = `${WORLD_DIR}/map.yaml`;
+
+/**
  * 爽点与期待感台账（M4 / T4-10，可选文件）。
  * 与 `foreshadow.yaml` 并列但**载体不同**（I03 §2.2）：伏笔靠道具/对白/意象埋设，
  * 这里的承诺多来自简介、核心梗与角色台词——所以两份账各记各的，靠 `foreshadow_id` 交叉引用，不双写。

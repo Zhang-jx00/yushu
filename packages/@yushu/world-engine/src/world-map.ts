@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+import { YushuError } from "@yushu/core";
+import { parseDocument } from "yaml";
 import type { IndexEntityRow } from "./index-input.js";
 
 /**
@@ -288,4 +290,140 @@ export function projectWorldMap(
     overlapClusters,
     outOfBoundsMarkers,
   };
+}
+
+/* ---------------------------------------------------------------------------
+ * 真源文件的严格解析（R120）
+ *
+ * 口径回源 K08 §3.6 的 yaml 样例（`map: {id, base_image, crs, bounds, layers, markers}`）
+ * 与 §2.9「分层可控」。**为什么解析要严格**：地图错了不会立刻显形——画布照样出得来，
+ * 只是地点摆错了位置；作者往往看不出"这张图是歪的"，几天后才在正文里发现对不上。
+ * 所以拼错的键、认不出的图层名、非数字的坐标一律**拒绝加载并点名**，
+ * 而不是"忽略这个字段继续画"（那会让作者以为坐标生效了）。
+ *
+ * 与投影的分工：**解析管形状**（键名/类型/枚举/重复 id），
+ * **投影管体检**（bounds 是否有效、标注是否孤儿、是否重合、是否越界）——
+ * 边界宽高为正与否不在这里判：那是 `normalizeBounds` 的活，判了它就会把
+ * "无有效边界"这件事从体检结论里抹掉。
+ * ------------------------------------------------------------------------ */
+
+export const MAP_API_VERSION = "map-v1";
+
+function failMap(message: string): never {
+  throw new YushuError("E_MAP_PARSE", message);
+}
+
+function asMapObject(value: unknown, label: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) failMap(`${label} 必须是映射`);
+  return value as Record<string, unknown>;
+}
+
+function asMapString(value: unknown, label: string, key: string): string {
+  if (typeof value !== "string" || value.trim() === "") failMap(`${label} 的 ${key} 必填且须为非空字符串`);
+  return value;
+}
+
+function asMapNumber(value: unknown, label: string, key: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) failMap(`${label} 的 ${key} 须为有限数字`);
+  return value;
+}
+
+function checkMapKeys(raw: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const known = new Set(allowed);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) failMap(`${label} 有未知键「${key}」（可选：${allowed.join(" / ")}）`);
+  }
+}
+
+/** bounds：[[x0, y0], [x1, y1]]（K08 §3.6 的像素边界） */
+function parseMapBounds(value: unknown): [[number, number], [number, number]] {
+  if (!Array.isArray(value) || value.length !== 2) failMap("bounds 须写成 [[x0, y0], [x1, y1]] 两对数字");
+  const pair = (item: unknown, label: string): [number, number] => {
+    if (!Array.isArray(item) || item.length !== 2) failMap(`${label} 须是一对数字`);
+    return [asMapNumber(item[0], label, "x"), asMapNumber(item[1], label, "y")];
+  };
+  const a = pair(value[0], "bounds[0]");
+  const b = pair(value[1], "bounds[1]");
+  return [a, b];
+}
+
+/**
+ * 严格解析 `world/map.yaml` → 投影可直接吃的 `WorldMapDef`。
+ *
+ * 已知键：apiVersion / id / base_image / crs / bounds / base_size / layers / markers。
+ * 未知键一律拒绝并点名（拼错的键被静默忽略 ⇒ 作者以为边界设了，其实在画纸上）。
+ */
+export function parseMapFile(text: string): WorldMapDef {
+  let rootRaw: unknown;
+  try {
+    rootRaw = parseDocument(text, { uniqueKeys: true }).toJS();
+  } catch (err) {
+    return failMap(`YAML 读不了：${err instanceof Error ? err.message : String(err)}`);
+  }
+  const root = asMapObject(rootRaw, "地图根");
+  checkMapKeys(
+    root,
+    ["apiVersion", "id", "base_image", "crs", "bounds", "base_size", "layers", "markers"],
+    "地图根",
+  );
+  if (root.apiVersion !== MAP_API_VERSION) {
+    failMap(`apiVersion 须为 ${MAP_API_VERSION}（收到「${String(root.apiVersion)}」）`);
+  }
+  const id = asMapString(root.id, "地图根", "id");
+  // crs：虚构地图没有真实经纬度 ⇒ 只认 simple（K08 §2.5 / §3.6）
+  if (root.crs !== undefined && root.crs !== null && root.crs !== "simple") {
+    failMap(`crs 只认 simple（虚构地图没有真实经纬度，收到「${String(root.crs)}」）`);
+  }
+  const bounds = parseMapBounds(root.bounds);
+  const def: WorldMapDef = { id, crs: "simple", bounds, markers: [] };
+
+  if (root.base_image !== undefined && root.base_image !== null) {
+    def.baseImage = asMapString(root.base_image, "地图根", "base_image");
+  }
+  if (root.base_size !== undefined && root.base_size !== null) {
+    const raw = asMapObject(root.base_size, "地图根.base_size");
+    checkMapKeys(raw, ["width", "height"], "地图根.base_size");
+    def.baseSize = {
+      width: asMapNumber(raw.width, "base_size", "width"),
+      height: asMapNumber(raw.height, "base_size", "height"),
+    };
+  }
+  const layers: MapLayerKind[] = [];
+  const layerSeen = new Set<string>();
+  for (const [index, item] of ((root.layers ?? []) as unknown[]).entries()) {
+    const label = `layers[${index}]`;
+    if (typeof item !== "string" || !LAYER_ORDER.includes(item as MapLayerKind)) {
+      failMap(`${label} 的图层名认不出（可选：${LAYER_ORDER.join(" / ")}）`);
+    }
+    const kind = item as MapLayerKind;
+    if (layerSeen.has(kind)) failMap(`图层重复：${kind}`);
+    layerSeen.add(kind);
+    layers.push(kind);
+  }
+  if (layers.length > 0) def.layers = layers;
+
+  const markers: MapMarker[] = [];
+  const markerIds = new Set<string>();
+  for (const [index, item] of ((root.markers ?? []) as unknown[]).entries()) {
+    const label = `markers[${index}]`;
+    const raw = asMapObject(item, label);
+    checkMapKeys(raw, ["id", "layer", "entity_ref", "x", "y", "label"], label);
+    const markerId = asMapString(raw.id, label, "id");
+    if (markerIds.has(markerId)) failMap(`标注 id 重复：${markerId}`);
+    markerIds.add(markerId);
+    if (typeof raw.layer !== "string" || !LAYER_ORDER.includes(raw.layer as MapLayerKind)) {
+      failMap(`${label} 的 layer 认不出（可选：${LAYER_ORDER.join(" / ")}）`);
+    }
+    const marker: MapMarker = {
+      id: markerId,
+      layer: raw.layer as MapLayerKind,
+      entityRef: asMapString(raw.entity_ref, label, "entity_ref"),
+      x: asMapNumber(raw.x, label, "x"),
+      y: asMapNumber(raw.y, label, "y"),
+    };
+    if (raw.label !== undefined && raw.label !== null) marker.label = asMapString(raw.label, label, "label");
+    markers.push(marker);
+  }
+  def.markers = markers;
+  return def;
 }
