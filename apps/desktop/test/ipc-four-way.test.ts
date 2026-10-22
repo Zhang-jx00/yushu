@@ -147,6 +147,13 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.view")).toBe(true);
   });
 
+  it("世界地图底图通道在四处齐备（R123 新增：只读，读成 data URL）", () => {
+    expect(channels.get("worldMapBase")).toBe("map:base");
+    expect(registered).toContain("worldMapBase");
+    expect(literals.invoke.has("map:base")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.base")).toBe(true);
+  });
+
   it("爽点看板通道在四处齐备（R73 新增）", () => {
     expect(channels.get("satisfactionBoard")).toBe("satisfaction:board");
     expect(registered).toContain("satisfactionBoard");

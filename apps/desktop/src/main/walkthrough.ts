@@ -294,6 +294,11 @@ export async function prepareProjectForDir(options: PrepareProjectOptions): Prom
   );
   await fs.writeFile(join(dir, ROUTING_CONFIG_PATH), routingYaml, "utf8");
 
+  // R123：预演项目里放一张底图（1×1 的 PNG）⇒ 地图面板能把底图铺在坐标空间上。
+  // 底图是**作者自己放进项目**的（地图登记不设表单），所以这一步是替作者做的那一次。
+  await fs.mkdir(join(dir, "world", "assets", "map"), { recursive: true });
+  await fs.writeFile(join(dir, "world", "assets", "map", "base.png"), Buffer.from(BASE_PNG_BASE64, "base64"));
+
   // T2-8 切片 B 预演：写入模拟崩溃标记（旧 pid → 挂载时按真实检出路走出「异常退出」结果）
   if (options.simulateCrash) {
     await fs.mkdir(join(dir, ".yushu"), { recursive: true });
@@ -586,6 +591,10 @@ const IMPORT_UI_TEXT = [
   "第三章 转",
   "剑光落下，风声停了。",
 ].join("\r\n");
+
+/** 1×1 的 PNG（R123 的预演底图：够小，只为验证"底图被铺在坐标空间上"这件事） */
+const BASE_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 /** 真 GBK 字节（`第一章 起 / 夜色压下来。/ 第二章 承 / 林渊拔剑而起。`，CRLF 行尾） */
 const IMPORT_UI_GBK = new Uint8Array([
@@ -5819,6 +5828,54 @@ const STEPS: StepDef[] = [
         ok: theme === 'dark' && markers.length > 0 && visible === markers.length,
         note: '深色对照：主题=' + theme + '，底色=' + bg + '，同一屏已就位（与 step83 成对）' +
           '；标注=' + markers.length + '，全部可见（错峰落位已结束）=' + visible,
+      };
+    `,
+  },
+
+  {
+    step: 85,
+    title: '世界观档案：世界地图的底图铺在坐标空间上（图片底图 + bounds，K08 §3.6）（M5/T5-1，R123）',
+    file: 'step85-map-base.png',
+    body: String.raw`
+      // 这一步证 R123：**底图**真的被铺在坐标空间上（K08 §3.6：地图 = 图片底图 + bounds）。
+      // 底图是作者自己放进项目的一张图（预演替作者放了一张 1×1 的 PNG），
+      // 真源 world/map.yaml 用 base_image 记它的相对路径。
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        'bounds: [[0, 0], [1000, 700]]',
+        'base_image: world/assets/map/base.png',
+        'layers: [place]',
+        'markers:',
+        '  - {id: m-base, layer: place, entity_ref: loc-map-probe, x: 250, y: 175}',
+        '',
+      ].join('\n');
+      const current = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      await window.yushu.doc.write('world/map.yaml', yaml, current === null ? undefined : current.hash);
+      // 面板只在挂载时取数 ⇒ 先去别的页再回来，强制重挂载（R68 的教训）
+      await tab('规则');
+      await tab('世界观档案');
+      const panel = await waitFor(() => document.querySelector('.map-panel') || null, 8000);
+      if (panel === null) return { ok: false, note: '地图面板没渲染出来' };
+      const img = await waitFor(() => document.querySelector('.map-panel .map-base') || null, 8000);
+      if (img === null) return { ok: false, note: '底图没被铺出来（.map-base 不在）' };
+      const scrim = document.querySelector('.map-panel .map-scrim');
+      const href = String(img.getAttribute('href') || '');
+      const w = Number(img.getAttribute('width'));
+      const h = Number(img.getAttribute('height'));
+      const caption = String((document.querySelector('.map-panel .map-caption') || {}).textContent || '');
+      const isDataUrl = href.indexOf('data:image/png') === 0;
+      const sized = w === 1000 && h === 700;
+      const mentioned = caption.indexOf('world/assets/map/base.png') >= 0;
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(250);
+      return {
+        ok: isDataUrl && sized && scrim !== null && mentioned,
+        note: '底图=' + (isDataUrl ? 'data URL（png）' : '（不是 data URL：' + href.slice(0, 24) + '）') +
+          '；铺的尺寸=' + w + '×' + h + '（按 bounds 铺满=' + String(sized) + '）' +
+          '；压暗层=' + String(scrim !== null) +
+          '；caption 点名了底图路径=' + String(mentioned),
       };
     `,
   },

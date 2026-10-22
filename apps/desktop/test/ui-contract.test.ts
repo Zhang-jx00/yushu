@@ -1369,6 +1369,54 @@ describe("R122：标注错峰落位（动效）+ 明暗逐页对照", () => {
   });
 });
 
+
+/**
+ * 世界地图**底图**（R123）的机器判据。
+ *
+ * 口径回源 K08 §3.6：地图 = **图片底图 + bounds**——底图是作者自己放进项目的一张图，
+ * 真源 `world/map.yaml` 的 `base_image` 记相对路径；坐标以图片像素 / 归一化坐标记录。
+ * 地图登记**不设表单**（与其它真源 YAML 同一处置）⇒ 这一段只负责**读与画**。
+ *
+ * 三条纪律落在判据上：
+ * ① 底图是**作者找的图，深浅不保证** ⇒ 底图上要压一层「地面色」，标注与网格才读得出来；
+ *    而这层压暗必须跟着主题换（primitive 层）⇒ 暗色下压的是暗的地面。
+ * ② 底图通道**只读**（路径防护走 gateway，K12 防路径穿越）。
+ * ③ 地点卡的信息**逐行对齐**——一行用「·」串起来的长串，在窄栏里会断成三行，读起来像碎片。
+ */
+describe("世界地图底图（R123）：铺在坐标空间上 + 压暗层 + 卡片排版", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+
+  it("底图铺在坐标空间上（按 bounds 铺满，不拉伸变形）", () => {
+    expect(panel, "面板没有画底图（<image>）").toMatch(/<image/);
+    expect(panel, "底图没按 bounds 铺满").toContain("preserveAspectRatio=\"none\"");
+    expect(panel, "底图的数据不是从通道来的").toContain("map.base()");
+  });
+
+  it("底图上要压一层地面色（作者找的图深浅不保证 ⇒ 标注与网格要读得出来）", () => {
+    expect(panel, "没有压暗层").toContain("map-scrim");
+    const scrim = /\.map-scrim \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    expect(scrim, "压暗层没有引用 primitive（换主题时它不会跟着换）").toContain("var(--c-map-scrim)");
+    // 暗色块里也必须覆盖这一层 ⇒ 暗色下压的是暗的地面
+    const dark = /:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    expect(dark, "暗色块没覆盖压暗层").toContain("--c-map-scrim");
+  });
+
+  it("底图通道是**只读**的（不写盘，路径防护走 gateway）", () => {
+    const base = /export async function worldMapBase\(([\s\S]*?)\n}\n/.exec(ops)?.[0] ?? "";
+    expect(base, "没找到 worldMapBase").not.toBe("");
+    for (const line of base.split("\n")) {
+      expect(line, "底图通道里出现了写盘调用").not.toMatch(/writeDoc|doc\.write|card\.write|deleteDoc/);
+    }
+    expect(base, "底图没有走 gateway 的路径防护").toContain("readBinary");
+  });
+
+  it("地点卡的信息**逐行对齐**（不再用「·」串成一长串）", () => {
+    expect(panel, "地点卡没有逐行对齐").toContain("map-card-rows");
+    expect(panel, "地点卡还在用「·」串信息").not.toMatch(/entityRef\} · /);
+  });
+});
+
 describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
   /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
   const stripComments = (src: string): string =>

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { WorldMapViewPayload } from "../../../src/shared/ipc";
+import type { WorldMapBasePayload, WorldMapViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { StateNote } from "./StateNote";
 
@@ -49,12 +49,27 @@ export function WorldMapPanel() {
   const [cardError, setCardError] = useState("");
   /** 是否已入场（R122：标注的错峰落位靠它触发） */
   const [entered, setEntered] = useState(false);
+  /** 底图（R123）：作者登记的那张图，读成 data URL 铺在坐标空间上 */
+  const [base, setBase] = useState<WorldMapBasePayload | null>(null);
 
   useEffect(() => {
     // 下一帧再切到已入场，浏览器才认得出这是一次**状态变化**，过渡才会跑
     // （R109 开屏入场用的就是这一招）。
     const raf = requestAnimationFrame(() => setEntered(true));
     return () => cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    api()
+      .map.base()
+      .then((payload) => {
+        if (alive) setBase(payload);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -169,6 +184,24 @@ export function WorldMapPanel() {
             role="img"
             aria-label={`世界地图坐标空间：${shown.length} 个标注，${map.layers.length} 个图层`}
           >
+            {base !== null && base.dataUrl !== null && (
+              <>
+                {/* 底图：作者登记的那张图，按 bounds 铺满（K08 §3.6：底图 + bounds）。
+                    preserveAspectRatio=none ⇒ 图片像素与画布像素一一对应。 */}
+                <image
+                  className="map-base"
+                  href={base.dataUrl}
+                  x={0}
+                  y={0}
+                  width={width}
+                  height={height}
+                  preserveAspectRatio="none"
+                />
+                {/* 压暗层：底图是作者自己找的图，深浅不保证 ⇒ 压一层「地面色」
+                    把底图拉到与界面同一档，标注与网格才读得出来。 */}
+                <rect className="map-scrim" x={0} y={0} width={width} height={height} />
+              </>
+            )}
             {Array.from({ length: GRID_STEPS + 1 }, (_, index) => {
               const x = (width * index) / GRID_STEPS;
               const y = (height * index) / GRID_STEPS;
@@ -220,7 +253,8 @@ export function WorldMapPanel() {
           </svg>
           <div className="map-caption muted">
             坐标空间：图片像素边界 {map.bounds === null ? "（无有效边界，坐标未产出）" : `${map.bounds.x0},${map.bounds.y0} → ${map.bounds.x1},${map.bounds.y1}`}
-            ；底图由作者上传（另做一段）
+            ；底图：{base !== null && base.path !== null ? `${base.path}${base.size === null ? "" : `（${base.size.width}×${base.size.height}）`}` : "没有登记（world/map.yaml 的 base_image）"}
+            {base !== null && base.exists && base.dataUrl === null ? `；${base.note}` : ""}
           </div>
         </div>
 
@@ -230,13 +264,33 @@ export function WorldMapPanel() {
           ) : (
             <div className="map-card">
               <div className="map-card-name">{selectedMarker.card?.name ?? selectedMarker.entityName}</div>
-              <div className="map-card-meta muted">
-                {selectedMarker.entityRef} · {LAYER_LABEL[selectedMarker.layer] ?? selectedMarker.layer}
-                {selectedMarker.card === null ? " · 绑定的实体已不存在" : ` · ${selectedMarker.card.type}`}
-              </div>
-              {selectedMarker.card !== null && selectedMarker.card.aliases.length > 0 && (
-                <div className="map-card-meta muted">别名：{selectedMarker.card.aliases.join(" / ")}</div>
-              )}
+              <dl className="map-card-rows">
+                <div className="map-card-row">
+                  <dt>id</dt>
+                  <dd>{selectedMarker.entityRef}</dd>
+                </div>
+                <div className="map-card-row">
+                  <dt>图层</dt>
+                  <dd>{LAYER_LABEL[selectedMarker.layer] ?? selectedMarker.layer}</dd>
+                </div>
+                {selectedMarker.card === null ? (
+                  <div className="map-card-row">
+                    <dt>实体</dt>
+                    <dd className="map-card-warn">绑定的实体已不存在</dd>
+                  </div>
+                ) : (
+                  <div className="map-card-row">
+                    <dt>类型</dt>
+                    <dd>{selectedMarker.card.type}</dd>
+                  </div>
+                )}
+                {selectedMarker.card !== null && selectedMarker.card.aliases.length > 0 && (
+                  <div className="map-card-row">
+                    <dt>别名</dt>
+                    <dd>{selectedMarker.card.aliases.join(" / ")}</dd>
+                  </div>
+                )}
+              </dl>
               {selectedMarker.card !== null && (
                 <button
                   type="button"

@@ -27,6 +27,10 @@
   --c-heat-1: #d9e8d4;
   --c-heat-2: #a9cfa4;
   --c-heat-3: #6faa74;
+  /* 地图底图的压暗层（R123）：底图是作者自己找的图，深浅不保证 ⇒
+     压一层「地面色」把底图拉到与界面同一档，标注与网格才读得出来。
+     放在 primitive 层 ⇒ 换主题时它跟着换（暗色下压的是暗的地面）。 */
+  --c-map-scrim: rgba(247, 244, 238, 0.45);
 
   /* 第二层 **semantic（用途）**：全部引用第一层，不写字面色值 */
   --bg: var(--c-paper);
@@ -205,6 +209,8 @@ body {
    朱色**降饱和 + 提亮**（饱和度 0.530 → 0.372）：御书的朱是落款印的颜色，不是警示灯。 */
 :root[data-theme="dark"] {
   --c-paper: #1e1b18;
+  /* 压暗层跟着换（暗色下压的是暗的地面，亮底图才拉得下来） */
+  --c-map-scrim: rgba(30, 27, 24, 0.45);
   --c-paper-raised: #26221d;
   --c-paper-sunken: #16130f;
   --c-ink: #ece4d7;
@@ -3528,6 +3534,16 @@ table,
   border-radius: var(--radius-4);
 }
 
+.map-base {
+  /* 底图铺满整个坐标空间（preserveAspectRatio=none 在 <image> 上给出） */
+  opacity: 1;
+}
+
+.map-scrim {
+  fill: var(--c-map-scrim);
+  pointer-events: none;
+}
+
 .map-grid line {
   stroke: var(--border);
   stroke-width: 1;
@@ -3680,6 +3696,37 @@ table,
 .map-card-meta {
   margin-top: var(--space-2);
   font-size: var(--text-sm);
+}
+
+/* 地点卡的信息**逐行对齐**（R123）：原先是一行用「·」串起来的长串，
+   在窄栏里会断成三行，读起来像散掉的碎片。 */
+.map-card-rows {
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.map-card-row {
+  display: grid;
+  grid-template-columns: 3em minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: var(--text-sm);
+}
+
+.map-card-row dt {
+  color: var(--muted);
+}
+
+.map-card-row dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.map-card-warn {
+  color: var(--warn);
 }
 
 .map-card-open {
