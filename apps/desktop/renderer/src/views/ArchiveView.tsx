@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CardReadResult, CardSummary, ForeshadowBoardPayload, NamingKindPayload, NamingResultPayload, TimelineViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { cardTypeLabel, layerLabel } from "../card-labels";
@@ -45,6 +45,18 @@ export function ArchiveView({
   const [linkedEvent, setLinkedEvent] = useState<string | null>(null);
   /** 地图上的锚点清单（由地图面板上报；时间线据此给「地图上有锚点」的入口） */
   const [mapAnchors, setMapAnchors] = useState<{ id: string; eventRef: string }[]>([]);
+  /**
+   * R133：**地点**方向的联动（K08 §3.8「点 marker 跳到时间轴对应事件」）。
+   *
+   * 与 `linkedEvent` **不是两套视图，是两件不同的事**：一个是"聚焦的事件"，一个是"聚焦的地点"
+   * ⇒ 两者不会互相矛盾（一个事件可以就发生在这个地点上，两个同时被聚焦是正常的）。
+   * 真正会矛盾的是"同一个东西两套状态"（R132 那条纪律管的是这个）。
+   */
+  const [linkedPlace, setLinkedPlace] = useState<string | null>(null);
+  /** 地图上的地点实体清单（时间线据此判断「这个地点在地图上」） */
+  const [mapPlaces, setMapPlaces] = useState<string[]>([]);
+  /** 地图那边刚点了哪个标注（地点名 + 实体 id） */
+  const [pickedPlace, setPickedPlace] = useState<{ entityRef: string; entityName: string } | null>(null);
 
   /** 地图那边点锚点 ⇒ 选事件 + 把时间线那一行滚到眼前 */
   const pickAnchor = useCallback((eventRef: string) => {
@@ -58,6 +70,21 @@ export function ArchiveView({
   /** 时间线那边点「地图上有锚点」⇒ 选事件 + 把地图滚到眼前 */
   const jumpToMap = useCallback((eventId: string) => {
     setLinkedEvent(eventId);
+    requestAnimationFrame(() => {
+      const panel = document.querySelector(".map-panel");
+      if (panel !== null) panel.scrollIntoView({ block: "center" });
+    });
+  }, []);
+
+  /** 地图那边点标注 ⇒ 记住这个地点（R133：父组件据此说"这个地点在时间线上有 N 条"） */
+  const pickMarker = useCallback((entityRef: string, entityName: string) => {
+    setPickedPlace({ entityRef, entityName });
+    setLinkedPlace(entityRef);
+  }, []);
+
+  /** 时间线那边点「这个地点在地图上」⇒ 选地点 + 把地图滚到眼前 */
+  const jumpToPlace = useCallback((entityRef: string) => {
+    setLinkedPlace(entityRef);
     requestAnimationFrame(() => {
       const panel = document.querySelector(".map-panel");
       if (panel !== null) panel.scrollIntoView({ block: "center" });
@@ -107,6 +134,20 @@ export function ArchiveView({
       alive = false;
     };
   }, [calendar]);
+
+  /**
+   * R133：刚刚点中的那个地点，在时间线上有哪几条事件（`place_ref` 对上号的）。
+   *
+   * 为什么要在**地图面板旁边**说这件事：点标注的**主**含义是"打开那张地点卡"（K08 §3.7），
+   * 若点一下就把页面滚到时间线，作者手里的卡就滚没了 ⇒ 两头都在眼前才接得上。
+   */
+  const placeEvents = useMemo(
+    () =>
+      (timeline?.rows ?? []).filter(
+        (row) => pickedPlace !== null && row.placeRef !== null && row.placeRef === pickedPlace.entityRef,
+      ),
+    [timeline, pickedPlace],
+  );
 
   const generateNames = async () => {
     try {
@@ -492,7 +533,11 @@ export function ArchiveView({
                 <tbody>
                   {timeline.rows.map((row) => {
                     const anchor = mapAnchors.find((item) => item.eventRef === row.id);
-                    const linked = linkedEvent === row.id;
+                    const placeRef = row.placeRef;
+                    const placeOnMap = placeRef !== null && mapPlaces.indexOf(placeRef) >= 0;
+                    const linked =
+                      linkedEvent === row.id ||
+                      (linkedPlace !== null && placeRef !== null && linkedPlace === placeRef);
                     return (
                       <tr key={row.id} className={linked ? "is-linked" : undefined} data-event={row.id}>
                         <td>{row.displayYear ?? "历法未识别"}</td>
@@ -507,6 +552,21 @@ export function ArchiveView({
                             >
                               地图上有锚点
                             </button>
+                          )}
+                          {/* 地点联动（R133）：这个事件发生的地点在地图上 ⇒ 给一个入口跳过去 */}
+                          {placeOnMap && (
+                            <button
+                              type="button"
+                              className="timeline-map-link"
+                              onClick={() => jumpToPlace(placeRef ?? "")}
+                            >
+                              这个地点在地图上
+                            </button>
+                          )}
+                          {/* 地点引用在、但地图上没这个地点 ⇒ **说出来**（不静默：
+                              可能是作者写错了 id，也可能是他还没把这个地点标上） */}
+                          {placeRef !== null && !placeOnMap && (
+                            <span className="muted"> 地点 {placeRef}（地图上没这个地点）</span>
                           )}
                         </td>
                         <td>{row.year}</td>
@@ -528,7 +588,29 @@ export function ArchiveView({
       <RelationGraphPanel />
       <ChronologyPanel />
       <SatisfactionPanel />
-      <WorldMapPanel linkedEvent={linkedEvent} onAnchorPick={pickAnchor} onAnchors={setMapAnchors} />
+      <WorldMapPanel
+        linkedEvent={linkedEvent}
+        linkedPlace={linkedPlace}
+        onAnchorPick={pickAnchor}
+        onMarkerPick={pickMarker}
+        onAnchors={setMapAnchors}
+        onPlaces={setMapPlaces}
+      />
+      {/* R133：点标注后，在地图面板**旁边**说清"这个地点在时间线上有哪几条"——
+          两头都在眼前才接得上（点一下就把页面滚走，作者手里的卡也就滚没了）。 */}
+      {pickedPlace !== null && placeEvents.length > 0 && (
+        <div className="map-place-events">
+          「{pickedPlace.entityName}」在时间线上有 {placeEvents.length} 条事件：
+          {placeEvents.map((row) => row.title).join("、")}
+          <button
+            type="button"
+            className="timeline-map-link"
+            onClick={() => jumpToPlace(pickedPlace.entityRef)}
+          >
+            跳到时间线
+          </button>
+        </div>
+      )}
       </div>
     </div>
   );

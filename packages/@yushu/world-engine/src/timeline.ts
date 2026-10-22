@@ -24,6 +24,14 @@ export type TimelineEventKind = (typeof EVENT_KINDS)[number];
 
 export interface TimelineEvent extends WorldEvent {
   kind?: TimelineEventKind;
+  /**
+   * 事件发生的**地点实体 id**（K08 §3.8 的 `place_ref`）。
+   *
+   * 与 `location`（自由文本，写给人看的地名）**是两回事**：这一项是**引用**，
+   * 才能和地图上的标注（`entity_ref`）对上号 ⇒ 才有"点标注跳到那条事件"的联动。
+   * 缺省 = 这条事件没有落到具体地点（不猜）。
+   */
+  placeRef?: string;
 }
 
 export interface Calendar {
@@ -66,6 +74,8 @@ export interface TimelineViewRow {
   displayYear: string | null;
   kind: TimelineEventKind | null;
   location: string | null;
+  /** 事件发生的地点实体 id（K08 §3.8 的 `place_ref`；没有 = null，不猜） */
+  placeRef: string | null;
 }
 
 function fail(message: string): never {
@@ -148,7 +158,7 @@ export function parseTimelineFile(text: string): TimelineFile {
   for (const [index, item] of ((root.events ?? []) as unknown[]).entries()) {
     const label = `events[${index}]`;
     const raw = asObject(item, label);
-    checkKeys(raw, ["id", "title", "year", "timeline", "participants", "location", "causes", "effects", "pov_viewpoints", "kind"], label);
+    checkKeys(raw, ["id", "title", "year", "timeline", "participants", "location", "place_ref", "causes", "effects", "pov_viewpoints", "kind"], label);
     const id = asString(raw.id, label, "id");
     if (eventIds.has(id)) fail(`事件 id 重复：${id}（时间线按 id 定位，撞号等于两条并成一条）`);
     eventIds.add(id);
@@ -165,6 +175,8 @@ export function parseTimelineFile(text: string): TimelineFile {
       effects: asIdList(raw.effects, label, "effects"),
     };
     if (raw.location !== undefined && raw.location !== null) event.location = asString(raw.location, label, "location");
+    // place_ref：事件发生的**地点实体 id**（K08 §3.8）⇒ 与地图标注的 entity_ref 对得上号
+    if (raw.place_ref !== undefined && raw.place_ref !== null) event.placeRef = asString(raw.place_ref, label, "place_ref");
     if (raw.kind !== undefined && raw.kind !== null) {
       if (!(EVENT_KINDS as readonly string[]).includes(raw.kind as string)) {
         fail(`${label}（${id}）的 kind「${String(raw.kind)}」非法值（可选：${EVENT_KINDS.join("/")}）`);
@@ -211,6 +223,7 @@ export function serializeTimelineFile(doc: TimelineFile): string {
       `    participants: ${JSON.stringify(event.participants)}`,
     );
     if (event.location !== undefined) lines.push(`    location: ${event.location}`);
+    if (event.placeRef !== undefined) lines.push(`    place_ref: ${event.placeRef}`);
     if (event.kind !== undefined) lines.push(`    kind: ${event.kind}`);
     lines.push(`    causes: ${JSON.stringify(event.causes)}`, `    effects: ${JSON.stringify(event.effects)}`);
     if (event.pov_viewpoints !== undefined) lines.push(`    pov_viewpoints: ${JSON.stringify(event.pov_viewpoints)}`);
@@ -266,6 +279,7 @@ export function buildTimelineView(
       displayYear: calendar === null ? null : formatCalendarYear(event.year, calendar),
       kind: event.kind ?? null,
       location: event.location ?? null,
+      placeRef: event.placeRef ?? null,
     };
   });
   return { rows, findings };

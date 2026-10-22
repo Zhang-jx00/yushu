@@ -3266,6 +3266,8 @@ const STEPS: StepDef[] = [
         '    participants: []',
         '    causes: []',
         '    effects: []',
+        // R133：事件发生的**地点实体 id**（K08 §3.8 的 place_ref）⇒ 与地图上的标注对得上号
+        '    place_ref: loc-map-probe',
         '    pov_viewpoints:',
         '      - culture: 官修史',
         '        account: 王师一战而定',
@@ -6404,6 +6406,56 @@ const STEPS: StepDef[] = [
           '；锚点自身高亮=' + String(anchorLinked) +
           '；点时间线入口后地图在视野内=' + String(inView) +
           '；锚点仍高亮（同一件事）=' + String(anchorLinkedAfter),
+      };
+    `,
+  },
+  {
+    step: 95,
+    title: '世界观档案：地点方向的联动（点标注 ⇒ 这个地点在时间线上有哪几条；反过来也跳得过去）（R133）',
+    file: 'step95-place-link.png',
+    body: String.raw`
+      // 这一步证 R133 的**地点**方向（K08 §3.8「点 marker 跳到时间轴对应事件」）：
+      // ① 点地图上的标注 ⇒ 面板**旁边**说清「这个地点在时间线上有 N 条事件」（地点卡还开着，不滚走）；
+      // ② 时间线那一行给「这个地点在地图上」的入口 ⇒ 点它能跳到地图、那个标注高亮。
+      await tab('世界观档案');
+      await sleep(700);
+      // 先把联动状态归零（R132 的教训：重试路径必须从干净状态起跑）
+      await tab('规则');
+      await tab('世界观档案');
+      await sleep(700);
+      const marker = await waitFor(() => document.querySelector('.map-panel .map-marker[data-marker]') || null, 8000);
+      if (marker === null) return { ok: false, note: '地图上没有标注（先跑 step81）' };
+      marker.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await sleep(500);
+      const block = document.querySelector('.map-place-events');
+      const placeText = block === null ? '' : String(block.textContent || '');
+      const eventsOnPlace = /在时间线上有 (\d+) 条事件/.exec(placeText);
+      // 点标注 ⇒ 时间线里那一地点的行应当被高亮（两个方向一眼对得上）
+      const placeRows = [...document.querySelectorAll('.timeline-table tr.is-linked')];
+      const placeLinkBtn = [...document.querySelectorAll('.timeline-table .timeline-map-link')]
+        .find((b) => String(b.textContent || '').indexOf('这个地点在地图上') >= 0) || null;
+      // 反方向：点时间线里的「这个地点在地图上」⇒ 地图进视野、那个标注高亮
+      let mapInView = false;
+      let markerLinked = false;
+      if (placeLinkBtn !== null) {
+        placeLinkBtn.click();
+        await sleep(600);
+        const mapPanel = document.querySelector('.map-panel');
+        mapInView = mapPanel !== null && (() => {
+          const r = mapPanel.getBoundingClientRect();
+          return r.bottom > 0 && r.top < window.innerHeight;
+        })();
+        markerLinked = [...document.querySelectorAll('.map-panel .map-marker.is-linked')].length > 0;
+      }
+      const svg = document.querySelector('.map-panel .map-svg');
+      if (svg !== null) svg.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: block !== null && eventsOnPlace !== null && Number(eventsOnPlace[1]) > 0 &&
+          placeRows.length > 0 && placeLinkBtn !== null && mapInView && markerLinked,
+        note: '点标注后地图旁说「' + placeText.slice(0, 44) + '」；时间线里高亮的行=' + String(placeRows.length) +
+          '；时间线的「这个地点在地图上」入口=' + String(placeLinkBtn !== null) +
+          '；点它后地图在视野内=' + String(mapInView) + '；标注高亮=' + String(markerLinked),
       };
     `,
   },

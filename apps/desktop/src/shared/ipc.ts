@@ -2785,6 +2785,8 @@ export interface TimelineRowPayload {
   displayYear: string | null;
   kind: string | null;
   location: string | null;
+  /** 事件发生的**地点实体 id**（K08 §3.8 的 `place_ref`；没有 = null，不猜） */
+  placeRef: string | null;
 }
 
 export interface TimelineFindingPayload {

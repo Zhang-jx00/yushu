@@ -41,10 +41,13 @@ const GRID_STEPS = 5;
 /**
  * 世界地图面板（M5 / T5-1，R120）。
  *
- * **联动三个 props 都是必填**（R132 时空联动）：
+ * **联动几个 props 都是必填**（R132 时空联动 / R133 地点联动）：
  * - `linkedEvent`：被选中的事件 ⇒ 对应的锚点高亮；
+ * - `linkedPlace`：被选中的地点实体 id ⇒ 对应的标注高亮；
  * - `onAnchorPick`：点锚点 ⇒ 上报它挂的事件（父组件去时间线那边定位）；
- * - `onAnchors`：把锚点清单上报给父组件（父组件要知道哪个事件在地图上）。
+ * - `onMarkerPick`：点标注 ⇒ 上报它绑的地点实体（父组件知道那条事件在这个地点）；
+ * - `onAnchors`：把锚点清单上报给父组件（父组件要知道哪个事件在地图上）；
+ * - `onPlaces`：把地图上的地点实体清单上报给父组件（父组件据此判断"这个地点在地图上"）。
  *
  * 为什么必填而不是可选：锚点**始终**是键盘可达的按钮（契约 §6 的键盘债是 0），
  * 若"有时能点有时不能点"，扫描器与作者都要靠猜 ⇒ 这里让组件只有一个形态。
@@ -52,10 +55,16 @@ const GRID_STEPS = 5;
 export function WorldMapPanel(props: {
   /** 被选中的事件（时间线那边点过来的）⇒ 对应的锚点高亮 */
   linkedEvent: string | null;
+  /** 被选中的地点实体 id ⇒ 对应的标注高亮 */
+  linkedPlace: string | null;
   /** 点锚点 ⇒ 上报它挂的事件（父组件去时间线那边定位） */
   onAnchorPick: (eventRef: string) => void;
+  /** 点标注 ⇒ 上报它绑的地点实体（父组件据此知道"这个地点在时间线上"） */
+  onMarkerPick: (entityRef: string, entityName: string) => void;
   /** 锚点清单上报给父组件（父组件要知道哪个事件在地图上） */
   onAnchors: (anchors: { id: string; eventRef: string }[]) => void;
+  /** 地图上的地点实体清单上报给父组件 */
+  onPlaces: (entityRefs: string[]) => void;
 }) {
   const [map, setMap] = useState<WorldMapViewPayload | null>(null);
   const [error, setError] = useState("");
@@ -140,6 +149,12 @@ export function WorldMapPanel(props: {
     if (map === null) return;
     props.onAnchors(map.anchors.map((anchor) => ({ id: anchor.id, eventRef: anchor.eventRef })));
   }, [map, props.onAnchors]);
+
+  /** 地图上的**地点实体清单**（R133）：父组件据此判断"这个事件发生的地点在地图上" */
+  useEffect(() => {
+    if (map === null) return;
+    props.onPlaces([...new Set(map.markers.map((marker) => marker.entityRef))]);
+  }, [map, props.onPlaces]);
 
   /** 点锚点 ⇒ 告诉父组件它挂的事件（父组件去时间线那边定位并高亮） */
   const pickAnchor = useCallback(
@@ -274,6 +289,8 @@ export function WorldMapPanel(props: {
               const cx = Math.min(Math.max(marker.nx, 0), 1) * width;
               const cy = Math.min(Math.max(marker.ny, 0), 1) * height;
               const isSelected = marker.id === selected;
+              // R133：被时间线那边选中的地点 ⇒ 这个标注也高亮（两个方向一眼对得上）
+              const placeLinked = props.linkedPlace !== null && props.linkedPlace === marker.entityRef;
               return (
                 <g
                   key={marker.id}
@@ -284,6 +301,7 @@ export function WorldMapPanel(props: {
                   className={
                     "map-marker" +
                     (isSelected ? " is-selected" : "") +
+                    (placeLinked ? " is-linked" : "") +
                     (inside ? "" : " is-outside")
                   }
                   data-layer={marker.layer}
@@ -293,7 +311,11 @@ export function WorldMapPanel(props: {
                   role="button"
                   tabIndex={0}
                   aria-label={`标注 ${marker.label}（${LAYER_LABEL[marker.layer] ?? marker.layer}）`}
-                  onClick={() => selectMarker(marker.id)}
+                  onClick={() => {
+                    selectMarker(marker.id);
+                    // R133：点标注 ⇒ 顺带上报它绑的地点实体（父组件据此知道"这个地点在时间线上"）
+                    props.onMarkerPick(marker.entityRef, marker.entityName);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();

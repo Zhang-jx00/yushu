@@ -1832,6 +1832,46 @@ describe("时空联动（R132）：锚点 ↔ 时间线双向定位", () => {
   });
 });
 
+/**
+ * 地点方向的联动（R133；K08 §3.8「点 marker 跳到时间轴对应事件」）。
+ *
+ * 前提是**事件能引用地点实体**（K08 的 `place_ref`）——
+ * 时间线原先的 `location` 是**自由文本**（写给人看的地名）⇒ 与地图标注对不上号。
+ */
+describe("地点方向的联动（R133）：事件能引用地点实体（place_ref）", () => {
+  const engine = readFileSync(join(ROOT, "packages", "@yushu", "world-engine", "src", "timeline.ts"), "utf8");
+  const archive = readFileSync(join(VIEW_ROOT, "views", "ArchiveView.tsx"), "utf8");
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const shared = readFileSync(join(ROOT, "apps", "desktop", "src", "shared", "ipc.ts"), "utf8");
+
+  it("时间线事件能引用**地点实体**（`place_ref`；严格解析 + 投影 + 序列化）", () => {
+    // 认**允许键列表**里的那一个名字，不是"文件里出现过 place_ref 这几个字"——
+    // 后者会把"解析循环里还留着、但允许键没了"当成有支持（实测：那样判据是绿的）
+    expect(engine, "真源的允许键列表里没有 place_ref").toMatch(/\["id"[^\]]*"place_ref"/);
+    expect(engine, "投影里没有带出 placeRef").toMatch(/placeRef: event\.placeRef \?\? null/);
+    expect(shared, "载荷里没有 placeRef").toContain("placeRef");
+  });
+
+  it("地图把**地点实体清单**上报，界面据此判断「这个地点在地图上」", () => {
+    // 认**真的调用**（`props.onPlaces(...)`），不认 prop 名——prop 名留着、调用没了，界面照样瞎
+    expect(panel, "地图面板没有上报地点清单").toMatch(/props\.onPlaces\(\[\.\.\.new Set\(map\.markers/);
+    expect(panel, "地图面板没有上报点了哪个标注").toMatch(/props\.onMarkerPick\(marker\.entityRef/);
+    expect(archive, "时间线没有用地点清单").toContain("mapPlaces");
+    // 认**那个按钮**（onClick + 文案），不认文案本身——文案留着、按钮没了，入口就没了
+    expect(archive, "时间线没有「这个地点在地图上」的入口").toMatch(
+      /onClick=\{\(\) => jumpToPlace\(placeRef \?\? ""\)\}[\s\S]{0,80}这个地点在地图上/,
+    );
+  });
+
+  it("点标注 ⇒ 地图面板**旁边**说清这个地点在时间线上有哪几条（不把页面滚走）", () => {
+    // 认**那整块**（条件 + 类名），不认类名——类名留着、条件改成 false，作者就什么也看不到
+    expect(archive, "点标注后没有说清地点与事件的关系").toMatch(
+      /\{pickedPlace !== null && placeEvents\.length > 0 && \([\s\S]{0,80}map-place-events/,
+    );
+    expect(archive, "没有把地点与事件的关联算出来").toContain("placeEvents");
+  });
+});
+
 describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
   /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
   const stripComments = (src: string): string =>

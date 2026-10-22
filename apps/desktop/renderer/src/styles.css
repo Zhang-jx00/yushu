@@ -3781,6 +3781,21 @@ table,
   stroke-width: 3;
 }
 
+/* R133：被时间线那边选中的**地点** ⇒ 地图上那个标注也高亮（两个方向一眼对得上） */
+.map-marker.is-linked {
+  stroke-width: 2.5;
+}
+
+/* R133：点标注后，地图面板旁边说清"这个地点在时间线上有哪几条" */
+.map-place-events {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-4);
+  background: var(--panel-2);
+  font-size: var(--text-sm);
+}
+
 .timeline-table tr.is-linked td {
   background: var(--panel-2);
 }
