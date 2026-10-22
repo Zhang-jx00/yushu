@@ -2792,8 +2792,15 @@ select {
   .disclosure-caret,
   .disclosure-body,
   .slot-table tbody tr,
+  .map-marker-in,
   .tab {
     transition-duration: 0.01ms;
+  }
+
+  /* R122：错峰的**延迟**也得归零——只归零时长的话，标注会一盏盏闪出来
+     （那比不闪更让人不安）。 */
+  .map-marker-in {
+    transition-delay: 0s;
   }
 
   /* 开屏入场（R109）：过渡也要被关掉——只关 animation 等于没关（R63 实测踩过）。
@@ -3528,6 +3535,24 @@ table,
 }
 
 /* 标注：形状按图层分（色盲与黑白打印都还能分得开），颜色只用来做"选中"这一件事。 */
+/* 标注的**错峰落位**（R122）：一串标注依次浮现，而不是一起啪地出现。
+   只动 **opacity**（transform 留给悬停/选中——动它会和反馈要跟手打架）；
+   错峰放在**外层 wrapper** 上：transition-delay 会作用在该元素的**所有**过渡上，
+   放在标注自己身上会连悬停的放大一起拖慢（反馈必须跟手）。
+   wrapper 只有 opacity 一条过渡 ⇒ 延迟只影响它。 */
+.map-marker-in {
+  opacity: 0;
+  transition: opacity var(--motion-enter) var(--ease-enter);
+  /* 错峰步长 = **进场时长的四分之一**：一串标注依次浮现，
+     而整串的时长正好是一个「进场」（4 个标注 = 4 × 60ms = 240ms）。
+     步长是**既有别名**算出来的，不新增时长值——R111 的纪律：时长只有一个来源。 */
+  transition-delay: calc(var(--i) * var(--motion-enter) / 4);
+}
+
+.map-svg.is-entered .map-marker-in {
+  opacity: 1;
+}
+
 .map-marker {
   cursor: pointer;
   fill: var(--accent);

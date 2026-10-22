@@ -1317,6 +1317,58 @@ describe("暗色主题（R121）：取值实测 + 只改 primitive 一层", () =
   });
 });
 
+
+/**
+ * 标注的**错峰落位**与明暗逐页对照（R122）的机器判据。
+ *
+ * 为什么要有它：R121 把暗色色板落地了，但**只在预演那几页看过**——
+ * `docs/13` §5 明写要「逐页截图对照」，不能只靠对比度数字自证。
+ * 这一轮补上成对的对照步骤（浅色 / 深色，同一屏同一滚动位置），并把"错峰落位"这条动效钉住。
+ *
+ * 判据要点：动效这条最容易写坏——**错峰的延迟放在标注自己身上会连悬停的放大一起拖慢**
+ * （反馈必须跟手，R111 的口径），所以它必须落在**只带 opacity 一条过渡的 wrapper** 上。
+ */
+describe("R122：标注错峰落位（动效）+ 明暗逐页对照", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const walk = readFileSync(new URL("../src/main/walkthrough.ts", import.meta.url), "utf8");
+
+  it("错峰落在**只动 opacity 的 wrapper** 上（不碰 transform —— 那是悬停/选中的反馈）", () => {
+    // 锚点收窄到"入场那条规则"：reduced-motion 块里也有一个 .map-marker-in
+    // （只把延迟归零），不收窄的话这条判据量到的会是那一条。
+    const block = /\.map-marker-in \{\n  opacity: 0;[\s\S]*?\n\}/.exec(css)?.[0] ?? "";
+    expect(block, "styles.css 里没有 .map-marker-in（错峰落位不在）").not.toBe("");
+    expect(block, "错峰没有动 opacity").toContain("opacity");
+    expect(block, "错峰不该动 transform（会和悬停反馈打架）").not.toContain("transform");
+    expect(block, "错峰的延迟要按序号错开").toContain("calc(var(--i) * var(--motion-enter) / 4)");
+    // 时长走**进场族**（--motion-enter），不是随手写个毫秒
+    expect(block, "错峰的时长没走进场族").toContain("var(--motion-enter)");
+  });
+
+  it("系统要求减少动效时，错峰的**时长与延迟都归零**（只归零时长的话标注会一盏盏闪出来）", () => {
+    const block = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    expect(block, "没找到 prefers-reduced-motion 块").not.toBe("");
+    // 只查"块里出现过 .map-marker-in"是**恒绿的**：独立的 `transition-delay: 0s` 规则
+    // 里也有这个名字 ⇒ 把它从**时长归零的选择器列表**里摘掉也照样绿（变异 M3 实测抓到）。
+    // 真正的要求是两条都在：**时长**归零（0.01ms）+ **延迟**归零（0s）。
+    const selectorList = (block.split("transition-duration: 0.01ms")[0] ?? "");
+    expect(selectorList, "减少动效时没把 .map-marker-in 的**时长**也归零（标注会一盏盏闪出来）").toContain(
+      ".map-marker-in",
+    );
+    expect(block, "减少动效时错峰的延迟没归零").toContain("transition-delay: 0s");
+  });
+
+  it("面板确实用了 wrapper 与入场状态（不是只写了 CSS 没人用）", () => {
+    expect(panel).toContain("map-marker-in");
+    expect(panel).toContain("is-entered");
+    expect(panel).toContain("requestAnimationFrame");
+  });
+
+  it("明暗对照是**成对**的（同一屏，浅色 + 深色各一张）", () => {
+    expect(walk).toContain("step83-compare-light.png");
+    expect(walk).toContain("step84-compare-dark.png");
+  });
+});
+
 describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
   /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
   const stripComments = (src: string): string =>

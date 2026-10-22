@@ -47,6 +47,15 @@ export function WorldMapPanel() {
   /** 地点卡正文（点「打开地点卡」后取回的第一段） */
   const [cardBody, setCardBody] = useState("");
   const [cardError, setCardError] = useState("");
+  /** 是否已入场（R122：标注的错峰落位靠它触发） */
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    // 下一帧再切到已入场，浏览器才认得出这是一次**状态变化**，过渡才会跑
+    // （R109 开屏入场用的就是这一招）。
+    const raf = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -155,7 +164,7 @@ export function WorldMapPanel() {
       <div className="map-layout">
         <div className="map-canvas-wrap">
           <svg
-            className="map-svg"
+            className={"map-svg" + (entered ? " is-entered" : "")}
             viewBox={`0 0 ${width} ${height}`}
             role="img"
             aria-label={`世界地图坐标空间：${shown.length} 个标注，${map.layers.length} 个图层`}
@@ -178,6 +187,10 @@ export function WorldMapPanel() {
               return (
                 <g
                   key={marker.id}
+                  className="map-marker-in"
+                  style={{ "--i": index } as React.CSSProperties}
+                >
+                <g
                   className={
                     "map-marker" +
                     (isSelected ? " is-selected" : "") +
@@ -185,7 +198,6 @@ export function WorldMapPanel() {
                   }
                   data-layer={marker.layer}
                   data-marker={marker.id}
-                  style={{ "--i": index } as React.CSSProperties}
                   /* 键盘可达（R110）：SVG 里放不了 HTML 按钮 ⇒ 这个 <g> 自己当按钮
                      （role + tabIndex + 回车/空格），并给它一个可读的名字。 */
                   role="button"
@@ -201,6 +213,7 @@ export function WorldMapPanel() {
                 >
                   <title>{`${marker.label}（${LAYER_LABEL[marker.layer] ?? marker.layer}）`}</title>
                   <MarkerShape layer={marker.layer} cx={cx} cy={cy} />
+                </g>
                 </g>
               );
             })}
