@@ -5928,7 +5928,19 @@ const STEPS: StepDef[] = [
         .filter((item) => item.box.width > 0 && item.box.height > 0);
       // **内容有没有溢出面板**：面板被压扁时，它自己的矩形仍不相交（只量矩形会漏）
       // ⇒ 内容会探出卡片、压住下一个 ⇒ 要量 scrollHeight 与 clientHeight 的差。
-      const spilling = panels.filter((el) => el.scrollHeight > el.clientHeight + 2);
+      const spilling = panels.filter((el) => {
+        const pb = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        const padTop = parseFloat(cs.paddingTop) || 0;
+        const padBottom = parseFloat(cs.paddingBottom) || 0;
+        const top = pb.top + padTop - 2;
+        const bottom = pb.bottom - padBottom + 2;
+        return [...el.children].some((ch) => {
+          const cb = ch.getBoundingClientRect();
+          if (cb.height <= 0) return false;
+          return cb.bottom > bottom || cb.top < top;
+        });
+      });
       const overlaps = [];
       for (let i = 0; i < boxes.length; i += 1) {
         for (let j = i + 1; j < boxes.length; j += 1) {
@@ -5957,6 +5969,70 @@ const STEPS: StepDef[] = [
           '；内容溢出面板=' + spilling.length + ' 个（' +
           spilling.map((el) => String(el.querySelector('h3')?.textContent || '').slice(0, 12)).join(' | ') + '）' +
           '；页面横向溢出=' + overflow + 'px（不溢出=' + String(noOverflow) + '）',
+      };
+    `,
+  },
+
+  {
+    step: 88,
+    title: '全应用排版巡检：逐页量面板不相交、内容不溢出、页面不横向溢出（R125）',
+    file: 'step88-layout-audit.png',
+    body: String.raw`
+      // 这一步把"排版不许堆叠"从地图推广到**每一个页面**：逐个标签页量三件事。
+      // ① 面板两两不相交；② 面板的**直接子元素**不越出它的内容盒；
+      // ③ 页面不横向溢出。
+      const TABS = ['起源工作台', '三级大纲', '编辑器', '稿件总览', 'AI 副驾', '记忆', '规则', '导出与自查', '世界观档案', '码字统计', '项目文件'];
+      const problems = [];
+      const seen = [];
+      for (const name of TABS) {
+        await tab(name);
+        await sleep(450);
+        const panels = [...document.querySelectorAll('.panel')].filter((el) => {
+          const b = el.getBoundingClientRect();
+          return b.width > 0 && b.height > 0;
+        });
+        // ① 面板两两不相交
+        for (let i = 0; i < panels.length; i += 1) {
+          for (let j = i + 1; j < panels.length; j += 1) {
+            const a = panels[i].getBoundingClientRect();
+            const b = panels[j].getBoundingClientRect();
+            const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+            const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+            if (w > 2 && h > 2) {
+              problems.push(name + '：面板「' + String(panels[i].querySelector('h3')?.textContent || i).slice(0, 10) +
+                '」与「' + String(panels[j].querySelector('h3')?.textContent || j).slice(0, 10) + '」重叠');
+            }
+          }
+        }
+        // ② 直接子元素不越出面板的内容盒（面板自带滚动区不算溢出 ⇒ 不看 scrollHeight）
+        for (const panel of panels) {
+          const pb = panel.getBoundingClientRect();
+          const cs = getComputedStyle(panel);
+          const padTop = parseFloat(cs.paddingTop) || 0;
+          const padBottom = parseFloat(cs.paddingBottom) || 0;
+          const top = pb.top + padTop - 2;
+          const bottom = pb.bottom - padBottom + 2;
+          for (const child of panel.children) {
+            const cb = child.getBoundingClientRect();
+            if (cb.height <= 0) continue;
+            if (cb.bottom > bottom || cb.top < top) {
+              problems.push(name + '：面板「' + String(panel.querySelector('h3')?.textContent || '').slice(0, 10) +
+                '」的内容越出边界 ' + Math.round(Math.max(bottom - cb.bottom, cb.top - top)) + 'px');
+              break;
+            }
+          }
+        }
+        // ③ 页面不横向溢出
+        const overflow = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+        if (overflow > 1) problems.push(name + '：页面横向溢出 ' + overflow + 'px');
+        seen.push(name + '(' + panels.length + ' 面板)');
+      }
+      await tab('世界观档案');
+      await sleep(300);
+      return {
+        ok: problems.length === 0,
+        note: '巡检 ' + seen.length + ' 个页面：' + seen.join('、') +
+          '；问题=' + problems.length + '（' + problems.slice(0, 6).join(' | ') + '）',
       };
     `,
   },
