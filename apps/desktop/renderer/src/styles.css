@@ -134,6 +134,9 @@
   /* 焦点环（契约 §5）：宽度与偏移只在这一处定义。用 outline 而不是 box-shadow ring——
      outline 在 Windows 高对比 / forced-colors 下会跟着系统色走，box-shadow 不会。 */
   --focus-width: 2px;
+  /* 边框宽度也有一个来源（R120）：散落的 1px 收进令牌，
+     长度字面量棘轮才降得下去（新增样式不再自带 px）。 */
+  --border-width: 1px;
   --focus-offset: 1px;
   /* 阅读型长文块的行长（R110）：比**写作版面**短。
      两种版面是两种用法——写作是"扫"（眼跳多、行可以宽），阅读是"读"（眼跳少、行要短）。
@@ -3442,4 +3445,230 @@ table,
 
 .import-result-foot {
   margin-top: 6px;
+}
+
+/* ---------- 世界地图（M5/T5-1，R120）---------- */
+
+/* 布局：左画布 + 右侧卡（窄处单列）。地图的重点是"点在哪儿"，
+   侧栏只是查卡 ⇒ 画布占大头（K08 §3.7 标注即地点卡）。 */
+.map-layout {
+  display: grid;
+  /* 侧栏宽度用 fr 份数而不是 px：宽度字面量棘轮（R96）只许降不许升，
+     而桌面端其它面板也都是固定网格 ⇒ 这里跟着约定走，不新开断点。 */
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.map-canvas-wrap {
+  min-width: 0;
+}
+
+/* 坐标空间：底图还没上传时，这一块画的是**坐标系本身**——网格局部坐标 + 标注落点。
+   空着不画，会把"作者还没上传底图"和"这个项目没有地点"混成同一件事。 */
+.map-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--panel-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-4);
+}
+
+.map-grid line {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+/* 标注：形状按图层分（色盲与黑白打印都还能分得开），颜色只用来做"选中"这一件事。 */
+.map-marker {
+  cursor: pointer;
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 1.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    transform var(--motion-state) var(--ease-premium),
+    opacity var(--motion-state) linear,
+    fill var(--motion-state) linear,
+    stroke var(--motion-state) linear;
+}
+
+.map-marker:hover {
+  transform: scale(1.3);
+}
+
+.map-marker.is-selected {
+  fill: var(--ink);
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  transform: scale(1.2);
+}
+
+/* 越界的标注被夹到边上：画成虚线环 + 降透明——"它不在图里"要看得出来，
+   而不是看起来像画在了边上（体检结论里也会点名它）。 */
+.map-marker.is-outside {
+  opacity: 0.6;
+  fill: none;
+  stroke-dasharray: 3 2;
+}
+
+/* 图层开关：每层一枚 chip，点了只切自己（K08 §3.9 独立显隐）。 */
+.map-layers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.map-layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background var(--motion-state) linear,
+    color var(--motion-state) linear,
+    border-color var(--motion-state) linear;
+}
+
+.map-layer-toggle.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* 图层色标：形状与画布上的标注一一对应（靠 currentColor 跟着 chip 的开关状态走） */
+.map-layer-dot {
+  width: var(--space-4);
+  height: var(--space-4);
+  flex: none;
+  background: currentColor;
+}
+
+.map-layer-dot[data-layer="place"] {
+  border-radius: var(--radius-full);
+}
+
+.map-layer-dot[data-layer="political"] {
+  border-radius: var(--radius-1);
+}
+
+.map-layer-dot[data-layer="event"] {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.map-layer-dot[data-layer="route"] {
+  transform: rotate(45deg);
+}
+
+.map-layer-dot[data-layer="base"] {
+  width: var(--space-3);
+  height: var(--space-3);
+  border-radius: var(--radius-1);
+  opacity: 0.7;
+}
+
+.map-layer-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.map-caption {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.map-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.map-card {
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-4);
+  background: var(--panel-2);
+}
+
+.map-card-name {
+  font-weight: 600;
+}
+
+.map-card-meta {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.map-card-open {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width) solid var(--accent);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background var(--motion-state) linear,
+    border-color var(--motion-state) linear;
+}
+
+.map-card-body {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--border-width) solid var(--border);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  white-space: pre-wrap;
+}
+
+.map-summary {
+  font-size: var(--text-sm);
+}
+
+.map-findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.map-finding {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
+  background: var(--panel-2);
+  font-size: var(--text-sm);
+}
+
+.map-finding.error {
+  background: var(--bad-tint-bg);
+}
+
+.map-finding.warn {
+  background: var(--warn-tint-bg);
+}
+
+.map-finding.info {
+  background: var(--panel-2);
+}
+
+.map-finding-code {
+  margin-right: var(--space-2);
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
 }

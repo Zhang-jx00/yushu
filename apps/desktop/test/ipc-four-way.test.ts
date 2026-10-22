@@ -140,6 +140,13 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("chronicle.book")).toBe(true);
   });
 
+  it("世界地图通道在四处齐备（R120 新增：只读，无入参——图层显隐在渲染层做）", () => {
+    expect(channels.get("worldMapView")).toBe("map:view");
+    expect(registered).toContain("worldMapView");
+    expect(literals.invoke.has("map:view")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.view")).toBe(true);
+  });
+
   it("爽点看板通道在四处齐备（R73 新增）", () => {
     expect(channels.get("satisfactionBoard")).toBe("satisfaction:board");
     expect(registered).toContain("satisfactionBoard");

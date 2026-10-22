@@ -112,6 +112,9 @@ contextBridge.exposeInMainWorld("yushu", {
   graph: {
     relation: (payload) => invoke("graph:relation", payload),
   },
+  map: {
+    view: () => invoke("map:view"),
+  },
   chronicle: {
     book: (payload) => invoke("chronicle:book", payload),
   },

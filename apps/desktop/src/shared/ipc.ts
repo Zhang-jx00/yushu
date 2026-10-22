@@ -70,6 +70,8 @@ export const CHANNELS = {
   timelineView: "timeline:view",
   /** 关系图谱（M4/T4-9，R69）：**只读真源**（entities/refs 直算，不碰 SQLite） */
   graphRelation: "graph:relation",
+  /** 世界地图（M5/T5-1，R120）：**只读**（图片底图 + bounds + 分层 + 标注，K08 §3） */
+  worldMapView: "map:view",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -2848,6 +2850,59 @@ export interface GraphViewPayload {
 export interface GraphViewRequestPayload {
   focus?: string;
   maxDepth?: number;
+}
+
+/**
+ * 世界地图视图请求（M5/T5-1，R120）：**无参数**。
+ *
+ * 图层显隐是**纯显示动作**，放在渲染层做（切层不必等一次 IPC 往返，动效才跟手，R111 的口径）。
+ * 所以这条通道没有入参——将来做「事件锚点」（K08 §3.8）时再加。
+ */
+export type WorldMapViewRequestPayload = Record<string, never>;
+
+/** 标注绑定的地点卡摘要（K08 §3.7：标注即地点卡） */
+export interface WorldMapPlaceCard {
+  id: string;
+  name: string;
+  type: string;
+  layer: string;
+  aliases: string[];
+  visibility: string;
+  filePath: string;
+}
+
+/** 地图标注（投影后：归一化坐标 + 地点实体名 + 卡摘要） */
+export interface WorldMapViewMarker {
+  id: string;
+  layer: string;
+  entityRef: string;
+  entityName: string;
+  /** 归一化坐标（0..1）：渲染层直接用，不必自己换算 */
+  nx: number;
+  ny: number;
+  /** 底图像素坐标（作者写的那一对） */
+  x: number;
+  y: number;
+  label: string;
+  card: WorldMapPlaceCard | null;
+}
+
+export interface WorldMapViewPayload {
+  path: string;
+  exists: boolean;
+  note: string;
+  /** 坐标空间（底图像素边界）；没有有效边界 = null（此时不产出坐标） */
+  bounds: { x0: number; y0: number; x1: number; y1: number } | null;
+  /** 画布宽高（底图尺寸；没给 base_size 时按 bounds 推） */
+  canvas: { width: number; height: number } | null;
+  markers: WorldMapViewMarker[];
+  layers: { kind: string; markerCount: number }[];
+  findings: { code: string; severity: string; message: string; refs: string[] }[];
+  orphanMarkers: string[];
+  overlapClusters: { layer: string; members: string[] }[];
+  outOfBoundsMarkers: string[];
+  /** 项目里的实体总数（地图只画标注过的那些） */
+  entityCount: number;
 }
 
 /** 编年史（M4 / T4-8，R71）：大事年表 + 同一事件的多文化"伪史书" */

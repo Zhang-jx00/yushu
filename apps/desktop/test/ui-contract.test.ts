@@ -826,6 +826,7 @@ const VECTOR_FILES = [
   "RelationGraphPanel.tsx",
   "StatsView.tsx",
   "StateArt.tsx", // R118：自绘的空/错态插画（登记在 docs/12 §1.4）
+  "WorldMapPanel.tsx", // R120：世界地图画布（数据驱动，登记在 docs/12 §1.3）
 ];
 /** 其中属于"图标资产"的三个（判据要求它们真的有 path） */
 const ICON_FILES = ["icons.tsx", "brand.tsx", "Disclosure.tsx"];
@@ -1135,6 +1136,50 @@ describe("UI 重构第四批·第四段（R118）：空/错态插画", () => {
  * 判据要点：**先剥注释再核对**——否则注释里写着的同名字面量会冒充属性，
  * 这类锁会变成"恒绿"，比没锁更坏（项目里已经吃过三次这种亏）。
  */
+/**
+ * 世界地图（M5/T5-1，R120）的机器判据。
+ *
+ * 口径回源 `docs/research/K-软件工程与产品/K08-时间线与地图UI.md` §3：
+ * ⑥ 地图 = 图片底图 + bounds（坐标是图片像素 / 归一化坐标，**不用经纬度**）；
+ * ⑦ 标注即地点卡；⑨ 分层可控（**图层独立显隐**）。
+ *
+ * 判据要点：逐行/逐块核对（先剥注释），否则注释里的同名字面量会冒充属性——
+ * 这类锁会变成"恒绿"，比没锁更坏。
+ */
+describe("世界地图（M5/T5-1，R120）：坐标空间 + 标注 + 图层显隐 + 点标注查卡", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const archive = readFileSync(join(VIEW_ROOT, "views", "ArchiveView.tsx"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+
+  it("地图面板挂在世界观档案页（不挂 = 界面根本到不了这张图）", () => {
+    // **只看 JSX 里的挂载**：只查"出现过 WorldMapPanel"是恒绿的——
+    // import 那一行还在的话，把面板从页面里摘掉也照样绿（变异 M5 实测抓到的）。
+    expect(archive).toMatch(/<WorldMapPanel\s*\/>/);
+  });
+
+  it("标注用归一化坐标落位（坐标空间那一层不许自己换算像素）", () => {
+    expect(panel).toContain("marker.nx");
+    expect(panel).toContain("marker.ny");
+  });
+
+  it("图层独立显隐在渲染层做（每层一枚开关，点了只切自己）", () => {
+    expect(panel).toContain("map-layer-toggle");
+    expect(panel, "图层的显隐过滤不见了").toContain("hidden.includes(marker.layer)");
+  });
+
+  it("点标注查地点卡（K08 §3.7：标注即地点卡）", () => {
+    expect(panel).toContain("map-card-name");
+    expect(panel, "地点卡读不出来（点标注只能看个名字）").toContain("card.read");
+  });
+
+  it("地图通道是只读的（渲染层不写盘）", () => {
+    // 逐行核对：地图 ops 里不许出现写通道的调用
+    for (const line of ops.split("\n")) {
+      expect(line, "地图 ops 里出现了写盘调用").not.toMatch(/card\.write|doc\.write|writeDoc/);
+    }
+  });
+});
+
 describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
   /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
   const stripComments = (src: string): string =>

@@ -5576,6 +5576,113 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+
+  {
+    step: 81,
+    title: '世界观档案：世界地图（坐标空间 + 标注 + 图层独立显隐 + 点标注查地点卡）（M5/T5-1，R120）',
+    file: 'step81-map.png',
+    body: String.raw`
+      // 这一步证 R120 的四件事：**坐标空间**（标注落点 = 归一化坐标 × 画布）、
+      // **标注**（投影成功才画）、**图层独立显隐**（关一层不影响别的层）、
+      // **点标注查地点卡**（K08 §3.7 标注即地点卡）。
+      // 另有一条反面证据：指向不存在实体的**孤儿标注不画**，但体检结论要点名它。
+      //
+      // 先退回项目页：上一步（R119 的 step80）停在「新建项目」向导里，
+      // 那里没有标签栏 ⇒ 直接找标签页会抛"找不到标签页"。
+      // 取消后落在**欢迎屏**（项目还开着）⇒ R120 给欢迎屏加了「继续当前项目」，点它回去。
+      const cancelBtn = [...document.querySelectorAll('button')]
+        .find((b) => String(b.textContent || '').trim() === '取消');
+      if (cancelBtn) { cancelBtn.click(); await sleep(700); }
+      let tabBar = await waitFor(() => (document.querySelector('.tab') ? true : null), 2500);
+      if (!tabBar) {
+        const contBtn = [...document.querySelectorAll('button')]
+          .find((b) => String(b.textContent || '').trim() === '继续当前项目');
+        if (contBtn) { contBtn.click(); await sleep(700); }
+        tabBar = await waitFor(() => (document.querySelector('.tab') ? true : null), 8000);
+      }
+      if (!tabBar) return { ok: false, note: '退回项目页后仍找不到标签栏（页面：' + pageText().slice(0, 80) + '）' };
+      const cardId = 'loc-map-probe';
+      const cardPath = 'world/cards/location/' + cardId + '.md';
+      const card = { id: cardId, type: 'location', name: '天启_probe', layer: 'geography' };
+      const cardBody = '临时地点卡：只为让世界地图有一个可点的标注。';
+      const existingCard = await window.yushu.card.read(cardPath).catch(() => null);
+      if (existingCard === null) await window.yushu.card.write({ path: cardPath, card: card, body: cardBody });
+      else await window.yushu.card.write({ path: cardPath, card: card, body: cardBody, baseHash: existingCard.hash });
+
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        'bounds: [[0, 0], [1000, 700]]',
+        'base_size: {width: 1000, height: 700}',
+        'layers: [place, event]',
+        'markers:',
+        '  - {id: m-place, layer: place, entity_ref: ' + cardId + ', x: 250, y: 175}',
+        '  - {id: m-event, layer: event, entity_ref: ' + cardId + ', x: 750, y: 525}',
+        '  - {id: m-orphan, layer: place, entity_ref: loc-does-not-exist, x: 100, y: 100}',
+        '',
+      ].join('\n');
+      const currentMap = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      await window.yushu.doc.write('world/map.yaml', yaml, currentMap === null ? undefined : currentMap.hash);
+      const hashBefore = (await window.yushu.doc.read('world/map.yaml')).hash;
+
+      // 面板只在挂载时取数 ⇒ 先去别的页再回来，强制重挂载（R68 的教训）
+      await tab('规则');
+      await tab('世界观档案');
+      const svg = await waitFor(() => document.querySelector('.map-panel .map-svg') || null, 8000);
+      if (!svg) return { ok: false, note: '地图 SVG 没渲染（通道未通或没有标注）' };
+
+      const drawn = [...document.querySelectorAll('.map-panel .map-marker')];
+      const placeEl = document.querySelector('.map-panel .map-marker[data-marker="m-place"]');
+      const eventEl = document.querySelector('.map-panel .map-marker[data-marker="m-event"]');
+      const orphanDrawn = document.querySelector('.map-panel .map-marker[data-marker="m-orphan"]') !== null;
+      // 位置按 getBBox 的中心量：不同图层的形状不同（地名=圆 / 事件=三角）⇒ 不能只认 circle
+      const centerOf = (el) => {
+        if (el === null) return { x: -1, y: -1 };
+        const box = el.getBBox();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      };
+      const placePos = centerOf(placeEl);
+      const eventPos = centerOf(eventEl);
+      const cx = placePos.x;
+      const cy = placePos.y;
+      const ecx = eventPos.x;
+      const ecy = eventPos.y;
+      // 坐标空间：x=250/1000 ⇒ 250；y=175/700 ⇒ 175（归一化 × 画布，正面证据）
+      const coordOk = Math.abs(cx - 250) <= 1 && Math.abs(cy - 175) <= 1 && Math.abs(ecx - 750) <= 1 && Math.abs(ecy - 525) <= 1;
+      const codes = [...document.querySelectorAll('.map-panel .map-finding-code')].map((el) => String(el.textContent || ''));
+      const orphanNamed = codes.indexOf('map-marker-orphan') >= 0;
+
+      // 点标注 ⇒ 地点卡摘要
+      if (placeEl) placeEl.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const cardName = await waitFor(() => {
+        const el = document.querySelector('.map-panel .map-card-name');
+        return el ? String(el.textContent || '').trim() : null;
+      }, 3000);
+
+      // 图层独立显隐：关掉「地名」层 ⇒ 只少这一层的标注
+      const placeToggle = [...document.querySelectorAll('.map-layer-toggle')]
+        .find((b) => String(b.textContent || '').indexOf('地名') >= 0);
+      if (placeToggle) placeToggle.click();
+      await sleep(400);
+      const afterHide = [...document.querySelectorAll('.map-panel .map-marker')].map((el) => String(el.getAttribute('data-marker')));
+      const hiddenOk = afterHide.indexOf('m-place') < 0 && afterHide.indexOf('m-event') >= 0;
+      const hashAfter = (await window.yushu.doc.read('world/map.yaml')).hash;
+      const readonlyOk = hashBefore === hashAfter;
+      const panel = document.querySelector('.map-panel');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: drawn.length === 2 && coordOk && orphanDrawn === false && orphanNamed && cardName !== null && cardName.indexOf('天启') >= 0 && hiddenOk && readonlyOk,
+        note: '标注数=' + drawn.length + '（孤儿不画=' + String(orphanDrawn === false) + '）' +
+          '；坐标：地名=(' + cx + ',' + cy + ') 事件=(' + ecx + ',' + ecy + '）符合归一化×画布=' + String(coordOk) +
+          '；体检点名孤儿=' + String(orphanNamed) + '（结论码=' + codes.join('/') + '）' +
+          '；点标注出卡=' + String(cardName) +
+          '；关掉地名层后剩=' + afterHide.join(',') + '（独立显隐=' + String(hiddenOk) + '）' +
+          '；盘上未改=' + String(readonlyOk),
+      };
+    `,
+  },
 ];
 
 /**

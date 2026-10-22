@@ -25,6 +25,7 @@ import type {
   TimelineViewRequestPayload,
   GraphViewPayload,
   GraphViewRequestPayload,
+  WorldMapViewPayload,
   ChronicleBookPayload,
   ChronicleBookRequestPayload,
   SatisfactionBoardPayload,
@@ -239,6 +240,10 @@ export interface YushuApi {
   /** 关系图谱（M4/T4-9，R69）：只读真源行表投影，不碰索引库 */
   graph: {
     relation: (payload?: GraphViewRequestPayload) => Promise<GraphViewPayload>;
+  };
+  /** 世界地图（M5/T5-1，R120）：只读；图层显隐在渲染层做，所以没有入参 */
+  map: {
+    view: () => Promise<WorldMapViewPayload>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {
