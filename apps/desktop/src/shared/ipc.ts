@@ -2833,8 +2833,20 @@ export interface GraphEdgePayload {
   selfLoop: boolean;
 }
 
+/** 面板汇总的**结构化**行（R126）：由后端给，界面只排版 —— 不在界面里切字符串 */
+export interface SummaryRow {
+  /** 左列的标签（如"实体"） */
+  label: string;
+  /** 右列的值 */
+  value: string;
+  /** 需要提醒时（如"绑定的实体已不存在"）走警告色 */
+  tone?: "warn";
+}
+
 export interface GraphViewPayload {
   note: string;
+  /** 汇总的结构化行（界面逐行渲染 ⇒ 不折成一长串） */
+  summary: SummaryRow[];
   focus: string | null;
   maxDepth: number;
   nodes: GraphNodePayload[];

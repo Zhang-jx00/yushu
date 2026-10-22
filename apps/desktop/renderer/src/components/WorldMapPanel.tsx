@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { WorldMapBasePayload, WorldMapViewPayload } from "../../../src/shared/ipc";
+import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { StateNote } from "./StateNote";
+import { SummaryRows } from "./SummaryRows";
 
 /**
  * 世界地图（M5 / T5-1，R120）：**只读**面板。
@@ -110,6 +111,25 @@ export function WorldMapPanel() {
     () => (map?.markers ?? []).find((marker) => marker.id === selected) ?? null,
     [map, selected],
   );
+
+  /** 地点卡的**键值行**（R126）：和面板汇总用**同一个**组件 ⇒ 键值行的样式只有一处，
+      不会出现"汇总那套样式、地点卡另一套样式、后者还没跟上改名"的事。 */
+  const cardRows: SummaryRow[] = useMemo(() => {
+    if (selectedMarker === null) return [];
+    const rows: SummaryRow[] = [
+      { label: "id", value: selectedMarker.entityRef },
+      { label: "图层", value: LAYER_LABEL[selectedMarker.layer] ?? selectedMarker.layer },
+    ];
+    if (selectedMarker.card === null) {
+      rows.push({ label: "实体", value: "绑定的实体已不存在", tone: "warn" });
+    } else {
+      rows.push({ label: "类型", value: selectedMarker.card.type });
+      if (selectedMarker.card.aliases.length > 0) {
+        rows.push({ label: "别名", value: selectedMarker.card.aliases.join(" / ") });
+      }
+    }
+    return rows;
+  }, [selectedMarker]);
 
   /** 打开地点卡：走既有的 `card:read` 通道读卡，取第一段（正文全文在「世界观档案」页） */
   const openPlaceCard = useCallback(async (filePath: string) => {
@@ -268,33 +288,7 @@ export function WorldMapPanel() {
           ) : (
             <div className="map-card">
               <div className="map-card-name">{selectedMarker.card?.name ?? selectedMarker.entityName}</div>
-              <dl className="map-card-rows">
-                <div className="map-card-row">
-                  <dt>id</dt>
-                  <dd>{selectedMarker.entityRef}</dd>
-                </div>
-                <div className="map-card-row">
-                  <dt>图层</dt>
-                  <dd>{LAYER_LABEL[selectedMarker.layer] ?? selectedMarker.layer}</dd>
-                </div>
-                {selectedMarker.card === null ? (
-                  <div className="map-card-row">
-                    <dt>实体</dt>
-                    <dd className="map-card-warn">绑定的实体已不存在</dd>
-                  </div>
-                ) : (
-                  <div className="map-card-row">
-                    <dt>类型</dt>
-                    <dd>{selectedMarker.card.type}</dd>
-                  </div>
-                )}
-                {selectedMarker.card !== null && selectedMarker.card.aliases.length > 0 && (
-                  <div className="map-card-row">
-                    <dt>别名</dt>
-                    <dd>{selectedMarker.card.aliases.join(" / ")}</dd>
-                  </div>
-                )}
-              </dl>
+              <SummaryRows rows={cardRows} />
               {selectedMarker.card !== null && (
                 <button
                   type="button"
@@ -312,24 +306,14 @@ export function WorldMapPanel() {
           )}
           {/* 摘要**按行渲染**（R124）：原先是一句「A · B；C」的自由文本，
               在窄栏里断成四五行、读起来像碎片 ⇒ 载荷带结构，这里逐行摆。 */}
-          <dl className="map-card-rows map-summary-rows">
-            <div className="map-card-row">
-              <dt>标注</dt>
-              <dd>{map.summary.markers}</dd>
-            </div>
-            <div className="map-card-row">
-              <dt>图层</dt>
-              <dd>{map.summary.layers}</dd>
-            </div>
-            <div className="map-card-row">
-              <dt>实体</dt>
-              <dd>{map.summary.entities}</dd>
-            </div>
-            <div className="map-card-row">
-              <dt>体检</dt>
-              <dd>{map.summary.findings}</dd>
-            </div>
-          </dl>
+          <SummaryRows
+            rows={[
+              { label: "标注", value: String(map.summary.markers) },
+              { label: "图层", value: String(map.summary.layers) },
+              { label: "实体", value: String(map.summary.entities) },
+              { label: "体检", value: String(map.summary.findings) },
+            ]}
+          />
           {map.findings.length > 0 && (
             <ul className="map-findings">
               {map.findings.map((finding, index) => (

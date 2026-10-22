@@ -3173,20 +3173,26 @@ const STEPS: StepDef[] = [
     file: "step51-graph.png",
     body: String.raw`
       // 先造一条**能成边**的关系：预演项目里的 3 条引用都指向章节（属 outOfScope，本来就不成边），
-      // 不自己造一条就只能验"空图不报错"，验不到"边真的画出来了"。造完再复原，不留脏数据。
+      // 不自己造一条就只能验"空图不报错"，验不到"边真的画出来了"。
+      // 这张临时卡留在**预演项目**里（每次预演都是全新目录 ⇒ 不会脏到用户项目）。
       const cards = await window.yushu.card.list();
       const anchor = cards.find((c) => c.type === 'character') || cards[0];
       if (!anchor) return { ok: false, note: '项目里一张卡都没有，造不出关系' };
-      await window.yushu.card.write({
-        card: {
-          id: 'char-graph-probe',
-          type: 'character',
-          name: '图谱探针',
-          layer: 'characters',
-          refs: [{ relation: 'rival_of', target: anchor.id }],
-        },
-        body: '临时卡：只为让关系图谱出现一条可画的边，步骤末尾删除。',
-      });
+      // **幂等写**：这张临时卡可能已经在（上一次尝试失败时留下的）⇒ 先查再写。
+      // 盲写会被拒（E_DOC_CONFLICT：未携带 baseHash）⇒ 不幂等的话第二次尝试就永远过不了。
+      const probe = cards.find((c) => c.id === 'char-graph-probe');
+      if (!probe) {
+        await window.yushu.card.write({
+          card: {
+            id: 'char-graph-probe',
+            type: 'character',
+            name: '图谱探针',
+            layer: 'characters',
+            refs: [{ relation: 'rival_of', target: anchor.id }],
+          },
+          body: '临时卡：只为让关系图谱出现一条可画的边（预演项目每次都是全新目录 ⇒ 不会脏到用户项目）。',
+        });
+      }
       // 面板只在挂载时取数：先去别的页再回来，强制重挂载
       await tab('规则');
       await tab('世界观档案');
@@ -3194,11 +3200,15 @@ const STEPS: StepDef[] = [
       if (!svg) return { ok: false, note: '图谱 SVG 没渲染（通道未通或没有实体可画）' };
       const circles = [...svg.querySelectorAll('.graph-node circle')];
       const lines = [...svg.querySelectorAll('line')];
-      const summary = (document.querySelector('.graph-summary') || {}).textContent || '';
+      // 汇总现在是**结构化行**（R126）⇒ 不再读那串自由文本（那个自由文本汇总的类名已经没了）
+      const summaryText = () => [...document.querySelectorAll('.graph-panel .summary-row')]
+        .map((r) => (r.textContent || '').replace(/\s+/g, ' ').trim())
+        .join(' ');
+      const summary = summaryText();
       const legend = (document.querySelector('.graph-legend') || {}).textContent || '';
       const legendOk = legend.indexOf('人物') >= 0 && legend.indexOf('势力') >= 0 && legend.indexOf('地点') >= 0;
       // 悬空引用必须"未成边但被点名"：汇总里说有几条，就得有对应的提示块
-      const danglingMentioned = /悬空引用 (\d+) 条/.exec(summary);
+      const danglingMentioned = /悬空引用\s*(\d+)\s*条/.exec(summary);
       const notices = [...document.querySelectorAll('.graph-notices')];
       const danglingOk = danglingMentioned === null
         ? true
@@ -3208,7 +3218,7 @@ const STEPS: StepDef[] = [
       const before = summary;
       circles[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
       const focused = await waitFor(() => {
-        const now = (document.querySelector('.graph-summary') || {}).textContent || '';
+        const now = summaryText();
         return now.indexOf('聚焦') >= 0 && now !== before ? now : null;
       }, 3000);
       const panel = document.querySelector('.graph-panel');
@@ -5889,9 +5899,12 @@ const STEPS: StepDef[] = [
       // （面板在档案页是两栏栅格里的一格 ⇒ 用容器查询换布局）；③ 页面不横向溢出。
       const panel = await waitFor(() => document.querySelector('.map-panel') || null, 8000);
       if (panel === null) return { ok: false, note: '地图面板没渲染出来' };
-      const rows = [...document.querySelectorAll('.map-summary-rows .map-card-row')];
-      // 每行不许换行（行高 ≈ 一行）⇒ 说明没有堆叠
-      const tall = rows.filter((r) => r.getBoundingClientRect().height > 28);
+      const rows = [...document.querySelectorAll('.map-panel .summary-rows .summary-row')];
+      // 判**标签列**不被挤歪（值那一列本来就允许折行 ⇒ 整行高度不是判据）
+      const tall = rows.filter((r) => {
+        const dt = r.querySelector('dt');
+        return dt !== null && dt.getBoundingClientRect().height > 28;
+      });
       const svg = document.querySelector('.map-panel .map-svg');
       const card = document.querySelector('.map-panel .map-card') || document.querySelector('.map-side');
       const svgW = svg === null ? 0 : svg.getBoundingClientRect().width;
@@ -6033,6 +6046,70 @@ const STEPS: StepDef[] = [
         ok: problems.length === 0,
         note: '巡检 ' + seen.length + ' 个页面：' + seen.join('、') +
           '；问题=' + problems.length + '（' + problems.slice(0, 6).join(' | ') + '）',
+      };
+    `,
+  },
+
+  {
+    step: 89,
+    title: '世界观档案：面板汇总结构化（标签列共享一行高、值列对齐）+ 孤立节点名单可展开且列全（R126）',
+    file: 'step89-summary-rows.png',
+    body: String.raw`
+      // 这一步证 R126：① 汇总**逐行渲染**，标签列是**共享的一列**（标签永远一行高、值列左边界对齐）；
+      // ② 孤立节点名单**可展开且列全**（原先只给前 8 个 + 一个省略号 ⇒ 作者看不到到底哪些没有关系）。
+      //
+      // 为什么判「标签」而不是整行：值那一列本来就允许折行（值可以很长），整行高度不是判据；
+      // 真正会坏的是**标签列被挤歪**（标签折成两行）或者**每行各自定列宽**（值左边界参差）。
+      await tab('世界观档案');
+      const panel = await waitFor(() => document.querySelector('.graph-panel') || null, 8000);
+      if (panel === null) return { ok: false, note: '关系图谱面板没渲染出来' };
+      const rows = [...document.querySelectorAll('.graph-panel .summary-row')];
+      // ① 标签一行高（不许被挤成两行）
+      const tallLabels = rows.filter((r) => {
+        const dt = r.querySelector('dt');
+        return dt !== null && dt.getBoundingClientRect().height > 28;
+      });
+      // ② 值列左边界对齐（证明标签列是共享的一列，而不是每行各自定宽）
+      const lefts = rows
+        .map((r) => {
+          const dd = r.querySelector('dd');
+          return dd === null ? null : dd.getBoundingClientRect().left;
+        })
+        .filter((v) => v !== null);
+      const aligned = lefts.length > 0 && lefts.every((v) => Math.abs((v ?? 0) - (lefts[0] ?? 0)) <= 1);
+      // ③ 值不许越出它那一列（不横向溢出面板）
+      const spilling = rows.filter((r) => {
+        const dd = r.querySelector('dd');
+        if (dd === null) return false;
+        return dd.getBoundingClientRect().right > r.getBoundingClientRect().right + 1;
+      });
+      // ④ 值必须在标签的**右边**（不许上下叠成两行 —— 那种退化的布局，
+      //    左边界反而全齐 ⇒ 上面那两条会误绿，得单独堵）
+      const stacked = rows.filter((r) => {
+        const dt = r.querySelector('dt');
+        const dd = r.querySelector('dd');
+        if (dt === null || dd === null) return false;
+        return dd.getBoundingClientRect().left < dt.getBoundingClientRect().right;
+      });
+      const disclosure = [...document.querySelectorAll('.graph-panel .disclosure')]
+        .find((d) => String(d.textContent || '').indexOf('孤立节点') >= 0) || null;
+      const label = disclosure === null ? '' : String(disclosure.textContent || '');
+      const m = /孤立节点 (\d+) 个/.exec(label);
+      const count = m === null ? -1 : Number(m[1]);
+      const btn = disclosure === null ? null : disclosure.querySelector('button');
+      if (btn !== null) btn.click();
+      await sleep(500);
+      const items = [...document.querySelectorAll('.graph-panel .graph-isolated-list li')];
+      // 截图要拍到**正在量的那块面板** ⇒ 先把它滚进视口（step86 同款做法）
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(250);
+      return {
+        ok: rows.length >= 4 && tallLabels.length === 0 && aligned &&
+          spilling.length === 0 && count > 0 && items.length === count,
+        note: '汇总行=' + rows.length + '（标签折行的=' + tallLabels.length + '）' +
+          '；值列左边界=' + (lefts.length > 0 ? Math.round(lefts[0] ?? 0) + 'px（对齐=' + String(aligned) + '）' : '无') +
+          '；值越列=' + spilling.length +
+          '；孤立节点=' + count + ' 个，展开后列出=' + items.length + ' 个（列全=' + String(items.length === count) + '）',
       };
     `,
   },

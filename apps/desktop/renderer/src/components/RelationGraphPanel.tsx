@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import type { GraphViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { Disclosure } from "./Disclosure";
+import { SummaryRows } from "./SummaryRows";
 
 /**
  * 关系图谱面板（M4 / T4-9，R69）：只读，数据来自真源行表投影（不碰索引库）。
@@ -76,7 +78,7 @@ export function RelationGraphPanel() {
       {error !== "" && <div className="error-text">{error}</div>}
       {graph !== null && error === "" && (
         <>
-          <div className="graph-summary muted">{graph.note}</div>
+          <SummaryRows rows={graph.summary} />
           {graph.focusMissing && <div className="error-text">聚焦的节点已不存在（可能刚被删或改名），当前画的是空图</div>}
           {drawn.length > 0 && (
             <svg className="graph-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`关系图谱：${drawn.length} 个节点、${drawnEdges.length} 条边`}>
@@ -146,7 +148,18 @@ export function RelationGraphPanel() {
               深度封顶在第 2 跳，下一层还有 {graph.truncated.count} 个未展开：{graph.truncated.frontier.join("、")}
             </div>
           )}
-          {graph.isolated.length > 0 && <div className="graph-notices">孤立节点 {graph.isolated.length} 个（一条关系都没有）：{graph.isolated.slice(0, 8).join("、")}{graph.isolated.length > 8 ? "…" : ""}</div>}
+          {/* 孤立节点**列全**，不截断（R126）：原先只给前 8 个 + 一个省略号 ⇒
+              作者看不到"到底哪些节点没有关系"，那正是他要找的信息。
+              收起时只给数量（不占地方），展开后逐个列出。 */}
+          {graph.isolated.length > 0 && (
+            <Disclosure label={`孤立节点 ${graph.isolated.length} 个（一条关系都没有）— 展开看全部`}>
+              <ul className="graph-isolated-list">
+                {graph.isolated.map((id) => (
+                  <li key={id}>{id}</li>
+                ))}
+              </ul>
+            </Disclosure>
+          )}
         </>
       )}
     </section>

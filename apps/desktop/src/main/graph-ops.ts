@@ -33,8 +33,27 @@ export async function relationGraphView(
   ]
     .filter((part) => part !== "")
     .join("；");
+  // 汇总的**结构化行**（R126）：界面逐行渲染 ⇒ 窄栏里不会折成三四行。
+  // 结构由**后端给**（不在界面里切字符串——切出来的项会丢掉句子里的限定词）。
+  const summary = [
+    { label: "实体", value: `${structure.entities.length} 个` },
+    { label: "引用行", value: `${structure.refs.length} 条` },
+    { label: "边", value: `${graph.edges.length} 条` },
+    { label: "视图", value: focusOn ? `聚焦「${request.focus}」${maxDepth} 跳内` : "全图" },
+    {
+      label: "悬空引用",
+      value: graph.dangling.length > 0 ? `${graph.dangling.length} 条未成边` : "无",
+    },
+  ];
+  if (graph.unclassifiedRelations.length > 0) {
+    summary.push({
+      label: "未归类",
+      value: `${graph.unclassifiedRelations.length} 种 relation 归入 other`,
+    });
+  }
   return {
     note,
+    summary,
     focus: focusOn ? (request.focus as string) : null,
     maxDepth,
     nodes: graph.nodes,

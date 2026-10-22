@@ -3175,9 +3175,8 @@ table,
 
 /* ---------- R69：关系图谱面板（世界观档案底部） ---------- */
 
-.graph-summary {
-  margin: 4px 0 8px;
-}
+/* R126：原先这里有 `.graph-summary`（那串自由文本汇总的样式）⇒
+   汇总改成结构化行（.summary-rows）之后它就没用了 ⇒ 删掉，别留没人用的样式。 */
 
 .graph-focus {
   margin-left: 10px;
@@ -3759,35 +3758,50 @@ table,
   font-size: var(--text-sm);
 }
 
-/* 地点卡的信息**逐行对齐**（R123）：原先是一行用「·」串起来的长串，
-   在窄栏里会断成三行，读起来像散掉的碎片。 */
-.map-card-rows {
+/* 面板汇总的**结构化键值行**（R124/R126）：标签一列、值一列。
+   值再长也不会把标签挤歪；多行值只在值那一列折行。
+
+   **标签列的宽度由整份清单里最宽的标签决定**（父级 `auto` + 子行 `subgrid`）——
+   之前每行自己定死 `3em`，「悬空引用」四个汉字塞不进 37.5px ⇒ 标签折成两行、
+   整行高度翻倍（R126 预演 step89 抓到）；改成共享列之后：标签永远一行高，
+   而且**各行的值左边界对齐**（`subgrid` 让子行借用父级的列宽）。 */
+.summary-rows {
   margin: var(--space-3) 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-3);
+  row-gap: var(--space-2);
 }
 
-.map-card-row {
+.summary-row {
   display: grid;
-  grid-template-columns: 3em minmax(0, 1fr);
-  gap: var(--space-3);
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: baseline;
   font-size: var(--text-sm);
 }
 
-.map-card-row dt {
+.summary-row dt {
   color: var(--muted);
 }
 
-.map-card-row dd {
+.summary-row dd {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.map-card-warn {
+.summary-warn {
   color: var(--warn);
+}
+
+/* 孤立节点名单（R126）：逐个列出，不截断 */
+.graph-isolated-list {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-6);
+  font-size: var(--text-sm);
+  columns: 2;
+  column-gap: var(--space-6);
 }
 
 .map-card-open {
@@ -3818,7 +3832,7 @@ table,
   font-size: var(--text-sm);
 }
 
-.map-summary-rows {
+.map-side .summary-rows {
   margin-top: 0;
 }
 

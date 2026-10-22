@@ -1412,8 +1412,12 @@ describe("世界地图底图（R123）：铺在坐标空间上 + 压暗层 + 卡
   });
 
   it("地点卡的信息**逐行对齐**（不再用「·」串成一长串）", () => {
-    expect(panel, "地点卡没有逐行对齐").toContain("map-card-rows");
+    // R126 起地点卡也走**共享**的键值行组件（SummaryRows）⇒ 键值行的样式只有一处
+    expect(panel, "地点卡没有逐行对齐").toContain("SummaryRows");
     expect(panel, "地点卡还在用「·」串信息").not.toMatch(/entityRef\} · /);
+    // 旧类名不许留在组件里：CSS 已改名（.map-card-row → .summary-row），
+    // 留着旧类名 = **那些行根本没有样式**（R126 差点就这么漏过去）
+    expect(panel, "地点卡还在用旧的 .map-card-row 类名（CSS 已改名 ⇒ 这些行没有样式）").not.toContain("map-card-row");
   });
 });
 
@@ -1435,7 +1439,8 @@ describe("排版与动效（R124）：说明分行 + 容器查询 + 不过渡布
 
   it("地图的摘要由**载荷带结构**，界面按行渲染（不是切一长串自由文本）", () => {
     expect(shared, "载荷里没有结构化摘要").toMatch(/summary:\s*\{\s*markers:/);
-    expect(panel, "面板没有把摘要排成行").toContain("map-summary-rows");
+    // R126 起地图的汇总也改用**共享**的键值行组件（SummaryRows）⇒ 这里认组件名
+    expect(panel, "面板没有把摘要排成行").toContain("SummaryRows");
     expect(panel, "面板还在渲染一长串自由文本摘要").not.toContain("{map.note}</div>");
   });
 
@@ -1524,6 +1529,61 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
         new RegExp(`^\\.${name} > section \\{`, "m"),
       );
     }
+  });
+});
+
+
+/**
+ * 面板汇总的**结构化**（R126）。
+ *
+ * 为什么要结构化：各面板的汇总原先都是**一长串自由文本**（"13 个实体 · 4 条引用行 → 1 条边；全图；…"），
+ * 在窄栏里会折成三四行、读起来像碎片；更要紧的是——**切出来的"项"会丢掉句子里的限定词**
+ * （"读到 3 个爽点 · 3 条承诺"切成两项后，前一项的"读到"就管不到后一项了）⇒
+ * 结构**必须由后端给**（载荷带 `summary` 行），界面只排版。
+ */
+describe("面板汇总的结构化（R126）：后端给结构，界面只排版", () => {
+  const graph = readFileSync(join(VIEW_ROOT, "components", "RelationGraphPanel.tsx"), "utf8");
+  const graphOps = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "graph-ops.ts"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+  const rows = readFileSync(join(VIEW_ROOT, "components", "SummaryRows.tsx"), "utf8");
+
+  it("图谱面板渲染的是**结构化行**，不是那串自由文本", () => {
+    expect(graph, "图谱面板没有用共享的键值行组件").toContain("SummaryRows");
+    expect(graph, "图谱面板还在渲染自由文本汇总").not.toContain("graph-summary muted");
+  });
+
+  it("结构由**后端**给（不在界面里切字符串 —— 切出来的项会丢掉句子里的限定词）", () => {
+    expect(graphOps, "图谱 ops 没有造结构化汇总").toContain("const summary = [");
+    expect(graphOps, "结构化汇总里没有逐项的标签").toContain('label: "实体"');
+    expect(graph, "界面里不该出现把 note 切开的写法").not.toMatch(/\.split\("[·；]"\)/);
+  });
+
+  it("孤立节点**列全**，不截断（原先只给前 8 个 + 省略号 ⇒ 作者看不到到底哪些没有关系）", () => {
+    expect(graph, "孤立节点名单还在截断").not.toContain("slice(0, 8)");
+    expect(graph, "孤立节点名单没有用可展开的组件").toContain("Disclosure");
+    expect(graph, "可展开的名单没有逐个列出节点").toContain("graph-isolated-list");
+  });
+
+  it("标签列是**共享的一列**（每行各自定宽 ⇒ 值列左边界参差、标签被挤成两行）", () => {
+    // 父级定列（auto = 宽度由清单里最宽的标签决定）+ 子行借用父级的列（subgrid）
+    expect(css, "汇总容器没有定列").toMatch(/\.summary-rows \{[^}]*grid-template-columns:/);
+    expect(css, "汇总行没有借用父级的列（subgrid）").toMatch(/\.summary-row \{[^}]*grid-template-columns: subgrid/);
+    // 不许再出现"每行自己定死一个窄标签列"：
+    // 「悬空引用」四个汉字塞不进 3em（37.5px）⇒ 标签折行、整行高度翻倍（R126 step89 抓到）
+    expect(css, "标签列又变回每行各自定宽").not.toMatch(/\.summary-row \{[^}]*grid-template-columns: 3em/);
+  });
+
+  it("键值行的**类型只有一个来源**（后端载荷与界面组件各写一份 ⇒ 慢慢长歪）", () => {
+    expect(rows, "组件自己又定义了一份 SummaryRow").not.toMatch(/export interface SummaryRow/);
+    expect(rows, "组件没有用共享契约里的 SummaryRow").toContain("from \"../../../src/shared/ipc\"");
+  });
+
+  it("代码里不许再读那个**已经没了的** .graph-summary（那是自由文本汇总的类名）", () => {
+    const walk = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "walkthrough.ts"), "utf8");
+    expect(walk, "预演还在读 .graph-summary（R126 起汇总是结构化行）").not.toContain(".graph-summary");
+    expect(graph, "图谱面板里还有 graph-summary").not.toContain("graph-summary");
+    // 样式也不该留着没人用的 .graph-summary
+    expect(css, "CSS 里还留着没人用的 .graph-summary").not.toMatch(/\.graph-summary\s*\{/);
   });
 });
 
