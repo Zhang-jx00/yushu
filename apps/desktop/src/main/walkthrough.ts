@@ -5879,6 +5879,87 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+
+  {
+    step: 86,
+    title: '世界观档案：地图面板的排版不堆叠（摘要分行、侧栏不挤成窄柱）+ 页面不横向溢出（R124）',
+    file: 'step86-map-layout.png',
+    body: String.raw`
+      // 这一步证 R124 的**排版**：① 摘要按行渲染（不堆成一长串）；② 侧栏没被挤成窄柱
+      // （面板在档案页是两栏栅格里的一格 ⇒ 用容器查询换布局）；③ 页面不横向溢出。
+      const panel = await waitFor(() => document.querySelector('.map-panel') || null, 8000);
+      if (panel === null) return { ok: false, note: '地图面板没渲染出来' };
+      const rows = [...document.querySelectorAll('.map-summary-rows .map-card-row')];
+      // 每行不许换行（行高 ≈ 一行）⇒ 说明没有堆叠
+      const tall = rows.filter((r) => r.getBoundingClientRect().height > 28);
+      const svg = document.querySelector('.map-panel .map-svg');
+      const card = document.querySelector('.map-panel .map-card') || document.querySelector('.map-side');
+      const svgW = svg === null ? 0 : svg.getBoundingClientRect().width;
+      const sideW = card === null ? 0 : card.getBoundingClientRect().width;
+      // 侧栏要么与画布同宽（上下排列），要么本身够宽（左右排列）⇒ 不许是窄柱
+      const notAColumn = sideW <= 0 || sideW >= svgW * 0.6 || sideW >= 220;
+      const overflow = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+      const noOverflow = overflow <= 1;
+      const panel2 = document.querySelector('.map-panel');
+      if (panel2) panel2.scrollIntoView({ block: 'center' });
+      await sleep(250);
+      return {
+        ok: rows.length === 4 && tall.length === 0 && notAColumn && noOverflow,
+        note: '摘要行=' + rows.length + '（每行一行高，换行的=' + tall.length + '）' +
+          '；画布宽=' + Math.round(svgW) + 'px，侧栏宽=' + Math.round(sideW) + 'px（不是窄柱=' + String(notAColumn) + '）' +
+          '；页面横向溢出=' + overflow + 'px（不溢出=' + String(noOverflow) + '）',
+      };
+    `,
+  },
+
+  {
+    step: 87,
+    title: '记忆页：卡片不许互相重叠、不许压住文字（用户截图那一片乱的根因，R124）',
+    file: 'step87-memory-layout.png',
+    body: String.raw`
+      // 这一步证 R124 的重点修复：**页面列的容器选择器不能写成后代**。
+      // 症状（用户截图）：卡片互相压住、按钮浮在正文上、几段文字叠成一团。
+      // 断言：记忆页右列里**任意两张面板的矩形不许相交**，且页面不许横向溢出。
+      await tab('记忆');
+      await sleep(500);
+      const panels = [...document.querySelectorAll('.memory > section > .panel')];
+      const boxes = panels
+        .map((el) => ({ el, box: el.getBoundingClientRect() }))
+        .filter((item) => item.box.width > 0 && item.box.height > 0);
+      // **内容有没有溢出面板**：面板被压扁时，它自己的矩形仍不相交（只量矩形会漏）
+      // ⇒ 内容会探出卡片、压住下一个 ⇒ 要量 scrollHeight 与 clientHeight 的差。
+      const spilling = panels.filter((el) => el.scrollHeight > el.clientHeight + 2);
+      const overlaps = [];
+      for (let i = 0; i < boxes.length; i += 1) {
+        for (let j = i + 1; j < boxes.length; j += 1) {
+          const a = boxes[i].box;
+          const b = boxes[j].box;
+          const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (w > 2 && h > 2) {
+            overlaps.push(
+              String(boxes[i].el.querySelector('h3')?.textContent || '#' + i).slice(0, 14) +
+              ' × ' + String(boxes[j].el.querySelector('h3')?.textContent || '#' + j).slice(0, 14) +
+              '（相交 ' + Math.round(w) + '×' + Math.round(h) + 'px）'
+            );
+          }
+        }
+      }
+      const overflow = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+      const noOverflow = overflow <= 1;
+      const root = document.querySelector('.memory');
+      if (root) root.scrollIntoView({ block: 'start' });
+      await sleep(250);
+      return {
+        ok: panels.length > 0 && overlaps.length === 0 && spilling.length === 0 && noOverflow,
+        note: '记忆页右列面板=' + panels.length + ' 个，互相重叠=' + overlaps.length +
+          '（' + overlaps.join(' | ') + '）' +
+          '；内容溢出面板=' + spilling.length + ' 个（' +
+          spilling.map((el) => String(el.querySelector('h3')?.textContent || '').slice(0, 12)).join(' | ') + '）' +
+          '；页面横向溢出=' + overflow + 'px（不溢出=' + String(noOverflow) + '）',
+      };
+    `,
+  },
 ];
 
 /**

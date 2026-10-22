@@ -1068,7 +1068,10 @@ h4 {
   min-height: 0;
 }
 
-.genesis section {
+/* R124：只命中**直接子级**。原先写的是后代选择器（`.genesis section`）⇒
+   列里**嵌套的那个 section** 也被套上这组规则（flex 列 + min-height:0）⇒
+   它被压缩、内容溢出自己、压住下面的卡片（用户截图里的「卡片全叠在一起」）。 */
+.genesis > section {
   padding: 16px 20px;
   overflow: auto;
   min-height: 0;
@@ -1234,7 +1237,10 @@ select {
   gap: 12px;
 }
 
-.outline section {
+/* R124：只命中**直接子级**。原先写的是后代选择器（`.outline section`）⇒
+   列里**嵌套的那个 section** 也被套上这组规则（flex 列 + min-height:0）⇒
+   它被压缩、内容溢出自己、压住下面的卡片（用户截图里的「卡片全叠在一起」）。 */
+.outline > section {
   padding: 16px 20px;
   overflow: auto;
   min-height: 0;
@@ -1424,7 +1430,10 @@ select {
   gap: 12px;
 }
 
-.ai section {
+/* R124：只命中**直接子级**。原先写的是后代选择器（`.ai section`）⇒
+   列里**嵌套的那个 section** 也被套上这组规则（flex 列 + min-height:0）⇒
+   它被压缩、内容溢出自己、压住下面的卡片（用户截图里的「卡片全叠在一起」）。 */
+.ai > section {
   padding: 16px 20px;
   overflow: auto;
   min-height: 0;
@@ -1595,13 +1604,49 @@ select {
   gap: 12px;
 }
 
-.memory section {
+/* R124：只命中**直接子级**。原先写的是后代选择器（`.memory section`）⇒
+   列里**嵌套的那个 section** 也被套上这组规则（flex 列 + min-height:0）⇒
+   它被压缩、内容溢出自己、压住下面的卡片（用户截图里的「卡片全叠在一起」）。 */
+.memory > section {
   padding: 16px 20px;
   overflow: auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* 页面列的子项按**自身内容撑高**，列自己滚（R124）。
+   为什么：`.panel { min-height: 0 }` 是 R110 为**档案页的 grid** 修的（grid 行高被视口均分 ⇒
+   内容溢出框外），但它是全局的 ⇒ 在**flex 列**里它覆盖了 flex item 默认的 `min-height: auto`
+   （= 不许被压到比内容还矮）⇒ 面板被压扁 ⇒ 里面的内容探出卡片、压住下一个面板
+   （用户截图：按钮浮在正文上、几段文字叠成一团）。
+   列本来就有 `overflow: auto` ⇒ 内容多了就滚，而不是互相压。 */
+.genesis > section > *,
+.outline > section > *,
+.ai > section > *,
+.memory > section > *,
+.export > section > *,
+/* 左列同理：`.outline` / `.ai` / `.memory` / `.export` 的 aside 也是 flex 列 ⇒ 同样的压扁。 */
+.outline > aside > *,
+.ai > aside > *,
+.memory > aside > *,
+.export > aside > * {
+  flex: none;
+}
+
+/* 页面列的子项按**自身内容撑高**，列自己滚（R124）。
+   为什么：`.panel { min-height: 0 }` 是 R110 为**档案页的 grid** 修的（grid 行高被视口均分 ⇒
+   内容溢出框外），但它是全局的 ⇒ 在**flex 列**里它覆盖了 flex item 默认的 `min-height: auto`
+   （= 不许被压到比内容还矮）⇒ 面板被压扁 ⇒ 里面的内容探出卡片、压住下一个面板
+   （用户截图：按钮浮在正文上、几段文字叠成一团）。
+   列本来就有 `overflow: auto` ⇒ 内容多了就滚，而不是互相压。 */
+.genesis > section > *,
+.outline > section > *,
+.ai > section > *,
+.memory > section > *,
+.export > section > * {
+  flex: none;
 }
 
 .memory-targets {
@@ -1749,7 +1794,10 @@ select {
   gap: 12px;
 }
 
-.export section {
+/* R124：只命中**直接子级**。原先写的是后代选择器（`.export section`）⇒
+   列里**嵌套的那个 section** 也被套上这组规则（flex 列 + min-height:0）⇒
+   它被压缩、内容溢出自己、压住下面的卡片（用户截图里的「卡片全叠在一起」）。 */
+.export > section {
   padding: 16px 20px;
   overflow: auto;
   min-height: 0;
@@ -3510,13 +3558,26 @@ table,
 
 /* 布局：左画布 + 右侧卡（窄处单列）。地图的重点是"点在哪儿"，
    侧栏只是查卡 ⇒ 画布占大头（K08 §3.7 标注即地点卡）。 */
+.map-panel {
+  /* 容器查询（R124）：这张面板在档案页是**两栏栅格**里的一格，宽度由栅格决定，
+     不是视口宽度 ⇒ 拿媒体查询猜宽度一定会猜错（窄面板被挤成 175px 的窄柱，
+     说明文字堆成四五行）。让面板自己当容器，按**自己的**宽度换布局。 */
+  container-type: inline-size;
+}
+
 .map-layout {
   display: grid;
-  /* 侧栏宽度用 fr 份数而不是 px：宽度字面量棘轮（R96）只许降不许升，
-     而桌面端其它面板也都是固定网格 ⇒ 这里跟着约定走，不新开断点。 */
+  /* 侧栏宽度用 fr 份数而不是 px：宽度字面量棘轮（R96）只许降不许升。 */
   grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
   gap: var(--space-6);
   align-items: start;
+}
+
+/* 面板窄到侧栏会挤成窄柱时：侧栏落到画布下方（宁可上下，也不要挤成一柱） */
+@container (max-width: 640px) {
+  .map-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .map-canvas-wrap {
@@ -3755,6 +3816,10 @@ table,
 
 .map-summary {
   font-size: var(--text-sm);
+}
+
+.map-summary-rows {
+  margin-top: 0;
 }
 
 .map-findings {

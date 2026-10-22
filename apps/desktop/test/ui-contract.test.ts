@@ -1417,6 +1417,116 @@ describe("世界地图底图（R123）：铺在坐标空间上 + 压暗层 + 卡
   });
 });
 
+
+/**
+ * 排版与动效（R124）的机器判据。
+ *
+ * 三条纪律（写进 docs/11 §7.3）：
+ * ① **说明不许堆成一长串**：信息多于两三项就分行对齐；要结构化就**让载荷带结构**，
+ *    别在界面里切字符串（切出来的"项"会丢掉句子里的限定词 ⇒ 意思变了还不自知）。
+ * ② **窄容器用容器查询，不拿媒体查询猜**：面板在栅格里时宽度由**栅格**决定，不是视口宽度
+ *    ⇒ 媒体查询一定会猜错（窄面板被挤成 175px 的窄柱）。
+ * ③ **动效不许过渡会让每一帧都重排的属性**（width/height/top/left/right/bottom/margin/padding）：
+ *    那些过渡每一帧都重排 ⇒ 掉帧。要动就用 opacity / transform（合成器就能做，不触发布局）。
+ */
+describe("排版与动效（R124）：说明分行 + 容器查询 + 不过渡布局属性", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const shared = readFileSync(join(ROOT, "apps", "desktop", "src", "shared", "ipc.ts"), "utf8");
+
+  it("地图的摘要由**载荷带结构**，界面按行渲染（不是切一长串自由文本）", () => {
+    expect(shared, "载荷里没有结构化摘要").toMatch(/summary:\s*\{\s*markers:/);
+    expect(panel, "面板没有把摘要排成行").toContain("map-summary-rows");
+    expect(panel, "面板还在渲染一长串自由文本摘要").not.toContain("{map.note}</div>");
+  });
+
+  it("窄容器用**容器查询**换布局（面板在栅格里，宽度由栅格决定，媒体查询会猜错）", () => {
+    expect(css, "地图面板没有当容器（container-type）").toMatch(/\.map-panel \{[^}]*container-type: inline-size/);
+    expect(css, "没有按容器宽度的布局分支").toMatch(/@container \(max-width: \d+px\)/);
+  });
+
+  it("动效不许过渡**会让每一帧都重排的属性**（那些过渡每一帧都重排 ⇒ 掉帧）", () => {
+    // 展开 / 收起的 grid-template-rows 是**唯一**登记的例外（内容增减，面板小，R111 刻意选的）
+    const FORBIDDEN = ["width", "height", "top", "left", "right", "bottom", "margin", "padding"];
+    // 登记的例外：两个进度条**刻意**用 width 过渡（宽度就是它们要表达的东西，
+    // 且那两处时长本来就登记在时长例外清单里）⇒ 不算"过渡布局属性"。
+    const ALLOWED = [".index-progress-bar", ".stats-progress-bar"];
+    const offenders: string[] = [];
+    for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = (rule[1] ?? "").trim();
+      const body = rule[2] ?? "";
+      for (const block of body.matchAll(/transition:\s*([^;]+);/g)) {
+        const decl = block[1] ?? "";
+        // 过渡的写法是 `transition: <属性> <时长> <缓动>`（**属性后面没有冒号**）⇒
+        // 按逗号分段取**首词**才是属性名。原先去找「属性:」⇒ 永远匹配不上 ⇒ 这条锁是恒绿的
+        // （变异 M4 实测抓到：加了 `transition: width …` 它照样绿）。
+        for (const part of decl.split(",")) {
+          const prop = (part.trim().split(/\s+/)[0] ?? "").toLowerCase();
+          if (!FORBIDDEN.includes(prop)) continue;
+          if (ALLOWED.some((sel) => selector.includes(sel))) continue;
+          offenders.push(`${selector} → ${decl.replace(/\s+/g, " ").trim()}`);
+        }
+      }
+    }
+    expect(offenders, `这些过渡会每一帧都重排（掉帧）：${offenders.join(" | ")}`).toEqual([]);
+  });
+});
+
+
+/**
+ * 页面列的容器选择器不许写成**后代**（R124 的重点修复）。
+ *
+ * 起因是用户截图：**记忆页"全是乱的"**——卡片互相压住、按钮浮在正文上、几段文字叠成一团。
+ * 根因不是"设计没做好"，是 `.memory section { display:flex; flex-direction:column; min-height:0 }`
+ * 这个**后代选择器**把右列里**嵌套的那个 <section>** 也套上了 ⇒ 它在 flex 列里被压缩、
+ * 内容溢出自己、压住下面的卡片。**同一个写法在 5 个页面都有**。
+ *
+ * 为什么值得立锁：它**不会让任何门禁变红**——静态结构合法，坏的是"哪一条规则命中了谁"。
+ * ⇒ 这条锁把"页面列必须是直接子级"写死，并把"卡片不许互相重叠"交给预演去量。
+ */
+describe("页面列的容器选择器不许写成后代（R124：卡片叠在一起的根因）", () => {
+  it("页面列的子项不许被压到比内容还矮（压扁了内容就探出卡片、压住彼此）", () => {
+    // `.panel { min-height: 0 }` 是 R110 为**档案页的 grid** 修的，但它是全局的 ⇒
+    // 在 flex 列里它覆盖了 flex item 默认的 `min-height: auto`
+    // （= 不许被压到比内容还矮）⇒ 面板被压扁 ⇒ 里面的内容探出卡片、压住下一个面板。
+    // **先剥注释**再扫规则：注释里写着 `{ min-height: 0 }` 这种带花括号的片段时，
+    // 规则正则会被切碎、扫出来的"规则"根本不是规则（判据就会恒绿 —— 实测踩过）。
+    const bareCss = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const name of ["genesis", "outline", "ai", "memory", "export"]) {
+      // 规则可能是**分组选择器**（几个页面共用一条）⇒ 不能用"选择器后面紧跟 {"的写法，
+      // 要把选择器列表里含它的规则都找出来。
+      const bodies = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+        .filter((m) => (m[1] ?? "").includes(`${name} > section > *`))
+        .map((m) => m[2] ?? "")
+        .join(" ");
+      expect(bodies, `${name} 页面列的子项没有「按内容撑高」这条（flex: none）`).toContain("flex: none");
+    }
+    // 左列同理：`.outline` / `.ai` / `.memory` / `.export` 的 aside 也是 flex 列
+    for (const name of ["outline", "ai", "memory", "export"]) {
+      const bodies = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+        .filter((m) => (m[1] ?? "").includes(`${name} > aside > *`))
+        .map((m) => m[2] ?? "")
+        .join(" ");
+      expect(bodies, `${name} 页面左列的子项没有「按内容撑高」这条（flex: none）`).toContain("flex: none");
+    }
+  });
+
+  it("五个页面列的容器都只命中直接子级", () => {
+    const offenders = [...css.matchAll(/^\.(genesis|outline|ai|memory|export) section \{/gm)].map(
+      (m) => m[0],
+    );
+    expect(
+      offenders,
+      `这些后代选择器会把列里**嵌套的 section** 也套上 flex 列规则 ⇒ 内容溢出、压住彼此：${offenders.join(" | ")}`,
+    ).toEqual([]);
+    // 反过来也要看一眼：直接子级那条规则确实在
+    for (const name of ["genesis", "outline", "ai", "memory", "export"]) {
+      expect(css, `${name} 页面列没有「直接子级」规则`).toMatch(
+        new RegExp(`^\\.${name} > section \\{`, "m"),
+      );
+    }
+  });
+});
+
 describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
   /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
   const stripComments = (src: string): string =>
