@@ -6622,6 +6622,100 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 99,
+    title: '逐页对比度体检：三档主题下，每页最差的那段文字都 ≥ 4.5（R137）',
+    file: 'step99-contrast-audit.png',
+    body: String.raw`
+      // 这一步把 docs/13 §6 那条「暗色只验了几页」**变成可量的门禁**：
+      // 逐个页面，把**页面上真正在显示的文字**（段落 / 列表项 / 表格单元 / 标题 / 次要字）
+      // 各自的颜色与**它所在的那层背景**算一遍对比度，取每页最差的那个 ⇒
+      // **浅色 / 暗色 / 暗色·柔和高对比三档**都过 4.5（docs/13 §3 的底线）。
+      //
+      // 为什么量"文字 vs 它所在的那层背景"而不是量 body：body 的配色每页都一样 ⇒
+      // 量它等于只验了一次（那正是 §6 说"只验了几页"的那类验法）。
+      //
+      // 这一步是**动态**那一半（页面上真正画出来的样子）；
+      // 另一半是**静态**那一半：apps/desktop/test/contrast-gate.test.ts
+      // 把样式表声明的所有「字色 × 底色」组合逐套主题算一遍。两道门禁各管一半。
+      const TABS = ['起源工作台', '三级大纲', '编辑器', '稿件总览', 'AI 副驾', '记忆', '规则', '导出与自查', '世界观档案', '码字统计', '项目文件'];
+      const THEMES = ['light', 'dark', 'dark-soft'];
+      const lum = (rgb) => {
+        const m = String(rgb).match(/(\d+(?:\.\d+)?)/g);
+        if (!m) return 0;
+        const f = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+        return 0.2126 * f(Number(m[0]) / 255) + 0.7152 * f(Number(m[1]) / 255) + 0.0722 * f(Number(m[2]) / 255);
+      };
+      const ratio = (a, b) => {
+        const la = lum(a); const lb = lum(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+      };
+      // 元素"所在的那层背景"：往上找**第一个不透明**的祖先背景（找不到就用 body 的）
+      const bgOf = (el) => {
+        let node = el;
+        while (node !== null && node !== document.body) {
+          const c = getComputedStyle(node).backgroundColor;
+          const m = String(c).match(/(\d+(?:\.\d+)?)(?:,\s*(\d+(?:\.\d+)?))?/);
+          if (m !== null && m[1] !== undefined) {
+            const alpha = m[2] === undefined ? 1 : Number(m[2]);
+            if (alpha > 0.05) return c;
+          }
+          node = node.parentElement;
+        }
+        return getComputedStyle(document.body).backgroundColor;
+      };
+      const setTheme = async (value) => {
+        const select = document.querySelector('.theme-picker select');
+        if (select === null) return;
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+        setter.call(select, value);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(450);
+      };
+      const worst = [];
+      for (const theme of THEMES) {
+        await setTheme(theme);
+        for (const name of TABS) {
+          await tab(name);
+          await sleep(350);
+          let min = 99;
+          let who = '';
+          let detail = '';
+          const nodes = [...document.querySelectorAll('p, li, td, th, h1, h2, h3, h4, .muted, code, label, button')];
+          for (const el of nodes) {
+            const box = el.getBoundingClientRect();
+            if (box.width <= 0 || box.height <= 0) continue;
+            const text = String(el.textContent || '').trim();
+            if (text === '') continue;
+            const cs = getComputedStyle(el);
+            if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) < 0.15) continue;
+            const bg = bgOf(el);
+            const r = ratio(cs.color, bg);
+            if (r < min) {
+              min = r;
+              who = text.slice(0, 12);
+              detail = el.tagName.toLowerCase() + '.' + String(el.className || '').slice(0, 16) +
+                ' 字色=' + cs.color + ' 底色=' + bg;
+            }
+          }
+          worst.push({ theme: theme, page: name, min: min, who: who, detail: detail });
+        }
+      }
+      await setTheme('light');
+      const bad = worst.filter((item) => item.min < 4.5);
+      const sorted = [...worst].sort((a, b) => a.min - b.min);
+      const lowest = sorted[0];
+      // 不过的**全列**出来（不截断）：截断会让下一个人以为只有最差的那几个有问题
+      const badList = bad.map((b) => b.theme + '/' + b.page + ' ' + b.min.toFixed(2) + ' ' + b.detail).join(' ｜ ');
+      return {
+        ok: bad.length === 0 && lowest !== undefined && worst.length === TABS.length * THEMES.length,
+        note: '量了 ' + String(worst.length) + ' 个（页 × 主题）组合（' + String(TABS.length) + ' 页 × ' +
+          String(THEMES.length) + ' 档）；不过 4.5 的=' + String(bad.length) +
+          '；最差的是 ' + (lowest === undefined ? '（没量到）' : lowest.theme + ' 的「' + lowest.page + '」' + lowest.min.toFixed(2) + '（' + lowest.who + '）') +
+          (bad.length > 0 ? '；不过的：' + badList : ''),
+      };
+    `,
+  },
 ];
 
 /**

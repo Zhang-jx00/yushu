@@ -973,10 +973,25 @@ describe("UI 重构第四批·第三段（R115）：状态图标集与空/错态
  * 分层做歪了有两种典型坏法：① semantic 里又写起字面色值 ⇒ 两层形同虚设；
  * ② 顺手把色板改了 ⇒ "改版"变成了"重设计"。所以这两条都要钉住。
  *
- * 口径见 `docs/13-暗色主题口径.md`（本轮只记口径，不动色板）。
+ * 口径见 `docs/13-暗色主题口径.md`（R116 那轮只记口径、不动色板）。
+ *
+ * **R137 的补充**：默认色板后来**有据改过三处**（次要字 / 提示色 / 成功色）——
+ * 逐页对比度体检量出它们低于 docs/13 §3 的 4.5 底线 ⇒ 调到过线。
+ * 所以"一个像素都没动"这句话**不再是现状**，改成了两条更严的：
+ * ① 当前值与**登记表**逐字一致（改之前先登记）；
+ * ② 与历史基线的差异**只有登记在案的那三处**（不许悄悄多改，也不许登记了却没改）。
  */
 
-/** 默认色板的基线（R116 改版前的原值，逐字）：semantic → 当时的字面值 */
+/**
+ * 默认色板的**历史基线**（R116 改版前的原值，逐字）：semantic → 当时的字面值。
+ *
+ * 这张表现在是**历史**，不是"当前值"：R137 的逐页对比度体检查出**默认档自己**
+ * 违反 docs/13 §3 的 4.5 底线（次要文字 3.49:1、提示色 4.19:1、成功色 4.38:1），
+ * 于是**有据**改了三处 ⇒ 当前值见 PALETTE_R137，理由见 PALETTE_CHANGES_R137。
+ *
+ * 为什么把历史表留着不删：它记着"当初一个像素都没动"这件事，也给"改了什么"留凭据。
+ * 删掉它就等于把这段历史抹了（那样后来的人只会看到一张凭空改过的色板）。
+ */
 const PALETTE_BASELINE: Record<string, string> = {
   "--bg": "#f7f4ee",
   "--panel": "#fffdf8",
@@ -999,6 +1014,39 @@ const PALETTE_BASELINE: Record<string, string> = {
   "--heat-l1": "#d9e8d4",
   "--heat-l2": "#a9cfa4",
   "--heat-l3": "#6faa74",
+};
+
+/**
+ * 默认色板**当前**的登记值（R137 起）：semantic → 字面值。
+ * 这一份是**逐字锁**：以后谁动色板，这张表会红，改之前必须先在这里登记并说清理由。
+ */
+const PALETTE_R137: Record<string, string> = {
+  ...PALETTE_BASELINE,
+  "--muted": "#675f55",
+  "--good": "#2a7042",
+  "--warn": "#8a570a",
+};
+
+/**
+ * R116 → R137 的**有据变更**逐条登记（不许悄悄多改一个色，也不许登记了却没改）。
+ * 每条的理由都带**实测比值**，不是"看着更清楚"。
+ */
+const PALETTE_CHANGES_R137: Record<string, { from: string; to: string; why: string }> = {
+  "--muted": {
+    from: "#8a8175",
+    to: "#675f55",
+    why: "次要文字：纸底 3.49:1、朱底 3.01:1 ⇒ 低于 docs/13 §3 的 4.5（预演 step99 逐页实测）",
+  },
+  "--warn": {
+    from: "#a06a12",
+    to: "#8a570a",
+    why: "提示色：纸底 4.19:1、凹陷底 3.91:1 ⇒ 低于 4.5",
+  },
+  "--good": {
+    from: "#2f7d4f",
+    to: "#2a7042",
+    why: "成功色：在自己的浅底 #e6f2e9 上 4.38:1 ⇒ 低于 4.5",
+  },
 };
 
 /** 取 :root 块里某个令牌的声明值 */
@@ -1032,10 +1080,10 @@ describe("UI 重构第五批（R116）：颜色令牌两层化", () => {
     expect(offenders, `这些语义色没有引用 primitive：${offenders.join(" | ")}`).toEqual([]);
   });
 
-  it("**默认色板一个像素都没动**（逐字比对基线表；primitive 的取值就是改版前的原值）", () => {
+  it("默认色板与 **R137 登记值逐字一致**（改色板要先改登记表并说清理由）", () => {
     const root = defaultRootBlock();
     const wrong: string[] = [];
-    for (const [name, expected] of Object.entries(PALETTE_BASELINE)) {
+    for (const [name, expected] of Object.entries(PALETTE_R137)) {
       const semantic = rootToken(root, name) ?? "";
       const ref = /^var\((--c-[a-z0-9-]+)\)$/.exec(semantic);
       if (ref === null) {
@@ -1043,9 +1091,42 @@ describe("UI 重构第五批（R116）：颜色令牌两层化", () => {
         continue;
       }
       const primitive = rootToken(root, ref[1] as string);
-      if (primitive !== expected) wrong.push(`${name}（${ref[1]}）= ${primitive ?? "(无)"} ≠ 基线 ${expected}`);
+      if (primitive !== expected) wrong.push(`${name}（${ref[1]}）= ${primitive ?? "(无)"} ≠ 登记值 ${expected}`);
     }
-    expect(wrong, `色板被改动了：${wrong.join(" | ")}`).toEqual([]);
+    expect(wrong, `色板与登记值不一致：${wrong.join(" | ")}`).toEqual([]);
+  });
+
+  it("R116 → R137 的差异**只有登记在案的那三处**（不许悄悄多改一个色，也不许登记了却没改）", () => {
+    const root = defaultRootBlock();
+    const problems: string[] = [];
+    for (const [name, baseline] of Object.entries(PALETTE_BASELINE)) {
+      const semantic = rootToken(root, name) ?? "";
+      const ref = /^var\((--c-[a-z0-9-]+)\)$/.exec(semantic);
+      if (ref === null) {
+        problems.push(`${name} 不是引用`);
+        continue;
+      }
+      const primitive = rootToken(root, ref[1] as string);
+      const registered = PALETTE_CHANGES_R137[name];
+      if (primitive !== baseline && registered === undefined) {
+        problems.push(`${name} 从 ${baseline} 变成了 ${primitive ?? "(无)"}，但变更表里没有登记`);
+      }
+    }
+    // 反向：登记了却没改 ⇒ 登记表是假的
+    for (const [name, change] of Object.entries(PALETTE_CHANGES_R137)) {
+      const semantic = rootToken(root, name) ?? "";
+      const ref = /^var\((--c-[a-z0-9-]+)\)$/.exec(semantic);
+      const primitive = ref === null ? null : rootToken(root, ref[1] as string);
+      if (primitive !== change.to) {
+        problems.push(`${name} 登记成 ${change.to}，实际是 ${primitive ?? "(无)"}`);
+      }
+      if (change.from !== PALETTE_BASELINE[name]) {
+        problems.push(
+          `${name} 变更表的起点（${change.from}）与历史基线（${PALETTE_BASELINE[name] ?? "(无)"}）不一致`,
+        );
+      }
+    }
+    expect(problems, `色板变更登记对不上：${problems.join(" | ")}`).toEqual([]);
   });
 
   it("高对比模式覆盖的是 **primitive** 一层（覆盖点集中在一处，semantic 自动跟着变）", () => {
