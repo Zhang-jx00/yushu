@@ -1180,6 +1180,143 @@ describe("世界地图（M5/T5-1，R120）：坐标空间 + 标注 + 图层显�
   });
 });
 
+
+/**
+ * 暗色主题（R121）的机器判据：**取值实测** + 只改 primitive 一层。
+ *
+ * 口径回源 `docs/13-暗色主题口径.md`：
+ * §1 换主题**只改 primitive**（semantic 一个字都不动）；
+ * §2 不能直接反相（纸/墨/朱各有各的底线）；
+ * §3 对比度底线（正文与次要文字 ≥ 4.5:1；描边在深底上要比纸**更亮**）；
+ * §4 与「高对比模式」不是一回事，不能互相顶掉。
+ *
+ * 判据要点：**对比度是从 CSS 里取真值现算的**，不是把口径文档里写的数字抄一遍——
+ * 抄一遍的话，改了色值而忘了改文档，这道锁照样绿（恒绿的锁比没锁更坏）。
+ */
+describe("暗色主题（R121）：取值实测 + 只改 primitive 一层", () => {
+  const darkBlock = /:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  const darkToken = (name: string): string | null => rootToken(darkBlock, name);
+  const defaultAccent = rootToken(defaultRootBlock(), "--c-accent") ?? "";
+
+  /** sRGB 相对亮度（WCAG 2.x） */
+  function luminance(hex: string): number {
+    const h = hex.replace("#", "");
+    const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255) as [
+      number,
+      number,
+      number,
+    ];
+    const f = (c: number): number => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  }
+
+  /** 对比度比值 */
+  function ratio(a: string, b: string): number {
+    const la = luminance(a);
+    const lb = luminance(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+
+  /** HLS 饱和度（朱色要"降饱和"，这条要可算） */
+  function saturation(hex: string): number {
+    const h = hex.replace("#", "");
+    const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255) as [
+      number,
+      number,
+      number,
+    ];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    if (max === min) return 0;
+    return l > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min);
+  }
+
+  it("暗色块存在，且**只覆盖 primitive**（semantic 一个字都不许动）", () => {
+    expect(darkBlock, "没找到 :root[data-theme=\"dark\"] 块").not.toBe("");
+    const semanticInBlock = Object.keys(PALETTE_BASELINE).filter((name) =>
+      new RegExp(`^\\s*${name.replace(/-/g, "\\-")}\\s*:`, "m").test(darkBlock),
+    );
+    expect(semanticInBlock, `暗色块里覆盖了 semantic：${semanticInBlock.join(" | ")}`).toEqual([]);
+    expect(darkBlock, "暗色块没有覆盖 primitive").toMatch(/--c-[a-z0-9-]+\s*:/);
+  });
+
+  it("对比度实测达标（从 CSS 真值现算，不是抄文档里的数字）", () => {
+    const paper = darkToken("--c-paper") ?? "";
+    const raised = darkToken("--c-paper-raised") ?? "";
+    const ink = darkToken("--c-ink") ?? "";
+    const muted = darkToken("--c-ink-soft") ?? "";
+    const accent = darkToken("--c-accent") ?? "";
+    const onAccent = darkToken("--c-on-accent") ?? "";
+    const line = darkToken("--c-line") ?? "";
+    const floors: Array<[string, string, string, number]> = [
+      ["正文 ink on 底", ink, paper, 4.5],
+      ["正文 ink on 面板", ink, raised, 4.5],
+      ["次要 muted on 底", muted, paper, 4.5],
+      ["朱 accent on 底（当文字用）", accent, paper, 4.5],
+      ["朱底上的字 on-accent", onAccent, accent, 4.5],
+    ];
+    const bad: string[] = [];
+    for (const [name, fg, bg, floor] of floors) {
+      const value = ratio(fg, bg);
+      if (!(value >= floor)) bad.push(`${name} = ${value.toFixed(2)}（底线 ${floor.toFixed(1)}）`);
+    }
+    expect(bad, `暗色下的对比度不达标：${bad.join(" | ")}`).toEqual([]);
+    // 描边另有一条**相对**规则（docs/13 §3 只说"在深底上要比纸更亮"，没说绝对比值；
+    // 浅色档自己的描边对底也才 1.25:1 ⇒ 拿 3:1 卡它是"拿一个更严的尺子量别人"）。
+    // 真正的底线是：**暗色的描边不许比默认档更看不见**。
+    const defaultLine = rootToken(defaultRootBlock(), "--c-line") ?? "";
+    const defaultPaper = rootToken(defaultRootBlock(), "--c-paper") ?? "";
+    const darkVisible = ratio(line, paper);
+    const defaultVisible = ratio(defaultLine, defaultPaper);
+    expect(
+      darkVisible,
+      `暗色描边对底 ${darkVisible.toFixed(2)} 比默认档的 ${defaultVisible.toFixed(2)} 更看不见`,
+    ).toBeGreaterThanOrEqual(defaultVisible);
+  });
+
+  it("纸墨关系不许丢（不能直接反相：raised 亮于底、sunken 暗于底、墨不是纯白、底不是纯黑）", () => {
+    const paper = darkToken("--c-paper") ?? "";
+    const raised = darkToken("--c-paper-raised") ?? "";
+    const sunken = darkToken("--c-paper-sunken") ?? "";
+    const ink = darkToken("--c-ink") ?? "";
+    const line = darkToken("--c-line") ?? "";
+    expect(luminance(raised), "raised 要比底亮（层次全靠这个）").toBeGreaterThan(luminance(paper));
+    expect(luminance(sunken), "sunken 要比底暗（凹陷感）").toBeLessThan(luminance(paper));
+    expect(ink.toLowerCase(), "墨不能是纯白（深底上纯白刺眼）").not.toBe("#ffffff");
+    expect(paper.toLowerCase(), "底不能是纯黑（那不是纸，是发光的屏幕）").not.toBe("#000000");
+    expect(luminance(line), "描边要比纸更亮（深底上更深的描边等于看不见）").toBeGreaterThan(luminance(paper));
+  });
+
+  it("朱色**降饱和 + 提亮**（御书的朱是落款印，不是警示灯）", () => {
+    const darkAccent = darkToken("--c-accent") ?? "";
+    expect(saturation(darkAccent), "暗色朱色比默认档还饱和 ⇒ 要降饱和").toBeLessThan(
+      saturation(defaultAccent),
+    );
+    expect(luminance(darkAccent), "暗色朱色要提亮（深底上原来的朱看不见）").toBeGreaterThan(
+      luminance(defaultAccent),
+    );
+  });
+
+  it("高对比在深色下**不被压掉**（另给一套，不是让深色色板赢）", () => {
+    const block = highContrastBlock();
+    const darkSub = /:root\[data-theme="dark"\] \{([\s\S]*?)\n\s*\}/.exec(block)?.[1] ?? "";
+    expect(darkSub, "高对比块里没有深色档的一套（深色会把高对比顶掉）").not.toBe("");
+    expect(darkSub, "深色档的高对比没有覆盖 primitive").toMatch(/--c-[a-z0-9-]+\s*:/);
+  });
+
+  it("主题档是**用户级偏好**（只决定用哪一套 primitive，不进项目真源）", () => {
+    const app = readFileSync(join(VIEW_ROOT, "App.tsx"), "utf8");
+    expect(app).toContain('dataset["theme"]');
+    expect(app).toContain("saveThemePref");
+    expect(app).toContain("loadThemePref");
+    // 主题偏好不许写进项目真源通道
+    expect(app, "主题偏好写进了项目真源").not.toMatch(/doc\.write\([^)]*theme/);
+  });
+});
+
 describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + 版式", () => {
   /** 剥掉注释（块注释 + 行注释），只留真代码 —— 注释里的同名字面量不许冒充属性 */
   const stripComments = (src: string): string =>

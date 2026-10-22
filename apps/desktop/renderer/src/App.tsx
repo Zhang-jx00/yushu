@@ -4,6 +4,7 @@ import type { AppFlushDonePayload, ProjectSnapshot } from "../../src/shared/ipc"
 import { api } from "./api";
 import { BrandMark, BrandWordmark } from "./brand";
 import { DENSITIES, loadDensityPref, saveDensityPref, type DensityId } from "./density-prefs";
+import { THEMES, loadThemePref, saveThemePref, type ThemeId } from "./theme-prefs";
 import { YushuIcon } from "./icons";
 import { flushEditorIfAny } from "./editor-flush";
 import { ProjectScreen } from "./views/ProjectScreen";
@@ -88,6 +89,15 @@ export function App() {
   const [lastProject, setLastProject] = useState<ProjectSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [density, setDensity] = useState<DensityId>(() => loadDensityPref(window.localStorage));
+  /** 主题档（浅色 / 深色，R121）：和密度档一样是**用户级偏好**，不进项目真源 */
+  const [theme, setTheme] = useState<ThemeId>(() => loadThemePref(window.localStorage));
+
+  useEffect(() => {
+    document.documentElement.dataset["theme"] = theme;
+    // 持久化（R121）：主题是**用户级偏好**，存 localStorage（不进项目真源）。
+    // 只决定"用哪一套 primitive"——暗色那套色值在 styles.css 里，这里只负责选。
+    saveThemePref(window.localStorage, theme);
+  }, [theme]);
 
   useEffect(() => {
     document.documentElement.dataset["density"] = density;
@@ -168,6 +178,20 @@ export function App() {
             onChange={(event) => setDensity(event.target.value as DensityId)}
           >
             {DENSITIES.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="theme-picker">
+          <span className="theme-label">主题</span>
+          <select
+            value={theme}
+            aria-label="主题"
+            onChange={(event) => setTheme(event.target.value as ThemeId)}
+          >
+            {THEMES.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.label}
               </option>

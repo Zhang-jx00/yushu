@@ -5683,6 +5683,77 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+
+  {
+    step: 82,
+    title: '暗色主题：取值实测（正文对比度 ≥ 4.5）+ 开关只改 primitive + 主题是用户级偏好（M5 暗色色板，R121）',
+    file: 'step82-dark.png',
+    body: String.raw`
+      // 这一步证 R121 的三件事：
+      // ① **取值实测**（正文对比度从 computed style 现算，不是抄文档里的数字）；
+      // ② **切回浅色逐字恢复**（默认色板一个像素都没动）；
+      // ③ **主题是用户级偏好**（存 localStorage，**项目真源一个字节都没动**）。
+      const themeSelect = document.querySelector('.theme-picker select');
+      if (themeSelect === null) return { ok: false, note: '顶栏里没有「主题」下拉' };
+      const body = document.body;
+      const beforeBg = getComputedStyle(body).backgroundColor;
+      const beforeFg = getComputedStyle(body).color;
+      // 盘上取一个真源文件做对照（主题是用户级偏好 ⇒ 真源不该有任何变化）
+      const diskFile = await window.yushu.doc.read('world/map.yaml').catch(() => null)
+        || await window.yushu.doc.read('world/world.yaml').catch(() => null);
+      const hashBefore = diskFile === null ? '' : String(diskFile.hash || '');
+
+      const lum = (rgb) => {
+        const m = String(rgb).match(/(\d+(?:\.\d+)?)/g);
+        if (!m) return 0;
+        const f = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+        return 0.2126 * f(Number(m[0]) / 255) + 0.7152 * f(Number(m[1]) / 255) + 0.0722 * f(Number(m[2]) / 255);
+      };
+      const ratio = (a, b) => {
+        const la = lum(a); const lb = lum(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+      };
+
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(themeSelect, 'dark');
+      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(400);
+      const afterBg = getComputedStyle(body).backgroundColor;
+      const afterFg = getComputedStyle(body).color;
+      const textRatio = ratio(afterFg, afterBg);
+      const dataset = String(document.documentElement.dataset.theme || '');
+      const stored = String(window.localStorage.getItem('yushu.ui.theme') || '');
+      const changed = afterBg !== beforeBg;
+
+      // 切回浅色：默认色板必须**逐字**恢复
+      setter.call(themeSelect, 'light');
+      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(400);
+      const backBg = getComputedStyle(body).backgroundColor;
+      const backFg = getComputedStyle(body).color;
+      const restored = backBg === beforeBg && backFg === beforeFg;
+      const backStored = String(window.localStorage.getItem('yushu.ui.theme') || '');
+      const diskAfter = diskFile === null ? null : await window.yushu.doc.read(diskFile.path).catch(() => null);
+      const hashAfter = diskAfter === null ? '' : String(diskAfter.hash || '');
+      const diskUntouched = diskFile === null ? true : hashBefore === hashAfter;
+
+      // 回到深色留一张暗色下的截图（证据）
+      setter.call(themeSelect, 'dark');
+      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(500);
+      const panel = document.querySelector('.app');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: changed && textRatio >= 4.5 && dataset === 'dark' && stored === 'dark' && restored && backStored === 'light' && diskUntouched,
+        note: '浅色底=' + beforeBg + ' → 深色底=' + afterBg + '（变了=' + String(changed) + '）' +
+          '；正文对比度=' + textRatio.toFixed(2) + '（底线 4.5）' +
+          '；data-theme=' + dataset + '；偏好存的是=' + stored +
+          '；切回浅色逐字恢复=' + String(restored) + '（底=' + backBg + ' 偏好=' + backStored + '）' +
+          '；项目真源未动=' + String(diskUntouched) + (diskFile === null ? '（项目里没有可比对的真源文件）' : '（' + diskFile.path + '）'),
+      };
+    `,
+  },
 ];
 
 /**

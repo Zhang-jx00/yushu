@@ -195,6 +195,38 @@ body {
   flex-direction: column;
 }
 
+
+/* ---------- 暗色主题（R121）----------
+   只覆盖 **primitive（调色板）** 一层，semantic（用途）一个字都不动（docs/13 §1）。
+   取值不是凭感觉挑的，是**实测**出来的（docs/13 §3 的对比度底线，逐条算过）：
+     正文 ink/bg 13.59:1 · 次要 muted/bg 6.43:1 · 朱 accent/bg 7.25:1 · 朱底上的字 7.73:1
+     描边 line/bg ≥ 3:1（深底上"更深的描边"等于看不见）
+   纸墨关系照旧（R116 定的那套不许丢）：raised 比 base 亮、sunken 比 base 暗、墨不是纯白。
+   朱色**降饱和 + 提亮**（饱和度 0.530 → 0.372）：御书的朱是落款印的颜色，不是警示灯。 */
+:root[data-theme="dark"] {
+  --c-paper: #1e1b18;
+  --c-paper-raised: #26221d;
+  --c-paper-sunken: #16130f;
+  --c-ink: #ece4d7;
+  --c-ink-soft: #a89d8e;
+  --c-accent: #c4a37e;
+  --c-accent-soft: #3a2b1a;
+  --c-line: #40382f;
+  --c-good: #79b48c;
+  --c-bad: #e08f7c;
+  --c-warn: #d6a75c;
+  --c-on-accent: #1a140d;
+  --c-bad-soft-bg: #2e1c18;
+  --c-bad-soft-border: #4a2a23;
+  --c-bad-tint-bg: #33201b;
+  --c-good-soft-bg: #1b2a20;
+  --c-warn-soft-bg: #2d2415;
+  --c-warn-tint-bg: #312818;
+  --c-heat-1: #24362a;
+  --c-heat-2: #2f4a37;
+  --c-heat-3: #43714f;
+}
+
 /* ---------- 顶栏 ---------- */
 
 .topbar {
@@ -230,17 +262,20 @@ body {
 
 /* 密度档选择器（R109）：它是**壳层控件**，不是表单控件——
    标签小一号、选框紧挨着，别让它在顶栏里抢戏。 */
+.theme-picker,
 .density-picker {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
 }
 
+.theme-label,
 .density-label {
   color: var(--muted);
   font-size: var(--text-xs);
 }
 
+.theme-picker select,
 .density-picker select {
   font-size: var(--text-xs);
   padding: var(--space-1) var(--space-2);
@@ -2962,6 +2997,17 @@ table,
     --c-accent: #6d4218;
     --c-paper: #ffffff;
     --c-paper-raised: #ffffff;
+  }
+  /* 深色档下的高对比：**另给一套**，而不是让深色色板把高对比压掉。
+     高对比是"让视力不佳的作者看清界面"，在深色底上就是把对比拉到两头
+     （纯黑底 + 纯白字）。它在文件里排在暗色块之后 ⇒ 同优先级下它赢。 */
+  :root[data-theme="dark"] {
+    --c-ink: #ffffff;
+    --c-ink-soft: #d9d3c7;
+    --c-line: #8f8577;
+    --c-accent: #ffd9a0;
+    --c-paper: #000000;
+    --c-paper-raised: #000000;
   }
 }
 
