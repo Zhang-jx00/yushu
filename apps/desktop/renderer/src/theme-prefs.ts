@@ -18,10 +18,14 @@
  * 这里是"选哪一套"——两者分开，改色板的人不必碰这里，改这里的人不必碰色板。
  */
 
-/** 两档主题（id 与 `data-theme` 的取值一致；label 是界面文案）——**唯一来源** */
+/** 三档主题（id 与 `data-theme` 的取值一致；label 是界面文案）——**唯一来源** */
 export const THEMES = [
   { id: "light", label: "浅色" },
   { id: "dark", label: "深色" },
+  // R129：深色档下的**柔和高对比**（docs/13 §6 明写没做的那条）——
+  // 系统「高对比度」在深色下是纯黑底 + 纯白字（拉到两头），夜里看久了晃眼；
+  // 这一档**按纸墨底调**：底还是那张暗纸，字是暖白，描边加重 ⇒ 依然是高对比，但不刺眼。
+  { id: "dark-soft", label: "深色·柔和高对比" },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]["id"];

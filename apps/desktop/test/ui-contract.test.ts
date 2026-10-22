@@ -1194,7 +1194,8 @@ describe("世界地图（M5/T5-1，R120）：坐标空间 + 标注 + 图层显�
  * 抄一遍的话，改了色值而忘了改文档，这道锁照样绿（恒绿的锁比没锁更坏）。
  */
 describe("暗色主题（R121）：取值实测 + 只改 primitive 一层", () => {
-  const darkBlock = /:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  // R129 起，暗色底色**同时罩住两档**（`dark` 与 `dark-soft`）⇒ 解析时要认这个选择器列表
+  const darkBlock = /:root\[data-theme="dark"\](?:,\s*:root\[data-theme="dark-soft"\])? \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
   const darkToken = (name: string): string | null => rootToken(darkBlock, name);
   const defaultAccent = rootToken(defaultRootBlock(), "--c-accent") ?? "";
 
@@ -1398,7 +1399,8 @@ describe("世界地图底图（R123）：铺在坐标空间上 + 压暗层 + 卡
     const scrim = /\.map-scrim \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
     expect(scrim, "压暗层没有引用 primitive（换主题时它不会跟着换）").toContain("var(--c-map-scrim)");
     // 暗色块里也必须覆盖这一层 ⇒ 暗色下压的是暗的地面
-    const dark = /:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    // （R129 起暗色底色同时罩住 `dark` 与 `dark-soft` 两档 ⇒ 解析要认这个选择器列表）
+    const dark = /:root\[data-theme="dark"\](?:,\s*:root\[data-theme="dark-soft"\])? \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
     expect(dark, "暗色块没覆盖压暗层").toContain("--c-map-scrim");
   });
 
@@ -1648,6 +1650,114 @@ describe("时间线面板的汇总也结构化（R128）：最后一个还在用
     // 拿长串当判据 = 恒绿（变异动不到它）——实测踩过
     expect(archive, "时间线汇总还在自己拼历法那句").not.toContain("当前显示按");
     expect(ops, "后端没有给「当前显示」那一行").toContain('{ label: "当前显示"');
+  });
+});
+
+/**
+ * 深色·柔和高对比这一档（R129）：docs/13 §6 明写没做的那条。
+ *
+ * 系统「高对比度」在深色下是**纯黑底 + 纯白字**（把对比拉到两头），夜里看久了晃眼；
+ * 这一档**按纸墨底调**：底还是那张暗纸、字是暖白、描边加重 ⇒ 依然是高对比，但不刺眼。
+ */
+describe("深色·柔和高对比这一档（R129）：docs/13 §6 那条明写没做的", () => {
+  const prefs = readFileSync(join(VIEW_ROOT, "theme-prefs.ts"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+
+  /**
+   * 把 CSS 拆成（选择器, 块体）——**按选择器找块**，不靠正则碰运气。
+   *
+   * 为什么不能直接正则：暗色底色是**选择器列表**（`dark` 与 `dark-soft` 共用），
+   * 那个列表的第二行**也是** `:root[data-theme="dark-soft"] {` ⇒
+   * 拿 `/:root\[data-theme="dark-soft"\] \{([^}]*)\}/` 去取，**取到的是暗色底色那块**
+   * ⇒ 判据指错了地方（实测：把柔和高对比那块删掉，它照样绿）。
+   */
+  const cssBlocks = (): { selector: string; body: string }[] => {
+    // **先剥注释**（注释会混进"选择器"那一段 ⇒ 块就认不出来了）
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const out: { selector: string; body: string }[] = [];
+    for (const m of bare.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      out.push({ selector: (m[1] ?? "").trim(), body: m[2] ?? "" });
+    }
+    return out;
+  };
+  /** 柔和高对比**自己那块**（选择器恰好等于它，不是选择器列表里的第二行） */
+  const softBlock = (): string | null => {
+    const hit = cssBlocks().find(
+      (b) => b.selector.replace(/\s+/g, " ") === ':root[data-theme="dark-soft"]',
+    );
+    return hit === undefined ? null : hit.body;
+  };
+  /** 同时罩住 dark 与 dark-soft 的那块（暗色底色） */
+  const sharedDarkBlock = (): string | null => {
+    const hit = cssBlocks().find(
+      (b) =>
+        b.selector.includes(':root[data-theme="dark"]') &&
+        b.selector.includes(':root[data-theme="dark-soft"]'),
+    );
+    return hit === undefined ? null : hit.body;
+  };
+
+  it("第三档进了主题白名单（id 与 `data-theme` 的取值一致）", () => {
+    expect(prefs, "主题档里没有第三档").toContain('{ id: "dark-soft"');
+    expect(prefs, "第三档没有界面文案").toMatch(/id: "dark-soft", label: "深色·柔和高对比"/);
+  });
+
+  it("CSS 里有这一档自己的色板块，且**暗色底色同时罩住两档**", () => {
+    expect(softBlock(), "没有找到柔和高对比自己的色板块").not.toBeNull();
+    expect(sharedDarkBlock(), "暗色底色没有同时罩住 dark-soft").not.toBeNull();
+  });
+
+  it("只动 primitive 一层（semantic 一个字没动）", () => {
+    const block = softBlock();
+    expect(block, "没有找到柔和高对比自己的色板块").not.toBeNull();
+    const vars = (block ?? "").match(/--[a-z0-9-]+\s*:/g) ?? [];
+    const notPrimitive = vars.filter((v) => !v.startsWith("--c-"));
+    expect(notPrimitive, "dark-soft 块里出现了非 primitive 变量").toEqual([]);
+  });
+});
+
+/**
+ * 机器跑法**不许打扰作者的桌面**（R130）。
+ *
+ * 作者反馈：每次预演都把窗口压在桌面上、强制置顶、抢焦点，打游戏时会把游戏顶掉。
+ * 根因是预演里那句 `win.setAlwaysOnTop(true); win.moveTop();`（当时的理由是"预演期间窗口
+ * 本来就该是屏幕上唯一被看的东西"）⇒ 那是**拿别人的桌面当测试台**。
+ *
+ * 现在的口径：**机器跑法走离屏渲染（offscreen）、永不显示** ⇒ 桌面上没有窗口；
+ * 离屏渲染没有"被遮挡就不出帧"的问题（探针实测：中间态 12 帧、截图非空、visibility=visible）。
+ */
+describe("机器跑法不许打扰作者的桌面（R130）", () => {
+  const main = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "main.ts"), "utf8");
+  const walk = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "walkthrough.ts"), "utf8");
+  /** 剥注释（块注释 + 行注释）——注释里提过这些 API，不许冒充"还在用" */
+  const strip = (src: string): string =>
+    src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  it("机器跑法走**离屏渲染**且**永不显示**（作者桌面上没有窗口）", () => {
+    expect(main, "机器跑法没有走离屏渲染").toContain("offscreen: true");
+    expect(main, "机器跑法的窗口没有设为不显示").toMatch(/show: !automation/);
+    // 真正的应用启动**照旧显示窗口**（离屏只给机器跑法用）
+    expect(main, "正常启动被改成不显示了").toMatch(/\n {2}createWindow\(\);/);
+  });
+
+  it("预演循环里不许再**强制置顶 / 抢顶层**（那正是压住作者桌面的元凶）", () => {
+    const bare = strip(walk);
+    // 认**调用**（`.moveTop(` / `.setAlwaysOnTop(`），不认裸词——
+    // 裸词会撞上别的标识符（实测：`moveTop` 命中的是同名片段）⇒ 判据指错了地方
+    expect(bare, "预演又强制置顶了").not.toMatch(/\.setAlwaysOnTop\(/);
+    expect(bare, "预演又把窗口提到最前了").not.toMatch(/\.moveTop\(/);
+  });
+
+  it("不许再靠**透明 / 鼠标穿透 / 不可聚焦**那一套（页面自己画着不透明底 ⇒ 照样压屏；而且窗口会变成点不掉、关不掉）", () => {
+    const bare = strip(main);
+    expect(bare, "机器跑法还在用透明窗口（页面底色不透明 ⇒ 照样看得见）").not.toContain("transparent: automation");
+    expect(bare, "机器跑法还在鼠标穿透（作者的点击会被吃掉）").not.toContain("setIgnoreMouseEvents");
+    expect(bare, "机器跑法还在禁用聚焦（窗口变成关不掉）").not.toContain("setFocusable(false)");
+  });
+
+  it("每个机器跑法都要用**离屏窗口**（预演 / e2e / trial / perf / 杀进程实测）", () => {
+    const count = (main.match(/createWindow\(\{ automation: true \}\)/g) ?? []).length;
+    expect(count, "机器跑法里还有没走离屏窗口的").toBeGreaterThanOrEqual(5);
   });
 });
 

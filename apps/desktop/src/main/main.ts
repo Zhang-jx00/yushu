@@ -16,7 +16,25 @@ import { stopRepoWorker } from "./repo-worker.js";
 /** --ui-trial 逐组销毁/新建窗口；期间必须抑制「窗口全关即退出」，末尾由 runTrial 统一 app.exit */
 let autoQuitDisabled = false;
 
-function createWindow(): BrowserWindow {
+/**
+ * 建窗口。
+ *
+ * `automation: true` = **机器跑法**（预演 / e2e / trial / perf / 杀进程实测）：
+ * 走**离屏渲染（offscreen）**、**永不显示** ⇒ **作者的桌面上没有任何窗口**：
+ * 不压屏、不抢焦点、不吃点击、打游戏不会被顶掉。
+ *
+ * 为什么必须是离屏、不能是"普通窗口但挪到屏幕外"：
+ * 窗口被遮挡 / 隐藏 / 在可见桌面之外时，Chromium **不出帧** ⇒ CSS 过渡**不插值**、
+ * 截图拿到空白帧 ⇒ 预演的逐帧采样与截图取证就废了
+ * （v266–v268 实撞：step74「终值对、中间态 0 帧」+ UnknownVizError；
+ *  R130 实撞：把窗口挪到屏幕外 ⇒ 同样 0 帧）。
+ * 离屏渲染没有这个限制：探针实测 **中间态 12 帧、截图非空、visibility=visible**，
+ * 而桌面上一个窗口都没有。
+ *
+ * 判据没有放松，是环境不对 ⇒ 换环境，不动判据。
+ */
+function createWindow(options: { automation?: boolean } = {}): BrowserWindow {
+  const automation = options.automation === true;
   const win = new BrowserWindow({
     width: 1360,
     height: 880,
@@ -24,6 +42,9 @@ function createWindow(): BrowserWindow {
     minHeight: 680,
     title: "御书",
     backgroundColor: "#f7f4ee",
+    // 机器跑法：**不显示**（离屏渲染没有可见窗口）⇒ 作者的桌面完全不受打扰
+    show: !automation,
+    skipTaskbar: automation,
     webPreferences: {
       preload: join(appRoot, "preload", "preload.cjs"),
       contextIsolation: true,
@@ -33,8 +54,17 @@ function createWindow(): BrowserWindow {
       // 窗口被遮挡时若被 Chromium 后台节流，保存会显著延后（e2e 探针实测暴露）——
       // 写作工具以"防丢稿"为硬约束，禁用后台节流换取计时器可靠性。
       backgroundThrottling: false,
+      // 机器跑法走**离屏渲染**：没有可见窗口，但页面照常合成
+      ...(automation ? { offscreen: true } : {}),
     },
   });
+  if (automation) {
+    // 离屏渲染要有人接帧才会持续出帧（否则合成器不产帧 ⇒ 过渡不插值）
+    win.webContents.on("paint", () => {
+      /* 帧只用来驱动合成器；内容由 capturePage 取 */
+    });
+    win.webContents.setFrameRate(60);
+  }
 
   // 关闭窗口前 flush（T2-6 完整版）：首次 close 拦截 → 渲染层落盘 → 回执后真正关闭；超时（5s）兜底强关。
   // 页面尚未加载完成时无未落盘内容可言：requestFlush 返回 false 直接放行，不拖延用户退出。
@@ -82,7 +112,7 @@ void app.whenReady().then(() => {
   }
   // --open-and-quit：真实启动窗口验证渲染端可加载且 React 挂载成功，随后自动退出
   if (process.argv.includes("--open-and-quit")) {
-    const win = createWindow();
+    const win = createWindow({ automation: true });
     win.webContents.on("did-finish-load", () => {
       void win.webContents
         .executeJavaScript(
@@ -110,7 +140,7 @@ void app.whenReady().then(() => {
   if (process.argv.includes("--e2e-smoke")) {
     // 关闭前 flush 探针会自行 destroy 窗口：抑制「窗口全关即退出」，末尾由断言结果统一 app.exit
     autoQuitDisabled = true;
-    const win = createWindow();
+    const win = createWindow({ automation: true });
     // once：关闭前 flush 探针会 reload 渲染层，did-finish-load 会再次触发——绝不能让 e2e 跑第二遍
     win.webContents.once("did-finish-load", () => {
       void runE2E(win);
@@ -127,7 +157,7 @@ void app.whenReady().then(() => {
     void (async () => {
       // 预演前置必须在窗口加载前完成：renderer 挂载时会调 project:current 并自动进入项目页
       const context = await prepareWalkthrough(parseWalkthroughDir(walkthroughArg));
-      const win = createWindow();
+      const win = createWindow({ automation: true });
       win.webContents.on("did-fail-load", (_event, code, desc) => {
         console.error("[walkthrough] renderer 加载失败:", code, desc);
         app.exit(1);
@@ -150,7 +180,7 @@ void app.whenReady().then(() => {
   const trialArg = process.argv.find((arg) => arg.startsWith("--ui-trial"));
   if (trialArg) {
     autoQuitDisabled = true;
-    void runTrial({ baseDir: parseTrialDir(trialArg), createWindow }).catch((err: unknown) => {
+    void runTrial({ baseDir: parseTrialDir(trialArg), createWindow: () => createWindow({ automation: true }) }).catch((err: unknown) => {
       console.error("[trial] 启动失败:", err);
       app.exit(1);
     });
@@ -181,7 +211,7 @@ void app.whenReady().then(() => {
   if (perfProbeArg) {
     autoQuitDisabled = true;
     const dirArg = perfProbeArg.includes("=") ? perfProbeArg.slice(perfProbeArg.indexOf("=") + 1) : "";
-    void runPerfProbe({ dirArg, createWindow }).catch((err: unknown) => {
+    void runPerfProbe({ dirArg, createWindow: () => createWindow({ automation: true }) }).catch((err: unknown) => {
       console.error("[perf] 实测失败:", err);
       app.exit(2);
     });
@@ -243,7 +273,7 @@ async function runKillEdit(dir: string): Promise<void> {
     console.log(`[kill-edit] 夹具就绪：${draft.chapterPath}`);
   }
   await attachProject(dir);
-  const win = createWindow();
+  const win = createWindow({ automation: true });
   await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
   await win.webContents.executeJavaScript("window.__yushuDebug = true;");
   const probe = (await win.webContents.executeJavaScript(killEditScript)) as {
@@ -272,7 +302,7 @@ async function runKillRecover(dir: string): Promise<void> {
   // T2-8 切片 B：二阶段重启应检出「上次会话（被强杀的一阶段）异常退出」——作为崩溃检测证据
   const { currentSessionAbnormal } = await import("./ipc.js");
   const sessionAbnormal = currentSessionAbnormal() !== null;
-  const win = createWindow();
+  const win = createWindow({ automation: true });
   await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()));
   await win.webContents.executeJavaScript("window.__yushuDebug = true;");
   const probe = (await win.webContents.executeJavaScript(killRecoverScript)) as {

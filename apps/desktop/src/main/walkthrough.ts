@@ -6226,6 +6226,85 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 92,
+    title: '深色·柔和高对比：按纸墨底调的一档（底不是纯黑、字不是纯白、描边更明显、对比度现算）（R129）',
+    file: 'step92-dark-soft.png',
+    body: String.raw`
+      // 这一步证 R129（docs/13 §6 明写没做的那条）：深色档下的**柔和高对比**。
+      // 系统「高对比度」在深色下是**纯黑底 + 纯白字**（把对比拉到两头），夜里看久了晃眼；
+      // 这一档**按纸墨底调**：底还是那张暗纸、字是暖白、描边加重 ⇒ 依然是高对比，但不刺眼。
+      //
+      // 判据全是**现算**的（computed style + 现算对比度），不是抄文档里的数字：
+      // ① 底色**不是纯黑**、字色**不是纯白**（⇒ 柔）；
+      // ② 正文对比度仍然很高（⇒ 依然是高对比，不能"柔和"成低对比）；
+      // ③ 描边比**默认暗色档**更明显（⇒ 高对比体现在描边上，比的是相对值）；
+      // ④ 偏好存的是这一档、切回浅色逐字恢复（⇒ 用户级偏好；默认色板一个像素没动）。
+      const themeSelect = document.querySelector('.theme-picker select');
+      if (themeSelect === null) return { ok: false, note: '顶栏里没有「主题」下拉' };
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      const lum = (rgb) => {
+        const m = String(rgb).match(/(\d+(?:\.\d+)?)/g);
+        if (!m) return 0;
+        const f = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+        return 0.2126 * f(Number(m[0]) / 255) + 0.7152 * f(Number(m[1]) / 255) + 0.0722 * f(Number(m[2]) / 255);
+      };
+      const ratio = (a, b) => {
+        const la = lum(a); const lb = lum(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+      };
+      const body = document.body;
+      const topbar = document.querySelector('.topbar');
+      const lineOf = () => (topbar === null ? '' : getComputedStyle(topbar).borderBottomColor);
+      // ① 先量**默认暗色档**的描边（后面要跟柔和高对比那档比）
+      setter.call(themeSelect, 'light');
+      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(300);
+      const lightBg = getComputedStyle(body).backgroundColor;
+      setter.call(themeSelect, 'dark');
+      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(350);
+      const darkBg = getComputedStyle(body).backgroundColor;
+      const darkLine = lineOf();
+      const darkLineRatio = ratio(darkLine, darkBg);
+      // ② 切到柔和高对比那一档
+      setter.call(themeSelect, 'dark-soft');
+      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(400);
+      const softBg = getComputedStyle(body).backgroundColor;
+      const softFg = getComputedStyle(body).color;
+      const softLine = lineOf();
+      const softLineRatio = ratio(softLine, softBg);
+      const textRatio = ratio(softFg, softBg);
+      const dataset = String(document.documentElement.dataset.theme || '');
+      const stored = String(window.localStorage.getItem('yushu.ui.theme') || '');
+      const pureBlack = /^rgb\(0,\s*0,\s*0\)$/.test(String(softBg).trim());
+      const pureWhite = /^rgb\(255,\s*255,\s*255\)$/.test(String(softFg).trim());
+      // ③ 切回浅色：默认色板必须**逐字**恢复
+      setter.call(themeSelect, 'light');
+      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(350);
+      const backBg = getComputedStyle(body).backgroundColor;
+      const restored = backBg === lightBg;
+      const backStored = String(window.localStorage.getItem('yushu.ui.theme') || '');
+      // 回到柔和高对比留一张证据截图
+      setter.call(themeSelect, 'dark-soft');
+      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(500);
+      const panel = document.querySelector('.app');
+      if (panel) panel.scrollIntoView({ block: 'center' });
+      await sleep(200);
+      return {
+        ok: dataset === 'dark-soft' && stored === 'dark-soft' && !pureBlack && !pureWhite &&
+          textRatio >= 7 && softLineRatio > darkLineRatio && restored && backStored === 'light',
+        note: '底色=' + softBg + '（纯黑=' + String(pureBlack) + '）；字色=' + softFg +
+          '（纯白=' + String(pureWhite) + '）；正文对比度=' + textRatio.toFixed(2) + '（底线 7）' +
+          '；描边对比度：默认暗色档=' + darkLineRatio.toFixed(2) + ' → 柔和高对比=' + softLineRatio.toFixed(2) +
+          '（更明显=' + String(softLineRatio > darkLineRatio) + '）；data-theme=' + dataset +
+          '；偏好存的是=' + stored + '；切回浅色逐字恢复=' + String(restored),
+      };
+    `,
+  },
 ];
 
 /**
@@ -6243,8 +6322,9 @@ async function captureStep(
   let lastPng: Buffer | null = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     if (win.isMinimized()) win.restore();
-    // 被遮挡窗口的合成会被系统暂停：把窗口提到最前，迫使渲染进程继续出帧
-    win.moveTop();
+    // **R130**：原先这里是 `win.moveTop();`（注释写的是"被遮挡窗口的合成会被系统暂停 ⇒ 把窗口提到最前"）——
+    // 那是在**动作者桌面的窗口层级**（把预演窗口顶到最前）⇒ 作者反馈：预演每次都压住桌面、抢焦点。
+    // 现在机器跑法走**离屏渲染**：没有可见窗口 ⇒ **不存在遮挡**，也就没有"提顶层"这一说 ⇒ 这句删掉。
     await win.webContents
       .executeJavaScript(
         "new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))); setTimeout(() => resolve(true), 500); })",
@@ -6302,10 +6382,13 @@ export async function runWalkthrough(win: BrowserWindow, options: WalkthroughCon
     const stepStart = Date.now();
     // 窗口被遮挡时浏览器会**暂停 rAF**、**不插值 CSS 过渡** ⇒ 预演的逐帧采样器采不到中间态
     // （v266 / v267 / v268 实撞：step74「终值对、中间态 0 帧」；同一步的截图还报 UnknownVizError）。
-    // `moveTop` 救不了"被别的窗口盖住"（置顶不等于可见），所以预演期间让窗口**始终置顶**——
-    // 它本来就该是屏幕上唯一被看的东西。判据没有放松，是环境不对。
-    win.setAlwaysOnTop(true);
-    win.moveTop();
+    //
+    // **R130 改口径**：原先这里是 `win.setAlwaysOnTop(true); win.moveTop();`——
+    // 理由是"预演期间窗口本来就该是屏幕上唯一被看的东西"⇒ 后果是**每次预演都把窗口压在
+    // 作者的桌面上、强制置顶、抢焦点**（作者反馈：打游戏时会被顶掉、游戏直接退出）。
+    // ⇒ 现在**窗口建在可见桌面之外、且不激活**（见 main.ts 的 `createWindow({ automation: true })`）：
+    // 窗口照样在渲染（过渡照插值、截图照取证），但**用户看不到、也拿不到焦点**。
+    // 判据没有放松，是环境不对 ⇒ 换环境，不动判据。
     // R111：有的步骤要在「系统要求减少动效」下跑（主进程侧 CDP 模拟——渲染进程改不了自己的媒体查询）。
     // 放在 attempt 循环**外面**：重试时仍在同一个媒体环境里，不会第二次 attempt 换了环境。
     const media = def.emulateReducedMotion === true ? await applyReducedMotion(win, true) : null;

@@ -30,9 +30,9 @@ function fakeStorage(initial: Record<string, string> = {}) {
   };
 }
 
-describe("主题档持久化（R121）", () => {
-  it("两档齐备，缺省是 light（默认色板一个像素都没动）", () => {
-    expect(THEME_IDS).toEqual(["light", "dark"]);
+describe("主题档持久化（R121；R129 加了「深色·柔和高对比」第三档）", () => {
+  it("三档齐备，缺省是 light（默认色板一个像素都没动）", () => {
+    expect(THEME_IDS).toEqual(["light", "dark", "dark-soft"]);
     expect(DEFAULT_THEME).toBe("light");
   });
 
@@ -40,6 +40,9 @@ describe("主题档持久化（R121）", () => {
     expect(readThemePref("light")).toBe("light");
     expect(readThemePref("dark")).toBe("dark");
     expect(readThemePref(" dark ")).toBe("dark");
+    // R129：第三档也在白名单里（它是"用户显式选的"⇒ 不许被当成乱写的值回落掉）
+    expect(readThemePref("dark-soft")).toBe("dark-soft");
+    expect(readThemePref(" dark-soft ")).toBe("dark-soft");
     expect(readThemePref("neon")).toBe("light");
     expect(readThemePref("")).toBe("light");
     expect(readThemePref(null)).toBe("light");
