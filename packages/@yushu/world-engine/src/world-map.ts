@@ -412,6 +412,60 @@ function failMap(message: string): never {
   throw new YushuError("E_MAP_PARSE", message);
 }
 
+/** 正则里要转义的字符（id 是作者起的名字，可能带 . - _） */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * 找到**那一个标注**在文件里的行号（R139：挪标注）。
+ *
+ * 只认**单行的流式映射**（`- {id: …, x: …, y: …}`）——那正是作者手写与工具写出来的形状。
+ * 认不出就**如实说认不出**（让作者自己改那一行），不猜、不重排整个文件。
+ */
+function markerLineIndex(lines: string[], markerId: string): number {
+  const idPattern = new RegExp(`(?:^|[\\s{,])id\\s*:\\s*${escapeRegExp(markerId)}\\s*(?:,|\\})`);
+  return lines.findIndex((line) => /^\s*-\s*\{/.test(line) && idPattern.test(line));
+}
+
+/**
+ * 把**一个标注**挪到新位置（R139）：只改那一行的 `x` / `y`，别的**一个字都不动**。
+ *
+ * 为什么不做"解析 → 改对象 → 重新序列化"：那要一个序列化器（会把作者写的注释与排版抹掉），
+ * 而作者在意的恰恰是那些标注与顺序 ⇒ 只**改那一行**（与 `appendMapBase` 同一个道理）。
+ *
+ * 挪不动的三种情况都**如实说**（不猜、不半个改）：
+ * ① 文件里没有这个标注；② 它不是单行写法；③ 那一行里认不出 `x` / `y`。
+ */
+export function setMapMarkerPosition(
+  text: string,
+  markerId: string,
+  position: { x: number; y: number },
+): { content: string | null; reason: string | null; previous: string[] } {
+  const lines = text.split("\n");
+  const index = markerLineIndex(lines, markerId);
+  if (index < 0) {
+    return {
+      content: null,
+      reason: `地图文件里找不到标注 ${markerId}（它也许是多行写法 ⇒ 请手动改那一行）`,
+      previous: [],
+    };
+  }
+  const line = lines[index] as string;
+  const next = line
+    .replace(/\bx\s*:\s*-?\d+(?:\.\d+)?/, `x: ${String(position.x)}`)
+    .replace(/\by\s*:\s*-?\d+(?:\.\d+)?/, `y: ${String(position.y)}`);
+  if (next === line) {
+    return {
+      content: null,
+      reason: `标注 ${markerId} 那一行里认不出 x / y（请手动改那一行）`,
+      previous: [line],
+    };
+  }
+  lines[index] = next;
+  return { content: lines.join("\n"), reason: null, previous: [line] };
+}
+
 function asMapObject(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) failMap(`${label} 必须是映射`);
   return value as Record<string, unknown>;

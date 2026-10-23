@@ -2074,6 +2074,55 @@ describe("框定边界（R138）：拖一块 ⇒ 只改 bounds 那一行 ⇒ 画
 });
 
 /**
+ * 挪标注（R139）：作者在图上把标注**拖到新位置**。
+ *
+ * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」——
+ * R135 做了「上传底图」、R138 做了「框定 bounds」，这一轮接上「放 marker」的第一步。
+ *
+ * 判据认**具体的形状**（哪个事件绑在哪、哪个键是方向键、哪条通道走 wrapWrite），
+ * 不是"文件里出现过挪标注三个字"。
+ */
+describe("挪标注（R139）：拖到新位置 ⇒ 只改那一个标注的 x / y", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const ipc = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "ipc.ts"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+  const engine = readFileSync(join(ROOT, "packages", "@yushu", "world-engine", "src", "world-map.ts"), "utf8");
+
+  it("地图面板的标注**可拖**（真的调 map.setMarker，不是只画个预览）", () => {
+    expect(panel, "面板里没有调 map.setMarker").toContain("map.setMarker(");
+    expect(panel, "标注没有绑上拖拽的开始").toMatch(
+      /onPointerDown=\{\(event\) => onMarkerPointerDown\(event, marker\.id\)\}/,
+    );
+    expect(panel, "标注没有绑上拖拽的结束").toMatch(
+      /onPointerUp=\{\(event\) => onMarkerPointerUp\(event, marker\.id\)\}/,
+    );
+  });
+
+  it("**键盘也能挪**（方向键微调）——拖拽不是唯一的路", () => {
+    // 认**标注那一份**的方向键处理（不是框定模式里的那份）
+    expect(panel, "标注没有方向键微调").toMatch(/event\.key === "ArrowLeft"\) dx = -step/);
+    expect(panel, "标注的方向键没有写盘").toMatch(/moveMarker\(marker\.id, marker\.x \+ dx, marker\.y \+ dy\)/);
+  });
+
+  it("写盘走 **wrapWrite**（真源写 ⇒ 索引要刷、上一轮结论要置脏）", () => {
+    expect(ipc, "挪标注没有走 wrapWrite").toMatch(/CHANNELS\.worldMapSetMarker[\s\S]{0,200}wrapWrite/);
+  });
+
+  it("主进程**只改那一个标注**（别的标注、底图、bounds、注释原样留着）", () => {
+    expect(ops, "没有按标注 id 改那一行").toContain(
+      "setMapMarkerPosition(snapshot.content, request.markerId, { x, y })",
+    );
+    expect(ops, "写盘没带 baseHash").toMatch(/writeDoc\(MAP_PATH, moved\.content, snapshot\.hash\)/);
+  });
+
+  it("引擎的挪标注**只改那一行**（不是解析→改对象→重新序列化）", () => {
+    expect(engine, "引擎里没有挪标注这个函数").toContain("export function setMapMarkerPosition");
+    // 逐行改写，而不是整份重排（`lines[index] = next` 是证据）
+    expect(engine, "引擎不是逐行改写").toMatch(/lines\[index\] = next/);
+  });
+});
+
+/**
  * `place_ref` 的孤儿体检（R134）：引用了**不存在**的地点实体，要有一条**体检结论**点名。
  *
  * 引擎不认地点实体（它只管时间）⇒ 这条判定只能在**桌面接线**这一层做

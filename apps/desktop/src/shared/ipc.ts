@@ -81,6 +81,11 @@ export const CHANNELS = {
    * 口径回源 K08 §3.6「地图 = 图片底图 + bounds → 用户上传底图并**框定 bounds**」。
    */
   worldMapSetBounds: "map:setBounds",
+  /**
+   * 世界地图·**挪标注**（R139）：**写盘**（作者在图上把标注拖到新位置 ⇒ 改 map.yaml 里**那一个**标注的 x / y）。
+   * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」。
+   */
+  worldMapSetMarker: "map:setMarker",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -2912,6 +2917,29 @@ export interface WorldMapSetBoundsResult {
   bounds: { x0: number; y0: number; x1: number; y1: number } | null;
   /** 底图本身的像素尺寸（作者框的范围要落在它里面） */
   imageSize: { width: number; height: number } | null;
+}
+
+/**
+ * 挪标注的请求（R139）：标注 id + 新的**底图像素坐标**。
+ *
+ * 坐标用**底图像素**（不是归一化、不是画布像素）：作者在图上拖 ⇒ 拖出来的就是底图像素，
+ * 与 `map.yaml` 里 `markers[].x/y` 的口径一致（K08 §3.6「坐标以图片像素记录」）。
+ */
+export interface WorldMapSetMarkerRequestPayload {
+  markerId: string;
+  x: number;
+  y: number;
+}
+
+/** 挪标注的结果（R139） */
+export interface WorldMapSetMarkerResult {
+  ok: boolean;
+  /** 给作者看的一句话（成了 / 为什么没成） */
+  note: string;
+  /** 挪到哪了（没成时为 null） */
+  position: { x: number; y: number } | null;
+  /** 改之前那一行（作者要挪回去，把这一行贴回去即可 ⇒ 回退的路摆在眼前） */
+  previous: string[];
 }
 
 /** 底图登记的结果（R135）：**路径不出主进程**，只回项目内的相对路径与量出来的尺寸 */

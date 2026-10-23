@@ -191,6 +191,20 @@ export function WorldMapPanel(props: {
   const [framingBusy, setFramingBusy] = useState(false);
   /** 拖拽起点（SVG 用户坐标 = 底图像素） */
   const dragStart = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * R139 **挪标注**（K08 §5「上传底图 → 框定 bounds → **放 marker**」那一步）：
+   * 作者手填的坐标常常差一点 ⇒ 让他在图上**拖**；**键盘也能挪**（方向键）⇒ 拖拽不是唯一的路。
+   */
+  /** 正在拖的那个标注（预览位置；x / y 是**底图像素**） */
+  const [dragging, setDragging] = useState<{ id: string; x: number; y: number } | null>(null);
+  /** 拖拽起点（那个标注的 id + 指针落点） */
+  const dragMarkerStart = useRef<{ id: string; px: number; py: number } | null>(null);
+  /** 拖拽途中的位置（放在 ref 里：pointerup 读它，别读可能还没刷新的 state） */
+  const dragMarkerPos = useRef<{ id: string; x: number; y: number } | null>(null);
+  /** 刚拖过 ⇒ 接下来的那次 click 不算数（否则拖完会顺手把地点卡也打开） */
+  const suppressClick = useRef(false);
+  /** 挪标注的提示（成功 / 为什么没成） */
+  const [markerNote, setMarkerNote] = useState("");
 
   const canvas = map?.canvas ?? FALLBACK_CANVAS;
   // R138：画布 = **作者框定的那一块**（bounds 那一块）；底图按它裁切显示
@@ -251,16 +265,74 @@ export function WorldMapPanel(props: {
   );
 
   /** SVG 客户端坐标 ⇒ 用户坐标（框定模式下用户坐标 = 底图像素） */
-  const toImagePoint = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
-    const svg = event.currentTarget;
+  const toImagePoint = useCallback((event: ReactPointerEvent<SVGGraphicsElement>) => {
+    // 用**所属的 `<svg>`** 的变换算：标注自己有悬停放大（transform），
+    // 拿标注自己的 CTM 会把落点算偏（放大是绕中心缩放的 ⇒ 偏几个像素，作者看不出来但会烦）。
+    const owner = event.currentTarget.ownerSVGElement;
+    const svg = owner ?? (event.currentTarget as unknown as SVGSVGElement);
     const ctm = svg.getScreenCTM();
     if (ctm === null) return null;
-    const point = svg.createSVGPoint();
-    point.x = event.clientX;
-    point.y = event.clientY;
-    const p = point.matrixTransform(ctm.inverse());
+    // DOMPoint 而不是 svg.createSVGPoint()：后者只在 <svg> 上有，标注那个 <g> 上没有
+    const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
     return { x: p.x, y: p.y };
   }, []);
+
+  /** 挪标注：写盘（**只改那一个标注的 x / y**；范围由主进程校验、冲突由主进程报） */
+  const moveMarker = useCallback(
+    async (markerId: string, x: number, y: number) => {
+      try {
+        const result = await api().map.setMarker({ markerId: markerId, x: x, y: y });
+        setMarkerNote(result.note);
+      } catch (err: unknown) {
+        setMarkerNote(err instanceof Error ? err.message : String(err));
+      } finally {
+        // 成没成都重新取数：成了要让图上那个点真的挪过去，没成要把预览位置退回去
+        reloadMap();
+      }
+    },
+    [reloadMap],
+  );
+
+  const onMarkerPointerDown = useCallback(
+    (event: ReactPointerEvent<SVGGraphicsElement>, markerId: string) => {
+      const p = toImagePoint(event);
+      if (p === null) return;
+      dragMarkerStart.current = { id: markerId, px: p.x, py: p.y };
+      dragMarkerPos.current = null;
+    },
+    [toImagePoint],
+  );
+
+  const onMarkerPointerMove = useCallback(
+    (event: ReactPointerEvent<SVGGraphicsElement>, markerId: string) => {
+      const start = dragMarkerStart.current;
+      if (start === null || start.id !== markerId) return;
+      const p = toImagePoint(event);
+      if (p === null) return;
+      // 动得不够 ⇒ 那还是一次**点击**（开地点卡），不是拖动
+      if (Math.hypot(p.x - start.px, p.y - start.py) < 3) return;
+      dragMarkerPos.current = { id: markerId, x: p.x, y: p.y };
+      setDragging(dragMarkerPos.current);
+    },
+    [toImagePoint],
+  );
+
+  const onMarkerPointerUp = useCallback(
+    (event: ReactPointerEvent<SVGGraphicsElement>, markerId: string) => {
+      const start = dragMarkerStart.current;
+      const moved = dragMarkerPos.current;
+      dragMarkerStart.current = null;
+      dragMarkerPos.current = null;
+      setDragging(null);
+      if (start === null || moved === null || moved.id !== markerId) return;
+      // 拖过了 ⇒ 接下来的那次 click 不算数（否则拖完会顺手把地点卡也打开）
+      suppressClick.current = true;
+      const p = toImagePoint(event);
+      if (p === null) return;
+      void moveMarker(markerId, p.x, p.y);
+    },
+    [toImagePoint, moveMarker],
+  );
 
   const onFramePointerDown = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -602,8 +674,14 @@ export function WorldMapPanel(props: {
               <>
             {shown.map((marker, index) => {
               const inside = marker.nx >= 0 && marker.nx <= 1 && marker.ny >= 0 && marker.ny <= 1;
-              const cx = Math.min(Math.max(marker.nx, 0), 1) * width;
-              const cy = Math.min(Math.max(marker.ny, 0), 1) * height;
+              // R139：正在拖的那个点**跟着指针走**（预览位置 = 底图像素 - 框的原点）
+              const isDragging = dragging !== null && dragging.id === marker.id;
+              const cx = isDragging
+                ? dragging.x - (frame?.x0 ?? 0)
+                : Math.min(Math.max(marker.nx, 0), 1) * width;
+              const cy = isDragging
+                ? dragging.y - (frame?.y0 ?? 0)
+                : Math.min(Math.max(marker.ny, 0), 1) * height;
               const isSelected = marker.id === selected;
               // R133：被时间线那边选中的地点 ⇒ 这个标注也高亮（两个方向一眼对得上）
               const placeLinked = props.linkedPlace !== null && props.linkedPlace === marker.entityRef;
@@ -627,7 +705,16 @@ export function WorldMapPanel(props: {
                   role="button"
                   tabIndex={0}
                   aria-label={`标注 ${marker.label}（${LAYER_LABEL[marker.layer] ?? marker.layer}）`}
+                  /* R139：标注**可拖**（在图上挪到新位置 ⇒ 写盘只改那一个标注的 x / y） */
+                  onPointerDown={(event) => onMarkerPointerDown(event, marker.id)}
+                  onPointerMove={(event) => onMarkerPointerMove(event, marker.id)}
+                  onPointerUp={(event) => onMarkerPointerUp(event, marker.id)}
                   onClick={() => {
+                    // 刚拖完的那一下 click 不算数（否则拖一下会顺手把地点卡也打开）
+                    if (suppressClick.current) {
+                      suppressClick.current = false;
+                      return;
+                    }
                     selectMarker(marker.id);
                     // R133：点标注 ⇒ 顺带上报它绑的地点实体（父组件据此知道"这个地点在时间线上"）
                     props.onMarkerPick(marker.entityRef, marker.entityName);
@@ -636,7 +723,19 @@ export function WorldMapPanel(props: {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       selectMarker(marker.id);
+                      return;
                     }
+                    // R139：方向键**挪标注**（键盘也能挪 ⇒ 拖拽不是唯一的路）
+                    const step = event.shiftKey ? 10 : 1;
+                    let dx = 0;
+                    let dy = 0;
+                    if (event.key === "ArrowLeft") dx = -step;
+                    else if (event.key === "ArrowRight") dx = step;
+                    else if (event.key === "ArrowUp") dy = -step;
+                    else if (event.key === "ArrowDown") dy = step;
+                    else return;
+                    event.preventDefault();
+                    void moveMarker(marker.id, marker.x + dx, marker.y + dy);
                   }}
                 >
                   <title>{`${marker.label}（${LAYER_LABEL[marker.layer] ?? marker.layer}）`}</title>
@@ -721,6 +820,10 @@ export function WorldMapPanel(props: {
               底图 {base !== null && base.path !== null ? `${base.path}${base.size === null ? "" : `（${base.size.width}×${base.size.height}）`}` : "没有登记"}
               {base !== null && base.exists && base.dataUrl === null ? `：${base.note}` : ""}
             </div>
+            <div>
+              标注**可以拖**（拖到新位置 ⇒ 只改 map.yaml 里那一个标注的 x / y）；键盘也行：选中标注后按方向键挪
+            </div>
+            {markerNote !== "" && <div className="map-upload-note">{markerNote}</div>}
           </div>
         </div>
 

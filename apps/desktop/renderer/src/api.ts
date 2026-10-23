@@ -28,6 +28,8 @@ import type {
   WorldMapBasePayload,
   WorldMapSetBoundsRequestPayload,
   WorldMapSetBoundsResult,
+  WorldMapSetMarkerRequestPayload,
+  WorldMapSetMarkerResult,
   WorldMapUploadBaseRequestPayload,
   WorldMapUploadBaseResult,
   WorldMapViewPayload,
@@ -264,6 +266,12 @@ export interface YushuApi {
      * 口径回源 K08 §3.6「用户上传底图并框定 bounds」。
      */
     setBounds: (payload: WorldMapSetBoundsRequestPayload) => Promise<WorldMapSetBoundsResult>;
+    /**
+     * 挪标注（R139）：作者在图上把标注**拖到新位置**（**底图像素坐标**）⇒ 改 map.yaml 里那一个标注的 x / y。
+     *
+     * 落在框定的那一块之外 ⇒ 主进程拒绝并说清范围（**渲染层不自己算**）。
+     */
+    setMarker: (payload: WorldMapSetMarkerRequestPayload) => Promise<WorldMapSetMarkerResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

@@ -168,6 +168,13 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.setBounds")).toBe(true);
   });
 
+  it("挪标注通道在四处齐备（R139 新增：**写盘**——改 map.yaml 里那一个标注的 x / y）", () => {
+    expect(channels.get("worldMapSetMarker")).toBe("map:setMarker");
+    expect(registered).toContain("worldMapSetMarker");
+    expect(literals.invoke.has("map:setMarker")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.setMarker")).toBe(true);
+  });
+
   it("爽点看板通道在四处齐备（R73 新增）", () => {
     expect(channels.get("satisfactionBoard")).toBe("satisfaction:board");
     expect(registered).toContain("satisfactionBoard");

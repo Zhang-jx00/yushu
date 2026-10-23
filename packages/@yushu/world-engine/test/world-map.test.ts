@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeBounds, parseMapFile, projectWorldMap, type WorldMapDef } from "../src/world-map.js";
+import { normalizeBounds, parseMapFile, projectWorldMap, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
 import type { IndexEntityRow } from "../src/index-input.js";
 
 /**
@@ -94,6 +94,50 @@ describe("世界地图投影（R114 引擎侧）", () => {
     expect(finding?.severity).toBe("error");
     expect(finding?.message).toContain("不匹配");
     expect(finding?.message).toContain("1000×1400");
+  });
+
+  it("挪标注（R139）⇒ **只改那一行**的 x / y，其余行原样；并把**改之前**那一行给出来（作者要挪回去就贴回去）", () => {
+    const text = [
+      "# 作者自己写的注释",
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 1400]]",
+      "markers:",
+      "  - {id: m-a, layer: place, entity_ref: loc-a, x: 100, y: 200}",
+      "  - {id: m-b, layer: place, entity_ref: loc-b, x: 300, y: 400}",
+      "",
+    ].join("\n");
+    const result = setMapMarkerPosition(text, "m-b", { x: 321, y: 654 });
+    expect(result.reason).toBeNull();
+    expect(result.content).not.toBeNull();
+    const content = result.content as string;
+    expect(content).toContain("x: 321, y: 654");
+    // **只有那一行变了**（其余行逐字不动）
+    const before = text.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length);
+    const changed = after.filter((line, index) => line !== before[index]);
+    expect(changed).toHaveLength(1);
+    expect(changed[0]).toContain("m-b");
+    expect(changed[0]).not.toContain("m-a");
+    // 改之前那一行给作者（回退的路摆在眼前）
+    expect(result.previous).toHaveLength(1);
+    expect(result.previous[0]).toContain("x: 300, y: 400");
+  });
+
+  it("挪标注：文件里没有这个 id ⇒ **如实说找不到**，不半个改", () => {
+    const text = ["apiVersion: map-v1", "markers:", "  - {id: m-a, layer: place, entity_ref: loc-a, x: 1, y: 2}", ""].join("\n");
+    const result = setMapMarkerPosition(text, "m-zzz", { x: 10, y: 20 });
+    expect(result.content).toBeNull();
+    expect(result.reason).toContain("m-zzz");
+  });
+
+  it("挪标注：那一行认不出 x / y ⇒ **如实说认不出**（不猜、不半改）", () => {
+    const text = ["apiVersion: map-v1", "markers:", "  - {id: m-a, layer: place, entity_ref: loc-a}", ""].join("\n");
+    const result = setMapMarkerPosition(text, "m-a", { x: 10, y: 20 });
+    expect(result.content).toBeNull();
+    expect(result.reason).toContain("认不出");
   });
 
   it("两种 bounds 写法等价（{x0,y0,x1,y1} 与 K08 里的 [[x0,y0],[x1,y1]]）", () => {

@@ -4,14 +4,18 @@ import {
   MAP_PATH,
   appendMapBase,
   checkStructureFromSources,
+  normalizeBounds,
   parseMapFile,
   projectWorldMap,
+  setMapMarkerPosition,
   type WorldMapDef,
 } from "@yushu/world-engine";
 import type {
   WorldMapBasePayload,
   WorldMapSetBoundsRequestPayload,
   WorldMapSetBoundsResult,
+  WorldMapSetMarkerRequestPayload,
+  WorldMapSetMarkerResult,
   WorldMapUploadBaseResult,
   WorldMapViewPayload,
   WorldMapViewRequestPayload,
@@ -509,5 +513,83 @@ export async function setMapBounds(
     note: `边界已定：${String(x0)},${String(y0)} → ${String(x1)},${String(y1)}`,
     bounds: { x0, y0, x1, y1 },
     imageSize,
+  };
+}
+
+/**
+ * **挪标注**（R139）：**写盘**——作者在图上把标注拖到新位置 ⇒ 改 `world/map.yaml` 里
+ * **那一个标注**的 `x` / `y`。
+ *
+ * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」：
+ * R135 做了「上传底图」、R138 做了「框定 bounds」，这一轮接上「放 marker」的第一步——
+ * 作者手填的坐标常常差一点（差几十像素，地图上就偏了一截）⇒ 让他在图上**拖**。
+ *
+ * 三条不静默 / 不越权（与 R135/R136/R138 的写盘纪律同一条）：
+ * ① **只改那一个标注的 x / y**（底图登记、bounds、图层、别的标注、锚点、作者自己的注释**原样留着**）；
+ * ② **坐标必须落在框定的那一块里**（落在外面 ⇒ 那个点看不见）⇒ 拒绝并说清范围；
+ * ③ 写盘带 baseHash ⇒ 作者在别处改过 map.yaml 时**报冲突**、不覆盖。
+ */
+export async function setMarkerPosition(
+  gateway: ProjectGateway,
+  request: WorldMapSetMarkerRequestPayload,
+): Promise<WorldMapSetMarkerResult> {
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) {
+    return { ok: false, note: "项目还没有世界地图（先登记底图）", position: null, previous: [] };
+  }
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return {
+      ok: false,
+      note: `地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`,
+      position: null,
+      previous: [],
+    };
+  }
+  const bounds = normalizeBounds(def.bounds).bounds;
+  if (bounds === null) {
+    return { ok: false, note: "地图没有有效边界（框不出范围）", position: null, previous: [] };
+  }
+  const x = Math.round(request.x);
+  const y = Math.round(request.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { ok: false, note: "坐标里有非数字", position: null, previous: [] };
+  }
+  if (x < bounds.x0 || x > bounds.x1 || y < bounds.y0 || y > bounds.y1) {
+    return {
+      ok: false,
+      note:
+        `这个点落在框定的那一块之外（${String(bounds.x0)},${String(bounds.y0)} → ` +
+        `${String(bounds.x1)},${String(bounds.y1)}）`,
+      position: null,
+      previous: [],
+    };
+  }
+  const marker = (def.markers ?? []).find((item) => item.id === request.markerId);
+  if (marker === undefined) {
+    return {
+      ok: false,
+      note: `地图里没有标注 ${request.markerId}`,
+      position: null,
+      previous: [],
+    };
+  }
+  const moved = setMapMarkerPosition(snapshot.content, request.markerId, { x, y });
+  if (moved.content === null) {
+    return {
+      ok: false,
+      note: moved.reason ?? "没挪成",
+      position: null,
+      previous: moved.previous,
+    };
+  }
+  await gateway.writeDoc(MAP_PATH, moved.content, snapshot.hash);
+  return {
+    ok: true,
+    note: `标注 ${request.markerId} 挪到 ${String(x)},${String(y)}`,
+    position: { x, y },
+    previous: moved.previous,
   };
 }

@@ -6834,6 +6834,108 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 101,
+    title: '挪标注：作者在图上把标注拖到新位置 ⇒ 只改 map.yaml 里那一个标注的 x / y（R139）',
+    file: 'step101-marker-move.png',
+    body: String.raw`
+      // 这一步证 R139：**挪标注**（口径回源 K08 §5「上传底图 → 框定 bounds → **放 marker**」那一步）。
+      // 作者手填的坐标常常差一点（差几十像素，地图上就偏了一截）⇒ 让他在图上**拖**。
+      //
+      // 断的是三件事：
+      // ① 盘上：那个标注的 x / y 改成了拖到的地方，**别的行一个字都没动**；
+      // ② 别的标注、作者自己的注释、底图登记、bounds **原样留着**；
+      // ③ 挪完那个点**还在**（挪了不是删了）。
+      const cardId = 'loc-map-probe';
+      const cardPath = 'world/cards/location/' + cardId + '.md';
+      const card = { id: cardId, type: 'location', name: '天启_probe', layer: 'geography' };
+      const cardBody = '临时地点卡：只为让世界地图有一个可点的标注。';
+      const existingCard = await window.yushu.card.read(cardPath).catch(() => null);
+      if (existingCard === null) await window.yushu.card.write({ path: cardPath, card: card, body: cardBody });
+      else await window.yushu.card.write({ path: cardPath, card: card, body: cardBody, baseHash: existingCard.hash });
+
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        '# 作者自己写的注释（挪标注之后应当原样留着）',
+        'base_image: world/assets/map/base.png',
+        'base_size: {width: 1000, height: 700}',
+        'bounds: [[0, 0], [1000, 700]]',
+        'layers: [place]',
+        'markers:',
+        '  - {id: m-in, layer: place, entity_ref: ' + cardId + ', x: 250, y: 175}',
+        '  - {id: m-other, layer: place, entity_ref: ' + cardId + ', x: 700, y: 500}',
+        '',
+      ].join('\n');
+      const currentMap = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      await window.yushu.doc.write('world/map.yaml', yaml, currentMap === null ? undefined : currentMap.hash);
+
+      // 面板只在挂载时取数 ⇒ 先去别的页再回来，强制重挂载（R68 的教训）
+      await tab('规则');
+      await tab('世界观档案');
+      const marker = await waitFor(
+        () => document.querySelector('.map-panel .map-marker[data-marker="m-in"]') || null,
+        8000,
+      );
+      if (!marker) return { ok: false, note: '地图上的标注没渲染出来' };
+      const svg = document.querySelector('.map-panel .map-svg');
+      if (!svg) return { ok: false, note: '地图 SVG 没渲染' };
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return { ok: false, note: '拿不到画布的坐标变换（拖不了）' };
+      const toClient = (ux, uy) => {
+        const pt = svg.createSVGPoint();
+        pt.x = ux;
+        pt.y = uy;
+        const p = pt.matrixTransform(ctm);
+        return { x: p.x, y: p.y };
+      };
+      // 从标注原来所在的地方 (250,175) 拖到 (400,300)（底图像素）
+      const from = toClient(250, 175);
+      const to = toClient(400, 300);
+      const fire = (type, x, y) => marker.dispatchEvent(new PointerEvent(type, {
+        clientX: x,
+        clientY: y,
+        bubbles: true,
+        cancelable: true,
+        pointerId: 2,
+        isPrimary: true,
+        buttons: 1,
+      }));
+      fire('pointerdown', from.x, from.y);
+      await sleep(150);
+      fire('pointermove', to.x, to.y);
+      await sleep(150);
+      fire('pointerup', to.x, to.y);
+      await sleep(900);
+
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const content = after.content;
+      const beforeLines = yaml.split('\n');
+      const afterLines = content.split('\n');
+      const movedOk = content.indexOf('x: 400, y: 300') >= 0;
+      const othersOk =
+        content.indexOf('# 作者自己写的注释（挪标注之后应当原样留着）') >= 0 &&
+        content.indexOf('base_size: {width: 1000, height: 700}') >= 0 &&
+        content.indexOf('x: 700, y: 500') >= 0;
+      const changed = afterLines.filter((line, index) => line !== beforeLines[index]);
+      const onlyOne = changed.length === 1 && changed[0].indexOf('m-in') >= 0;
+      const stillDrawn = document.querySelector('.map-panel .map-marker[data-marker="m-in"]') !== null;
+      // 证据要**看得见**：把地图面板滚到画面中间（否则截到的是没变化的半屏 ⇒ 证据存疑）
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'center' });
+      await sleep(300);
+
+      return {
+        ok: movedOk && othersOk && beforeLines.length === afterLines.length && onlyOne && stillDrawn,
+        note: '盘上 m-in=' + (movedOk ? 'x: 400, y: 300' : '（没挪成）') +
+          '；别的标注/注释/底图原样=' + String(othersOk) +
+          '（行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) +
+          '，改动行数=' + String(changed.length) + '）' +
+          '；挪完那个点还在=' + String(stillDrawn),
+      };
+    `,
+  },
 ];
 
 /**

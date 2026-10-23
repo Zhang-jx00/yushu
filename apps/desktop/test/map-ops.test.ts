@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { uploadMapBase, setMapBounds, worldMapView } from "../src/main/map-ops.js";
+import { uploadMapBase, setMapBounds, setMarkerPosition, worldMapView } from "../src/main/map-ops.js";
 import { ProjectGateway } from "../src/main/file-gateway.js";
 import { parseMapFile } from "@yushu/world-engine";
 
@@ -266,5 +266,83 @@ describe("框定边界（R138）：作者在图上拖一块 ⇒ 只改 map.yaml 
     expect(view.canvas).toEqual({ width: 700, height: 550 });
     expect(view.baseSize).toEqual({ width: 1000, height: 700 });
     expect(view.findings.some((item) => item.code === "map-bounds-missing")).toBe(false);
+  });
+});
+
+/**
+ * 挪标注（R139）：**写盘**路径的单测。
+ *
+ * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」——
+ * R135 做了「上传底图」、R138 做了「框定 bounds」，这一轮接上「放 marker」的第一步：**挪**。
+ *
+ * 判据盯三件事：
+ * ① **只改那一个标注的 x / y**（别的标注、底图、bounds、作者的注释**原样留着**）；
+ * ② **落在框定的那一块之外 ⇒ 拒绝**（那个点看不见），且**盘上一个字节都没动**；
+ * ③ **改之前那一行给作者**（回退的路摆在眼前：把那行贴回去即可）。
+ */
+describe("挪标注（R139）：作者在图上把标注拖到新位置 ⇒ 只改那一个标注", () => {
+  const MAP_YAML = [
+    "# 作者自己写的注释",
+    "apiVersion: map-v1",
+    "id: map-world",
+    "crs: simple",
+    "base_image: world/assets/map/base.png",
+    "base_size: {width: 1000, height: 700}",
+    "bounds: [[0, 0], [1000, 700]]",
+    "layers: [place]",
+    "markers:",
+    "  - {id: m-in, layer: place, entity_ref: loc-a, x: 250, y: 175}",
+    "  - {id: m-other, layer: place, entity_ref: loc-b, x: 700, y: 500}",
+    "",
+  ].join("\n");
+
+  it("挪到新位置 ⇒ **只改那一个标注的 x / y**，其余行原样；并把改之前那一行给出来", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await setMarkerPosition(gateway, { markerId: "m-in", x: 321, y: 654 });
+    expect(result.ok).toBe(true);
+    expect(result.position).toEqual({ x: 321, y: 654 });
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).toContain("- {id: m-in, layer: place, entity_ref: loc-a, x: 321, y: 654}");
+    // 别的标注没动
+    expect(content).toContain("- {id: m-other, layer: place, entity_ref: loc-b, x: 700, y: 500}");
+    // 注释 / 底图 / bounds 都没动
+    expect(content).toContain("# 作者自己写的注释");
+    expect(content).toContain("base_size: {width: 1000, height: 700}");
+    expect(content).toContain("bounds: [[0, 0], [1000, 700]]");
+    // **只有那一行变了**
+    const before = MAP_YAML.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length);
+    const changed = after.filter((line, index) => line !== before[index]);
+    expect(changed).toHaveLength(1);
+    // 改之前那一行给作者（挪回去就贴回去）
+    expect(result.previous).toHaveLength(1);
+    expect(result.previous[0]).toContain("x: 250, y: 175");
+  });
+
+  it("落在框定的那一块之外 ⇒ 拒绝并说清范围，**盘上一个字节都没动**", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await setMarkerPosition(gateway, { markerId: "m-in", x: 5000, y: 5000 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("之外");
+    expect(result.position).toBeNull();
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("地图里没有这个标注 ⇒ 拒绝（不猜、不新建）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await setMarkerPosition(gateway, { markerId: "m-zzz", x: 10, y: 10 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("m-zzz");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("项目里根本没有地图文件 ⇒ 拒绝（先登记底图）", async () => {
+    const result = await setMarkerPosition(gateway, { markerId: "m-in", x: 10, y: 10 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("先登记底图");
+    await expect(gateway.readDoc("world/map.yaml")).rejects.toThrow();
   });
 });
