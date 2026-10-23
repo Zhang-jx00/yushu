@@ -5,6 +5,7 @@ import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../..
 import { api } from "../api";
 import { StateNote } from "./StateNote";
 import { SummaryRows } from "./SummaryRows";
+import { ZOOM_MAX, ZOOM_MIN, clampPan, computeViewBox, panStep, zoomStep } from "./map-view";
 
 /**
  * 世界地图（M5 / T5-1，R120）：**只读**面板。
@@ -240,6 +241,13 @@ export function WorldMapPanel(props: {
   const [shapePoints, setShapePoints] = useState<{ x: number; y: number }[]>([]);
   /** 放标注时的**十字光标**（视图坐标）：鼠标点哪儿、方向键走到哪儿，它就在哪儿 */
   const [placeCursor, setPlaceCursor] = useState<{ x: number; y: number } | null>(null);
+  /**
+   * R145 **缩放与平移**（docs/11 §7.25）：底图再大，一屏也只看得到一块 ⇒ 放大看清局部、挪动看别处。
+   *
+   * **这是"看"的状态，不是作品的一部分** ⇒ 不写盘（作者放大只是为了看清楚，
+   * 那不该变成 map.yaml 里的一行）。看得见的范围永远在作者框定的那一块里。
+   */
+  const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
 
   const canvas = map?.canvas ?? FALLBACK_CANVAS;
   // R138：画布 = **作者框定的那一块**（bounds 那一块）；底图按它裁切显示
@@ -257,6 +265,68 @@ export function WorldMapPanel(props: {
   const imageY = framing ? 0 : -(frame?.y0 ?? 0);
   /** 有没有底图尺寸可依（没有 base_size ⇒ 框不出范围，入口不给按） */
   const hasBaseSize = map?.baseSize != null;
+
+  /** 缩放（±1 步）：看得见的范围变了 ⇒ 平移要重新钳一遍 */
+  const changeZoom = useCallback(
+    (direction: 1 | -1) => {
+      setView((prev) => {
+        const zoom = zoomStep(prev.zoom, direction);
+        return { zoom, pan: clampPan(prev.pan.x, prev.pan.y, width, height, zoom) };
+      });
+    },
+    [width, height],
+  );
+  /** 平移：看得见的范围永远不许被推出作者框定的那一块（框外是没框过的图） */
+  const moveView = useCallback(
+    (dx: number, dy: number) => {
+      setView((prev) => ({
+        zoom: prev.zoom,
+        pan: clampPan(prev.pan.x + dx, prev.pan.y + dy, width, height, prev.zoom),
+      }));
+    },
+    [width, height],
+  );
+  /** 复位：回到整块框、1 倍 */
+  const resetView = useCallback(() => setView({ zoom: 1, pan: { x: 0, y: 0 } }), []);
+  /**
+   * 缩放/平移的**键盘路**：+ / - 改大小、方向键挪画面、0 复位。
+   *
+   * 两条让位规则（**别抢作者正在做的事**）：
+   * ① 框定 / 放置 / 画形状时，方向键与 +/- 归那些模式（作者正在精确落点）；
+   * ② 焦点落在某个标注/锚点上时，方向键归它（那是"挪这个点"）。
+   */
+  const onViewKeyDown = useCallback(
+    (event: ReactKeyboardEvent<SVGSVGElement>) => {
+      if (framing || placing || shapeKind !== null) return;
+      if (event.target !== event.currentTarget) return;
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        changeZoom(1);
+        return;
+      }
+      if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        changeZoom(-1);
+        return;
+      }
+      if (event.key === "0") {
+        event.preventDefault();
+        resetView();
+        return;
+      }
+      const step = panStep(width, height, view.zoom);
+      let dx = 0;
+      let dy = 0;
+      if (event.key === "ArrowLeft") dx = -step;
+      else if (event.key === "ArrowRight") dx = step;
+      else if (event.key === "ArrowUp") dy = -step;
+      else if (event.key === "ArrowDown") dy = step;
+      else return;
+      event.preventDefault();
+      moveView(dx, dy);
+    },
+    [framing, placing, shapeKind, view.zoom, width, height, changeZoom, resetView, moveView],
+  );
 
   /** 进入/退出框定模式：进来时把当前那一块放进工作区（虚线画出来，他看得见自己框到哪了） */
   const toggleFraming = useCallback(() => {
@@ -872,19 +942,31 @@ export function WorldMapPanel(props: {
             className={
               "map-svg" + (entered ? " is-entered" : "") + (framing ? " is-framing" : "")
             }
-            viewBox={`0 0 ${width} ${height}`}
+            viewBox={
+              /* R145：缩放/平移只改 viewBox ⇒ 画面跟着变，而落点换算走 getScreenCTM() 的逆变换
+                 （那个矩阵会跟着 viewBox 变）⇒ **放大之后落点仍然准**。
+                 框定模式画整张图 ⇒ 缩放/平移让位（作者要看到全图才能框）。 */
+              framing
+                ? `0 0 ${String(baseW)} ${String(baseH)}`
+                : computeViewBox(width, height, view.zoom, view.pan.x, view.pan.y)
+            }
             role="img"
             aria-label={
               framing
                 ? `框定边界：整张底图 ${String(baseW)}×${String(baseH)}，拖一块或用方向键移动、回车定下来`
                 : `世界地图坐标空间：${shown.length} 个标注，${map.layers.length} 个图层`
             }
-            /* R138 框定模式：画布可拖（指针）+ 可键盘操作（方向键 / +- / 回车） */
-            tabIndex={framing ? 0 : -1}
+            /* R138 框定模式：画布可拖（指针）+ 可键盘操作（方向键 / +- / 回车）。
+               **R145：画布恒可聚焦** —— 缩放与平移的键盘路（+ / - / 方向键 / 0）也挂在这里。
+               原来只在框定模式里可聚焦（tabIndex={framing ? 0 : -1}），那时缩放平移还没有键盘路。 */
+            tabIndex={0}
             onPointerDown={onFramePointerDown}
             onPointerMove={onFramePointerMove}
             onPointerUp={onFramePointerUp}
-            onKeyDown={onFrameKeyDown}
+            onKeyDown={(event) => {
+              onFrameKeyDown(event);
+              onViewKeyDown(event);
+            }}
           >
             {base !== null && base.dataUrl !== null && (
               <>
@@ -1208,6 +1290,40 @@ export function WorldMapPanel(props: {
               </>
             )}
           </svg>
+          {/* R145 缩放/平移：放大看清局部、挪动看别处（**只影响"看"，不写盘**）。
+              按钮是原生 button ⇒ 键盘可达；画布上另有 + / - / 方向键 / 0 那条路。 */}
+          <div className="map-zoom-controls">
+            <button
+              type="button"
+              className="map-zoom-btn"
+              onClick={() => changeZoom(1)}
+              disabled={view.zoom >= ZOOM_MAX}
+              title="放大（键盘：+）"
+            >
+              放大
+            </button>
+            <button
+              type="button"
+              className="map-zoom-btn"
+              onClick={() => changeZoom(-1)}
+              disabled={view.zoom <= ZOOM_MIN}
+              title="缩小（键盘：-）"
+            >
+              缩小
+            </button>
+            <button
+              type="button"
+              className="map-zoom-btn"
+              onClick={resetView}
+              disabled={view.zoom === ZOOM_MIN && view.pan.x === 0 && view.pan.y === 0}
+              title="回到整块（键盘：0）"
+            >
+              复位
+            </button>
+            <span className="map-zoom-level" aria-live="polite">
+              {view.zoom.toFixed(2).replace(/\.?0+$/, "")}×
+            </span>
+          </div>
           <div className="map-caption">
             <SummaryRows rows={mapSummaryRows} />
             {/* 一行**作者语言**的操作提示（不露实现细节：作者不关心改的是哪个文件） */}
@@ -1220,7 +1336,7 @@ export function WorldMapPanel(props: {
                     : "选好事件后在图上点一下（键盘：方向键挪十字光标、回车落点）"
                   : framing
                     ? "在整张图上拖一块（键盘：方向键移动，+ / - 改大小，回车定下来）"
-                    : "拖标注可以改位置；「框定边界」把地图在图里的那一块框出来"}
+                    : "拖标注可以改位置；放大看细节（+ / -），方向键挪画面；「框定边界」把地图在图里的那一块框出来"}
             </div>
           </div>
         </div>

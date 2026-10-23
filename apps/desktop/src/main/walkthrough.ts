@@ -7462,6 +7462,130 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 107,
+    title: '缩放与平移：放大看清局部、挪动看别处（**不写盘**），放大之后落点仍然准（R145）',
+    file: 'step107-map-zoom.png',
+    body: String.raw`
+      // 这一步证 R145 的四件事：
+      // ① **放大/平移看得见**（viewBox 真的变了）；
+      // ② **不写盘**（放大只是"看"，不是作品的一部分 ⇒ map.yaml 一个字节都不许动）；
+      // ③ **放大之后落点仍然准**（最要紧的一条：缩放若让落点偏了，作者点哪儿就会落在别处）；
+      // ④ **键盘路**（+ / - 缩放、方向键挪画面、0 复位）。
+      await tab('规则');
+      await tab('世界观档案');
+      const before = await window.yushu.doc.read('world/map.yaml');
+      const beforeLines = before.content.split('\n');
+      const svg = await waitFor(() => document.querySelector('.map-panel .map-svg') || null, 8000);
+      if (!svg) return { ok: false, note: '地图面板没有画布' };
+      const viewBoxNow = () => String(svg.getAttribute('viewBox') || '');
+      const parts = viewBoxNow().split(' ').map(Number);
+      const baseWidth = parts.length === 4 ? parts[2] : 0;
+
+      // ① 放大两次（点控件那条路）⇒ viewBox 的可见范围变小
+      const zoomIn = [...document.querySelectorAll('.map-panel button')]
+        .find((b) => String(b.title || '').indexOf('放大') === 0);
+      if (!zoomIn) return { ok: false, note: '没有「放大」控件' };
+      zoomIn.click();
+      await sleep(200);
+      zoomIn.click();
+      await sleep(300);
+      const zoomedBox = viewBoxNow();
+      const zoomedParts = zoomedBox.split(' ').map(Number);
+      const zoomOk = zoomedParts.length === 4 && zoomedParts[2] < baseWidth;
+
+      // ④ 键盘路：方向键挪画面（画布要可聚焦才走得了）
+      svg.focus();
+      const key = (k) => svg.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+      key('ArrowRight');
+      await sleep(250);
+      const pannedBox = viewBoxNow();
+      const pannedParts = pannedBox.split(' ').map(Number);
+      const panOk = pannedParts.length === 4 && pannedParts[0] > 0;
+
+      // ② 放大 + 平移之后，盘上必须**一个字节都没动**
+      const afterView = await window.yushu.doc.read('world/map.yaml');
+      const notWritten = afterView.content === before.content;
+
+      // ③ 放大 + 平移之后，**落点仍然准**：用同样的用户坐标 (600,400) 反算屏幕坐标再点
+      const placeBtn = [...document.querySelectorAll('.map-panel button')]
+        .find((b) => String(b.textContent || '').trim() === '放标注');
+      if (!placeBtn) return { ok: false, note: '地图面板没有「放标注」这个入口' };
+      placeBtn.click();
+      await sleep(400);
+      const select = await waitFor(() => {
+        const el = document.querySelector('.map-panel .map-place-select');
+        if (!el) return null;
+        const opts = [...el.querySelectorAll('option')].map((o) => String(o.value || '')).filter((v) => v !== '');
+        // **地点清单是异步取来的** ⇒ 光等下拉出现不够，还得等里面真有地点
+        // （v359 首跑就栽在这：清单还没到 ⇒ options 为空 ⇒ 选了 undefined ⇒ 落点当然写不进去）
+        return opts.length > 0 ? el : null;
+      }, 8000);
+      if (!select) return { ok: false, note: '放标注模式里没有地点下拉（或地点清单还没到）' };
+      const options = [...select.querySelectorAll('option')].map((o) => String(o.value || '')).filter((v) => v !== '');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, options[0]);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(300);
+      const picked = String(select.value || '');
+      const overlay = await waitFor(() => document.querySelector('.map-panel .map-place-overlay') || null, 4000);
+      if (!overlay) return { ok: false, note: '放标注模式里没有那个覆盖层' };
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return { ok: false, note: '拿不到画布的坐标变换' };
+      const pt = svg.createSVGPoint();
+      pt.x = 600;
+      pt.y = 400;
+      const at = pt.matrixTransform(ctm);
+      overlay.dispatchEvent(new MouseEvent('click', {
+        clientX: at.x,
+        clientY: at.y,
+        bubbles: true,
+        cancelable: true,
+      }));
+      await sleep(900);
+      const afterPlace = await window.yushu.doc.read('world/map.yaml');
+      const afterLines = afterPlace.content.split('\n');
+      // 新增的行 = 盘上多出来的那几行（**差集**）：先前几轮已经放过标注，
+      // 若按"内容里含 x: 600, y: 400"去找，舍入差 1 像素就会**漏判成没落点**（v359/v360 两次都栽在这）。
+      const beforeSet = new Set(beforeLines);
+      const added = afterLines.filter((line) => line.indexOf('id: m-') >= 0 && !beforeSet.has(line));
+      const spot = /x: (\d+), y: (\d+)/.exec(added[0] || '');
+      const px = spot ? Number(spot[1]) : -1;
+      const py = spot ? Number(spot[2]) : -1;
+      const atSpot = px === 600 && Math.abs(py - 400) <= 1;
+      const onlyOne = added.length === 1;
+      const lineDelta = afterLines.length - beforeLines.length;
+      // 状态行回执：能一次分清「点击根本没触发」与「触发了但被主进程拒了」
+      const statusEl = document.querySelector('.map-status');
+      const statusText = String((statusEl && statusEl.textContent) || '').replace(/\s+/g, ' ').slice(0, 90);
+
+      // ④ 键盘 0 复位 ⇒ viewBox 回到整块
+      key('0');
+      await sleep(250);
+      const resetBox = viewBoxNow();
+      const resetParts = resetBox.split(' ').map(Number);
+      const resetOk = resetParts.length === 4 && resetParts[0] === 0 && resetParts[1] === 0;
+
+      // 截图要看得见控件与放大效果 ⇒ 再放大一次，把面板滚到画面中间
+      zoomIn.click();
+      await sleep(250);
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(400);
+
+      return {
+        ok: zoomOk && panOk && notWritten && atSpot && onlyOne && resetOk,
+        note: '放大后可见范围=' + String(baseWidth) + '→' + String(zoomedParts[2]) + '（变小了=' + String(zoomOk) + '）' +
+          '；方向键平移后 viewBox=' + pannedBox + '（x>0=' + String(panOk) + '）' +
+          '；放大+平移后盘上一个字节没动=' + String(notWritten) +
+          '；放大后落点=' + String(px) + ',' + String(py) + '（目标 600,400，容差 1px）' +
+          '；新增行数=' + String(added.length) + '（只多一行=' + String(onlyOne) + '，盘上总行数 +' + String(lineDelta) +
+          '，选中的地点=' + picked + '，清单里 ' + String(options.length) + ' 个）' +
+          '；状态行回执=「' + statusText + '」' +
+          '；键盘 0 复位后 viewBox=' + resetBox + '（回到整块=' + String(resetOk) + '）',
+      };
+    `,
+  },
 ];
 
 /**

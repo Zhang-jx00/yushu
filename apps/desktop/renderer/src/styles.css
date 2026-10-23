@@ -3615,6 +3615,42 @@ table,
 
 .map-canvas-wrap {
   min-width: 0;
+  /* R145：缩放控件浮在画布右上角 ⇒ 这一块是它的定位上下文 */
+  position: relative;
+}
+
+/* R145 缩放/平移控件：放大看清局部、挪动看别处（只影响"看"，不写盘）。
+   全部用既有令牌 —— 新样式不许引入 px 字面量（CSS 令牌棘轮 R83）。 */
+.map-zoom-controls {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.map-zoom-btn {
+  padding: var(--space-1) var(--space-4);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color var(--motion-state) linear, background var(--motion-state) linear,
+    border-color var(--motion-state) linear;
+}
+
+.map-zoom-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.map-zoom-level {
+  color: var(--muted);
+  font-size: var(--text-xs);
 }
 
 /* 坐标空间：底图还没上传时，这一块画的是**坐标系本身**——网格局部坐标 + 标注落点。

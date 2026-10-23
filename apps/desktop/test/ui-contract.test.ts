@@ -2050,7 +2050,11 @@ describe("框定边界（R138）：拖一块 ⇒ 只改 bounds 那一行 ⇒ 画
   it("**键盘也能框**（方向键移动、+ / - 改大小、回车定下来）——拖拽不是唯一的路", () => {
     expect(panel, "没有方向键移动").toContain("ArrowLeft");
     expect(panel, "没有回车定下来").toMatch(/event\.key === "Enter"/);
-    expect(panel, "画布在框定模式里不可聚焦").toMatch(/tabIndex=\{framing \? 0 : -1\}/);
+    // R145：画布**恒可聚焦**（缩放/平移的键盘路 + / - / 方向键 / 0 挂在这里）⇒ 不再只在框定模式里
+    const canvasTags = panel.match(/<svg[\s\S]*?>/g) ?? [];
+    const canvasTag = canvasTags.find((tag) => tag.indexOf("map-svg") >= 0) ?? "";
+    expect(canvasTag, "没找到画布那个 <svg> 标签").not.toBe("");
+    expect(canvasTag, "画布不可聚焦（缩放与平移就没有键盘路）").toContain("tabIndex={0}");
   });
 
   it("框定模式里标注与锚点**不可点**（那一下是拖框，不是开卡）", () => {
@@ -2282,6 +2286,78 @@ describe("地图编辑面收口（R144）：五个入口 = 一个分段控件", 
   it("模式相关的控件（框回整张图 / 画完了 / 对象下拉）**只在该模式里出现**", () => {
     expect(panel, "「框回整张图」没有跟着框定模式走").toMatch(/\{framing && \(\s*<button type="button" className="map-upload-btn" onClick=\{useWholeImage\}/);
     expect(panel, "「画完了」没有跟着画形状模式走").toMatch(/\{shapeKind !== null && \(\s*<button type="button" className="map-upload-btn" onClick=\{\(\) => void commitShape\(\)\}/);
+  });
+});
+
+/**
+ * R145：**缩放与平移** —— 底图再大，一屏也只看得到一块。
+ *
+ * 口径（`docs/11` §7.25）：
+ * ① 缩放/平移是**"看"的状态** ⇒ 不写盘（放大不是作品的一部分）；
+ * ② 看得见的范围永远在作者框定的那一块里（越界的平移要钳住）；
+ * ③ 键盘路：+ / - 改大小、方向键挪画面、0 复位 —— 画布得可聚焦才走得了；
+ * ④ 放置 / 框定 / 画形状时键盘**让位**（别抢作者正在做的事）。
+ */
+describe("地图缩放与平移（R145）：放大看局部，挪动看别处", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const mapView = readFileSync(join(VIEW_ROOT, "components", "map-view.ts"), "utf8");
+  /**
+   * **画布那一个** `<svg>` 标签（认位置，不认"文件里出现过 tabIndex={0}"）：
+   * 标注、锚点、覆盖层也都有 `tabIndex={0}` ⇒ 全文搜一遍是**恒绿**的，
+   * 把画布改成不可聚焦它照样绿 ⇒ 变异 M5 就是这么抓不到人的。
+   */
+  const svgTags = panel.match(/<svg[\s\S]*?>/g) ?? [];
+  const canvasTag = svgTags.find((tag) => tag.indexOf("map-svg") >= 0) ?? "";
+
+  it("画布的 viewBox 由「框内尺寸 + 缩放 + 平移」算出（不是写死整块）", () => {
+    expect(panel, "viewBox 没走 computeViewBox").toContain(
+      "computeViewBox(width, height, view.zoom, view.pan.x, view.pan.y)",
+    );
+    expect(panel, "viewBox 还是写死的整块（那就没有缩放这回事）").not.toContain(
+      "viewBox={`0 0 ${width} ${height}`}",
+    );
+  });
+
+  it("缩放**不写盘**（放大只是看，不是作品的一部分）", () => {
+    // 认**缩放那一段**：它只能动视图状态，不许碰任何写盘接口
+    const zoomBlock = /const changeZoom = useCallback\([\s\S]*?\n  \);/.exec(panel)?.[0] ?? "";
+    expect(zoomBlock, "没找到缩放那一段").not.toBe("");
+    expect(zoomBlock, "缩放去写盘了（放大不该改作品）").not.toMatch(/api\(\)\.map\./);
+    const panBlock = /const moveView = useCallback\([\s\S]*?\n  \);/.exec(panel)?.[0] ?? "";
+    expect(panBlock, "没找到平移那一段").not.toBe("");
+    expect(panBlock, "平移去写盘了").not.toMatch(/api\(\)\.map\./);
+  });
+
+  it("放大 / 缩小 / 复位三个控件都在（作者不用记快捷键）", () => {
+    expect(panel, "没有放大控件").toContain('title="放大（键盘：+）"');
+    expect(panel, "没有缩小控件").toContain('title="缩小（键盘：-）"');
+    expect(panel, "没有复位控件").toContain('title="回到整块（键盘：0）"');
+  });
+
+  it("键盘路：+ / - 缩放、方向键平移、0 复位（且画布可聚焦才走得了）", () => {
+    expect(panel, "没有 + 键").toMatch(/event\.key === "\+"/);
+    expect(panel, "没有 - 键").toMatch(/event\.key === "-"/);
+    expect(panel, "没有方向键平移").toContain("ArrowRight");
+    expect(panel, "没有 0 复位").toMatch(/event\.key === "0"/);
+    expect(canvasTag, "没找到画布那个 <svg> 标签").not.toBe("");
+    expect(canvasTag, "画布不可聚焦 ⇒ 键盘路走不了").toContain("tabIndex={0}");
+  });
+
+  it("放置 / 框定 / 画形状时，缩放平移的键盘**让位**（别抢作者正在做的事）", () => {
+    const handler = /const onViewKeyDown = useCallback\([\s\S]*?\n  \);/.exec(panel)?.[0] ?? "";
+    expect(handler, "没找到缩放平移的键盘处理").not.toBe("");
+    expect(handler, "没让位给放置/框定/画形状").toMatch(
+      /if \(framing \|\| placing \|\| shapeKind !== null\) return;/,
+    );
+    expect(handler, "没让位给被聚焦的标注/锚点").toMatch(
+      /if \(event\.target !== event\.currentTarget\) return;/,
+    );
+  });
+
+  it("越界的平移会被钳回作者框定的那一块，缩放也有上下限", () => {
+    expect(mapView, "钳制没了").toContain("clampPan");
+    expect(mapView, "缩放上下限没了").toContain("ZOOM_MAX");
+    expect(mapView, "缩放步进没了").toContain("ZOOM_STEP");
   });
 });
 
