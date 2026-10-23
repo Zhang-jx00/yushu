@@ -7,8 +7,8 @@
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json && vite build",
-    "build:main": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json --noEmitOnError && vite build",
+    "build:main": "tsc -p tsconfig.json --noEmitOnError",
     "build:renderer": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p renderer/tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "start": "electron .",

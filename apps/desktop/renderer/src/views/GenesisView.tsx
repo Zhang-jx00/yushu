@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { useCallback, useEffect, useState } from "react";
-import type { CardSummary, WorldSummary } from "../../../src/shared/ipc";
+import type { CardSummary, LibraryViewPayload, WorldSummary } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { GENESIS_STEPS, buildCardBody } from "../genesis-steps";
 
@@ -23,6 +23,8 @@ const KICKOFF_STARTERS: Array<{ label: string; text: string }> = [
 export function GenesisView() {
   const [world, setWorld] = useState<WorldSummary | null>(null);
   const [cards, setCards] = useState<CardSummary[]>([]);
+  /** R147：稿件总览（算"接下来做什么"要用：哪些章写完了、这本书多大了） */
+  const [library, setLibrary] = useState<LibraryViewPayload | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, Record<string, string>>>({});
   const [doneSteps, setDoneSteps] = useState<string[]>([]);
@@ -34,12 +36,15 @@ export function GenesisView() {
   const [kickoff, setKickoff] = useState("");
 
   const refresh = useCallback(async () => {
-    const [worldSummary, cardList] = await Promise.all([
+    const [worldSummary, cardList, libraryView] = await Promise.all([
       api().project.world(),
       api().card.list(),
+      // 稿件总览取不到（还没建大纲等）**不许把整屏拖垮** ⇒ 降级成 null，其余照常
+      api().library.list().catch(() => null),
     ]);
     setWorld(worldSummary);
     setCards(cardList);
+    setLibrary(libraryView);
   }, []);
 
   useEffect(() => {
@@ -113,6 +118,32 @@ export function GenesisView() {
 
   const kickoffTargetLabel = step.fields.find((field) => field.required)?.label ?? "名称";
   const progressPct = Math.min(100, Math.round((cards.length / GOAL_CARDS) * 100));
+
+  /**
+   * R147：**「接下来做什么」三条** —— 全部从**真源现算**（卡列表 + 稿件总览），不是写死的文案。
+   *
+   * 为什么要有这一段：AI 工具的主页除了"入口"，还会告诉你**下一步**与**最近的产物**
+   * （TRAE SOLO 左栏是"正在进行的任务"）⇒ 作者打开软件时最需要的不是一张空表单，
+   * 而是"我该接着做什么"。写死的文案没有用（那不是他的书）⇒ 三条都要现算。
+   */
+  const builtLayers = new Set(cards.map((card) => card.layer));
+  const nextStep = GENESIS_STEPS.find((item) => !builtLayers.has(item.layer)) ?? null;
+  const nextLayerText =
+    nextStep !== null
+      ? `下一层是「${nextStep.title}」—— ${nextStep.intro}`
+      : "九层都建过了 ⇒ 去看看稿子，或者回头补一补已建的层";
+  const draftedChapters = (library?.chapters ?? []).filter(
+    (chapter) => chapter.chapterPath !== null && chapter.wordCount > 0,
+  );
+  const lastDrafted = draftedChapters[draftedChapters.length - 1] ?? null;
+  const continueText =
+    lastDrafted !== null
+      ? `接着写《${lastDrafted.title}》（已 ${String(lastDrafted.wordCount)} 字）`
+      : "还没建草稿 —— 从大纲里挑一章开始写";
+  const bookText =
+    library === null
+      ? "正在读这本书的规模…"
+      : `${String(library.totals.chapters)} 章 · 已建草稿 ${String(library.totals.drafted)} · 共 ${String(library.totals.words)} 字`;
 
   return (
     <div className="genesis">
@@ -268,6 +299,30 @@ export function GenesisView() {
             </div>
           </div>
         )}
+
+        {/* R147：**「接下来做什么」** —— 三条都从真源现算（不是写死的文案）。
+            AI 工具的主页除了"入口"，还会告诉你**下一步**与**最近的产物**
+            （TRAE SOLO 左栏就是"正在进行的任务"）⇒ 作者打开软件时最需要的
+            不是一张空表单，而是"我该接着做什么"。 */}
+        <div className="genesis-next">
+          <div className="panel-title">
+            <span className="muted">接下来做什么</span>
+          </div>
+          <ul className="genesis-next-list">
+            <li>
+              <span className="genesis-next-label">先建这一层</span>
+              <span>{nextLayerText}</span>
+            </li>
+            <li>
+              <span className="genesis-next-label">接着写</span>
+              <span>{continueText}</span>
+            </li>
+            <li>
+              <span className="genesis-next-label">这本书</span>
+              <span>{bookText}</span>
+            </li>
+          </ul>
+        </div>
       </section>
     </div>
   );

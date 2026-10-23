@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { BrowserWindow, app } from "electron";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CHANNELS } from "../shared/ipc.js";
 import { CloseCoordinator, registerCloseCoordinator, unregisterCloseCoordinator } from "./close-coordinator.js";
@@ -12,6 +13,38 @@ import { parseWalkthroughDir, prepareWalkthrough, runWalkthrough, startMockOpenA
 import { stopRepoWorker } from "./repo-worker.js";
 
 /** 御书桌面端入口（M1：主进程 + 白名单 IPC + React renderer） */
+
+/**
+ * **主进程不许弹原生错误框**（R147）。
+ *
+ * 起因：预演跑崩时 Electron 弹了 "A JavaScript error occurred in the main process"
+ * 对话框 ⇒ **打扰作者桌面**（本项目的纪律：所有机器跑法都不许碰别人的桌面，
+ * 见 `createWindow({ automation: true })` 那段注释）——离屏渲染管得住窗口，
+ * 管不住**主进程自己的错误框**。
+ *
+ * ⇒ 这里注册 handler：把错误**写进日志**（stdout + `userData/logs/main-crash.log`），
+ * 然后**直接退出**，**不弹框**。机器跑法（预演 / e2e / trial）因此拿到**非 0 退出码**，
+ * 门禁能抓到 ⇒ 比弹一个框让人看着强。
+ */
+function reportFatal(kind: string, err: unknown): void {
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  console.error(`[main] 未捕获的 ${kind}：${detail}`);
+  try {
+    const dir = join(app.getPath("userData"), "logs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "main-crash.log"),
+      `[${new Date().toISOString()}] ${kind}\n${detail}\n`,
+      "utf8",
+    );
+  } catch {
+    /* 日志写不下去也得退出：不能靠弹框告知 */
+  }
+  app.exit(1);
+}
+
+process.on("uncaughtException", (err: Error) => reportFatal("uncaughtException", err));
+process.on("unhandledRejection", (reason: unknown) => reportFatal("unhandledRejection", reason));
 
 /** --ui-trial 逐组销毁/新建窗口；期间必须抑制「窗口全关即退出」，末尾由 runTrial 统一 app.exit */
 let autoQuitDisabled = false;

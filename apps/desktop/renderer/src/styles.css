@@ -1170,6 +1170,40 @@ h4 {
   color: var(--ink);
 }
 
+/* R147：**「接下来做什么」**（三条都从真源现算，不是写死的文案） */
+.genesis-next {
+  margin-top: var(--space-6);
+}
+
+.genesis-next-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.genesis-next-list li {
+  /* 标签列按最长那条对齐（**不用长度字面量** —— 棘轮把 em 也算一处 ⇒ 用 max-content） */
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.genesis-next-list li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.genesis-next-label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
 .genesis aside {
   border-right: 1px solid var(--border);
   padding: 12px;

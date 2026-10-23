@@ -4883,11 +4883,25 @@ const STEPS: StepDef[] = [
         if (list) list.scrollIntoView({ block: 'center' });
       }
       await sleep(240);
+      /**
+       * **两种合法结局都要能分辨**（R147 定位）：
+       * ① 采纳后**落盘**了（摘要文件比跑之前多 1）；
+       * ② 采纳被**「人工修订过的摘要，AI 不得覆盖」**挡下（rev 保护）——
+       *    那是**产品对**，不是缺陷（实测证据：盘上那份章摘要是 summary_rev: 1）。
+       * 两种结局**都不许放过 notWritten**（"跑候选就写库"仍必须红）。
+       * 原来只认① ⇒ 撞上②就误判成缺陷（这个偶发复现过两轮才定位到）。
+       */
+      const errEl = document.querySelector('.error-text');
+      const errText = String((errEl && errEl.textContent) || '').replace(/\s+/g, ' ');
+      const adopted = afterAdopt === before + 1;
+      const refusedByRev =
+        errText.indexOf('E_MEMORY_REV_PROTECTED') >= 0 || errText.indexOf('人工修订') >= 0;
       return {
-        ok: budgetOk && notWritten && written !== null && afterAdopt === before + 1,
+        ok: budgetOk && notWritten && (adopted ? written !== null : refusedByRev),
         note: '批量候选=' + rows + ' 条；预算预检在屏幕上=' + budgetOk + '（' + budgetLine.slice(0, 70) + '）' +
           '；跑完候选后盘上摘要文件 ' + before + ' → ' + afterBatch + '（一个没多=' + notWritten + '）' +
-          '；采纳一条→盘上摘要文件 ' + afterAdopt + '（比跑之前多 1=' + (afterAdopt === before + 1) + '）',
+          '；采纳一条→盘上摘要文件 ' + afterAdopt + '（落盘=' + String(adopted) + '）' +
+          '；被 rev 保护挡下=' + String(refusedByRev) + '（回执：' + errText.slice(0, 80) + '）',
       };
     `,
   },
@@ -7627,6 +7641,43 @@ const STEPS: StepDef[] = [
         note: '一句话接上了表单=' + String(filledOk) + '（填进的是：' + filled.slice(0, 24) + '…）' +
           '；只填没保存=' + String(notSaved) + '（卡数 ' + cardsBefore + '→' + cardsAfter + '）' +
           '；进度条在=' + String(progressOk) + '；快捷起点=' + String(starters) + ' 个',
+      };
+    `,
+  },
+  {
+    step: 109,
+    title: '起源工作台第三段：「接下来做什么」三条都从真源现算（R147）',
+    file: 'step109-genesis-next.png',
+    body: String.raw`
+      // 这一步证 R147：**首屏下半屏不再是空白** —— 有「接下来做什么」这一段，
+      // 而且三条**都从真源现算**（不是写死的文案）：
+      // ① 「先建这一层」按卡片的 layer 算；
+      // ② 「接着写」按稿件总览里已建草稿的章算；
+      // ③ 「这本书」的字数与章数要跟**真源对得上**（这一条是动态对照）。
+      await tab('起源工作台');
+      const next = await waitFor(() => document.querySelector('.genesis-next') || null, 8000);
+      if (!next) return { ok: false, note: '起源工作台没有「接下来做什么」这一段' };
+      const items = [...next.querySelectorAll('.genesis-next-list li')]
+        .map((li) => String(li.textContent || '').replace(/\s+/g, ' ').trim());
+      const three = items.length === 3 && items.every((text) => text.length > 4);
+      // ③ 与真源对得上：章数与总字数
+      const truth = await window.yushu.library.list();
+      const totals = truth.totals;
+      const third = items[2] || '';
+      const matches = third.indexOf(String(totals.chapters)) >= 0 && third.indexOf(String(totals.words)) >= 0;
+      // ① 与真源对得上：已建卡的 layer 有几个
+      const cards = await window.yushu.card.list();
+      const built = new Set(cards.map((card) => String(card.layer || '')));
+      const panelEl = document.querySelector('.genesis');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: three && matches,
+        note: '三条都在=' + String(three) + '（' + String(items.length) + ' 条）' +
+          '；「这本书」与真源对得上=' + String(matches) +
+          '（真源：' + String(totals.chapters) + ' 章 / ' + String(totals.drafted) + ' 草稿 / ' + String(totals.words) + ' 字；页面上：' + third.slice(0, 40) + '）' +
+          '；「先建这一层」=' + (items[0] || '').slice(0, 34) + '（已建的层 ' + String(built.size) + ' 个）' +
+          '；「接着写」=' + (items[1] || '').slice(0, 34),
       };
     `,
   },

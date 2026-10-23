@@ -2536,3 +2536,36 @@ describe("起源工作台首屏（R146）：入口是主角 + 进度看得见", 
     expect(genesis, "没有目标张数").toContain("GOAL_CARDS");
   });
 });
+
+/**
+ * R147：起源工作台第三段 —— **「接下来做什么」**（三条都从真源现算）。
+ *
+ * 为什么要有第三段：AI 工具的主页除了"入口"，还会告诉你**下一步**与**最近的产物**
+ * （TRAE SOLO 左栏就是"正在进行的任务"）⇒ 作者打开软件时最需要的不是一张空表单，
+ * 而是"我该接着做什么"。而**写死的文案没有用**（那不是他的书）⇒ 三条都要现算。
+ */
+describe("起源工作台第三段（R147）：「接下来做什么」三条都从真源现算", () => {
+  const genesis = readFileSync(join(VIEW_ROOT, "views", "GenesisView.tsx"), "utf8");
+
+  it("有「接下来做什么」这一段（首屏下半屏不再是空白）", () => {
+    expect(genesis, "没有「接下来做什么」这一段").toMatch(/className="genesis-next"/);
+    expect(genesis, "没有这个标题").toContain("接下来做什么");
+  });
+
+  it("三条**都从真源现算**（不是写死的文案）", () => {
+    // 认**计算的那几处**：一旦改成写死文案，这三处就会消失
+    expect(genesis, "「先建这一层」不是现算的").toContain(
+      "GENESIS_STEPS.find((item) => !builtLayers.has(item.layer))",
+    );
+    expect(genesis, "「接着写」不是现算的").toContain("draftedChapters");
+    expect(genesis, "「这本书」不是现算的").toContain("library.totals.chapters");
+  });
+
+  it("「先建这一层」按**卡片的 layer** 判断（真源是卡列表，不是写死的层序）", () => {
+    expect(genesis, "没从卡列表取 layer").toContain("new Set(cards.map((card) => card.layer))");
+  });
+
+  it("取数时把稿件总览一起取来（否则「接着写」只能是死话）", () => {
+    expect(genesis, "没取稿件总览").toContain("api().library.list()");
+  });
+});
