@@ -10,6 +10,8 @@ import {
 } from "@yushu/world-engine";
 import type {
   WorldMapBasePayload,
+  WorldMapSetBoundsRequestPayload,
+  WorldMapSetBoundsResult,
   WorldMapUploadBaseResult,
   WorldMapViewPayload,
   WorldMapViewRequestPayload,
@@ -51,6 +53,7 @@ export async function worldMapView(
       note: "项目还没有世界地图：写一份 world/map.yaml（底图 bounds + 标注）才会有地图",
       bounds: null,
       canvas: null,
+      baseSize: null,
       markers: [],
       anchors: [],
       layers: [],
@@ -73,6 +76,7 @@ export async function worldMapView(
       note: `地图读不了，本次不出结论（不静默按空地图显示）：${err instanceof Error ? err.message : String(err)}`,
       bounds: null,
       canvas: null,
+      baseSize: null,
       markers: [],
       anchors: [],
       layers: [],
@@ -118,13 +122,11 @@ export async function worldMapView(
   });
 
   const bounds = projection.bounds;
+  // 画布 = **bounds 那一块**（作者框定的就是画布；底图按它裁切显示）
   const canvas =
-    bounds === null
-      ? null
-      : {
-          width: def.baseSize?.width ?? bounds.x1 - bounds.x0,
-          height: def.baseSize?.height ?? bounds.y1 - bounds.y0,
-        };
+    bounds === null ? null : { width: bounds.x1 - bounds.x0, height: bounds.y1 - bounds.y0 };
+  // 底图**声明**的像素尺寸（框定模式下画整张图 ⇒ 拖出来的坐标就是底图像素坐标）
+  const baseSize = def.baseSize ?? null;
 
   const note = [
     `${markers.length} 个标注 · ${projection.layers.length} 个图层`,
@@ -139,6 +141,7 @@ export async function worldMapView(
     note,
     bounds,
     canvas,
+    baseSize,
     markers,
     // 事件锚点（K08 §3.8）：事件挂坐标 ⇒ 选事件能定位到地图上
     anchors: projection.anchors.map((anchor) => ({
@@ -424,5 +427,87 @@ export async function uploadMapBase(
     snippet: null,
     previous: merged.previous,
     mapPath: MAP_PATH,
+  };
+}
+
+/**
+ * **框定边界**（R138）：**写盘**——作者在底图上**拖出一块** ⇒ 写进 `world/map.yaml` 的 `bounds`。
+ *
+ * 口径回源 K08 §5「地图编辑器：上传底图 → **框定 bounds** → 放 marker/区域/行程线 → 绑定实体」：
+ * R135 做了"上传底图"（bounds 按量出来的尺寸自动填 = 整张图），
+ * 这一轮把**框定**这一步给作者：**在图上拖一块** ⇒ 那块才是地图（K08 §3.6「用户上传底图并框定 bounds」）。
+ *
+ * 三条不静默 / 不越权（与 R135/R136 的写盘纪律同一条）：
+ * ① **只改 `bounds` 那一行**：底图登记、图层、标注、事件锚点**原样留着**
+ *    （不重写整个文件 ⇒ 不抹作者的注释与排版；行尾也照原样）；
+ * ② **框的范围必须落在底图里**（落在外面 ⇒ 画出来是空的）⇒ 拒绝并说清楚；
+ * ③ 写盘带 baseHash ⇒ 作者在别处改过 map.yaml 时**报冲突**、不覆盖。
+ */
+export async function setMapBounds(
+  gateway: ProjectGateway,
+  request: WorldMapSetBoundsRequestPayload,
+): Promise<WorldMapSetBoundsResult> {
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) {
+    return { ok: false, note: "项目还没有世界地图（先登记底图）", bounds: null, imageSize: null };
+  }
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return {
+      ok: false,
+      note: `地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`,
+      bounds: null,
+      imageSize: null,
+    };
+  }
+  const imageSize = def.baseSize ?? null;
+  if (imageSize === null) {
+    return {
+      ok: false,
+      note: "这张地图没有 base_size（不知道底图多大 ⇒ 框不出范围）",
+      bounds: null,
+      imageSize: null,
+    };
+  }
+  // 拖出来的坐标是**底图像素** ⇒ 取整（像素没有小数）
+  const x0 = Math.round(request.x0);
+  const y0 = Math.round(request.y0);
+  const x1 = Math.round(request.x1);
+  const y1 = Math.round(request.y1);
+  if (![x0, y0, x1, y1].every((n) => Number.isFinite(n))) {
+    return { ok: false, note: "框的坐标里有非数字", bounds: null, imageSize };
+  }
+  if (x1 <= x0 || y1 <= y0) {
+    return { ok: false, note: "框的宽或高不为正", bounds: null, imageSize };
+  }
+  if (x0 < 0 || y0 < 0 || x1 > imageSize.width || y1 > imageSize.height) {
+    return {
+      ok: false,
+      note: `框的范围超出了底图（底图 ${String(imageSize.width)}×${String(imageSize.height)}）`,
+      bounds: null,
+      imageSize,
+    };
+  }
+  // 只改 bounds 那一行（`[^\r\n]*` ⇒ 行尾照原样，不把 CRLF 改成 LF）
+  if (!/^bounds[^\r\n]*/m.test(snapshot.content)) {
+    return {
+      ok: false,
+      note: "地图文件里没有 bounds 那一行（先登记底图）",
+      bounds: null,
+      imageSize,
+    };
+  }
+  const content = snapshot.content.replace(
+    /^bounds[^\r\n]*/m,
+    `bounds: [[${String(x0)}, ${String(y0)}], [${String(x1)}, ${String(y1)}]]`,
+  );
+  await gateway.writeDoc(MAP_PATH, content, snapshot.hash);
+  return {
+    ok: true,
+    note: `边界已定：${String(x0)},${String(y0)} → ${String(x1)},${String(y1)}`,
+    bounds: { x0, y0, x1, y1 },
+    imageSize,
   };
 }

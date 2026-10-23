@@ -71,6 +71,31 @@ describe("世界地图投影（R114 引擎侧）", () => {
     expect(finding?.message).toContain("不匹配");
   });
 
+  it("bounds 是底图的**子矩形**（作者框定的那一块）⇒ **不报** map-bounds-missing（框定是正式功能，不是尺寸写错）", () => {
+    // 口径回源 K08 §3.6：地图 = 图片底图 + bounds，作者**上传底图并框定 bounds**
+    // ⇒ bounds 天然就是底图里的**一块**，不是整张图。
+    const def = mapDef({ bounds: { x0: 200, y0: 300, x1: 800, y1: 1100 } });
+    const result = projectWorldMap(def, ENTITIES);
+    expect(result.findings.find((item) => item.code === "map-bounds-missing")).toBeUndefined();
+    // 框里的标注按**新框**归一（坐标空间变了 ⇒ 归一也变）
+    const b = result.markers.find((item) => item.id === "m-b");
+    expect(b?.nx).toBeCloseTo((300 - 200) / 600, 6);
+    expect(b?.ny).toBeCloseTo((400 - 300) / 800, 6);
+    // 框**外面**的标注：仍然画（坐标照给），但逐条点名（作者看得见自己框掉了什么）
+    const outside = result.findings.filter((item) => item.code === "map-marker-outside");
+    expect(outside.map((item) => item.refs[0])).toEqual(["m-a"]);
+  });
+
+  it("bounds **超出**底图 ⇒ 仍然是 map-bounds-missing（error），并说清底图多大", () => {
+    const def = mapDef({ bounds: { x0: 0, y0: 0, x1: 1200, y1: 1400 } });
+    const result = projectWorldMap(def, ENTITIES);
+    const finding = result.findings.find((item) => item.code === "map-bounds-missing");
+    expect(finding).toBeTruthy();
+    expect(finding?.severity).toBe("error");
+    expect(finding?.message).toContain("不匹配");
+    expect(finding?.message).toContain("1000×1400");
+  });
+
   it("两种 bounds 写法等价（{x0,y0,x1,y1} 与 K08 里的 [[x0,y0],[x1,y1]]）", () => {
     const a = normalizeBounds({ x0: 0, y0: 0, x1: 1000, y1: 1400 });
     const b = normalizeBounds([

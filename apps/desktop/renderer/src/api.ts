@@ -26,6 +26,8 @@ import type {
   GraphViewPayload,
   GraphViewRequestPayload,
   WorldMapBasePayload,
+  WorldMapSetBoundsRequestPayload,
+  WorldMapSetBoundsResult,
   WorldMapUploadBaseRequestPayload,
   WorldMapUploadBaseResult,
   WorldMapViewPayload,
@@ -255,6 +257,13 @@ export interface YushuApi {
      * 渲染层**拿不到也拿不到需要**本地路径：只回项目内的相对路径与尺寸。
      */
     uploadBase: (payload: WorldMapUploadBaseRequestPayload) => Promise<WorldMapUploadBaseResult>;
+    /**
+     * 框定边界（R138）：作者在底图上**拖出**的那一块（**底图像素坐标**）⇒ 写 map.yaml 的 `bounds`。
+     *
+     * 范围落在底图尺寸外 / 宽高不为正 ⇒ 主进程拒绝并说清楚（**渲染层不自己算**）。
+     * 口径回源 K08 §3.6「用户上传底图并框定 bounds」。
+     */
+    setBounds: (payload: WorldMapSetBoundsRequestPayload) => Promise<WorldMapSetBoundsResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

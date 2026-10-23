@@ -1025,6 +1025,8 @@ const PALETTE_R137: Record<string, string> = {
   "--muted": "#675f55",
   "--good": "#2a7042",
   "--warn": "#8a570a",
+  // R138：框定时"正在拖的那一块"的半透明朱（字面色值不许出现在 :root 之外 ⇒ 收进令牌）
+  "--accent-veil": "rgba(140, 90, 43, 0.12)",
 };
 
 /**
@@ -2004,6 +2006,70 @@ describe("底图登记（R135）：作者的入口 + 写盘纪律", () => {
     expect(panel, "没有按有没有登记过区分模式").toMatch(/mode: hasBase \? "replace" : "register"/);
     // 换之前的那三行要给作者看（他要换回去就贴回去）
     expect(panel, "换之前的三行没给作者看").toContain("uploadPrevious");
+  });
+});
+
+/**
+ * 框定边界（R138）：作者在底图上**拖出**地图在图里的哪一块。
+ *
+ * 口径回源 K08 §3.6「地图 = 图片底图 + bounds → 用户上传底图并**框定 bounds**」。
+ *
+ * 这一轮是**模型翻转**：bounds 从"整张图"变成"图里的一块"⇒
+ * 画布 = 框、底图按框裁切、框定模式画整张图。
+ *
+ * 判据认**具体的形状**（哪一行算裁切、哪个键是回车、哪个角色被撤掉），
+ * 不是"文件里出现过框定两个字"——后者会随改名一起失效。
+ */
+describe("框定边界（R138）：拖一块 ⇒ 只改 bounds 那一行 ⇒ 画布按它裁切", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const ipc = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "ipc.ts"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+  const engine = readFileSync(join(ROOT, "packages", "@yushu", "world-engine", "src", "world-map.ts"), "utf8");
+
+  it("地图面板给作者一个**框定边界**的入口（按钮真的绑在拖框上）", () => {
+    expect(panel, "面板里没有「框定边界」这个入口").toContain("框定边界");
+    expect(panel, "框定按钮没有绑上").toMatch(/onClick=\{toggleFraming\}/);
+    // 真的写盘：调的是 map.setBounds（不是只画个框给他看）
+    expect(panel, "没有调用 map.setBounds").toContain("map.setBounds(");
+  });
+
+  it("画布 = **框定的那一块**，底图按它**裁切**（往左挪 -x0）", () => {
+    expect(panel, "画布没有按 bounds 那一块算").toMatch(
+      /frameW = frame === null \? canvas\.width : frame\.x1 - frame\.x0/,
+    );
+    expect(panel, "底图没有按框裁切").toMatch(/const imageX = framing \? 0 : -\(frame\?\.x0 \?\? 0\)/);
+  });
+
+  it("框定模式画的是**整张图**（否则作者在已裁切的画面上拖，永远框不到图外）", () => {
+    expect(panel, "框定模式没有画整张图").toMatch(/const width = framing \? baseW :/);
+  });
+
+  it("**键盘也能框**（方向键移动、+ / - 改大小、回车定下来）——拖拽不是唯一的路", () => {
+    expect(panel, "没有方向键移动").toContain("ArrowLeft");
+    expect(panel, "没有回车定下来").toMatch(/event\.key === "Enter"/);
+    expect(panel, "画布在框定模式里不可聚焦").toMatch(/tabIndex=\{framing \? 0 : -1\}/);
+  });
+
+  it("框定模式里标注与锚点**不可点**（那一下是拖框，不是开卡）", () => {
+    // 框定模式是**单独一支**（没有 onClick ⇒ 不构成键盘债，也不跟拖框抢那一下）
+    const framingBranch = /\{framing \? \(([\s\S]*?)\) : \(/.exec(panel)?.[1] ?? "";
+    expect(framingBranch, "面板里没有框定模式那一支").not.toBe("");
+    expect(framingBranch, "框定模式里标注仍然可点（那一下应该是拖框）").not.toContain("onClick");
+    expect(framingBranch, "框定模式那一支没有标出来").toContain("map-frame-points");
+  });
+
+  it("写盘走 **wrapWrite**（真源写 ⇒ 索引要刷、上一轮结论要置脏）", () => {
+    expect(ipc, "框定边界没有走 wrapWrite").toMatch(/CHANNELS\.worldMapSetBounds[\s\S]{0,200}wrapWrite/);
+  });
+
+  it("主进程**只改 bounds 那一行**，写盘带 baseHash（作者在别处改过 ⇒ 报冲突不覆盖）", () => {
+    expect(ops, "没有只改那一行的替换").toContain("/^bounds[^\\r\\n]*/m");
+    expect(ops, "写盘没带 baseHash").toMatch(/writeDoc\(MAP_PATH, content, snapshot\.hash\)/);
+  });
+
+  it("引擎不再要求 bounds 与底图**等大**（作者框一块是正式功能，不是尺寸写错）", () => {
+    expect(engine, "引擎还在要求尺寸相等").not.toMatch(/width !== def\.baseSize\.width/);
+    expect(engine, "引擎没有「范围必须落在底图里」这条判定").toContain("bounds.x1 > def.baseSize.width");
   });
 });
 

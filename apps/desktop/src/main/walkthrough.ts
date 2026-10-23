@@ -6716,6 +6716,124 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 100,
+    title: '框定边界：作者在底图上拖一块 ⇒ 只改 map.yaml 的 bounds 那一行 ⇒ 画布按那一块裁切（R138）',
+    file: 'step100-frame-bounds.png',
+    body: String.raw`
+      // 这一步证 R138：**框定边界**（口径回源 K08 §3.6「地图 = 图片底图 + bounds ⇒ 用户上传底图并**框定 bounds**」）。
+      // 作者的大图常常只有**中间一块**是地图 ⇒ 边界要能**框**（不是一律按整张图算）。
+      //
+      // 断的是**四件事**：
+      // ① 盘上：bounds 那一行被改成作者拖的那一块，**其余行原样留着**（注释 / 底图登记 / 标注都在）；
+      // ② 画布按新框裁切（viewBox = 框的尺寸、底图往左挪 -x0）；
+      // ③ 框**外面**的标注被点名（map-marker-outside）——作者看得见自己框掉了什么；
+      // ④ 框**里面**的标注仍然画着（框定不是把标注弄没了）。
+      const cardId = 'loc-map-probe';
+      const cardPath = 'world/cards/location/' + cardId + '.md';
+      const card = { id: cardId, type: 'location', name: '天启_probe', layer: 'geography' };
+      const body = '临时地点卡：只为让世界地图有一个可点的标注。';
+      const existingCard = await window.yushu.card.read(cardPath).catch(() => null);
+      if (existingCard === null) await window.yushu.card.write({ path: cardPath, card: card, body: body });
+      else await window.yushu.card.write({ path: cardPath, card: card, body: body, baseHash: existingCard.hash });
+
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        '# 作者自己写的注释（框定之后应当原样留着）',
+        'base_image: world/assets/map/base.png',
+        'base_size: {width: 1000, height: 700}',
+        'bounds: [[0, 0], [1000, 700]]',
+        'layers: [place]',
+        'markers:',
+        '  - {id: m-in, layer: place, entity_ref: ' + cardId + ', x: 250, y: 175}',
+        '  - {id: m-out, layer: place, entity_ref: ' + cardId + ', x: 900, y: 600}',
+        '',
+      ].join('\n');
+      const currentMap = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      await window.yushu.doc.write('world/map.yaml', yaml, currentMap === null ? undefined : currentMap.hash);
+
+      // 面板只在挂载时取数 ⇒ 先去别的页再回来，强制重挂载（R68 的教训）
+      await tab('规则');
+      await tab('世界观档案');
+      const svg0 = await waitFor(() => document.querySelector('.map-panel .map-svg') || null, 8000);
+      if (!svg0) return { ok: false, note: '地图 SVG 没渲染（通道未通或没有标注）' };
+
+      // 进框定模式（作者点那个按钮）
+      const frameBtn = [...document.querySelectorAll('.map-panel button')]
+        .find((b) => String(b.textContent || '').trim() === '框定边界');
+      if (!frameBtn) return { ok: false, note: '地图面板没有「框定边界」这个入口' };
+      frameBtn.click();
+      await sleep(400);
+      const framing = await waitFor(
+        () => (document.querySelector('.map-panel .map-svg.is-framing') ? true : null),
+        3000,
+      );
+      if (!framing) return { ok: false, note: '点了「框定边界」但画布没进框定模式（按钮多半是灰的）' };
+
+      // 在整张图上拖一块：(200,150) → (700,500)（底图像素）
+      const ctm = svg0.getScreenCTM();
+      if (!ctm) return { ok: false, note: '拿不到画布的坐标变换（拖不了）' };
+      const toClient = (ux, uy) => {
+        const pt = svg0.createSVGPoint();
+        pt.x = ux;
+        pt.y = uy;
+        const p = pt.matrixTransform(ctm);
+        return { x: p.x, y: p.y };
+      };
+      const from = toClient(200, 150);
+      const to = toClient(700, 500);
+      const fire = (type, x, y) => svg0.dispatchEvent(new PointerEvent(type, {
+        clientX: x,
+        clientY: y,
+        bubbles: true,
+        cancelable: true,
+        pointerId: 1,
+        isPrimary: true,
+        buttons: 1,
+      }));
+      fire('pointerdown', from.x, from.y);
+      await sleep(150);
+      fire('pointermove', to.x, to.y);
+      await sleep(150);
+      fire('pointerup', to.x, to.y);
+      await sleep(900);
+
+      // ① 盘上：只有 bounds 那一行变了
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const content = after.content;
+      const boundsOk = content.indexOf('bounds: [[200, 150], [700, 500]]') >= 0;
+      const othersOk =
+        content.indexOf('# 作者自己写的注释（框定之后应当原样留着）') >= 0 &&
+        content.indexOf('base_size: {width: 1000, height: 700}') >= 0 &&
+        content.indexOf('m-out') >= 0;
+      const linesBefore = yaml.split('\n').length;
+      const linesAfter = content.split('\n').length;
+
+      // ② 画布按新框裁切（viewBox = 0 0 500 350；底图往左挪 -200）
+      const svg = document.querySelector('.map-panel .map-svg');
+      const viewBox = svg ? String(svg.getAttribute('viewBox') || '') : '';
+      const img = document.querySelector('.map-panel .map-base');
+      const imgX = img ? Number(img.getAttribute('x')) : Number.NaN;
+      const cropped = viewBox === '0 0 500 350' && imgX === -200;
+
+      // ③ 框外的标注被点名 ④ 框内的标注仍然画着
+      const codes = [...document.querySelectorAll('.map-panel .map-finding-code')]
+        .map((el) => String(el.textContent || '').trim());
+      const outsideNamed = codes.indexOf('map-marker-outside') >= 0;
+      const inDrawn = document.querySelector('.map-panel .map-marker[data-marker="m-in"]') !== null;
+
+      return {
+        ok: boundsOk && othersOk && linesBefore === linesAfter && cropped && outsideNamed && inDrawn,
+        note: '盘上 bounds=' + (boundsOk ? '[[200, 150], [700, 500]]' : '（没写成）') +
+          '；其余行原样=' + String(othersOk) + '（行数 ' + String(linesBefore) + '→' + String(linesAfter) + '）' +
+          '；画布按框裁切=' + String(cropped) + '（viewBox=' + viewBox + '，底图 x=' + String(imgX) + '）' +
+          '；框外的标注被点名=' + String(outsideNamed) + '（结论码=' + codes.join('/') + '）' +
+          '；框内的标注仍画着=' + String(inDrawn),
+      };
+    `,
+  },
 ];
 
 /**

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { uploadMapBase } from "../src/main/map-ops.js";
+import { uploadMapBase, setMapBounds, worldMapView } from "../src/main/map-ops.js";
 import { ProjectGateway } from "../src/main/file-gateway.js";
 import { parseMapFile } from "@yushu/world-engine";
 
@@ -149,5 +149,122 @@ describe("底图登记（R135）：挑图 ⇒ 拷进项目 ⇒ 边界按量出�
     // 换之前的三行给作者看（他要换回去就贴回去）
     expect(result.previous).toContain("base_image: world/assets/map/old.png");
     expect(result.previous).toHaveLength(3);
+  });
+});
+
+/**
+ * 框定边界（R138）：**写盘**路径的单测。
+ *
+ * 口径回源 K08 §3.6「地图 = 图片底图 + bounds → 用户上传底图并**框定 bounds**」：
+ * 作者在图上拖一块 ⇒ 那块才是地图。判据盯四件事：
+ * ① **只改 `bounds` 那一行**（底图登记、图层、标注、锚点、注释**原样留着**）；
+ * ② **框的范围必须落在底图里**（落在外面 ⇒ 画出来是空的）⇒ 拒绝；
+ * ③ **盘上没成 ⇒ 一个字节都不动**（拒绝不是"先改了再说说"）；
+ * ④ **地图文件读不了 / 没有那一行 ⇒ 拒绝并说清**（工具不替作者猜）。
+ */
+describe("框定边界（R138）：作者在图上拖一块 ⇒ 只改 map.yaml 的 bounds 那一行", () => {
+  const MAP_YAML = [
+    "# 作者自己写的注释",
+    "apiVersion: map-v1",
+    "id: map-world",
+    "crs: simple",
+    "base_image: world/assets/map/base.png",
+    "base_size: {width: 1000, height: 700}",
+    "bounds: [[0, 0], [1000, 700]]",
+    "layers: [place, event]",
+    "markers:",
+    "  - {id: m-place, layer: place, entity_ref: loc-a, x: 250, y: 175}",
+    "event_anchors:",
+    "  - {id: a-ev, event_ref: ev-1, x: 300, y: 200}",
+    "",
+  ].join("\n");
+
+  it("框在底图内 ⇒ **只改 bounds 那一行**，其余（注释 / 底图登记 / 图层 / 标注 / 锚点）原样留着", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await setMapBounds(gateway, { x0: 100, y0: 50, x1: 800, y1: 600 });
+    expect(result.ok).toBe(true);
+    expect(result.bounds).toEqual({ x0: 100, y0: 50, x1: 800, y1: 600 });
+    expect(result.imageSize).toEqual({ width: 1000, height: 700 });
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).toContain("bounds: [[100, 50], [800, 600]]");
+    expect(content).toContain("# 作者自己写的注释");
+    expect(content).toContain("base_image: world/assets/map/base.png");
+    expect(content).toContain("base_size: {width: 1000, height: 700}");
+    expect(content).toContain("- {id: m-place, layer: place, entity_ref: loc-a, x: 250, y: 175}");
+    expect(content).toContain("- {id: a-ev, event_ref: ev-1, x: 300, y: 200}");
+    // **只改那一行** ⇒ 别的行逐字不动（行数与内容都一样）
+    const before = MAP_YAML.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length);
+    const changed = after.filter((line, index) => line !== before[index]);
+    expect(changed).toEqual(["bounds: [[100, 50], [800, 600]]"]);
+  });
+
+  it("框超出底图 ⇒ 拒绝并说清底图多大，**盘上一个字节都没动**", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await setMapBounds(gateway, { x0: 0, y0: 0, x1: 1200, y1: 700 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("1000×700");
+    expect(result.bounds).toBeNull();
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("框的宽或高不为正 ⇒ 拒绝（画不出任何东西）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await setMapBounds(gateway, { x0: 300, y0: 200, x1: 300, y1: 500 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("不为正");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("地图没有 base_size ⇒ 拒绝（不知道底图多大 ⇒ 框不出范围），不自己猜", async () => {
+    await gateway.writeDoc(
+      "world/map.yaml",
+      ["apiVersion: map-v1", "id: map-world", "crs: simple", "bounds: [[0, 0], [100, 100]]", ""].join("\n"),
+    );
+    const result = await setMapBounds(gateway, { x0: 0, y0: 0, x1: 50, y1: 50 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("base_size");
+    expect(result.imageSize).toBeNull();
+  });
+
+  it("地图文件里没有 bounds 那一行 ⇒ 拒绝（工具不替作者加一行）", async () => {
+    await gateway.writeDoc(
+      "world/map.yaml",
+      ["apiVersion: map-v1", "id: map-world", "crs: simple", "base_size: {width: 100, height: 100}", ""].join("\n"),
+    );
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await setMapBounds(gateway, { x0: 0, y0: 0, x1: 50, y1: 50 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("bounds");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("项目里根本没有地图文件 ⇒ 拒绝（先登记底图）", async () => {
+    const result = await setMapBounds(gateway, { x0: 0, y0: 0, x1: 50, y1: 50 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("先登记底图");
+    await expect(gateway.readDoc("world/map.yaml")).rejects.toThrow();
+  });
+
+  it("视图的画布 = **框定的那一块**（不是整张底图）⇒ 底图按它裁切显示；且子矩形**不报** map-bounds-missing", async () => {
+    await gateway.writeDoc(
+      "world/map.yaml",
+      [
+        "apiVersion: map-v1",
+        "id: map-world",
+        "crs: simple",
+        "base_size: {width: 1000, height: 700}",
+        "bounds: [[100, 50], [800, 600]]",
+        "layers: [place]",
+        "",
+      ].join("\n"),
+    );
+    const view = await worldMapView(gateway, {});
+    expect(view.canvas).toEqual({ width: 700, height: 550 });
+    expect(view.baseSize).toEqual({ width: 1000, height: 700 });
+    expect(view.findings.some((item) => item.code === "map-bounds-missing")).toBe(false);
   });
 });

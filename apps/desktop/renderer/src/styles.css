@@ -23,6 +23,9 @@
   --c-ink-soft: #675f55;
   --c-accent: #8c5a2b;
   --c-accent-soft: #f0e2ce;
+  /* 半透明的朱（R138 框定用：正在拖的那一块要有一层淡淡的朱 ⇒ 看得见自己在拖什么）。
+     放 primitive 层 ⇒ 字面色值不许出现在 :root 之外（CSS 令牌棘轮 R83）。 */
+  --c-accent-veil: rgba(140, 90, 43, 0.12);
   --c-line: #e4dccf;
   /* 成功色（R137 有据变更）：#2f7d4f 在自己的浅底 #e6f2e9 上只有 4.38:1 ⇒ 调到 #2a7042（5.22:1）。 */
   --c-good: #2a7042;
@@ -52,6 +55,7 @@
   --muted: var(--c-ink-soft);
   --accent: var(--c-accent);
   --accent-soft: var(--c-accent-soft);
+  --accent-veil: var(--c-accent-veil);
   --border: var(--c-line);
   --good: var(--c-good);
   --bad: var(--c-bad);
@@ -3816,6 +3820,44 @@ table,
   flex-basis: 100%;
   margin-top: var(--space-2);
   color: var(--muted);
+}
+
+/* ---------- R138：框定边界（作者在图上拖出地图在图里的哪一块） ---------- */
+.map-frame-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.map-frame-bar .muted {
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+/* 框定模式：画布变成"可拖的" ⇒ 指针形状给作者一个提示 */
+.map-svg.is-framing {
+  cursor: crosshair;
+}
+
+/* 正在拖的那一块：实线（当前动作） */
+.map-frame-rect {
+  fill: var(--accent-veil);
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: none;
+  pointer-events: none;
+}
+
+/* 已经框好的那一块：虚线（现状）—— 与正在拖的那块分得开 */
+.map-frame-current {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+  opacity: 0.8;
 }
 
 .map-upload-snippet {

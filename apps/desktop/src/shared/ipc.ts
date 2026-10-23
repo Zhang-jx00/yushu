@@ -76,6 +76,11 @@ export const CHANNELS = {
   worldMapBase: "map:base",
   /** 世界地图底图·**作者侧登记**（R135）：**写盘**（挑一张图 ⇒ 拷进项目 ⇒ bounds 按量出来的像素尺寸自动填） */
   worldMapUploadBase: "map:uploadBase",
+  /**
+   * 世界地图·**框定边界**（R138）：**写盘**（作者在底图上**拖出**一块 ⇒ 写 map.yaml 的 `bounds`）。
+   * 口径回源 K08 §3.6「地图 = 图片底图 + bounds → 用户上传底图并**框定 bounds**」。
+   */
+  worldMapSetBounds: "map:setBounds",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -2885,6 +2890,30 @@ export type WorldMapUploadBaseRequestPayload = {
   mode: "register" | "replace";
 };
 
+/**
+ * 框定边界的请求（R138）：作者在底图上**拖出来**的那一块（**底图像素坐标**）。
+ *
+ * 口径回源 K08 §3.6：地图 = 图片底图 + bounds ⇒ 作者上传底图后**框定 bounds**
+ * （不是"手填四个数"，是**在图上拖一块**——K08 §5 说的「上传底图 → 框定 bounds」）。
+ */
+export interface WorldMapSetBoundsRequestPayload {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** 框定边界的结果（R138） */
+export interface WorldMapSetBoundsResult {
+  ok: boolean;
+  /** 给作者看的一句话（成了 / 为什么没成） */
+  note: string;
+  /** 写进去的边界（没成时为 null） */
+  bounds: { x0: number; y0: number; x1: number; y1: number } | null;
+  /** 底图本身的像素尺寸（作者框的范围要落在它里面） */
+  imageSize: { width: number; height: number } | null;
+}
+
 /** 底图登记的结果（R135）：**路径不出主进程**，只回项目内的相对路径与量出来的尺寸 */
 export interface WorldMapUploadBaseResult {
   /** 作者取消了（没挑文件） */
@@ -2954,10 +2983,19 @@ export interface WorldMapViewPayload {
   path: string;
   exists: boolean;
   note: string;
-  /** 坐标空间（底图像素边界）；没有有效边界 = null（此时不产出坐标） */
+  /** 坐标空间（**作者框定的那一块**，底图像素坐标）；没有有效边界 = null（此时不产出坐标） */
   bounds: { x0: number; y0: number; x1: number; y1: number } | null;
-  /** 画布宽高（底图尺寸；没给 base_size 时按 bounds 推） */
+  /**
+   * 画布宽高（= **bounds 那一块**的尺寸：作者框定的就是画布，底图按它裁切显示）。
+   * 以前这里是"整张底图"的尺寸 —— 那等于"只能整张图当地图"，K08 §3.6 的「框定 bounds」就没处落脚。
+   */
   canvas: { width: number; height: number } | null;
+  /**
+   * **底图声明的像素尺寸**（`base_size`）：作者框的那一块在**这张图**里的位置靠它换算
+   * （框定模式下画的是整张图 ⇒ 拖出来的坐标就是底图像素坐标）。
+   * 没有 `base_size` = null（此时画布就是 bounds 本身）。
+   */
+  baseSize: { width: number; height: number } | null;
   markers: WorldMapViewMarker[];
   /** 事件锚点（K08 §3.8：事件挂坐标 ⇒ 选事件能定位到地图上） */
   anchors: {

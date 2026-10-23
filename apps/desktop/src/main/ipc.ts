@@ -33,6 +33,8 @@ import {
   type GraphViewPayload,
   type GraphViewRequestPayload,
   type WorldMapBasePayload,
+  type WorldMapSetBoundsRequestPayload,
+  type WorldMapSetBoundsResult,
   type WorldMapUploadBaseRequestPayload,
   type WorldMapUploadBaseResult,
   type WorldMapViewPayload,
@@ -175,7 +177,7 @@ import { applyProposal, decideProposal, listProposals, previewPropagation, propo
 import { foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
-import { uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
+import { setMapBounds, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
 import {
@@ -651,6 +653,11 @@ export function registerIpcHandlers(): void {
         payload?.mode === "replace" ? "replace" : "register",
       ),
     ),
+  );
+  // 世界地图·**框定边界**（R138）：**写盘**（作者在底图上拖出一块 ⇒ 改 map.yaml 的 bounds 那一行）⇒ wrapWrite
+  // 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → 放 marker/区域/行程线 → 绑定实体」。
+  ipcMain.handle(CHANNELS.worldMapSetBounds, (_event, payload: WorldMapSetBoundsRequestPayload) =>
+    wrapWrite<WorldMapSetBoundsResult>(() => setMapBounds(requireGateway(), payload)),
   );
   // 编年史（T4-8）：复用时间线刻度，只读 ⇒ wrap
   ipcMain.handle(CHANNELS.chronicleBook, (_event, payload: ChronicleBookRequestPayload) =>

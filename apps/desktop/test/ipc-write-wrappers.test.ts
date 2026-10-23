@@ -55,6 +55,8 @@ const WRITE_CHANNELS = [
   // R135 底图登记：把图**拷进项目**（world/assets/map/…）+ 改 `world/map.yaml`
   // ⇒ 真源写 ⇒ 必须与上面同一类（写完索引要刷、上一轮体检结论要置脏）
   "worldMapUploadBase",
+  // R138 框定边界：改 `world/map.yaml` 的 `bounds` 那一行 ⇒ 同样是真源写
+  "worldMapSetBounds",
 ] as const;
 
 /** 写盘但不写真源（派生物 / 索引器排除文件 / .git 内部）——走只读包装器是有意的 */

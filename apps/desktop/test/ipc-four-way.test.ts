@@ -161,6 +161,13 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.uploadBase")).toBe(true);
   });
 
+  it("框定边界通道在四处齐备（R138 新增：**写盘**——改 map.yaml 的 bounds 那一行）", () => {
+    expect(channels.get("worldMapSetBounds")).toBe("map:setBounds");
+    expect(registered).toContain("worldMapSetBounds");
+    expect(literals.invoke.has("map:setBounds")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.setBounds")).toBe(true);
+  });
+
   it("爽点看板通道在四处齐备（R73 新增）", () => {
     expect(channels.get("satisfactionBoard")).toBe("satisfaction:board");
     expect(registered).toContain("satisfactionBoard");

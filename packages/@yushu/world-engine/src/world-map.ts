@@ -212,15 +212,23 @@ export function projectWorldMap(
       refs: [def.id],
     });
   } else if (def.baseSize !== undefined) {
-    const width = bounds.x1 - bounds.x0;
-    const height = bounds.y1 - bounds.y0;
-    if (width !== def.baseSize.width || height !== def.baseSize.height) {
+    // R138：**bounds 是作者框定的那一块**（口径回源 K08 §3.6「用户上传底图并**框定 bounds**」）
+    // ⇒ 判据从「尺寸必须等于底图」改成「**范围必须落在底图里**」。
+    // 以前那条判等是"作者只能整张图当地图"时代留下的：那时没有框定，只能拿手填的尺寸去对。
+    // 现在作者框一块是**正式功能** ⇒ 只有"框到图外"才是写错（画出来是空的）。
+    const outside =
+      bounds.x0 < 0 ||
+      bounds.y0 < 0 ||
+      bounds.x1 > def.baseSize.width ||
+      bounds.y1 > def.baseSize.height;
+    if (outside) {
       findings.push({
         code: "map-bounds-missing",
         severity: "error",
         message:
-          `bounds 的尺寸 ${String(width)}×${String(height)} 与底图图片 ` +
-          `${String(def.baseSize.width)}×${String(def.baseSize.height)} 不匹配`,
+          `bounds 的范围 ${String(bounds.x0)},${String(bounds.y0)} → ` +
+          `${String(bounds.x1)},${String(bounds.y1)} 与底图图片 ` +
+          `${String(def.baseSize.width)}×${String(def.baseSize.height)} 不匹配（框定的范围超出了底图）`,
         refs: [def.id],
       });
     }

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { StateNote } from "./StateNote";
@@ -170,9 +171,175 @@ export function WorldMapPanel(props: {
     }
   }, [base, reloadMap]);
 
+  /**
+   * R138 **框定边界**（口径回源 K08 §3.6「地图 = 图片底图 + bounds → 用户上传底图并**框定 bounds**」）。
+   *
+   * 作者的大图往往只有**中间一块**是地图 ⇒ 边界要能**框**，不能一律按整张图算
+   * （R135 的登记底图把 bounds 按量出来的尺寸自动填 = 整张图，那只是"第一步"）。
+   *
+   * 三条口径：
+   * ① **框定模式画的是整张图**（不是当前那一块）——否则作者在已裁切的画面上拖，
+   *    永远框不到图外的地方；当前框用虚线画出来，他看得见自己框到哪了。
+   * ② **键盘也能框**：方向键移动框（Shift = 细调）、`+`/`-` 改大小、回车定下来。
+   *    拖拽只是"快"的那条路，不是唯一的路（契约 §6：键盘债是 0）。
+   * ③ **只改 `bounds` 那一行**（写盘在主进程做，见 `setMapBounds`）⇒ 标注、图层、锚点原样留着。
+   */
+  const [framing, setFraming] = useState(false);
+  /** 框定中的那一块（工作区：鼠标拖与键盘改都改它） */
+  const [frameRect, setFrameRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [frameNote, setFrameNote] = useState("");
+  const [framingBusy, setFramingBusy] = useState(false);
+  /** 拖拽起点（SVG 用户坐标 = 底图像素） */
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+
   const canvas = map?.canvas ?? FALLBACK_CANVAS;
-  const width = canvas.width > 0 ? canvas.width : FALLBACK_CANVAS.width;
-  const height = canvas.height > 0 ? canvas.height : FALLBACK_CANVAS.height;
+  // R138：画布 = **作者框定的那一块**（bounds 那一块）；底图按它裁切显示
+  const frame = map?.bounds ?? null;
+  const frameW = frame === null ? canvas.width : frame.x1 - frame.x0;
+  const frameH = frame === null ? canvas.height : frame.y1 - frame.y0;
+  // 底图**声明**的像素尺寸（框定模式画整张图 ⇒ 拖出来的坐标就是底图像素坐标）
+  const baseW = map?.baseSize?.width ?? (frameW > 0 ? frameW : FALLBACK_CANVAS.width);
+  const baseH = map?.baseSize?.height ?? (frameH > 0 ? frameH : FALLBACK_CANVAS.height);
+  // 视图尺寸：框定模式 = 整张底图；平时 = 框定的那一块
+  const width = framing ? baseW : frameW > 0 ? frameW : FALLBACK_CANVAS.width;
+  const height = framing ? baseH : frameH > 0 ? frameH : FALLBACK_CANVAS.height;
+  // 底图在视图里的位置：平时按框裁切（往左挪 -x0）；框定模式 = 整张图
+  const imageX = framing ? 0 : -(frame?.x0 ?? 0);
+  const imageY = framing ? 0 : -(frame?.y0 ?? 0);
+  /** 有没有底图尺寸可依（没有 base_size ⇒ 框不出范围，入口不给按） */
+  const hasBaseSize = map?.baseSize != null;
+
+  /** 进入/退出框定模式：进来时把当前那一块放进工作区（虚线画出来，他看得见自己框到哪了） */
+  const toggleFraming = useCallback(() => {
+    setFrameNote("");
+    if (framing) {
+      setFraming(false);
+      setFrameRect(null);
+      return;
+    }
+    setFrameRect(
+      frame === null
+        ? { x0: 0, y0: 0, x1: baseW, y1: baseH }
+        : { x0: frame.x0, y0: frame.y0, x1: frame.x1, y1: frame.y1 },
+    );
+    setFraming(true);
+  }, [framing, frame, baseW, baseH]);
+
+  /** 把工作区里那一块写进 map.yaml（**只改 bounds 那一行**；范围由主进程校验、冲突由主进程报） */
+  const commitFrame = useCallback(
+    async (rect: { x0: number; y0: number; x1: number; y1: number }) => {
+      if (rect.x1 - rect.x0 < 2 || rect.y1 - rect.y0 < 2) {
+        setFrameNote("框太小了（按住拖一小块再松手）");
+        return;
+      }
+      setFramingBusy(true);
+      try {
+        const result = await api().map.setBounds({ x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 });
+        setFrameNote(result.note);
+        if (result.ok) {
+          setFraming(false);
+          setFrameRect(null);
+          reloadMap();
+        }
+      } catch (err: unknown) {
+        setFrameNote(err instanceof Error ? err.message : String(err));
+      } finally {
+        setFramingBusy(false);
+      }
+    },
+    [reloadMap],
+  );
+
+  /** SVG 客户端坐标 ⇒ 用户坐标（框定模式下用户坐标 = 底图像素） */
+  const toImagePoint = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
+    const svg = event.currentTarget;
+    const ctm = svg.getScreenCTM();
+    if (ctm === null) return null;
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const p = point.matrixTransform(ctm.inverse());
+    return { x: p.x, y: p.y };
+  }, []);
+
+  const onFramePointerDown = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      if (!framing) return;
+      const p = toImagePoint(event);
+      if (p === null) return;
+      dragStart.current = p;
+      setFrameRect({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+    },
+    [framing, toImagePoint],
+  );
+
+  const onFramePointerMove = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      if (!framing || dragStart.current === null) return;
+      const p = toImagePoint(event);
+      if (p === null) return;
+      const s = dragStart.current;
+      setFrameRect({
+        x0: Math.min(s.x, p.x),
+        y0: Math.min(s.y, p.y),
+        x1: Math.max(s.x, p.x),
+        y1: Math.max(s.y, p.y),
+      });
+    },
+    [framing, toImagePoint],
+  );
+
+  const onFramePointerUp = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      if (!framing) return;
+      const start = dragStart.current;
+      dragStart.current = null;
+      if (start === null) return;
+      const p = toImagePoint(event);
+      if (p === null) return;
+      void commitFrame({
+        x0: Math.min(start.x, p.x),
+        y0: Math.min(start.y, p.y),
+        x1: Math.max(start.x, p.x),
+        y1: Math.max(start.y, p.y),
+      });
+    },
+    [framing, toImagePoint, commitFrame],
+  );
+
+  /** 键盘框定：方向键移动、`+`/`-` 改大小、回车定下来（契约 §6：键盘债是 0） */
+  const onFrameKeyDown = useCallback(
+    (event: ReactKeyboardEvent<SVGSVGElement>) => {
+      if (!framing) return;
+      const current = frameRect;
+      if (current === null) return;
+      const step = event.shiftKey ? 1 : 10;
+      let next = current;
+      if (event.key === "ArrowLeft") next = { ...current, x0: current.x0 - step, x1: current.x1 - step };
+      else if (event.key === "ArrowRight") next = { ...current, x0: current.x0 + step, x1: current.x1 + step };
+      else if (event.key === "ArrowUp") next = { ...current, y0: current.y0 - step, y1: current.y1 - step };
+      else if (event.key === "ArrowDown") next = { ...current, y0: current.y0 + step, y1: current.y1 + step };
+      else if (event.key === "+" || event.key === "=") {
+        next = { x0: current.x0 - step, y0: current.y0 - step, x1: current.x1 + step, y1: current.y1 + step };
+      } else if (event.key === "-" || event.key === "_") {
+        next = { x0: current.x0 + step, y0: current.y0 + step, x1: current.x1 - step, y1: current.y1 - step };
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        void commitFrame(current);
+        return;
+      } else {
+        return;
+      }
+      event.preventDefault();
+      setFrameRect(next);
+    },
+    [framing, frameRect, commitFrame],
+  );
+
+  /** 一键框回整张图（作者想回退时的**最短路**） */
+  const useWholeImage = useCallback(() => {
+    void commitFrame({ x0: 0, y0: 0, x1: baseW, y1: baseH });
+  }, [baseW, baseH, commitFrame]);
 
   const shown = useMemo(
     () => (map?.markers ?? []).filter((marker) => !hidden.includes(marker.layer)),
@@ -280,7 +447,7 @@ export function WorldMapPanel(props: {
   return (
     <section className="panel map-panel">
       <div className="panel-title">
-        世界地图（只读 · 由真源直算）
+        世界地图（底图与边界由作者定 · 其余由真源直算）
         <button
           type="button"
           className="map-upload-btn"
@@ -289,6 +456,30 @@ export function WorldMapPanel(props: {
         >
           {uploading ? "正在登记…" : base !== null && base.exists ? "换底图" : "登记底图"}
         </button>
+      </div>
+      {/* R138 框定边界（K08 §3.6「用户上传底图并框定 bounds」）：
+          入口与「登记底图」并列（同一件事的两步：先有图，再框出地图在图里的哪一块）。 */}
+      <div className="map-frame-bar">
+        <button
+          type="button"
+          className="map-upload-btn"
+          onClick={toggleFraming}
+          disabled={!hasBaseSize || framingBusy}
+          title={hasBaseSize ? "" : "这张地图没有 base_size（不知道底图多大 ⇒ 框不出范围）"}
+        >
+          {framingBusy ? "正在写边界…" : framing ? "退出框定" : "框定边界"}
+        </button>
+        {framing && (
+          <button type="button" className="map-upload-btn" onClick={useWholeImage} disabled={framingBusy}>
+            框回整张图
+          </button>
+        )}
+        <span className="muted">
+          {framing
+            ? "在整张图上拖一块（键盘也行：方向键移动，+ / - 改大小，回车定下来）"
+            : "作者的大图常常只有中间一块是地图 ⇒ 在这里把那块框出来"}
+        </span>
+        {frameNote !== "" && <div className="map-upload-note">{frameNote}</div>}
       </div>
       {uploadNote !== "" && (
         <div className="map-upload-note">
@@ -332,22 +523,36 @@ export function WorldMapPanel(props: {
       <div className="map-layout">
         <div className="map-canvas-wrap">
           <svg
-            className={"map-svg" + (entered ? " is-entered" : "")}
+            className={
+              "map-svg" + (entered ? " is-entered" : "") + (framing ? " is-framing" : "")
+            }
             viewBox={`0 0 ${width} ${height}`}
             role="img"
-            aria-label={`世界地图坐标空间：${shown.length} 个标注，${map.layers.length} 个图层`}
+            aria-label={
+              framing
+                ? `框定边界：整张底图 ${String(baseW)}×${String(baseH)}，拖一块或用方向键移动、回车定下来`
+                : `世界地图坐标空间：${shown.length} 个标注，${map.layers.length} 个图层`
+            }
+            /* R138 框定模式：画布可拖（指针）+ 可键盘操作（方向键 / +- / 回车） */
+            tabIndex={framing ? 0 : -1}
+            onPointerDown={onFramePointerDown}
+            onPointerMove={onFramePointerMove}
+            onPointerUp={onFramePointerUp}
+            onKeyDown={onFrameKeyDown}
           >
             {base !== null && base.dataUrl !== null && (
               <>
-                {/* 底图：作者登记的那张图，按 bounds 铺满（K08 §3.6：底图 + bounds）。
+                {/* 底图：作者登记的那张图（K08 §3.6：底图 + bounds）。
+                    **按框裁切**（R138）：平时把图往左挪 -x0 ⇒ 画布里露出的正好是作者框的那一块；
+                    框定模式画整张图（挪 0）⇒ 作者能在整张图上框。
                     preserveAspectRatio=none ⇒ 图片像素与画布像素一一对应。 */}
                 <image
                   className="map-base"
                   href={base.dataUrl}
-                  x={0}
-                  y={0}
-                  width={width}
-                  height={height}
+                  x={imageX}
+                  y={imageY}
+                  width={baseW}
+                  height={baseH}
                   preserveAspectRatio="none"
                 />
                 {/* 压暗层：底图是作者自己找的图，深浅不保证 ⇒ 压一层「地面色」
@@ -365,6 +570,36 @@ export function WorldMapPanel(props: {
                 </g>
               );
             })}
+            {framing ? (
+              /* 框定模式（R138）：标注与锚点**只看不点** —— 那一下是拖框，不是开卡。
+                 这一支**不挂点击处理器** ⇒ 键盘债扫描器不算它债（可点的才必须键盘可达），
+                 位置也按**底图像素**摆（那是整张图的坐标，他看得见自己框掉了哪些点）。 */
+              <g className="map-frame-points" aria-hidden="true">
+                {shown.map((marker, index) => (
+                  <g
+                    key={marker.id}
+                    className="map-marker-in"
+                    style={{ "--i": index } as React.CSSProperties}
+                  >
+                    <g className="map-marker" data-layer={marker.layer} data-marker={marker.id}>
+                      <MarkerShape layer={marker.layer} cx={marker.x} cy={marker.y} />
+                    </g>
+                  </g>
+                ))}
+                {map.anchors.map((anchor) => (
+                  <g
+                    key={anchor.id}
+                    className="map-anchor"
+                    data-anchor={anchor.id}
+                    data-event={anchor.eventRef}
+                  >
+                    <circle cx={anchor.x} cy={anchor.y} r={9} />
+                    <circle cx={anchor.x} cy={anchor.y} r={2.5} className="map-anchor-core" />
+                  </g>
+                ))}
+              </g>
+            ) : (
+              <>
             {shown.map((marker, index) => {
               const inside = marker.nx >= 0 && marker.nx <= 1 && marker.ny >= 0 && marker.ny <= 1;
               const cx = Math.min(Math.max(marker.nx, 0), 1) * width;
@@ -447,10 +682,40 @@ export function WorldMapPanel(props: {
                 </g>
               );
             })}
+              </>
+            )}
+            {/* R138 框定模式：把「现在框到哪了」画出来（虚线）+ 拖动中的那一块（实线）。
+                没有这两条，作者在整张图上拖的时候是盲的。 */}
+            {framing && frameRect !== null && (
+              <>
+                <rect
+                  className="map-frame-rect"
+                  x={frameRect.x0}
+                  y={frameRect.y0}
+                  width={Math.max(frameRect.x1 - frameRect.x0, 0)}
+                  height={Math.max(frameRect.y1 - frameRect.y0, 0)}
+                />
+                {frame !== null && (
+                  <rect
+                    className="map-frame-current"
+                    x={frame.x0}
+                    y={frame.y0}
+                    width={Math.max(frame.x1 - frame.x0, 0)}
+                    height={Math.max(frame.y1 - frame.y0, 0)}
+                  />
+                )}
+              </>
+            )}
           </svg>
           <div className="map-caption muted">
             <div>
-              坐标空间 {map.bounds === null ? "（无有效边界，坐标未产出）" : `${map.bounds.x0},${map.bounds.y0} → ${map.bounds.x1},${map.bounds.y1}`}
+              框定的那一块{" "}
+              {map.bounds === null
+                ? "（无有效边界，坐标未产出）"
+                : `${map.bounds.x0},${map.bounds.y0} → ${map.bounds.x1},${map.bounds.y1}（${String(frameW)}×${String(frameH)}）`}
+              {map.baseSize !== null && (
+                <span className="muted">　底图整张 {map.baseSize.width}×{map.baseSize.height}</span>
+              )}
             </div>
             <div>
               底图 {base !== null && base.path !== null ? `${base.path}${base.size === null ? "" : `（${base.size.width}×${base.size.height}）`}` : "没有登记"}
