@@ -187,24 +187,41 @@ export function WorldMapPanel(props: {
   const [framing, setFraming] = useState(false);
   /** 框定中的那一块（工作区：鼠标拖与键盘改都改它） */
   const [frameRect, setFrameRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
-  const [frameNote, setFrameNote] = useState("");
   const [framingBusy, setFramingBusy] = useState(false);
+  /**
+   * **一条状态行**（R141 的 UI 收拾）：框定 / 放标注 / 挪标注 三件事的回执放同一处 ⇒
+   * 面板上只有一行「刚才那一下怎么了」，不再三四处各挂一句。
+   */
+  const [status, setStatus] = useState("");
   /** 拖拽起点（SVG 用户坐标 = 底图像素） */
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   /**
    * R139 **挪标注**（K08 §5「上传底图 → 框定 bounds → **放 marker**」那一步）：
    * 作者手填的坐标常常差一点 ⇒ 让他在图上**拖**；**键盘也能挪**（方向键）⇒ 拖拽不是唯一的路。
    */
-  /** 正在拖的那个标注（预览位置；x / y 是**底图像素**） */
-  const [dragging, setDragging] = useState<{ id: string; x: number; y: number } | null>(null);
-  /** 拖拽起点（那个标注的 id + 指针落点） */
-  const dragMarkerStart = useRef<{ id: string; px: number; py: number } | null>(null);
+  /** 正在拖的那个东西（标注 / 锚点；预览位置；x / y 是**底图像素**） */
+  const [dragging, setDragging] = useState<{
+    kind: "marker" | "anchor";
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  /** 拖拽起点（种类 + 那个东西的 id + 指针落点） */
+  const dragItemStart = useRef<{
+    kind: "marker" | "anchor";
+    id: string;
+    px: number;
+    py: number;
+  } | null>(null);
   /** 拖拽途中的位置（放在 ref 里：pointerup 读它，别读可能还没刷新的 state） */
-  const dragMarkerPos = useRef<{ id: string; x: number; y: number } | null>(null);
+  const dragItemPos = useRef<{
+    kind: "marker" | "anchor";
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
   /** 刚拖过 ⇒ 接下来的那次 click 不算数（否则拖完会顺手把地点卡也打开） */
   const suppressClick = useRef(false);
-  /** 挪标注的提示（成功 / 为什么没成） */
-  const [markerNote, setMarkerNote] = useState("");
   /**
    * R140 **放标注**（K08 §5「放 marker、区域、行程线 → 绑定实体」）：
    * 选一个**地点实体** ⇒ 在图上点一下 ⇒ 落一个标注（写盘只追加那一行）。
@@ -212,7 +229,6 @@ export function WorldMapPanel(props: {
   const [placing, setPlacing] = useState(false);
   /** 放标注时选中的地点实体 id（空 = 还没选） */
   const [placeEntity, setPlaceEntity] = useState("");
-  const [placeNote, setPlaceNote] = useState("");
   /** 放标注时的**十字光标**（视图坐标）：鼠标点哪儿、方向键走到哪儿，它就在哪儿 */
   const [placeCursor, setPlaceCursor] = useState<{ x: number; y: number } | null>(null);
 
@@ -235,7 +251,7 @@ export function WorldMapPanel(props: {
 
   /** 进入/退出框定模式：进来时把当前那一块放进工作区（虚线画出来，他看得见自己框到哪了） */
   const toggleFraming = useCallback(() => {
-    setFrameNote("");
+    setStatus("");
     if (framing) {
       setFraming(false);
       setFrameRect(null);
@@ -253,26 +269,55 @@ export function WorldMapPanel(props: {
   const commitFrame = useCallback(
     async (rect: { x0: number; y0: number; x1: number; y1: number }) => {
       if (rect.x1 - rect.x0 < 2 || rect.y1 - rect.y0 < 2) {
-        setFrameNote("框太小了（按住拖一小块再松手）");
+        setStatus("框太小了（按住拖一小块再松手）");
         return;
       }
       setFramingBusy(true);
       try {
         const result = await api().map.setBounds({ x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 });
-        setFrameNote(result.note);
+        setStatus(result.note);
         if (result.ok) {
           setFraming(false);
           setFrameRect(null);
           reloadMap();
         }
       } catch (err: unknown) {
-        setFrameNote(err instanceof Error ? err.message : String(err));
+        setStatus(err instanceof Error ? err.message : String(err));
       } finally {
         setFramingBusy(false);
       }
     },
     [reloadMap],
   );
+
+  /**
+   * 地图的**结构化行**（R141 的 UI 收拾）：与其他面板**同一套**汇总行 ⇒
+   * 不再是几行各自为政的 div（标签与值挤在一行、值一长就折行 ⇒ 读起来像碎片）。
+   */
+  const mapSummaryRows: SummaryRow[] = useMemo(() => {
+    const bounds = map?.bounds ?? null;
+    const baseSize = map?.baseSize ?? null;
+    const rows: SummaryRow[] = [
+      {
+        label: "框定的那一块",
+        value:
+          bounds === null
+            ? "（无有效边界，坐标未产出）"
+            : `${bounds.x0},${bounds.y0} → ${bounds.x1},${bounds.y1}（${String(frameW)}×${String(frameH)}）`,
+      },
+      {
+        label: "底图",
+        value:
+          base !== null && base.path !== null
+            ? `${base.path}${base.size === null ? "" : `（${base.size.width}×${base.size.height}）`}`
+            : "没有登记",
+      },
+    ];
+    if (baseSize !== null) {
+      rows.push({ label: "底图整张", value: `${baseSize.width}×${baseSize.height}` });
+    }
+    return rows;
+  }, [map, base, frameW, frameH]);
 
   /** SVG 客户端坐标 ⇒ 用户坐标（框定模式下用户坐标 = 底图像素）
    *  参数只取**要用的那三样**（clientX / clientY / currentTarget）⇒ 指针事件与鼠标事件都能传进来。 */
@@ -294,9 +339,9 @@ export function WorldMapPanel(props: {
     async (markerId: string, x: number, y: number) => {
       try {
         const result = await api().map.setMarker({ markerId: markerId, x: x, y: y });
-        setMarkerNote(result.note);
+        setStatus(result.note);
       } catch (err: unknown) {
-        setMarkerNote(err instanceof Error ? err.message : String(err));
+        setStatus(err instanceof Error ? err.message : String(err));
       } finally {
         // 成没成都重新取数：成了要让图上那个点真的挪过去，没成要把预览位置退回去
         reloadMap();
@@ -305,45 +350,61 @@ export function WorldMapPanel(props: {
     [reloadMap],
   );
 
-  const onMarkerPointerDown = useCallback(
-    (event: ReactPointerEvent<SVGGraphicsElement>, markerId: string) => {
+  /** 挪事件锚点（R141）：写盘（**只改那一个锚点的 x / y**；范围由主进程校验、冲突由主进程报） */
+  const moveAnchor = useCallback(
+    async (anchorId: string, x: number, y: number) => {
+      try {
+        const result = await api().map.setAnchor({ anchorId: anchorId, x: x, y: y });
+        setStatus(result.note);
+      } catch (err: unknown) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      } finally {
+        reloadMap();
+      }
+    },
+    [reloadMap],
+  );
+
+  const onItemPointerDown = useCallback(
+    (event: ReactPointerEvent<SVGGraphicsElement>, kind: "marker" | "anchor", id: string) => {
       const p = toImagePoint(event);
       if (p === null) return;
-      dragMarkerStart.current = { id: markerId, px: p.x, py: p.y };
-      dragMarkerPos.current = null;
+      dragItemStart.current = { kind: kind, id: id, px: p.x, py: p.y };
+      dragItemPos.current = null;
     },
     [toImagePoint],
   );
 
-  const onMarkerPointerMove = useCallback(
-    (event: ReactPointerEvent<SVGGraphicsElement>, markerId: string) => {
-      const start = dragMarkerStart.current;
-      if (start === null || start.id !== markerId) return;
+  const onItemPointerMove = useCallback(
+    (event: ReactPointerEvent<SVGGraphicsElement>, kind: "marker" | "anchor", id: string) => {
+      const start = dragItemStart.current;
+      if (start === null || start.id !== id || start.kind !== kind) return;
       const p = toImagePoint(event);
       if (p === null) return;
-      // 动得不够 ⇒ 那还是一次**点击**（开地点卡），不是拖动
+      // 动得不够 ⇒ 那还是一次**点击**（开地点卡 / 去时间线定位），不是拖动
       if (Math.hypot(p.x - start.px, p.y - start.py) < 3) return;
-      dragMarkerPos.current = { id: markerId, x: p.x, y: p.y };
-      setDragging(dragMarkerPos.current);
+      dragItemPos.current = { kind: kind, id: id, x: p.x, y: p.y };
+      setDragging(dragItemPos.current);
     },
     [toImagePoint],
   );
 
-  const onMarkerPointerUp = useCallback(
-    (event: ReactPointerEvent<SVGGraphicsElement>, markerId: string) => {
-      const start = dragMarkerStart.current;
-      const moved = dragMarkerPos.current;
-      dragMarkerStart.current = null;
-      dragMarkerPos.current = null;
+  const onItemPointerUp = useCallback(
+    (event: ReactPointerEvent<SVGGraphicsElement>, kind: "marker" | "anchor", id: string) => {
+      const start = dragItemStart.current;
+      const moved = dragItemPos.current;
+      dragItemStart.current = null;
+      dragItemPos.current = null;
       setDragging(null);
-      if (start === null || moved === null || moved.id !== markerId) return;
+      if (start === null || moved === null || moved.id !== id || moved.kind !== kind) return;
       // 拖过了 ⇒ 接下来的那次 click 不算数（否则拖完会顺手把地点卡也打开）
       suppressClick.current = true;
       const p = toImagePoint(event);
       if (p === null) return;
-      void moveMarker(markerId, p.x, p.y);
+      if (kind === "marker") void moveMarker(id, p.x, p.y);
+      else void moveAnchor(id, p.x, p.y);
     },
-    [toImagePoint, moveMarker],
+    [toImagePoint, moveMarker, moveAnchor],
   );
 
   const onFramePointerDown = useCallback(
@@ -427,8 +488,8 @@ export function WorldMapPanel(props: {
 
   /** 进入/退出**放标注**模式（与框定模式互斥：一次只做一件事） */
   const togglePlacing = useCallback(() => {
-    setPlaceNote("");
-    setMarkerNote("");
+    setStatus("");
+    setStatus("");
     if (placing) {
       setPlacing(false);
       setPlaceEntity("");
@@ -446,7 +507,7 @@ export function WorldMapPanel(props: {
   const placeMarkerAt = useCallback(
     async (userX: number, userY: number) => {
       if (placeEntity === "") {
-        setPlaceNote("先选一个地点，再在图上点一下");
+        setStatus("先选一个地点，再在图上点一下");
         return;
       }
       // 视图坐标 ⇒ 底图像素（框的原点要加回去）
@@ -454,7 +515,7 @@ export function WorldMapPanel(props: {
       const y = Math.round(userY + (frame?.y0 ?? 0));
       try {
         const result = await api().map.createMarker({ entityRef: placeEntity, x: x, y: y });
-        setPlaceNote(result.note);
+        setStatus(result.note);
         if (result.ok) {
           setPlacing(false);
           setPlaceEntity("");
@@ -462,7 +523,7 @@ export function WorldMapPanel(props: {
           reloadMap();
         }
       } catch (err: unknown) {
-        setPlaceNote(err instanceof Error ? err.message : String(err));
+        setStatus(err instanceof Error ? err.message : String(err));
       }
     },
     [placeEntity, frame, reloadMap],
@@ -613,56 +674,51 @@ export function WorldMapPanel(props: {
         </button>
       </div>
       {/* R138 框定边界（K08 §3.6「用户上传底图并框定 bounds」）：
-          入口与「登记底图」并列（同一件事的两步：先有图，再框出地图在图里的哪一块）。 */}
+          入口与「登记底图」并列（同一件事的两步：先有图，再框出地图在图里的哪一块）。
+          R141 的 UI 收拾：**按钮归一组**，模式相关的控件（框回整张图 / 地点下拉）只在该模式里出现。 */}
       <div className="map-frame-bar">
-        <button
-          type="button"
-          className="map-upload-btn"
-          onClick={toggleFraming}
-          disabled={!hasBaseSize || framingBusy}
-          title={hasBaseSize ? "" : "这张地图没有 base_size（不知道底图多大 ⇒ 框不出范围）"}
-        >
-          {framingBusy ? "正在写边界…" : framing ? "退出框定" : "框定边界"}
-        </button>
-        {framing && (
-          <button type="button" className="map-upload-btn" onClick={useWholeImage} disabled={framingBusy}>
-            框回整张图
-          </button>
-        )}
-        {/* R140 放标注：选一个地点 ⇒ 在图上点一下 ⇒ 落一个标注（K08 §5「放 marker → 绑定实体」） */}
-        <button
-          type="button"
-          className="map-upload-btn"
-          onClick={togglePlacing}
-          disabled={placing ? false : map.places.length === 0}
-          title={map.places.length === 0 ? "项目里还没有地点实体（标注要绑真实地点）" : ""}
-        >
-          {placing ? "取消放标注" : "放标注"}
-        </button>
-        {placing && (
-          <select
-            className="map-place-select"
-            value={placeEntity}
-            onChange={(event) => setPlaceEntity(event.target.value)}
-            aria-label="选一个地点"
+        <div className="map-mode-group">
+          <button
+            type="button"
+            className="map-upload-btn"
+            onClick={toggleFraming}
+            disabled={!hasBaseSize || framingBusy}
+            title={hasBaseSize ? "" : "这张地图没有 base_size（不知道底图多大 ⇒ 框不出范围）"}
           >
-            <option value="">选一个地点…</option>
-            {map.places.map((place) => (
-              <option key={place.id} value={place.id}>
-                {place.name}
-              </option>
-            ))}
-          </select>
-        )}
-        <span className="muted">
-          {placing
-            ? "选好地点后在图上点一下（键盘：方向键挪十字光标、回车落点）"
-            : framing
-              ? "在整张图上拖一块（键盘也行：方向键移动，+ / - 改大小，回车定下来）"
-              : "作者的大图常常只有中间一块是地图 ⇒ 在这里把那块框出来；标注也能直接拖"}
-        </span>
-        {frameNote !== "" && <div className="map-upload-note">{frameNote}</div>}
-        {placeNote !== "" && <div className="map-upload-note">{placeNote}</div>}
+            {framingBusy ? "正在写边界…" : framing ? "退出框定" : "框定边界"}
+          </button>
+          {framing && (
+            <button type="button" className="map-upload-btn" onClick={useWholeImage} disabled={framingBusy}>
+              框回整张图
+            </button>
+          )}
+          {/* R140 放标注：选一个地点 ⇒ 在图上点一下 ⇒ 落一个标注（K08 §5「放 marker → 绑定实体」） */}
+          <button
+            type="button"
+            className="map-upload-btn"
+            onClick={togglePlacing}
+            disabled={placing ? false : map.places.length === 0}
+            title={map.places.length === 0 ? "项目里还没有地点实体（标注要绑真实地点）" : ""}
+          >
+            {placing ? "取消放标注" : "放标注"}
+          </button>
+          {placing && (
+            <select
+              className="map-place-select"
+              value={placeEntity}
+              onChange={(event) => setPlaceEntity(event.target.value)}
+              aria-label="选一个地点"
+            >
+              <option value="">选一个地点…</option>
+              {map.places.map((place) => (
+                <option key={place.id} value={place.id}>
+                  {place.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        {status !== "" && <div className="map-status">{status}</div>}
       </div>
       {uploadNote !== "" && (
         <div className="map-upload-note">
@@ -786,7 +842,8 @@ export function WorldMapPanel(props: {
             {shown.map((marker, index) => {
               const inside = marker.nx >= 0 && marker.nx <= 1 && marker.ny >= 0 && marker.ny <= 1;
               // R139：正在拖的那个点**跟着指针走**（预览位置 = 底图像素 - 框的原点）
-              const isDragging = dragging !== null && dragging.id === marker.id;
+              const isDragging =
+                dragging !== null && dragging.kind === "marker" && dragging.id === marker.id;
               const cx = isDragging
                 ? dragging.x - (frame?.x0 ?? 0)
                 : Math.min(Math.max(marker.nx, 0), 1) * width;
@@ -817,9 +874,9 @@ export function WorldMapPanel(props: {
                   tabIndex={0}
                   aria-label={`标注 ${marker.label}（${LAYER_LABEL[marker.layer] ?? marker.layer}）`}
                   /* R139：标注**可拖**（在图上挪到新位置 ⇒ 写盘只改那一个标注的 x / y） */
-                  onPointerDown={(event) => onMarkerPointerDown(event, marker.id)}
-                  onPointerMove={(event) => onMarkerPointerMove(event, marker.id)}
-                  onPointerUp={(event) => onMarkerPointerUp(event, marker.id)}
+                  onPointerDown={(event) => onItemPointerDown(event, "marker", marker.id)}
+                  onPointerMove={(event) => onItemPointerMove(event, "marker", marker.id)}
+                  onPointerUp={(event) => onItemPointerUp(event, "marker", marker.id)}
                   onClick={() => {
                     // 刚拖完的那一下 click 不算数（否则拖一下会顺手把地点卡也打开）
                     if (suppressClick.current) {
@@ -860,8 +917,15 @@ export function WorldMapPanel(props: {
                 R132：锚点**可点** ⇒ 点它去时间线那边定位对应事件（时空联动的反向）。 */}
             {map.anchors.map((anchor) => {
               const inside = anchor.nx >= 0 && anchor.nx <= 1 && anchor.ny >= 0 && anchor.ny <= 1;
-              const cx = Math.min(Math.max(anchor.nx, 0), 1) * width;
-              const cy = Math.min(Math.max(anchor.ny, 0), 1) * height;
+              // R141：正在拖的那个锚点**跟着指针走**（预览位置 = 底图像素 - 框的原点）
+              const isDragging =
+                dragging !== null && dragging.kind === "anchor" && dragging.id === anchor.id;
+              const cx = isDragging
+                ? dragging.x - (frame?.x0 ?? 0)
+                : Math.min(Math.max(anchor.nx, 0), 1) * width;
+              const cy = isDragging
+                ? dragging.y - (frame?.y0 ?? 0)
+                : Math.min(Math.max(anchor.ny, 0), 1) * height;
               const linked = props.linkedEvent !== null && props.linkedEvent === anchor.eventRef;
               return (
                 <g
@@ -878,12 +942,35 @@ export function WorldMapPanel(props: {
                   role="button"
                   tabIndex={0}
                   aria-label={`事件锚点 ${anchor.label}（${anchor.eventRef}）`}
-                  onClick={() => pickAnchor(anchor.eventRef)}
+                  /* R141：锚点**可拖**（在图上挪到新位置 ⇒ 写盘只改那一个锚点的 x / y） */
+                  onPointerDown={(event) => onItemPointerDown(event, "anchor", anchor.id)}
+                  onPointerMove={(event) => onItemPointerMove(event, "anchor", anchor.id)}
+                  onPointerUp={(event) => onItemPointerUp(event, "anchor", anchor.id)}
+                  onClick={() => {
+                    // 刚拖完的那一下 click 不算数（否则拖一下会顺手跳去时间线）
+                    if (suppressClick.current) {
+                      suppressClick.current = false;
+                      return;
+                    }
+                    pickAnchor(anchor.eventRef);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       pickAnchor(anchor.eventRef);
+                      return;
                     }
+                    // R141：方向键**挪锚点**（键盘也能挪 ⇒ 拖拽不是唯一的路）
+                    const step = event.shiftKey ? 10 : 1;
+                    let dx = 0;
+                    let dy = 0;
+                    if (event.key === "ArrowLeft") dx = -step;
+                    else if (event.key === "ArrowRight") dx = step;
+                    else if (event.key === "ArrowUp") dy = -step;
+                    else if (event.key === "ArrowDown") dy = step;
+                    else return;
+                    event.preventDefault();
+                    void moveAnchor(anchor.id, anchor.x + dx, anchor.y + dy);
                   }}
                 >
                   <title>{`事件锚点 ${anchor.label}（${anchor.eventRef}）`}</title>
@@ -947,24 +1034,16 @@ export function WorldMapPanel(props: {
               </>
             )}
           </svg>
-          <div className="map-caption muted">
-            <div>
-              框定的那一块{" "}
-              {map.bounds === null
-                ? "（无有效边界，坐标未产出）"
-                : `${map.bounds.x0},${map.bounds.y0} → ${map.bounds.x1},${map.bounds.y1}（${String(frameW)}×${String(frameH)}）`}
-              {map.baseSize !== null && (
-                <span className="muted">　底图整张 {map.baseSize.width}×{map.baseSize.height}</span>
-              )}
+          <div className="map-caption">
+            <SummaryRows rows={mapSummaryRows} />
+            {/* 一行**作者语言**的操作提示（不露实现细节：作者不关心改的是哪个文件） */}
+            <div className="map-hint">
+              {placing
+                ? "选好地点后在图上点一下（键盘：方向键挪十字光标、回车落点）"
+                : framing
+                  ? "在整张图上拖一块（键盘：方向键移动，+ / - 改大小，回车定下来）"
+                  : "拖标注可以改位置；「框定边界」把地图在图里的那一块框出来"}
             </div>
-            <div>
-              底图 {base !== null && base.path !== null ? `${base.path}${base.size === null ? "" : `（${base.size.width}×${base.size.height}）`}` : "没有登记"}
-              {base !== null && base.exists && base.dataUrl === null ? `：${base.note}` : ""}
-            </div>
-            <div>
-              标注**可以拖**（拖到新位置 ⇒ 只改 map.yaml 里那一个标注的 x / y）；键盘也行：选中标注后按方向键挪
-            </div>
-            {markerNote !== "" && <div className="map-upload-note">{markerNote}</div>}
           </div>
         </div>
 

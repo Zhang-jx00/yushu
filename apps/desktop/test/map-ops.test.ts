@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { uploadMapBase, setMapBounds, setMarkerPosition, createMapMarker, worldMapView } from "../src/main/map-ops.js";
+import { uploadMapBase, setMapBounds, setMarkerPosition, setAnchorPosition, createMapMarker, worldMapView } from "../src/main/map-ops.js";
 import { ProjectGateway } from "../src/main/file-gateway.js";
 import { parseMapFile, createSettingCard, serializeCardFile } from "@yushu/world-engine";
 
@@ -442,5 +442,68 @@ describe("放标注（R140）：选一个地点 ⇒ 在图上点一下 ⇒ 落�
     expect(second.marker?.id).toBe("m-3");
     const def = parseMapFile((await gateway.readDoc("world/map.yaml")).content);
     expect((def.markers ?? []).map((marker) => marker.id)).toEqual(["m-1", "m-2", "m-3"]);
+  });
+});
+
+/**
+ * 挪事件锚点（R141）：**写盘**路径的单测。
+ *
+ * 锚点是「事件挂在地图上的坐标」（K08 §3.8）⇒ 手填的坐标同样常常差一点 ⇒ 让作者在图上**拖**。
+ * 判据盯两件事：① **只改那一个锚点的 x / y**（别的锚点、标注、注释原样留着）；
+ * ② 落在框定的那一块之外 ⇒ 拒绝且盘上不动。
+ */
+describe("挪事件锚点（R141）：作者在图上把锚点拖到新位置 ⇒ 只改那一个锚点", () => {
+  const MAP_YAML = [
+    "# 作者自己写的注释",
+    "apiVersion: map-v1",
+    "id: map-world",
+    "crs: simple",
+    "base_size: {width: 1000, height: 700}",
+    "bounds: [[0, 0], [1000, 700]]",
+    "layers: [place, event]",
+    "markers:",
+    "  - {id: m-1, layer: place, entity_ref: loc-a, x: 250, y: 175}",
+    "event_anchors:",
+    "  - {id: a-ev, event_ref: ev-1, x: 300, y: 200}",
+    "  - {id: a-ev2, event_ref: ev-2, x: 500, y: 400}",
+    "",
+  ].join("\n");
+
+  it("挪到新位置 ⇒ **只改那一个锚点的 x / y**，其余行原样", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await setAnchorPosition(gateway, { anchorId: "a-ev", x: 321, y: 654 });
+    expect(result.ok).toBe(true);
+    expect(result.position).toEqual({ x: 321, y: 654 });
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).toContain("- {id: a-ev, event_ref: ev-1, x: 321, y: 654}");
+    // 别的锚点、标注、注释都原样
+    expect(content).toContain("- {id: a-ev2, event_ref: ev-2, x: 500, y: 400}");
+    expect(content).toContain("- {id: m-1, layer: place, entity_ref: loc-a, x: 250, y: 175}");
+    expect(content).toContain("# 作者自己写的注释");
+    const before = MAP_YAML.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length);
+    expect(after.filter((line, index) => line !== before[index])).toHaveLength(1);
+  });
+
+  it("落在框定的那一块之外 ⇒ 拒绝并说清范围，盘上不动", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await setAnchorPosition(gateway, { anchorId: "a-ev", x: 5000, y: 5000 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("之外");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("地图里没有这个锚点 ⇒ 拒绝（不猜、不新建）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await setAnchorPosition(gateway, { anchorId: "a-zzz", x: 10, y: 10 });
+    expect(result.ok).toBe(false);
+    // 认**主进程自己那句**（"地图里没有锚点"）——只认 ok=false 太弱：
+    // 若主进程放过这个 id、让引擎去报错，回执会变成另一句话 ⇒ 那样也是 bug
+    expect(result.note).toContain("地图里没有锚点");
+    expect(result.note).toContain("a-zzz");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
   });
 });

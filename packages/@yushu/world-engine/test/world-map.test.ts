@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendMapMarker, normalizeBounds, parseMapFile, projectWorldMap, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
+import { appendMapMarker, normalizeBounds, parseMapFile, projectWorldMap, setMapAnchorPosition, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
 import type { IndexEntityRow } from "../src/index-input.js";
 
 /**
@@ -193,6 +193,46 @@ describe("世界地图投影（R114 引擎侧）", () => {
     expect(markers[0]?.id).toBe("m-new");
     expect(markers[0]?.x).toBe(100);
     expect(markers[0]?.entityRef).toBe("loc-a");
+  });
+
+  it("挪事件锚点（R141）⇒ **只改那一行**的 x / y，其余行原样", () => {
+    const text = [
+      "# 作者自己写的注释",
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 1400]]",
+      "event_anchors:",
+      "  - {id: a-ev, event_ref: ev-1, x: 300, y: 200}",
+      "  - {id: a-ev2, event_ref: ev-2, x: 500, y: 400}",
+      "",
+    ].join("\n");
+    const result = setMapAnchorPosition(text, "a-ev", { x: 321, y: 654 });
+    expect(result.reason).toBeNull();
+    const content = result.content as string;
+    expect(content).toContain("x: 321, y: 654");
+    // 别的锚点与注释原样
+    expect(content).toContain("- {id: a-ev2, event_ref: ev-2, x: 500, y: 400}");
+    expect(content).toContain("# 作者自己写的注释");
+    const before = text.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length);
+    expect(after.filter((line, index) => line !== before[index])).toHaveLength(1);
+  });
+
+  it("挪事件锚点：锚点的 `id` **可以省**（默认用 event_ref）⇒ 认 event_ref 也算这个锚点", () => {
+    const text = [
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 1400]]",
+      "event_anchors:",
+      "  - {event_ref: ev-9, x: 300, y: 200}",
+      "",
+    ].join("\n");
+    const result = setMapAnchorPosition(text, "ev-9", { x: 11, y: 22 });
+    expect(result.reason).toBeNull();
+    expect(result.content).toContain("x: 11, y: 22");
   });
 
   it("两种 bounds 写法等价（{x0,y0,x1,y1} 与 K08 里的 [[x0,y0],[x1,y1]]）", () => {

@@ -429,6 +429,37 @@ function markerLineIndex(lines: string[], markerId: string): number {
 }
 
 /**
+ * 找到**那一个事件锚点**在文件里的行号（R141：挪锚点）。
+ *
+ * 锚点的 `id` **可以省**（默认用 `event_ref`）⇒ 认 `id:` 也认 `event_ref:`。
+ * 还要**在 `event_anchors:` 段里**找（别把同名的一行标注当成锚点）。
+ */
+function anchorLineIndex(lines: string[], anchorId: string): number {
+  const escaped = escapeRegExp(anchorId);
+  const idPattern = new RegExp(`(?:^|[\\s{,])id\\s*:\\s*${escaped}\\s*(?:,|\\})`);
+  const refPattern = new RegExp(`(?:^|[\\s{,])event_ref\\s*:\\s*${escaped}\\s*(?:,|\\})`);
+  let inSection = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] as string;
+    if (/^event_anchors\s*:/.test(line)) {
+      inSection = true;
+      continue;
+    }
+    if (inSection && /^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(line)) inSection = false;
+    if (!inSection) continue;
+    if (/^\s*-\s*\{/.test(line) && (idPattern.test(line) || refPattern.test(line))) return index;
+  }
+  return -1;
+}
+
+/** 把一行里的 `x` / `y` 改成新值（其余部分原样保留） */
+function rewritePositionInLine(line: string, position: { x: number; y: number }): string {
+  return line
+    .replace(/\bx\s*:\s*-?\d+(?:\.\d+)?/, `x: ${String(position.x)}`)
+    .replace(/\by\s*:\s*-?\d+(?:\.\d+)?/, `y: ${String(position.y)}`);
+}
+
+/**
  * 把**一个新标注**追加进地图文件（R140）：只动 `markers:` 那一段，别的行**原样留着**。
  *
  * 为什么不是"解析 → 改对象 → 重新序列化"：那要一个序列化器（会把作者写的注释与排版抹掉），
@@ -481,13 +512,44 @@ export function setMapMarkerPosition(
     };
   }
   const line = lines[index] as string;
-  const next = line
-    .replace(/\bx\s*:\s*-?\d+(?:\.\d+)?/, `x: ${String(position.x)}`)
-    .replace(/\by\s*:\s*-?\d+(?:\.\d+)?/, `y: ${String(position.y)}`);
+  const next = rewritePositionInLine(line, position);
   if (next === line) {
     return {
       content: null,
       reason: `标注 ${markerId} 那一行里认不出 x / y（请手动改那一行）`,
+      previous: [line],
+    };
+  }
+  lines[index] = next;
+  return { content: lines.join("\n"), reason: null, previous: [line] };
+}
+
+/**
+ * 把**一个事件锚点**挪到新位置（R141）：同样只改那一行的 `x` / `y`。
+ *
+ * 与标注的差别：锚点的 `id` **可以省**（默认用 `event_ref`）⇒ 找那一行时
+ * **认 `id:` 也认 `event_ref:`**（两种写法都算这个锚点）。
+ */
+export function setMapAnchorPosition(
+  text: string,
+  anchorId: string,
+  position: { x: number; y: number },
+): { content: string | null; reason: string | null; previous: string[] } {
+  const lines = text.split("\n");
+  const index = anchorLineIndex(lines, anchorId);
+  if (index < 0) {
+    return {
+      content: null,
+      reason: `地图文件里找不到锚点 ${anchorId}（它也许是多行写法 ⇒ 请手动改那一行）`,
+      previous: [],
+    };
+  }
+  const line = lines[index] as string;
+  const next = rewritePositionInLine(line, position);
+  if (next === line) {
+    return {
+      content: null,
+      reason: `锚点 ${anchorId} 那一行里认不出 x / y（请手动改那一行）`,
       previous: [line],
     };
   }

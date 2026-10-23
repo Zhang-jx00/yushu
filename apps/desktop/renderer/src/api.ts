@@ -28,6 +28,8 @@ import type {
   WorldMapBasePayload,
   WorldMapCreateMarkerRequestPayload,
   WorldMapCreateMarkerResult,
+  WorldMapSetAnchorRequestPayload,
+  WorldMapSetAnchorResult,
   WorldMapSetBoundsRequestPayload,
   WorldMapSetBoundsResult,
   WorldMapSetMarkerRequestPayload,
@@ -280,6 +282,10 @@ export interface YushuApi {
      * 绑的地点必须真实存在、落点必须落在框定的那一块里 ⇒ 不满足时主进程拒绝并说清楚。
      */
     createMarker: (payload: WorldMapCreateMarkerRequestPayload) => Promise<WorldMapCreateMarkerResult>;
+    /**
+     * 挪事件锚点（R141）：作者在图上把**锚点**拖到新位置（**底图像素坐标**）⇒ 改 map.yaml 里那一个锚点的 x / y。
+     */
+    setAnchor: (payload: WorldMapSetAnchorRequestPayload) => Promise<WorldMapSetAnchorResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

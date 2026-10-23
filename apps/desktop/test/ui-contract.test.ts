@@ -1902,7 +1902,10 @@ describe("时空联动（R132）：锚点 ↔ 时间线双向定位", () => {
   it("地图面板把锚点**上报**并接受「被选中的事件」（父组件据此联动）", () => {
     expect(panel, "地图面板没有上报锚点").toContain("onAnchors");
     expect(panel, "地图面板没有接受被选中的事件").toContain("linkedEvent");
-    expect(panel, "锚点不可点（点它去不了时间线）").toMatch(/onClick=\{\(\) => pickAnchor\(anchor\.eventRef\)\}/);
+    // R141：锚点的 onClick 变成了一整块（先看"刚拖过就不算数"，再跳时间线）⇒ 锁认**里面那一下**
+    expect(panel, "锚点不可点（点它去不了时间线）").toMatch(
+      /onClick=\{\(\) => \{[\s\S]{0,240}pickAnchor\(anchor\.eventRef\)/,
+    );
   });
 
   it("时间线那边给「地图上有锚点」的入口，并按**同一个事件 id**高亮", () => {
@@ -2091,10 +2094,10 @@ describe("挪标注（R139）：拖到新位置 ⇒ 只改那一个标注的 x /
   it("地图面板的标注**可拖**（真的调 map.setMarker，不是只画个预览）", () => {
     expect(panel, "面板里没有调 map.setMarker").toContain("map.setMarker(");
     expect(panel, "标注没有绑上拖拽的开始").toMatch(
-      /onPointerDown=\{\(event\) => onMarkerPointerDown\(event, marker\.id\)\}/,
+      /onPointerDown=\{\(event\) => onItemPointerDown\(event, "marker", marker\.id\)\}/,
     );
     expect(panel, "标注没有绑上拖拽的结束").toMatch(
-      /onPointerUp=\{\(event\) => onMarkerPointerUp\(event, marker\.id\)\}/,
+      /onPointerUp=\{\(event\) => onItemPointerUp\(event, "marker", marker\.id\)\}/,
     );
   });
 
@@ -2162,6 +2165,59 @@ describe("放标注（R140）：选一个地点 ⇒ 在图上点一下 ⇒ 落�
   it("引擎只**追加**那一行（不重排整个文件 ⇒ 作者的标注顺序不变）", () => {
     expect(engine, "引擎里没有追加标注这个函数").toContain("export function appendMapMarker");
     expect(ops, "主进程没有用引擎的追加函数").toContain("appendMapMarker(snapshot.content");
+  });
+});
+
+/**
+ * 挪事件锚点（R141）+ **地图编辑面的 UI 收拾**。
+ *
+ * 锚点与标注是同一类东西（地图上的一个点）⇒ 同一套机制（R139/R140 的做法照搬）。
+ *
+ * UI 那几条是**用户明确要的**（"顺便多修修 UI"）⇒ 必须有锁钉住，
+ * 否则下一轮又会把说明写成散 div、把实现细节露给作者。
+ */
+describe("挪事件锚点（R141）+ 地图编辑面的 UI 收拾", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const ipc = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "ipc.ts"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+  const engine = readFileSync(join(ROOT, "packages", "@yushu", "world-engine", "src", "world-map.ts"), "utf8");
+
+  it("锚点**也可拖**（真的调 map.setAnchor，写盘只改那一个锚点）", () => {
+    expect(panel, "没有调用 map.setAnchor").toContain("map.setAnchor(");
+    expect(panel, "锚点没有绑上拖拽").toMatch(
+      /onPointerDown=\{\(event\) => onItemPointerDown\(event, "anchor", anchor\.id\)\}/,
+    );
+    expect(ops, "主进程没有用引擎的挪锚点函数").toContain("setMapAnchorPosition(snapshot.content");
+    expect(engine, "引擎里没有挪锚点这个函数").toContain("export function setMapAnchorPosition");
+  });
+
+  it("锚点也能**用键盘挪**（方向键微调）", () => {
+    expect(panel, "锚点的方向键没有写盘").toMatch(/moveAnchor\(anchor\.id, anchor\.x \+ dx, anchor\.y \+ dy\)/);
+  });
+
+  it("写盘走 **wrapWrite**（真源写 ⇒ 索引要刷、上一轮结论要置脏）", () => {
+    expect(ipc, "挪锚点没有走 wrapWrite").toMatch(/CHANNELS\.worldMapSetAnchor[\s\S]{0,200}wrapWrite/);
+  });
+
+  it("UI：地图的汇总**用共享的 SummaryRows**（不再是一串各自为政的 div）", () => {
+    expect(panel, "地图的汇总没用共享组件").toContain("<SummaryRows rows={mapSummaryRows} />");
+    expect(panel, "地图的汇总行没算出来").toContain("const mapSummaryRows: SummaryRow[] = useMemo(");
+  });
+
+  it("UI：**一条状态行**（框定 / 放标注 / 挪标注 的回执都在同一处，不再三四处各挂一句）", () => {
+    expect(panel, "面板里没有统一的状态行").toContain('className="map-status"');
+    expect(panel, "还有别的提示状态没并进来").not.toContain("setFrameNote(");
+    expect(panel, "还有别的提示状态没并进来").not.toContain("setMarkerNote(");
+    expect(panel, "还有别的提示状态没并进来").not.toContain("setPlaceNote(");
+  });
+
+  it("UI：提示是**作者语言**（不把「改的是哪个文件」写给作者看）", () => {
+    expect(panel, "提示里还露着实现细节（map.yaml / x / y）").not.toContain("map.yaml 里那一个标注");
+    expect(panel, "没有一行操作提示").toContain('className="map-hint"');
+  });
+
+  it("UI：工具栏**按钮归一组**（模式相关的控件只在该模式里出现）", () => {
+    expect(panel, "工具栏没有分组").toContain('className="map-mode-group"');
   });
 });
 

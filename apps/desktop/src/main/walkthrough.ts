@@ -294,7 +294,7 @@ export async function prepareProjectForDir(options: PrepareProjectOptions): Prom
   );
   await fs.writeFile(join(dir, ROUTING_CONFIG_PATH), routingYaml, "utf8");
 
-  // R123：预演项目里放一张底图（1×1 的 PNG）⇒ 地图面板能把底图铺在坐标空间上。
+  // R123：预演项目里放一张底图（64×64 的棋盘格 PNG，R141 换的）⇒ 地图面板能把底图铺在坐标空间上。
   // 底图是**作者自己放进项目**的（地图登记不设表单），所以这一步是替作者做的那一次。
   await fs.mkdir(join(dir, "world", "assets", "map"), { recursive: true });
   await fs.writeFile(join(dir, "world", "assets", "map", "base.png"), Buffer.from(BASE_PNG_BASE64, "base64"));
@@ -593,7 +593,7 @@ const IMPORT_UI_TEXT = [
 ].join("\r\n");
 
 /**
- * 底图登记的**原生对话框桩**（R135）：预演替作者挑那张 1×1 的 PNG。
+ * 底图登记的**原生对话框桩**（R135）：预演替作者挑那张 64×64 的棋盘格 PNG（R141 换的）。
  *
  * 桩只是工装（原生对话框在无人值守的预演里没法真点）⇒ **断言断的是盘上的字节**。
  */
@@ -618,9 +618,14 @@ async function openMapBaseDialogFixture(
   };
 }
 
-/** 1×1 的 PNG（R123 的预演底图：够小，只为验证"底图被铺在坐标空间上"这件事） */
+/**
+ * 预演底图（64×64 的**棋盘格** PNG）。
+ *
+ * R141 把它从 1×1 换成了棋盘格：1×1 摊开就是一块纯色 ⇒ 证据截图里看不出
+ * "底图在哪儿、标注落在底图的哪一块" ⇒ 换一张有内容的图，截图才**能看出东西**。
+ */
 const BASE_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAbUlEQVR42u3XoQ0AIAxFQfYfhRnQOCbAMQkLFFUD4RJkBadefllzhK+3Gr7b7gsAAAAAQArwykdP9wAAAAAAOYASAwAAANgDSgwAAABgDygxAAAAgD2gxAAAAAD2gBIDAAAA2ANKDAAAAPANYAMBo7IsL0gESAAAAABJRU5ErkJggg==";
 
 /** 真 GBK 字节（`第一章 起 / 夜色压下来。/ 第二章 承 / 林渊拔剑而起。`，CRLF 行尾） */
 const IMPORT_UI_GBK = new Uint8Array([
@@ -5880,7 +5885,7 @@ const STEPS: StepDef[] = [
     file: 'step85-map-base.png',
     body: String.raw`
       // 这一步证 R123：**底图**真的被铺在坐标空间上（K08 §3.6：地图 = 图片底图 + bounds）。
-      // 底图是作者自己放进项目的一张图（预演替作者放了一张 1×1 的 PNG），
+      // 底图是作者自己放进项目的一张图（预演替作者放了一张 64×64 的棋盘格 PNG），
       // 真源 world/map.yaml 用 base_image 记它的相对路径。
       const yaml = [
         'apiVersion: map-v1',
@@ -6539,7 +6544,7 @@ const STEPS: StepDef[] = [
       // 这一步证 R135 的**作者侧入口**：世界地图面板上有个「登记底图」，
       // 挑一张图 ⇒ 工具把它**拷进项目** ⇒ 并把 base_image / base_size / bounds 写进 map.yaml，
       // **bounds 按量出来的像素尺寸填**（作者手填边界填不对是常态 ⇒ 让工具量）。
-      // 原生对话框在主进程被**桩**掉了（预演替作者挑那张 1×1 的 PNG）——桩是工装，**断言断的是盘上的字节**。
+      // 原生对话框在主进程被**桩**掉了（预演替作者挑那张 64×64 的棋盘格 PNG）——桩是工装，**断言断的是盘上的字节**。
       await tab('规则');
       await tab('世界观档案');
       await sleep(700);
@@ -6562,9 +6567,9 @@ const STEPS: StepDef[] = [
       const after = await window.yushu.doc.read('world/map.yaml');
       const hasBase = after.content.indexOf('base_image:') >= 0;
       const hasSize = after.content.indexOf('base_size:') >= 0;
-      const hasBounds = after.content.indexOf('bounds: [[0, 0], [1, 1]]') >= 0;
+      const hasBounds = after.content.indexOf('bounds: [[0, 0], [64, 64]]') >= 0;
       const keptMarkers = after.content.indexOf('entity_ref: loc-map-probe') >= 0;
-      // 把地图恢复成"正常"的样子（这张 1×1 的底图只是验登记用的）⇒ 免得后面的截图是一张塌掉的图
+      // 把地图恢复成"正常"的样子（这张底图只是验登记用的）⇒ 免得后面的截图是一张塌掉的图
       await window.yushu.doc.write('world/map.yaml', current.content, after.hash);
       await tab('规则');
       await tab('世界观档案');
@@ -6572,7 +6577,7 @@ const STEPS: StepDef[] = [
       return {
         ok: hasBase && hasSize && hasBounds && keptMarkers && note.indexOf('底图已登记') >= 0,
         note: '回执「' + note.slice(0, 56) + '」；盘上：base_image=' + String(hasBase) +
-          '，base_size=' + String(hasSize) + '，bounds=量出来的 1×1=' + String(hasBounds) +
+          '，base_size=' + String(hasSize) + '，bounds=量出来的 64×64=' + String(hasBounds) +
           '；作者的标注原样留着=' + String(keptMarkers),
       };
     `,
@@ -6923,7 +6928,7 @@ const STEPS: StepDef[] = [
       const stillDrawn = document.querySelector('.map-panel .map-marker[data-marker="m-in"]') !== null;
       // 证据要**看得见**：把地图面板滚到画面中间（否则截到的是没变化的半屏 ⇒ 证据存疑）
       const panelEl = document.querySelector('.map-panel');
-      if (panelEl) panelEl.scrollIntoView({ block: 'center' });
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
       await sleep(300);
 
       return {
@@ -7031,7 +7036,7 @@ const STEPS: StepDef[] = [
       const drawn = document.querySelector('.map-panel .map-marker[data-marker="m-2"]') !== null;
       // 证据要看得见：把地图面板滚到画面中间
       const panelEl = document.querySelector('.map-panel');
-      if (panelEl) panelEl.scrollIntoView({ block: 'center' });
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
       await sleep(300);
 
       return {
@@ -7042,6 +7047,100 @@ const STEPS: StepDef[] = [
           '；别的行原样=' + String(othersOk) +
           '；地点下拉里的选项=' + String(options.length) + ' 个（来自真源）' +
           '；新标注画出来了=' + String(drawn),
+      };
+    `,
+  },
+  {
+    step: 103,
+    title: '挪事件锚点：把锚点拖到新位置 ⇒ 只改 map.yaml 里那一个锚点的 x / y（R141）',
+    file: 'step103-anchor-move.png',
+    body: String.raw`
+      // 这一步证 R141：**挪事件锚点**（锚点 = 事件挂在地图上的坐标，K08 §3.8）。
+      // 锚点与标注是同一类东西 ⇒ 同一套机制：拖 ⇒ 只改那一个锚点的 x / y。
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        '# 作者自己写的注释（挪锚点之后应当原样留着）',
+        'base_image: world/assets/map/base.png',
+        'base_size: {width: 1000, height: 700}',
+        'bounds: [[0, 0], [1000, 700]]',
+        'layers: [place, event]',
+        'markers:',
+        '  - {id: m-1, layer: place, entity_ref: loc-map-probe, x: 250, y: 175}',
+        'event_anchors:',
+        '  - {id: a-ev, event_ref: ev-war, x: 300, y: 200}',
+        '  - {id: a-ev2, event_ref: ev-other, x: 700, y: 500}',
+        '',
+      ].join('\n');
+      const currentMap = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      await window.yushu.doc.write('world/map.yaml', yaml, currentMap === null ? undefined : currentMap.hash);
+
+      await tab('规则');
+      await tab('世界观档案');
+      const anchor = await waitFor(
+        () => document.querySelector('.map-panel .map-anchor[data-anchor="a-ev"]') || null,
+        8000,
+      );
+      if (!anchor) return { ok: false, note: '地图上的事件锚点没渲染出来' };
+      const svg = document.querySelector('.map-panel .map-svg');
+      if (!svg) return { ok: false, note: '地图 SVG 没渲染' };
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return { ok: false, note: '拿不到画布的坐标变换（拖不了）' };
+      const toClient = (ux, uy) => {
+        const pt = svg.createSVGPoint();
+        pt.x = ux;
+        pt.y = uy;
+        const p = pt.matrixTransform(ctm);
+        return { x: p.x, y: p.y };
+      };
+      // 从锚点原来所在的地方 (300,200) 拖到 (450,350)
+      const from = toClient(300, 200);
+      const to = toClient(450, 350);
+      const fire = (type, x, y) => anchor.dispatchEvent(new PointerEvent(type, {
+        clientX: x,
+        clientY: y,
+        bubbles: true,
+        cancelable: true,
+        pointerId: 3,
+        isPrimary: true,
+        buttons: 1,
+      }));
+      fire('pointerdown', from.x, from.y);
+      await sleep(150);
+      fire('pointermove', to.x, to.y);
+      await sleep(150);
+      fire('pointerup', to.x, to.y);
+      await sleep(900);
+
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const content = after.content;
+      const beforeLines = yaml.split('\n');
+      const afterLines = content.split('\n');
+      const othersOk =
+        content.indexOf('# 作者自己写的注释（挪锚点之后应当原样留着）') >= 0 &&
+        content.indexOf('bounds: [[0, 0], [1000, 700]]') >= 0 &&
+        content.indexOf('x: 250, y: 175') >= 0 &&
+        content.indexOf('x: 700, y: 500') >= 0;
+      const changed = afterLines.filter((line, index) => line !== beforeLines[index]);
+      const onlyOne = changed.length === 1 && changed[0].indexOf('a-ev') >= 0;
+      // 落点：点击位置经「屏幕 ↔ 用户坐标」往返有零点几像素误差 ⇒ 容差 1 像素
+      const spot = /x: (\d+), y: (\d+)/.exec(changed[0] || '');
+      const px = spot ? Number(spot[1]) : -1;
+      const py = spot ? Number(spot[2]) : -1;
+      const atSpot = px === 450 && Math.abs(py - 350) <= 1;
+      const stillDrawn = document.querySelector('.map-panel .map-anchor[data-anchor="a-ev"]') !== null;
+      // 证据要看得见：把地图面板滚到画面中间
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+
+      return {
+        ok: atSpot && othersOk && onlyOne && beforeLines.length === afterLines.length && stillDrawn,
+        note: '盘上 a-ev=' + (atSpot ? 'x: ' + String(px) + ', y: ' + String(py) + '（目标 450,350，容差 1px）' : '（没挪成）') +
+          '；改动行数=' + String(changed.length) + '（总行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) + '）' +
+          '；别的锚点/标注/注释原样=' + String(othersOk) +
+          '；挪完那个锚点还在=' + String(stillDrawn),
       };
     `,
   },

@@ -3848,13 +3848,31 @@ table,
 /* ---------- R138：框定边界（作者在图上拖出地图在图里的哪一块） ---------- */
 .map-frame-bar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-4);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
   margin-top: var(--space-3);
 }
 
-.map-frame-bar .muted {
+/* R141：按钮归一组（模式相关的控件只在该模式里出现） */
+.map-mode-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* R141：一条**状态行**——刚才那一下怎么了（框定 / 放标注 / 挪标注 共用这一处） */
+.map-status {
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+/* R141：一行**作者语言**的操作提示（不露实现细节） */
+.map-hint {
+  margin-top: var(--space-2);
+  color: var(--muted);
   font-size: var(--text-sm);
   line-height: 1.6;
 }

@@ -8,6 +8,7 @@ import {
   normalizeBounds,
   parseMapFile,
   projectWorldMap,
+  setMapAnchorPosition,
   setMapMarkerPosition,
   type WorldMapDef,
 } from "@yushu/world-engine";
@@ -15,6 +16,8 @@ import type {
   WorldMapBasePayload,
   WorldMapCreateMarkerRequestPayload,
   WorldMapCreateMarkerResult,
+  WorldMapSetAnchorRequestPayload,
+  WorldMapSetAnchorResult,
   WorldMapSetBoundsRequestPayload,
   WorldMapSetBoundsResult,
   WorldMapSetMarkerRequestPayload,
@@ -690,5 +693,77 @@ export async function createMapMarker(
     ok: true,
     note: `已放标注 ${id}：${place.name}（${String(x)},${String(y)}）`,
     marker: { id, entityRef: request.entityRef, x, y },
+  };
+}
+
+/**
+ * **挪事件锚点**（R141）：**写盘**——作者在图上把锚点拖到新位置 ⇒ 改 `world/map.yaml` 里
+ * **那一个锚点**的 `x` / `y`。
+ *
+ * 锚点是「事件挂在地图上的坐标」（K08 §3.8：选事件能定位到地图上）⇒ 手填的坐标同样常常差一点
+ * ⇒ 让他在图上**拖**（与挪标注同一条纪律：只改那一行、范围要落在框内、写盘带 baseHash）。
+ */
+export async function setAnchorPosition(
+  gateway: ProjectGateway,
+  request: WorldMapSetAnchorRequestPayload,
+): Promise<WorldMapSetAnchorResult> {
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) {
+    return { ok: false, note: "项目还没有世界地图（先登记底图）", position: null, previous: [] };
+  }
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return {
+      ok: false,
+      note: `地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`,
+      position: null,
+      previous: [],
+    };
+  }
+  const bounds = normalizeBounds(def.bounds).bounds;
+  if (bounds === null) {
+    return { ok: false, note: "地图没有有效边界（框不出范围）", position: null, previous: [] };
+  }
+  const x = Math.round(request.x);
+  const y = Math.round(request.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { ok: false, note: "坐标里有非数字", position: null, previous: [] };
+  }
+  if (x < bounds.x0 || x > bounds.x1 || y < bounds.y0 || y > bounds.y1) {
+    return {
+      ok: false,
+      note:
+        `这个点落在框定的那一块之外（${String(bounds.x0)},${String(bounds.y0)} → ` +
+        `${String(bounds.x1)},${String(bounds.y1)}）`,
+      position: null,
+      previous: [],
+    };
+  }
+  const anchor = (def.eventAnchors ?? []).find((item) => item.id === request.anchorId);
+  if (anchor === undefined) {
+    return {
+      ok: false,
+      note: `地图里没有锚点 ${request.anchorId}`,
+      position: null,
+      previous: [],
+    };
+  }
+  const moved = setMapAnchorPosition(snapshot.content, request.anchorId, { x, y });
+  if (moved.content === null) {
+    return {
+      ok: false,
+      note: moved.reason ?? "没挪成",
+      position: null,
+      previous: moved.previous,
+    };
+  }
+  await gateway.writeDoc(MAP_PATH, moved.content, snapshot.hash);
+  return {
+    ok: true,
+    note: `锚点 ${request.anchorId} 挪到 ${String(x)},${String(y)}`,
+    position: { x, y },
+    previous: moved.previous,
   };
 }

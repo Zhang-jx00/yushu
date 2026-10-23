@@ -91,6 +91,10 @@ export const CHANNELS = {
    * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」。
    */
   worldMapCreateMarker: "map:createMarker",
+  /**
+   * 世界地图·**挪事件锚点**（R141）：**写盘**（作者在图上把锚点拖到新位置 ⇒ 改 map.yaml 里**那一个**锚点的 x / y）。
+   */
+  worldMapSetAnchor: "map:setAnchor",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -2964,6 +2968,26 @@ export interface WorldMapCreateMarkerResult {
   note: string;
   /** 新标注的 id 与位置（没成时为 null） */
   marker: { id: string; entityRef: string; x: number; y: number } | null;
+}
+
+/**
+ * 挪事件锚点的请求（R141）：锚点 id + 新的**底图像素坐标**。
+ */
+export interface WorldMapSetAnchorRequestPayload {
+  anchorId: string;
+  x: number;
+  y: number;
+}
+
+/** 挪事件锚点的结果（R141） */
+export interface WorldMapSetAnchorResult {
+  ok: boolean;
+  /** 给作者看的一句话（成了 / 为什么没成） */
+  note: string;
+  /** 挪到哪了（没成时为 null） */
+  position: { x: number; y: number } | null;
+  /** 改之前那一行（作者要挪回去，把这一行贴回去即可） */
+  previous: string[];
 }
 
 /** 底图登记的结果（R135）：**路径不出主进程**，只回项目内的相对路径与量出来的尺寸 */
