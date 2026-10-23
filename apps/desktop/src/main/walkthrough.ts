@@ -7290,6 +7290,12 @@ const STEPS: StepDef[] = [
       if (!routeBtn) return { ok: false, note: '地图面板没有「放行程线」这个入口' };
       routeBtn.click();
       await sleep(400);
+      // R144：五个入口是**一个分段控件**，当前模式要高亮（作者一眼看得出自己在哪种模式里）
+      const groups = document.querySelectorAll('.map-panel .map-mode-group').length;
+      const modeOn = [...document.querySelectorAll('.map-panel .map-mode-btn')]
+        .filter((b) => String(b.className || '').indexOf('is-on') >= 0)
+        .map((b) => String(b.textContent || '').trim());
+      const segmentedOk = groups === 1 && modeOn.length === 1 && modeOn[0] === '放行程线';
       const overlay = await waitFor(() => document.querySelector('.map-panel .map-place-overlay') || null, 3000);
       if (!overlay) return { ok: false, note: '画形状模式里没有那个覆盖层（点不了）' };
       const svg = document.querySelector('.map-panel .map-svg');
@@ -7351,13 +7357,108 @@ const STEPS: StepDef[] = [
       await sleep(300);
 
       return {
-        ok: atSpot && onlyOne && othersOk && drawn && pendingDrawn,
+        ok: atSpot && onlyOne && othersOk && drawn && pendingDrawn && segmentedOk,
         note: '盘上多了一行=' + String(atSpot) + '（新增行数=' + String(added.length) +
           '，顶点=' + JSON.stringify(pts) + '（目标 200,200 / 400,300 / 600,150，容差 1px）' +
           '，总行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) + '）' +
           '；别的行原样=' + String(othersOk) +
           '；画到一半看得见=' + String(pendingDrawn) +
-          '；那条线画在图上=' + String(drawn),
+          '；那条线画在图上=' + String(drawn) +
+          '；五个入口是一个分段控件=' + String(groups === 1) + '（当前高亮=' + modeOn.join('/') + '）',
+      };
+    `,
+  },
+  {
+    step: 106,
+    title: '当前模式要看得见：那一档是实心朱砂底 + 反色字，实测底色差 ≥ 3:1（R144）',
+    file: 'step106-mode-highlight.png',
+    body: String.raw`
+      // 这一步证 R144 的另一半：**「当前模式要看得见」不是一句口号，要有数**。
+      //
+      // 起因：R144 收尾时看证据图，发现五个入口的胶囊按钮**长得一模一样** ——
+      // 当时选中态底色用的是 --accent-soft（#f0e2ce），常态底色是 --panel（#fffdf8），
+      // 实测只有 1.25:1（WCAG 1.4.11 的非文本对比度门槛是 3:1）⇒ 等于没有高亮。
+      //
+      // 这一步在**真实渲染**里量（静态那一半在 selected-state-contrast.test.ts）：
+      // ① 停在「放标注」模式里（不放点，只看界面态）⇒ 这一步的截图自带高亮；
+      // ② 读**计算样式**（getComputedStyle）拿真正画在屏幕上的底色与字色；
+      // ③ 算「选中底 vs 常态底」的对比度 ⇒ 要 ≥ 3；
+      // ④ 算「选中字 vs 选中底」的对比度 ⇒ 要 ≥ 4.5；
+      // ⑤ 顺带证：模式相关的控件（对象下拉）**只在该模式里出现**。
+      await tab('规则');
+      await tab('世界观档案');
+      const placeBtn = await waitFor(
+        () => [...document.querySelectorAll('.map-panel button')]
+          .find((b) => String(b.textContent || '').trim() === '放标注') || null,
+        8000,
+      );
+      if (!placeBtn) return { ok: false, note: '地图面板没有「放标注」这个入口' };
+      if (placeBtn.disabled) return { ok: false, note: '「放标注」是禁用的（项目里还没有地点实体）' };
+      placeBtn.click();
+      await sleep(500);
+
+      const onBtn = document.querySelector('.map-panel .map-mode-btn.is-on');
+      const normalBtn = [...document.querySelectorAll('.map-panel .map-mode-btn')]
+        .find((b) => String(b.className || '').indexOf('is-on') < 0);
+      if (!onBtn) return { ok: false, note: '进了放标注模式，但没有任何一档带 is-on（当前模式看不出来）' };
+      if (!normalBtn) return { ok: false, note: '找不到没被选中的那一档（拿不到常态底色）' };
+
+      const lum = (rgb) => {
+        const m = String(rgb).match(/[0-9]+/g).map(Number);
+        const ch = (c) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+        return 0.2126 * ch(m[0]) + 0.7152 * ch(m[1]) + 0.0722 * ch(m[2]);
+      };
+      const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+
+      const onStyle = getComputedStyle(onBtn);
+      const normalStyle = getComputedStyle(normalBtn);
+      const onBg = onStyle.backgroundColor;
+      const normalBg = normalStyle.backgroundColor;
+      const onFg = onStyle.color;
+      const stateRatio = ratio(onBg, normalBg);
+      const textRatio = ratio(onFg, onBg);
+      const highlighted = String(onBtn.textContent || '').trim() === '放标注';
+      const distinct = onBg !== normalBg;
+      const selectShown = document.querySelector('.map-panel .map-place-select') !== null;
+      const weight = String(onStyle.fontWeight);
+      const bold = Number(weight) >= 600;
+
+      const stateFloor = 3;
+      const textFloor = 4.5;
+      const ok = highlighted && distinct && stateRatio >= stateFloor && textRatio >= textFloor && selectShown && bold;
+      // 截图在**步骤结束后**才拍（框架统一采集）⇒ 断言与截图之间画面可能被外部异步动作带走
+      // （v354/v355/v356 实拍到的都是编辑器页，不是地图面板；最可能是"崩溃恢复"把界面导航过去了）
+      // ⇒ 这里切回地图面板、**重新进入放标注模式**，并**自检**画面是否真的停在那里；
+      // 最多试 3 轮，还在被切走就如实写进 note（不假装图拍到了）。
+      let stillOn = null;
+      let rerounds = 0;
+      for (let round = 0; round < 3; round += 1) {
+        await tab('规则');
+        await tab('世界观档案');
+        const again = await waitFor(
+          () => [...document.querySelectorAll('.map-panel button')]
+            .find((b) => String(b.textContent || '').trim() === '放标注') || null,
+          8000,
+        );
+        if (again !== null && !again.disabled) again.click();
+        // **必须让离屏合成真的重绘**：v357 实测——DOM 里当前档位在（自检=true），
+        // 可 capturePage 拿到的还是**更早的一帧**（编辑器页）⇒ 画面没变化 ⇒ 合成器不更新。
+        // step105 的截图之所以对，是因为它末尾 scrollIntoView 逼出了重绘 ⇒ 这里照做。
+        const panelEl = document.querySelector('.map-panel');
+        if (panelEl !== null) panelEl.scrollIntoView({ block: 'start' });
+        await sleep(900);
+        stillOn = document.querySelector('.map-panel .map-mode-btn.is-on');
+        rerounds = round + 1;
+        if (stillOn !== null) break;
+      }
+      return {
+        ok: ok,
+        note: '当前档位=' + String(onBtn.textContent || '').trim() +
+          '；选中底=' + onBg + ' vs 常态底=' + normalBg + ' ⇒ 底色差=' + stateRatio.toFixed(2) + ':1（门槛 ' + stateFloor + '）' +
+          '；选中字=' + onFg + ' ⇒ 字色对比=' + textRatio.toFixed(2) + ':1（门槛 ' + textFloor + '）' +
+          '；字重=' + weight + '；底色确实不同=' + String(distinct) +
+          '；对象下拉只在这个模式里出现=' + String(selectShown) +
+          '；采集前画面自检=重试 ' + String(rerounds) + ' 轮后当前档位仍在画面上=' + String(stillOn !== null),
       };
     `,
   },

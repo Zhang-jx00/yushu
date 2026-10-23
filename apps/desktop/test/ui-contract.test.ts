@@ -2224,10 +2224,17 @@ describe("放区域 / 放行程线（R143）：点出一串点 ⇒ 落一个面 
     expect(panel, "没有调用 map.createShape").toContain("map.createShape(");
   });
 
+  it("图层显隐**也要管到区域/行程线**（K08 §3.9「图层独立显隐」——不然关掉「路线」层，那条线还在）", () => {
+    // 认**过滤那一处**（形状按图层过滤），不是"代码里出现过 hidden"
+    expect(panel, "形状没有按图层过滤（关掉图层它还在）").toMatch(
+      /map\.shapes\.filter\(\(shape\) => !hidden\.includes\(shape\.layer\)\)/,
+    );
+  });
+
   it("区域与行程线**画在图上**（面是填色、线是折线）", () => {
     // 认**渲染那一处**（是 map.shapes 画出来的）——只认"文件里出现过 <polygon>"太弱
     // （代码搬走了、不再被调用，它照样绿）
-    expect(panel, "区域与行程线不是从 map.shapes 画的").toMatch(/map\.shapes\.map\(\(shape\)/);
+    expect(panel, "区域与行程线不是从 map.shapes 画的").toMatch(/map\.shapes\.[\s\S]{0,80}map\(\(shape\)/);
     expect(panel, "区域没有画成面").toContain("<polygon");
     expect(panel, "行程线没有画成折线").toContain("<polyline");
     expect(panel, "画到一半的那串点没有画出来").toContain("map-shape-pending");
@@ -2242,6 +2249,39 @@ describe("放区域 / 放行程线（R143）：点出一串点 ⇒ 落一个面 
   it("**键盘也能画**（回车加顶点、退格删点）", () => {
     expect(panel, "回车没有加点").toMatch(/event\.key === "Enter"[\s\S]{0,160}setShapePoints/);
     expect(panel, "退格没有删点").toMatch(/event\.key === "Backspace"[\s\S]{0,120}setShapePoints/);
+  });
+});
+
+/**
+ * R144 的 UI 收口：五个编辑入口（框定 / 放标注 / 放锚点 / 放区域 / 放行程线）
+ * **收成一个分段控件**。
+ *
+ * 为什么不是"一个入口 + 一个下拉"：这五件事的**清单、校验、结果都不同**
+ * （地点清单 / 事件清单 / 顶点数下限 / 落点范围）⇒ 塞进一个入口反而看不清
+ * "现在能放的是哪一种"；但**看起来**它们该是一组（都是「编辑地图」）。
+ *
+ * 于是：**一个分组 + 五个档位 + 当前档位高亮（is-on / aria-pressed）**。
+ */
+describe("地图编辑面收口（R144）：五个入口 = 一个分段控件", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+
+  it("五个入口在**同一个分组**里（不是五处散落的按钮）", () => {
+    expect(panel, "没有那个分段控件的分组").toContain('className="map-mode-group"');
+    expect(panel, "分组没有说明它是什么").toContain('aria-label="编辑地图"');
+    const group = /<div className="map-mode-group"[\s\S]*?<\/div>/.exec(panel)?.[0] ?? "";
+    for (const label of ["框定边界", "放标注", "放锚点", "放区域", "放行程线"]) {
+      expect(group, `分段控件里少了「${label}」这一档`).toContain(label);
+    }
+  });
+
+  it("**当前模式看得出来**（高亮 + aria-pressed），不只靠按钮文案", () => {
+    expect(panel, "没有模式态的类名").toMatch(/map-mode-btn" \+ \(framing \? " is-on"/);
+    expect(panel, "没有 aria-pressed").toContain("aria-pressed={framing}");
+  });
+
+  it("模式相关的控件（框回整张图 / 画完了 / 对象下拉）**只在该模式里出现**", () => {
+    expect(panel, "「框回整张图」没有跟着框定模式走").toMatch(/\{framing && \(\s*<button type="button" className="map-upload-btn" onClick=\{useWholeImage\}/);
+    expect(panel, "「画完了」没有跟着画形状模式走").toMatch(/\{shapeKind !== null && \(\s*<button type="button" className="map-upload-btn" onClick=\{\(\) => void commitShape\(\)\}/);
   });
 });
 

@@ -706,4 +706,12 @@ describe("放区域 / 放行程线（R143）：点出一串点 ⇒ 落一个面 
     expect(view.shapes[0]?.kind).toBe("route");
     expect(view.shapes[0]?.points[0]?.x).toBeCloseTo(0.01, 6);
   });
+
+  it("**图层的计数带上形状**（K08 §3.9：图层独立显隐 ⇒ 关掉「路线」层时那条线也得跟着没）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const view = await worldMapView(gateway, {});
+    const route = view.layers.find((layer) => layer.kind === "route");
+    expect(route?.markerCount).toBe(0);
+    expect(route?.shapeCount).toBe(1);
+  });
 });

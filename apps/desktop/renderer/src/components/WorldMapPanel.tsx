@@ -735,61 +735,72 @@ export function WorldMapPanel(props: {
           入口与「登记底图」并列（同一件事的两步：先有图，再框出地图在图里的哪一块）。
           R141 的 UI 收拾：**按钮归一组**，模式相关的控件（框回整张图 / 地点下拉）只在该模式里出现。 */}
       <div className="map-frame-bar">
-        <div className="map-mode-group">
+        {/* R144 的 UI 收口：五个入口（框定 / 放标注 / 放锚点 / 放区域 / 放行程线）**收成一个分段控件**
+            —— 它们是「编辑地图」的几种做法，不是五件不相干的事。
+            **当前模式看得出来**（分段按钮高亮 + aria-pressed），**模式相关的控件只在该模式里出现**。 */}
+        <span className="map-mode-label">编辑地图</span>
+        <div className="map-mode-group" role="group" aria-label="编辑地图">
           <button
             type="button"
-            className="map-upload-btn"
+            className={"map-mode-btn" + (framing ? " is-on" : "")}
+            aria-pressed={framing}
             onClick={toggleFraming}
             disabled={!hasBaseSize || framingBusy}
-            title={hasBaseSize ? "" : "这张地图没有 base_size（不知道底图多大 ⇒ 框不出范围）"}
+            title={hasBaseSize ? "框定边界：把地图在底图里的哪一块框出来" : "这张地图没有 base_size（不知道底图多大 ⇒ 框不出范围）"}
           >
-            {framingBusy ? "正在写边界…" : framing ? "退出框定" : "框定边界"}
+            {framingBusy ? "正在写边界…" : "框定边界"}
           </button>
-          {framing && (
-            <button type="button" className="map-upload-btn" onClick={useWholeImage} disabled={framingBusy}>
-              框回整张图
-            </button>
-          )}
-          {/* R140 放标注 / R142 放锚点：选一个地点或一个事件 ⇒ 在图上点一下 ⇒ 落一个标注或锚点
-              （K08 §5「放 marker → 绑定实体」/ §3.8「事件可挂坐标」）。两个入口各管一件事。 */}
+          {/* R140 放标注 / R142 放锚点 / R143 放区域与行程线：五种做法各管一件事，
+              但**看起来**是同一个控件的五个档位（分段控件）。 */}
           <button
             type="button"
-            className="map-upload-btn"
+            className={"map-mode-btn" + (placing && placeKind === "marker" ? " is-on" : "")}
+            aria-pressed={placing && placeKind === "marker"}
             onClick={() => togglePlacing("marker")}
             disabled={placing ? false : map.places.length === 0}
-            title={map.places.length === 0 ? "项目里还没有地点实体（标注要绑真实地点）" : ""}
+            title={map.places.length === 0 ? "项目里还没有地点实体（标注要绑真实地点）" : "放标注：选一个地点，在图上点一下"}
           >
-            {placing && placeKind === "marker" ? "取消放标注" : "放标注"}
+            放标注
           </button>
           <button
             type="button"
-            className="map-upload-btn"
+            className={"map-mode-btn" + (placing && placeKind === "anchor" ? " is-on" : "")}
+            aria-pressed={placing && placeKind === "anchor"}
             onClick={() => togglePlacing("anchor")}
             disabled={placing ? false : map.events.length === 0}
-            title={map.events.length === 0 ? "项目里还没有时间线事件（锚点要挂真实的事件）" : ""}
+            title={map.events.length === 0 ? "项目里还没有时间线事件（锚点要挂真实的事件）" : "放锚点：选一个事件，在图上点一下"}
           >
-            {placing && placeKind === "anchor" ? "取消放锚点" : "放锚点"}
+            放锚点
           </button>
-          {/* R143 放区域 / 放行程线：点出一串点 ⇒ 落一个面 / 一条线（K08 §5 的后两样） */}
           <button
             type="button"
-            className="map-upload-btn"
+            className={"map-mode-btn" + (shapeKind === "region" ? " is-on" : "")}
+            aria-pressed={shapeKind === "region"}
             onClick={() => toggleShape("region")}
+            title="放区域：点出一串点，落一个闭合的面"
           >
-            {shapeKind === "region" ? "取消放区域" : "放区域"}
+            放区域
           </button>
           <button
             type="button"
-            className="map-upload-btn"
+            className={"map-mode-btn" + (shapeKind === "route" ? " is-on" : "")}
+            aria-pressed={shapeKind === "route"}
             onClick={() => toggleShape("route")}
+            title="放行程线：点出一串点，落一条线"
           >
-            {shapeKind === "route" ? "取消放行程线" : "放行程线"}
+            放行程线
           </button>
-          {shapeKind !== null && (
-            <button type="button" className="map-upload-btn" onClick={() => void commitShape()}>
-              画完了（{shapePoints.length} 个点）
-            </button>
-          )}
+        </div>
+        {framing && (
+          <button type="button" className="map-upload-btn" onClick={useWholeImage} disabled={framingBusy}>
+            框回整张图
+          </button>
+        )}
+        {shapeKind !== null && (
+          <button type="button" className="map-upload-btn" onClick={() => void commitShape()}>
+            画完了（{shapePoints.length} 个点）
+          </button>
+        )}
           {placing && (
             <select
               className="map-place-select"
@@ -811,7 +822,6 @@ export function WorldMapPanel(props: {
                   ))}
             </select>
           )}
-        </div>
         {status !== "" && <div className="map-status">{status}</div>}
       </div>
       {uploadNote !== "" && (
@@ -847,7 +857,10 @@ export function WorldMapPanel(props: {
             >
               <span className="map-layer-dot" data-layer={layer.kind} aria-hidden="true" />
               {LAYER_LABEL[layer.kind] ?? layer.kind}
-              <span className="map-layer-count">{layer.markerCount}</span>
+              <span className="map-layer-count">
+                {layer.markerCount}
+                {layer.shapeCount > 0 ? ` + ${layer.shapeCount}` : ""}
+              </span>
             </button>
           );
         })}
@@ -1101,7 +1114,7 @@ export function WorldMapPanel(props: {
                 十字光标是**键盘可达**的（方向键挪、回车落点）⇒ 键盘债是 0。
                 它盖在标注之上 ⇒ 放标注时点标注不会误放一个。 */}
             {/* R143：地图上的区域（面）与行程线（线）——从真源直算，顶点已归一化 */}
-            {map.shapes.map((shape) => {
+            {map.shapes.filter((shape) => !hidden.includes(shape.layer)).map((shape) => {
               const points = shape.points.map((point) => `${String(point.x * width)},${String(point.y * height)}`).join(" ");
               return shape.kind === "region" ? (
                 <polygon key={shape.id} className="map-region" data-shape={shape.id} points={points}>

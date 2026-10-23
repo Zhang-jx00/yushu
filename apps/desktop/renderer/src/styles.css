@@ -3892,6 +3892,42 @@ table,
   gap: var(--space-3);
 }
 
+/* R144：五个编辑入口收成**一个分段控件**（它们是「编辑地图」的几种做法，不是不相干的事） */
+.map-mode-label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.map-mode-group .map-mode-btn {
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-pill);
+  border: var(--border-width) solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: color var(--motion-state) linear, background var(--motion-state) linear,
+    border-color var(--motion-state) linear;
+}
+
+/* 当前模式看得出来（不是只靠按钮文案）
+   R144 实测：原来「选中底 = accent-soft」与常态底（panel）只有 1.10~1.54:1 ——
+   五套主题**全都**低于 WCAG 1.4.11 的非文本对比度 3:1 ⇒ 等于没有高亮。
+   改成实心强调底 + 反色字：底色差 5.72~15.68:1，字色对比 5.81~13.64:1。
+   判据：apps/desktop/test/selected-state-contrast.test.ts（逐套主题卡 3:1 与 4.5） */
+.map-mode-group .map-mode-btn.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-on-accent);
+  font-weight: 600;
+}
+
+.map-mode-group .map-mode-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 /* R141：一条**状态行**——刚才那一下怎么了（框定 / 放标注 / 挪标注 共用这一处） */
 .map-status {
   color: var(--ink);

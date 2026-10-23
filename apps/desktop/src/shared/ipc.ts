@@ -3151,7 +3151,8 @@ export interface WorldMapViewPayload {
     ny: number;
     label: string;
   }[];
-  layers: { kind: string; markerCount: number }[];
+  /** 每个图层的计数：`markerCount` 是标注数，`shapeCount` 是区域/行程线数（R144） */
+  layers: { kind: string; markerCount: number; shapeCount: number }[];
   findings: { code: string; severity: string; message: string; refs: string[] }[];
   orphanMarkers: string[];
   overlapClusters: { layer: string; members: string[] }[];

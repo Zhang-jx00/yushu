@@ -225,12 +225,19 @@ describe("stream 动词（流式 + 停止，T1-16）", () => {
       {},
     );
     await expect(failure).rejects.toBeInstanceOf(LlmAbortError);
+    let partial = "";
     try {
       await failure;
     } catch (err) {
-      expect((err as LlmAbortError).partial).toBe("天启");
+      partial = (err as LlmAbortError).partial;
     }
-    expect(deltas).toEqual(["天启"]);
+    // 中止与「下一块到达」是**竞态**：abort 生效之前已经在途的那一块，也可能被算进 partial
+    // （实现里 text += delta 先于 onDelta，而 onDelta 里才 abort）。
+    // ⇒ 这里钉的是**语义**（partial 恰好是"已收到的那些块"拼起来的，且至少收到了第一块），
+    // 而不是"恰好一个字"—— 后者把时序当成了契约，这条因此偶发红过（R144 定位并修正）。
+    expect(deltas.length, "中止前一块都没收到（那就不算「携带已生成部分」）").toBeGreaterThanOrEqual(1);
+    expect(partial, "partial 不是已收到的分块拼起来的（多算了 / 少了 / 丢了）").toBe(deltas.join(""));
+    expect(partial.startsWith("天启"), "partial 不是从第一块开始的").toBe(true);
   });
 
   it("流中途断链且已输出内容时不再切换 provider（避免重复正文）", async () => {

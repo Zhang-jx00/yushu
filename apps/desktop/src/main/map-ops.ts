@@ -206,7 +206,11 @@ export async function worldMapView(
       ny: anchor.ny,
       label: anchor.label ?? anchor.eventRef,
     })),
-    layers: projection.layers.map((layer) => ({ kind: layer.kind, markerCount: layer.markerCount })),
+    layers: projection.layers.map((layer) => ({
+      kind: layer.kind,
+      markerCount: layer.markerCount,
+      shapeCount: projection.shapes.filter((shape) => shape.layer === layer.kind).length,
+    })),
     findings: projection.findings.map((finding) => ({
       code: finding.code,
       severity: finding.severity,
