@@ -196,6 +196,13 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.createAnchor")).toBe(true);
   });
 
+  it("放区域 / 放行程线通道在四处齐备（R143 新增：**写盘**——往 map.yaml 的 regions / routes 段追加一行）", () => {
+    expect(channels.get("worldMapCreateShape")).toBe("map:createShape");
+    expect(registered).toContain("worldMapCreateShape");
+    expect(literals.invoke.has("map:createShape")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.createShape")).toBe(true);
+  });
+
   it("爽点看板通道在四处齐备（R73 新增）", () => {
     expect(channels.get("satisfactionBoard")).toBe("satisfaction:board");
     expect(registered).toContain("satisfactionBoard");

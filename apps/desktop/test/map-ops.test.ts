@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { uploadMapBase, setMapBounds, setMarkerPosition, setAnchorPosition, createMapMarker, createMapAnchor, worldMapView } from "../src/main/map-ops.js";
+import { uploadMapBase, setMapBounds, setMarkerPosition, setAnchorPosition, createMapMarker, createMapAnchor, createMapShape, worldMapView } from "../src/main/map-ops.js";
 import { ProjectGateway } from "../src/main/file-gateway.js";
 import { parseMapFile, createSettingCard, serializeCardFile, serializeTimelineFile, TIMELINE_API_VERSION } from "@yushu/world-engine";
 
@@ -602,5 +602,108 @@ describe("放事件锚点（R142）：选一个事件 ⇒ 在图上点一下 ⇒
     await gateway.writeDoc("world/map.yaml", MAP_YAML);
     const view = await worldMapView(gateway, {});
     expect(view.events).toEqual([{ id: "ev-war", title: "玄元立国" }]);
+  });
+});
+
+/**
+ * 放区域 / 放行程线（R143）：**写盘**路径的单测。
+ *
+ * 口径回源 K08 §5「放 marker、**区域、行程线**」。判据盯三件事：
+ * ① **只追加那一行**（放在 `regions:` / `routes:` 段的末尾 ⇒ 顺序不变）；
+ * ② **顶点必须落在框定的那一块里** ⇒ 拒绝且盘上不动；
+ * ③ **顶点数下限**（区域 ≥ 3、行程线 ≥ 2）⇒ 拒绝。
+ */
+describe("放区域 / 放行程线（R143）：点出一串点 ⇒ 落一个面 / 一条线", () => {
+  const MAP_YAML = [
+    "# 作者自己写的注释",
+    "apiVersion: map-v1",
+    "id: map-world",
+    "crs: simple",
+    "base_size: {width: 1000, height: 700}",
+    "bounds: [[0, 0], [1000, 700]]",
+    "layers: [place, political, route]",
+    "routes:",
+    "  - {id: rt-1, layer: route, points: [[10, 10], [20, 20]]}",
+    "",
+  ].join("\n");
+
+  it("落一个行程线 ⇒ **只追加那一行**（排在已有那条之后），其余行原样", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await createMapShape(gateway, {
+      kind: "route",
+      points: [
+        { x: 100, y: 200 },
+        { x: 300, y: 400 },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.shape?.id).toBe("rt-2");
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).toContain("points: [[100, 200], [300, 400]]");
+    // 别的行原样
+    expect(content).toContain("# 作者自己写的注释");
+    expect(content).toContain("bounds: [[0, 0], [1000, 700]]");
+    expect(content).toContain("points: [[10, 10], [20, 20]]");
+    const before = MAP_YAML.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length + 1);
+  });
+
+  it("落一个区域 ⇒ id 是 r-<n>，写进 regions 段", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await createMapShape(gateway, {
+      kind: "region",
+      name: "北境",
+      points: [
+        { x: 100, y: 100 },
+        { x: 300, y: 100 },
+        { x: 300, y: 300 },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.shape?.id).toBe("r-1");
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).toContain("regions:");
+    expect(content).toContain('name: "北境"');
+  });
+
+  it("顶点落在框定的那一块之外 ⇒ 拒绝并说清范围，盘上不动", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await createMapShape(gateway, {
+      kind: "route",
+      points: [
+        { x: 100, y: 100 },
+        { x: 5000, y: 100 },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("之外");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("顶点数不够 ⇒ 拒绝（区域至少 3 个点、行程线至少 2 个）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const route = await createMapShape(gateway, { kind: "route", points: [{ x: 10, y: 10 }] });
+    expect(route.ok).toBe(false);
+    expect(route.note).toContain("至少要 2 个点");
+    const region = await createMapShape(gateway, {
+      kind: "region",
+      points: [
+        { x: 10, y: 10 },
+        { x: 20, y: 20 },
+      ],
+    });
+    expect(region.ok).toBe(false);
+    expect(region.note).toContain("至少要 3 个点");
+  });
+
+  it("地图载荷里带上**区域与行程线**（顶点已归一化，渲染层直接用）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const view = await worldMapView(gateway, {});
+    expect(view.shapes).toHaveLength(1);
+    expect(view.shapes[0]?.id).toBe("rt-1");
+    expect(view.shapes[0]?.kind).toBe("route");
+    expect(view.shapes[0]?.points[0]?.x).toBeCloseTo(0.01, 6);
   });
 });

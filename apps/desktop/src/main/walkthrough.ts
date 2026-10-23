@@ -7254,6 +7254,113 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 105,
+    title: '放行程线：点出一串点 ⇒ 盘上多一行，别的行原样（R143）',
+    file: 'step105-draw-route.png',
+    body: String.raw`
+      // 这一步证 R143：**放行程线 / 放区域**（K08 §5 的地图编辑器链条的最后两样）。
+      // 作者在图上点出一串点 ⇒ 落一条线（区域同理，只是点多一个、闭合）。
+      //
+      // 断的是三件事：
+      // ① 盘上**多了一行**行程线（顶点对），**别的行一个字都没动**；
+      // ② 那条线**画在图上了**（不是写进去了但看不见）；
+      // ③ 点到一半时**看得见自己画到哪了**（那串点画出来了）。
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        '# 作者自己写的注释（放行程线之后应当原样留着）',
+        'base_image: world/assets/map/base.png',
+        'base_size: {width: 1000, height: 700}',
+        'bounds: [[0, 0], [1000, 700]]',
+        'layers: [place, route]',
+        '',
+      ].join('\n');
+      const currentMap = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      await window.yushu.doc.write('world/map.yaml', yaml, currentMap === null ? undefined : currentMap.hash);
+
+      await tab('规则');
+      await tab('世界观档案');
+      const routeBtn = await waitFor(
+        () => [...document.querySelectorAll('.map-panel button')]
+          .find((b) => String(b.textContent || '').trim() === '放行程线') || null,
+        8000,
+      );
+      if (!routeBtn) return { ok: false, note: '地图面板没有「放行程线」这个入口' };
+      routeBtn.click();
+      await sleep(400);
+      const overlay = await waitFor(() => document.querySelector('.map-panel .map-place-overlay') || null, 3000);
+      if (!overlay) return { ok: false, note: '画形状模式里没有那个覆盖层（点不了）' };
+      const svg = document.querySelector('.map-panel .map-svg');
+      const ctm = svg ? svg.getScreenCTM() : null;
+      if (!ctm) return { ok: false, note: '拿不到画布的坐标变换' };
+      const clickAt = (ux, uy) => {
+        const pt = svg.createSVGPoint();
+        pt.x = ux;
+        pt.y = uy;
+        const at = pt.matrixTransform(ctm);
+        overlay.dispatchEvent(new MouseEvent('click', {
+          clientX: at.x,
+          clientY: at.y,
+          bubbles: true,
+          cancelable: true,
+        }));
+      };
+      // 点三个点：画到一半要看得见
+      clickAt(200, 200);
+      await sleep(150);
+      clickAt(400, 300);
+      await sleep(150);
+      const pendingDrawn = document.querySelector('.map-panel .map-shape-pending') !== null;
+      clickAt(600, 150);
+      await sleep(200);
+      // 定下来
+      const doneBtn = await waitFor(
+        () => [...document.querySelectorAll('.map-panel button')]
+          .find((b) => String(b.textContent || '').indexOf('画完了') >= 0) || null,
+        3000,
+      );
+      if (!doneBtn) return { ok: false, note: '没有「画完了」那个按钮' };
+      doneBtn.click();
+      await sleep(900);
+
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const content = after.content;
+      const beforeLines = yaml.split('\n');
+      const afterLines = content.split('\n');
+      const othersOk =
+        content.indexOf('# 作者自己写的注释（放行程线之后应当原样留着）') >= 0 &&
+        content.indexOf('bounds: [[0, 0], [1000, 700]]') >= 0;
+      const added = afterLines.filter((line) => line.indexOf('id: rt-1') >= 0 && line.indexOf('points:') >= 0);
+      const onlyOne = added.length === 1;
+      // 顶点：点击位置经「屏幕 ↔ 用户坐标」往返有**零点几像素**误差 ⇒ 容差 1 像素
+      const pointText = added[0] === undefined ? '' : added[0].slice(added[0].indexOf('points:'));
+      const nums = (pointText.match(/-?\d+/g) || []).map(Number);
+      const pts = [];
+      for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i], nums[i + 1]]);
+      const want = [[200, 200], [400, 300], [600, 150]];
+      const atSpot =
+        pts.length === 3 &&
+        pts.every((point, index) =>
+          Math.abs(point[0] - want[index][0]) <= 1 && Math.abs(point[1] - want[index][1]) <= 1);
+      const drawn = document.querySelector('.map-panel .map-route[data-shape="rt-1"]') !== null;
+      // 证据要看得见：把地图面板滚到画面中间
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+
+      return {
+        ok: atSpot && onlyOne && othersOk && drawn && pendingDrawn,
+        note: '盘上多了一行=' + String(atSpot) + '（新增行数=' + String(added.length) +
+          '，顶点=' + JSON.stringify(pts) + '（目标 200,200 / 400,300 / 600,150，容差 1px）' +
+          '，总行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) + '）' +
+          '；别的行原样=' + String(othersOk) +
+          '；画到一半看得见=' + String(pendingDrawn) +
+          '；那条线画在图上=' + String(drawn),
+      };
+    `,
+  },
 ];
 
 /**

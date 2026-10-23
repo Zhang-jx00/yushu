@@ -4,6 +4,7 @@ import {
   MAP_PATH,
   TIMELINE_PATH,
   appendMapAnchor,
+  appendMapShape,
   appendMapBase,
   appendMapMarker,
   checkStructureFromSources,
@@ -19,6 +20,8 @@ import type {
   WorldMapBasePayload,
   WorldMapCreateAnchorRequestPayload,
   WorldMapCreateAnchorResult,
+  WorldMapCreateShapeRequestPayload,
+  WorldMapCreateShapeResult,
   WorldMapCreateMarkerRequestPayload,
   WorldMapCreateMarkerResult,
   WorldMapSetAnchorRequestPayload,
@@ -72,6 +75,7 @@ export async function worldMapView(
       markers: [],
       places: [],
       events: [],
+      shapes: [],
       anchors: [],
       layers: [],
       findings: [],
@@ -97,6 +101,7 @@ export async function worldMapView(
       markers: [],
       places: [],
       events: [],
+      shapes: [],
       anchors: [],
       layers: [],
       findings: [],
@@ -184,6 +189,13 @@ export async function worldMapView(
     markers,
     places,
     events,
+    shapes: projection.shapes.map((shape) => ({
+      id: shape.id,
+      kind: shape.kind,
+      layer: shape.layer,
+      ...(shape.name === undefined ? {} : { name: shape.name }),
+      points: shape.points.map(([nx, ny]) => ({ x: nx, y: ny })),
+    })),
     // 事件锚点（K08 §3.8）：事件挂坐标 ⇒ 选事件能定位到地图上
     anchors: projection.anchors.map((anchor) => ({
       id: anchor.id,
@@ -807,6 +819,87 @@ export async function createMapAnchor(
     ok: true,
     note: `已放锚点 ${id}：${eventTitle}（${String(x)},${String(y)}）`,
     anchor: { id, eventRef: request.eventRef, x, y },
+  };
+}
+
+/**
+ * **放区域 / 行程线**（R143）：**写盘**——作者在图上点出一串点 ⇒ 落一个面 / 一条线。
+ *
+ * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → 放 marker、**区域、行程线** → 绑定实体」。
+ *
+ * 三条不静默 / 不越权（与前几轮同一条纪律）：
+ * ① **只追加那一行**（放在 `regions:` / `routes:` 段的末尾 ⇒ 作者自己写的顺序不变）；
+ * ② **顶点必须落在框定的那一块里**（落在外面 ⇒ 那个形状看不见）⇒ 拒绝并说清范围；
+ * ③ 顶点数下限：区域至少 3 个（画不出面）、行程线至少 2 个。
+ *
+ * 形状 id 由**主进程**生成（`r-<n>` / `rt-<n>`，跳过已占用的）⇒ 两个形状不会撞 id。
+ */
+export async function createMapShape(
+  gateway: ProjectGateway,
+  request: WorldMapCreateShapeRequestPayload,
+): Promise<WorldMapCreateShapeResult> {
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) {
+    return { ok: false, note: "项目还没有世界地图（先登记底图）", shape: null };
+  }
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return {
+      ok: false,
+      note: `地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`,
+      shape: null,
+    };
+  }
+  const bounds = normalizeBounds(def.bounds).bounds;
+  if (bounds === null) {
+    return { ok: false, note: "地图没有有效边界（框不出范围）", shape: null };
+  }
+  const minPoints = request.kind === "region" ? 3 : 2;
+  if (request.points.length < minPoints) {
+    return {
+      ok: false,
+      note: `${request.kind === "region" ? "区域" : "行程线"}至少要 ${String(minPoints)} 个点（现在 ${String(request.points.length)} 个）`,
+      shape: null,
+    };
+  }
+  const points = request.points.map((point) => ({
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+  }));
+  for (const point of points) {
+    if (point.x < bounds.x0 || point.x > bounds.x1 || point.y < bounds.y0 || point.y > bounds.y1) {
+      return {
+        ok: false,
+        note:
+          `有个顶点落在框定的那一块之外（${String(bounds.x0)},${String(bounds.y0)} → ` +
+          `${String(bounds.x1)},${String(bounds.y1)}）`,
+        shape: null,
+      };
+    }
+  }
+  // id 不能撞
+  const used = new Set((def.shapes ?? []).map((shape) => shape.id));
+  const prefix = request.kind === "region" ? "r" : "rt";
+  let index = 1;
+  while (used.has(`${prefix}-${String(index)}`)) index += 1;
+  const id = `${prefix}-${String(index)}`;
+  const appended = appendMapShape(snapshot.content, {
+    id,
+    kind: request.kind,
+    layer: request.kind === "region" ? "political" : "route",
+    ...(request.name === undefined || request.name === "" ? {} : { name: request.name }),
+    points: points.map((point) => [point.x, point.y] as [number, number]),
+  });
+  if (appended.content === null) {
+    return { ok: false, note: appended.reason ?? "没放成", shape: null };
+  }
+  await gateway.writeDoc(MAP_PATH, appended.content, snapshot.hash);
+  return {
+    ok: true,
+    note: `已放${request.kind === "region" ? "区域" : "行程线"} ${id}（${String(points.length)} 个点）`,
+    shape: { id, kind: request.kind, points },
   };
 }
 

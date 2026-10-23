@@ -127,6 +127,8 @@ contextBridge.exposeInMainWorld("yushu", {
     setAnchor: (payload) => invoke("map:setAnchor", payload),
     /** 放事件锚点（R142）：作者选一个事件 ⇒ 在图上点一下 ⇒ 落一个锚点 */
     createAnchor: (payload) => invoke("map:createAnchor", payload),
+    /** 放区域 / 放行程线（R143）：作者点出一串点 ⇒ 落一个面 / 一条线 */
+    createShape: (payload) => invoke("map:createShape", payload),
   },
   chronicle: {
     book: (payload) => invoke("chronicle:book", payload),

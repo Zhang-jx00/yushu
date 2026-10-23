@@ -1867,7 +1867,7 @@ describe("事件锚点（R131）：K08 §3.8 的事件挂坐标", () => {
   it("真源支持 `event_anchors`，且**严格解析**（未知键 / 同一个事件两个锚点 一律点名）", () => {
     // 认**允许键列表**里的那一个名字，不是"文件里出现过 event_anchors 这几个字"——
     // 后者会把"解析循环里还留着、但允许键没了"当成有支持（实测：那样判据是绿的）
-    expect(engine, "真源的允许键列表里没有 event_anchors").toMatch(/\["apiVersion"[^\]]*"event_anchors"/);
+    expect(engine, "真源的允许键列表里没有 event_anchors").toMatch(/\[\s*"apiVersion"[^\]]*"event_anchors"/);
     expect(engine, "照 K08 抄的未知键没有被点名").toContain("有未知键");
     expect(engine, "同一个事件两个锚点没有拒绝").toContain("事件锚点重复");
   });
@@ -2155,7 +2155,8 @@ describe("放标注（R140）：选一个地点 ⇒ 在图上点一下 ⇒ 落�
   it("放标注也要**键盘可达**（十字光标 + 方向键 + 回车）——点一下不是唯一的路", () => {
     expect(panel, "没有十字光标").toContain("map-place-cursor");
     // 认**绑定**（覆盖层真的接了键盘），不是"文件里定义过这个函数"
-    expect(panel, "覆盖层没有接键盘").toMatch(/onKeyDown=\{onPlaceKeyDown\}/);
+    // R143：画形状时 onKeyDown 是一整块（先判"是不是在画形状"，再交给 onPlaceKeyDown）⇒ 认那一下调用
+    expect(panel, "覆盖层没有接键盘").toMatch(/onPlaceKeyDown\(event\)/);
     expect(panel, "回车没落点").toMatch(/event\.key === "Enter"[\s\S]{0,120}placeAt/);
   });
 
@@ -2202,6 +2203,45 @@ describe("放事件锚点（R142）：选一个事件 ⇒ 在图上点一下 ⇒
   it("引擎只**追加**那一行（不重排整个文件 ⇒ 作者自己写的锚点顺序不变）", () => {
     expect(engine, "引擎里没有追加锚点这个函数").toContain("export function appendMapAnchor");
     expect(ops, "主进程没有用引擎的追加函数").toContain("appendMapAnchor(snapshot.content");
+  });
+});
+
+/**
+ * 放区域 / 放行程线（R143）：K08 §5 的地图编辑器链条的**最后两样**。
+ *
+ * 几何由本项目定（K08 只给了图层类型）：**点用底图像素**，`regions` / `routes` 两段，
+ * 一行一个形状（口径写在 docs/11 §7.23）。
+ */
+describe("放区域 / 放行程线（R143）：点出一串点 ⇒ 落一个面 / 一条线", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const ipc = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "ipc.ts"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+  const engine = readFileSync(join(ROOT, "packages", "@yushu", "world-engine", "src", "world-map.ts"), "utf8");
+
+  it("地图面板给作者**放区域 / 放行程线**的入口（真的调 map.createShape）", () => {
+    expect(panel, "面板里没有「放区域」这个入口").toContain("放区域");
+    expect(panel, "面板里没有「放行程线」这个入口").toContain("放行程线");
+    expect(panel, "没有调用 map.createShape").toContain("map.createShape(");
+  });
+
+  it("区域与行程线**画在图上**（面是填色、线是折线）", () => {
+    // 认**渲染那一处**（是 map.shapes 画出来的）——只认"文件里出现过 <polygon>"太弱
+    // （代码搬走了、不再被调用，它照样绿）
+    expect(panel, "区域与行程线不是从 map.shapes 画的").toMatch(/map\.shapes\.map\(\(shape\)/);
+    expect(panel, "区域没有画成面").toContain("<polygon");
+    expect(panel, "行程线没有画成折线").toContain("<polyline");
+    expect(panel, "画到一半的那串点没有画出来").toContain("map-shape-pending");
+  });
+
+  it("写盘走 **wrapWrite**，且引擎**只追加**那一行", () => {
+    expect(ipc, "放形状没有走 wrapWrite").toMatch(/CHANNELS\.worldMapCreateShape[\s\S]{0,200}wrapWrite/);
+    expect(engine, "引擎里没有追加形状这个函数").toContain("export function appendMapShape");
+    expect(ops, "主进程没有用引擎的追加函数").toContain("appendMapShape(snapshot.content");
+  });
+
+  it("**键盘也能画**（回车加顶点、退格删点）", () => {
+    expect(panel, "回车没有加点").toMatch(/event\.key === "Enter"[\s\S]{0,160}setShapePoints/);
+    expect(panel, "退格没有删点").toMatch(/event\.key === "Backspace"[\s\S]{0,120}setShapePoints/);
   });
 });
 

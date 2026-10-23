@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendMapAnchor, appendMapMarker, normalizeBounds, parseMapFile, projectWorldMap, setMapAnchorPosition, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
+import { appendMapAnchor, appendMapMarker, appendMapShape, normalizeBounds, parseMapFile, projectWorldMap, setMapAnchorPosition, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
 import type { IndexEntityRow } from "../src/index-input.js";
 
 /**
@@ -138,6 +138,107 @@ describe("世界地图投影（R114 引擎侧）", () => {
     const result = setMapMarkerPosition(text, "m-a", { x: 10, y: 20 });
     expect(result.content).toBeNull();
     expect(result.reason).toContain("认不出");
+  });
+
+  it("区域与行程线（R143）⇒ 顶点按边界归一；点在框外 ⇒ map-shape-outside（warn）", () => {
+    const text = [
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 1400]]",
+      "regions:",
+      "  - {id: r-1, layer: political, name: 北境, points: [[0, 0], [500, 0], [500, 700]]}",
+      "routes:",
+      "  - {id: rt-1, layer: route, points: [[0, 0], [1000, 1400]]}",
+      "",
+    ].join("\n");
+    const def = parseMapFile(text);
+    expect((def.shapes ?? []).map((shape) => shape.id)).toEqual(["r-1", "rt-1"]);
+    const result = projectWorldMap(def, ENTITIES);
+    const region = result.shapes.find((shape) => shape.id === "r-1");
+    expect(region?.kind).toBe("region");
+    expect(region?.points[1]?.[0]).toBeCloseTo(0.5, 6);
+    expect(region?.points[1]?.[1]).toBeCloseTo(0, 6);
+    const route = result.shapes.find((shape) => shape.id === "rt-1");
+    expect(route?.kind).toBe("route");
+    // 顶点出界 ⇒ 逐条点名（warn）
+    const out = projectWorldMap(
+      parseMapFile(
+        [
+          "apiVersion: map-v1",
+          "id: map-world",
+          "crs: simple",
+          "bounds: [[0, 0], [1000, 1400]]",
+          "routes:",
+          "  - {id: rt-2, layer: route, points: [[0, 0], [1200, 0]]}",
+          "",
+        ].join("\n"),
+      ),
+      ENTITIES,
+    );
+    const finding = out.findings.find((item) => item.code === "map-shape-outside");
+    expect(finding).toBeTruthy();
+    expect(finding?.severity).toBe("warn");
+    expect(finding?.refs).toEqual(["rt-2"]);
+  });
+
+  it("区域至少 3 个点、行程线至少 2 个点 ⇒ 少一个就**拒绝加载并点名**（严格解析）", () => {
+    const tooFew = [
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 1400]]",
+      "regions:",
+      "  - {id: r-1, layer: political, points: [[0, 0], [500, 0]]}",
+      "",
+    ].join("\n");
+    expect(() => parseMapFile(tooFew)).toThrow(/至少要 3 个点/);
+    const tooFewRoute = [
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 1400]]",
+      "routes:",
+      "  - {id: rt-1, layer: route, points: [[0, 0]]}",
+      "",
+    ].join("\n");
+    expect(() => parseMapFile(tooFewRoute)).toThrow(/至少要 2 个点/);
+  });
+
+  it("追加形状（R143）⇒ **只加那一行**（放在那一段末尾），其余行原样", () => {
+    const text = [
+      "# 作者自己写的注释",
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 1400]]",
+      "routes:",
+      "  - {id: rt-1, layer: route, points: [[0, 0], [100, 100]]}",
+      "layers: [place]",
+      "",
+    ].join("\n");
+    const result = appendMapShape(text, {
+      id: "rt-2",
+      kind: "route",
+      layer: "route",
+      points: [
+        [200, 200],
+        [300, 300],
+      ],
+    });
+    expect(result.reason).toBeNull();
+    const content = result.content as string;
+    const before = text.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length + 1);
+    const added = after.filter((line) => line.includes("id: rt-2"));
+    expect(added).toHaveLength(1);
+    expect(added[0]).toContain("points: [[200, 200], [300, 300]]");
+    // 去掉新增那一行之后其余**逐字**一样
+    expect(after.filter((line) => !line.includes("id: rt-2"))).toEqual(before);
+    // 排在作者自己那条之后（该段末尾）
+    expect(content.indexOf("id: rt-1")).toBeLessThan(content.indexOf("id: rt-2"));
+    expect(content.indexOf("id: rt-2")).toBeLessThan(content.indexOf("layers:"));
   });
 
   it("追加标注（R140）⇒ **只加那一行**（放在 markers 段的末尾），其余行原样", () => {

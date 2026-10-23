@@ -3845,6 +3845,36 @@ table,
   stroke: var(--accent);
   stroke-width: 1.5;
 }
+
+/* ---------- R143：区域（面）与行程线（线） ---------- */
+.map-region {
+  fill: var(--accent-soft);
+  fill-opacity: 0.55;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.map-route {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+/* 画到一半的那串点（还没落盘 ⇒ 虚线 + 小点，让作者看得见自己画到哪了） */
+.map-shape-pending polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.map-shape-pending circle {
+  fill: var(--accent);
+}
 /* ---------- R138：框定边界（作者在图上拖出地图在图里的哪一块） ---------- */
 .map-frame-bar {
   display: flex;

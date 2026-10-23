@@ -27,6 +27,8 @@ import type {
   GraphViewRequestPayload,
   WorldMapBasePayload,
   WorldMapCreateAnchorRequestPayload,
+  WorldMapCreateShapeRequestPayload,
+  WorldMapCreateShapeResult,
   WorldMapCreateAnchorResult,
   WorldMapCreateMarkerRequestPayload,
   WorldMapCreateMarkerResult,
@@ -294,6 +296,12 @@ export interface YushuApi {
      * 事件必须真实存在（在 world/timeline.yaml 里）、落点必须落在框定的那一块里 ⇒ 不满足时主进程拒绝。
      */
     createAnchor: (payload: WorldMapCreateAnchorRequestPayload) => Promise<WorldMapCreateAnchorResult>;
+    /**
+     * 放区域 / 放行程线（R143）：作者在图上点出一串点 ⇒ 落一个面 / 一条线。
+     *
+     * 顶点用**底图像素**；区域至少 3 个点、行程线至少 2 个；落在框定的那一块之外 ⇒ 主进程拒绝。
+     */
+    createShape: (payload: WorldMapCreateShapeRequestPayload) => Promise<WorldMapCreateShapeResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

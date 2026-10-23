@@ -231,6 +231,13 @@ export function WorldMapPanel(props: {
   const [placeKind, setPlaceKind] = useState<"marker" | "anchor">("marker");
   /** 放置时选中的那个 id（地点实体 id 或事件 id；空 = 还没选） */
   const [placeEntity, setPlaceEntity] = useState("");
+  /**
+   * R143 **放区域 / 放行程线**（K08 §5 的后两样）：在图上点出一串点 ⇒ 落一个面 / 一条线。
+   * 顶点用**底图像素**（与标注/锚点同一套坐标空间）。
+   */
+  const [shapeKind, setShapeKind] = useState<"region" | "route" | null>(null);
+  /** 已经点出来的顶点（底图像素） */
+  const [shapePoints, setShapePoints] = useState<{ x: number; y: number }[]>([]);
   /** 放标注时的**十字光标**（视图坐标）：鼠标点哪儿、方向键走到哪儿，它就在哪儿 */
   const [placeCursor, setPlaceCursor] = useState<{ x: number; y: number } | null>(null);
 
@@ -483,6 +490,46 @@ export function WorldMapPanel(props: {
     [framing, frameRect, commitFrame],
   );
 
+  /** 进入/退出**画形状**模式（区域 / 行程线；与框定、放标注互斥：一次只做一件事） */
+  const toggleShape = useCallback(
+    (kind: "region" | "route") => {
+      setStatus("");
+      if (shapeKind === kind) {
+        setShapeKind(null);
+        setShapePoints([]);
+        return;
+      }
+      setFraming(false);
+      setFrameRect(null);
+      setPlacing(false);
+      setPlaceEntity("");
+      setShapeKind(kind);
+      setShapePoints([]);
+    },
+    [shapeKind],
+  );
+
+  /** 把点出来的那串点写成地图上的一个形状（只追加那一行；范围由主进程校验） */
+  const commitShape = useCallback(async () => {
+    if (shapeKind === null) return;
+    const minPoints = shapeKind === "region" ? 3 : 2;
+    if (shapePoints.length < minPoints) {
+      setStatus(`${shapeKind === "region" ? "区域" : "行程线"}至少要 ${String(minPoints)} 个点（现在 ${String(shapePoints.length)} 个）`);
+      return;
+    }
+    try {
+      const result = await api().map.createShape({ kind: shapeKind, points: shapePoints });
+      setStatus(result.note);
+      if (result.ok) {
+        setShapeKind(null);
+        setShapePoints([]);
+        reloadMap();
+      }
+    } catch (err: unknown) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, [shapeKind, shapePoints, reloadMap]);
+
   /** 一键框回整张图（作者想回退时的**最短路**） */
   const useWholeImage = useCallback(() => {
     void commitFrame({ x0: 0, y0: 0, x1: baseW, y1: baseH });
@@ -500,6 +547,8 @@ export function WorldMapPanel(props: {
       }
       setFraming(false);
       setFrameRect(null);
+      setShapeKind(null);
+      setShapePoints([]);
       setPlaceKind(kind);
       setPlaceEntity("");
       // 光标从**框的正中间**起步（作者一眼看得见起点，方向键一按就能挪）
@@ -721,6 +770,26 @@ export function WorldMapPanel(props: {
           >
             {placing && placeKind === "anchor" ? "取消放锚点" : "放锚点"}
           </button>
+          {/* R143 放区域 / 放行程线：点出一串点 ⇒ 落一个面 / 一条线（K08 §5 的后两样） */}
+          <button
+            type="button"
+            className="map-upload-btn"
+            onClick={() => toggleShape("region")}
+          >
+            {shapeKind === "region" ? "取消放区域" : "放区域"}
+          </button>
+          <button
+            type="button"
+            className="map-upload-btn"
+            onClick={() => toggleShape("route")}
+          >
+            {shapeKind === "route" ? "取消放行程线" : "放行程线"}
+          </button>
+          {shapeKind !== null && (
+            <button type="button" className="map-upload-btn" onClick={() => void commitShape()}>
+              画完了（{shapePoints.length} 个点）
+            </button>
+          )}
           {placing && (
             <select
               className="map-place-select"
@@ -1031,7 +1100,40 @@ export function WorldMapPanel(props: {
             {/* R140 放标注模式：一层**透明覆盖层**接住"点一下"，
                 十字光标是**键盘可达**的（方向键挪、回车落点）⇒ 键盘债是 0。
                 它盖在标注之上 ⇒ 放标注时点标注不会误放一个。 */}
-            {placing && (
+            {/* R143：地图上的区域（面）与行程线（线）——从真源直算，顶点已归一化 */}
+            {map.shapes.map((shape) => {
+              const points = shape.points.map((point) => `${String(point.x * width)},${String(point.y * height)}`).join(" ");
+              return shape.kind === "region" ? (
+                <polygon key={shape.id} className="map-region" data-shape={shape.id} points={points}>
+                  <title>{shape.name ?? shape.id}</title>
+                </polygon>
+              ) : (
+                <polyline key={shape.id} className="map-route" data-shape={shape.id} points={points}>
+                  <title>{shape.name ?? shape.id}</title>
+                </polyline>
+              );
+            })}
+            {/* 画到一半的那串点（还没落盘 ⇒ 虚线 + 小点，让作者看得见自己画到哪了） */}
+            {shapeKind !== null && shapePoints.length > 0 && (
+              <g className="map-shape-pending" aria-hidden="true" pointerEvents="none">
+                {shapePoints.length > 1 && (
+                  <polyline
+                    points={shapePoints
+                      .map((point) => `${String(point.x - (frame?.x0 ?? 0))},${String(point.y - (frame?.y0 ?? 0))}`)
+                      .join(" ")}
+                  />
+                )}
+                {shapePoints.map((point, index) => (
+                  <circle
+                    key={index}
+                    cx={point.x - (frame?.x0 ?? 0)}
+                    cy={point.y - (frame?.y0 ?? 0)}
+                    r={3.5}
+                  />
+                ))}
+              </g>
+            )}
+            {(placing || shapeKind !== null) && (
               <>
                 <rect
                   className="map-place-overlay"
@@ -1041,14 +1143,48 @@ export function WorldMapPanel(props: {
                   height={height}
                   role="button"
                   tabIndex={0}
-                  aria-label="放标注：在图上点一下落点；键盘用方向键挪十字光标、回车落点"
+                  aria-label={
+                    shapeKind !== null
+                      ? "画形状：点一下加一个顶点；键盘用方向键挪十字光标、回车加点、退格删点"
+                      : "放标注：在图上点一下落点；键盘用方向键挪十字光标、回车落点"
+                  }
                   onClick={(event) => {
                     const p = toImagePoint(event);
                     if (p === null) return;
                     setPlaceCursor({ x: p.x, y: p.y });
+                    if (shapeKind !== null) {
+                      // 画形状：点一下是**加一个顶点**
+                      setShapePoints((prev) => [
+                        ...prev,
+                        { x: Math.round(p.x + (frame?.x0 ?? 0)), y: Math.round(p.y + (frame?.y0 ?? 0)) },
+                      ]);
+                      return;
+                    }
                     void placeAt(p.x, p.y);
                   }}
-                  onKeyDown={onPlaceKeyDown}
+                  onKeyDown={(event) => {
+                    if (shapeKind !== null) {
+                      // 画形状：回车加一个顶点、退格删掉最后一个（键盘也能画）
+                      if (event.key === "Enter" && placeCursor !== null) {
+                        event.preventDefault();
+                        setShapePoints((prev) => [
+                          ...prev,
+                          {
+                            x: Math.round(placeCursor.x + (frame?.x0 ?? 0)),
+                            y: Math.round(placeCursor.y + (frame?.y0 ?? 0)),
+                          },
+                        ]);
+                        return;
+                      }
+                      if (event.key === "Backspace") {
+                        event.preventDefault();
+                        setShapePoints((prev) => prev.slice(0, -1));
+                        return;
+                      }
+                      return;
+                    }
+                    onPlaceKeyDown(event);
+                  }}
                 />
                 {placeCursor !== null && (
                   <g className="map-place-cursor" aria-hidden="true" pointerEvents="none">
@@ -1063,13 +1199,15 @@ export function WorldMapPanel(props: {
             <SummaryRows rows={mapSummaryRows} />
             {/* 一行**作者语言**的操作提示（不露实现细节：作者不关心改的是哪个文件） */}
             <div className="map-hint">
-              {placing
-                ? placeKind === "marker"
-                  ? "选好地点后在图上点一下（键盘：方向键挪十字光标、回车落点）"
-                  : "选好事件后在图上点一下（键盘：方向键挪十字光标、回车落点）"
-                : framing
-                  ? "在整张图上拖一块（键盘：方向键移动，+ / - 改大小，回车定下来）"
-                  : "拖标注可以改位置；「框定边界」把地图在图里的那一块框出来"}
+              {shapeKind !== null
+                ? `点一下加一个顶点（键盘：方向键挪十字光标、回车加点、退格删点），点够了按「画完了」`
+                : placing
+                  ? placeKind === "marker"
+                    ? "选好地点后在图上点一下（键盘：方向键挪十字光标、回车落点）"
+                    : "选好事件后在图上点一下（键盘：方向键挪十字光标、回车落点）"
+                  : framing
+                    ? "在整张图上拖一块（键盘：方向键移动，+ / - 改大小，回车定下来）"
+                    : "拖标注可以改位置；「框定边界」把地图在图里的那一块框出来"}
             </div>
           </div>
         </div>

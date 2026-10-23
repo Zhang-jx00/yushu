@@ -28,6 +28,29 @@ import type { IndexEntityRow } from "./index-input.js";
 /** 地图图层（K08 §3.9 的分层；`other` 兜底认不出的） */
 export type MapLayerKind = "base" | "place" | "political" | "event" | "route" | "other";
 
+/**
+ * 地图上的**面 / 线**（R143）：区域（多边形）与行程线（折线）。
+ *
+ * 口径回源 K08 §5 的图层类型（`type: region` / `type: polyline`）——
+ * K08 给了**图层类型**但没给几何 ⇒ 这一段的几何由本项目定，并写进 docs/11：
+ * **点用底图像素**（与标注/锚点同一套坐标空间），一行一个形状：
+ * `regions: [{id, layer, name?, points: [[x,y], …]}]` / `routes: [{id, layer, name?, points: [[x,y], …]}]`。
+ *
+ * 为什么不用经纬度：K08 §3.6 明写「坐标以图片像素 / 归一化坐标记录（不用真实经纬度）」。
+ */
+export type MapShapeKind = "region" | "route";
+
+/** 地图上的一个面 / 线 */
+export interface MapShape {
+  id: string;
+  kind: MapShapeKind;
+  layer: MapLayerKind;
+  /** 作者给的名字（可省 ⇒ 界面上显示 id） */
+  name?: string;
+  /** 顶点（底图像素；区域是闭合多边形，行程线是折线） */
+  points: [number, number][];
+}
+
 /** 底图边界（图片像素坐标） */
 export interface MapBounds {
   x0: number;
@@ -76,6 +99,8 @@ export interface WorldMapDef {
   bounds?: MapBounds | [[number, number], [number, number]];
   /** 底图图片尺寸（给了才能核对 bounds 与尺寸是否匹配） */
   baseSize?: { width: number; height: number };
+  /** 区域与行程线（R143；K08 §5 的后两样） */
+  shapes?: MapShape[];
   /** 作者声明的图层（可显隐） */
   layers?: MapLayerKind[];
   markers?: MapMarker[];
@@ -97,12 +122,19 @@ export interface MapProjectedAnchor extends MapEventAnchor {
   ny: number;
 }
 
+/** 面 / 线的投影结果（顶点已归一化） */
+export interface MapProjectedShape extends MapShape {
+  /** 归一化后的顶点（0..1） */
+  points: [number, number][];
+}
+
 export type MapFindingCode =
   | "map-bounds-missing"
   | "map-marker-orphan"
   | "map-marker-overlap"
   | "map-marker-outside"
-  | "map-anchor-outside";
+  | "map-anchor-outside"
+  | "map-shape-outside";
 
 export interface MapFinding {
   code: MapFindingCode;
@@ -125,6 +157,8 @@ export interface WorldMapProjection {
   markers: MapProjectedMarker[];
   /** 投影成功的事件锚点（按 id 排序 ⇒ 同输入同输出） */
   anchors: MapProjectedAnchor[];
+  /** 投影成功的区域与行程线（按 id 排序） */
+  shapes: MapProjectedShape[];
   layers: MapLayerSummary[];
   findings: MapFinding[];
   /** 找不到地点实体的 marker id（逐条） */
@@ -307,6 +341,31 @@ export function projectWorldMap(
   // ④ 事件锚点（K08 §3.8：事件挂坐标 ⇒ 选事件能定位到地图上）
   //    与标注同一套"不猜"：没有有效边界 ⇒ 不产出坐标（悄悄按 0..1 归一会让"图没画对"像"图画了"）。
   const anchorInput = [...(def.eventAnchors ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // 面 / 线（R143）：顶点按边界归一（与标注同一套坐标空间）
+  // 没有有效边界 ⇒ **不产出形状**（没有边界就无从归一，与标注、锚点同一条纪律）
+  const shapes: MapProjectedShape[] = [];
+  if (bounds !== null) {
+  for (const shape of [...(def.shapes ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    const points: [number, number][] = [];
+    let outside = false;
+    for (const [px, py] of shape.points) {
+      const nx = (px - bounds.x0) / (bounds.x1 - bounds.x0);
+      const ny = (py - bounds.y0) / (bounds.y1 - bounds.y0);
+      if (nx < 0 || nx > 1 || ny < 0 || ny > 1) outside = true;
+      points.push([nx, ny]);
+    }
+    if (outside) {
+      findings.push({
+        code: "map-shape-outside",
+        severity: "warn",
+        message: `${shape.kind === "region" ? "区域" : "行程线"} ${shape.id} 有顶点落在底图边界之外`,
+        refs: [shape.id],
+      });
+    }
+    shapes.push({ ...shape, points });
+  }
+  }
+
   const anchors: MapProjectedAnchor[] = [];
   const outOfBoundsAnchors: string[] = [];
   for (const anchor of anchorInput) {
@@ -344,6 +403,7 @@ export function projectWorldMap(
     bounds,
     markers,
     anchors,
+    shapes,
     layers,
     findings,
     orphanMarkers,
@@ -483,6 +543,32 @@ export function appendMapMarker(
   }
   // `markers:` 段的末尾 = 下一个**顶层键**（列 0 的 `key:`）或文件末尾
   let end = markersIndex + 1;
+  while (end < lines.length && !/^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(lines[end] as string)) end += 1;
+  const inserted = [...lines.slice(0, end), entry, ...lines.slice(end)];
+  return { content: inserted.join("\n"), reason: null, previous: [] };
+}
+
+/**
+ * 把**一个区域 / 行程线**追加进地图文件（R143）：只动 `regions:` / `routes:` 那一段。
+ *
+ * 与 `appendMapMarker` / `appendMapAnchor` 同一条纪律：**只追加那一行**，
+ * 排在那一段的**末尾** ⇒ 作者自己写的顺序不变；没有那一段就在末尾**新起一段**。
+ */
+export function appendMapShape(
+  text: string,
+  shape: { id: string; kind: MapShapeKind; layer: MapLayerKind; name?: string; points: [number, number][] },
+): { content: string | null; reason: string | null; previous: string[] } {
+  const key = shape.kind === "region" ? "regions" : "routes";
+  const points = shape.points.map(([x, y]) => `[${String(x)}, ${String(y)}]`).join(", ");
+  const namePart = shape.name === undefined ? "" : `, name: "${shape.name.replace(/["\\]/g, "\\$&")}"`;
+  const entry = `  - {id: ${shape.id}, layer: ${shape.layer}${namePart}, points: [${points}]}`;
+  const lines = text.split("\n");
+  const sectionIndex = lines.findIndex((line) => new RegExp(`^${key}\\s*:`).test(line));
+  if (sectionIndex < 0) {
+    const head = text.replace(/\n*$/, "");
+    return { content: `${head}\n${key}:\n${entry}\n`, reason: null, previous: [] };
+  }
+  let end = sectionIndex + 1;
   while (end < lines.length && !/^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(lines[end] as string)) end += 1;
   const inserted = [...lines.slice(0, end), entry, ...lines.slice(end)];
   return { content: inserted.join("\n"), reason: null, previous: [] };
@@ -632,7 +718,19 @@ export function parseMapFile(text: string): WorldMapDef {
   const root = asMapObject(rootRaw, "地图根");
   checkMapKeys(
     root,
-    ["apiVersion", "id", "base_image", "crs", "bounds", "base_size", "layers", "markers", "event_anchors"],
+    [
+      "apiVersion",
+      "id",
+      "base_image",
+      "crs",
+      "bounds",
+      "base_size",
+      "layers",
+      "markers",
+      "event_anchors",
+      "regions",
+      "routes",
+    ],
     "地图根",
   );
   if (root.apiVersion !== MAP_API_VERSION) {
@@ -694,6 +792,53 @@ export function parseMapFile(text: string): WorldMapDef {
     markers.push(marker);
   }
   def.markers = markers;
+
+  // 区域与行程线（R143；K08 §5 的后两样）：`regions` 是多边形、`routes` 是折线，
+  // 顶点用**底图像素**（与标注/锚点同一套坐标空间）。
+  // 顶点数下限：区域至少 3 个点（否则画不出面），行程线至少 2 个点。
+  const shapes: MapShape[] = [];
+  const shapeIds = new Set<string>();
+  for (const [kind, key] of [
+    ["region", "regions"],
+    ["route", "routes"],
+  ] as const) {
+    for (const [index, item] of ((root[key] ?? []) as unknown[]).entries()) {
+      const label = `${key}[${index}]`;
+      const raw = asMapObject(item, label);
+      checkMapKeys(raw, ["id", "layer", "name", "points"], label);
+      const shapeId = asMapString(raw.id, label, "id");
+      if (shapeIds.has(shapeId)) failMap(`形状 id 重复：${shapeId}`);
+      shapeIds.add(shapeId);
+      if (typeof raw.layer !== "string" || !LAYER_ORDER.includes(raw.layer as MapLayerKind)) {
+        failMap(`${label} 的 layer 认不出（可选：${LAYER_ORDER.join(" / ")}）`);
+      }
+      const rawPoints = raw.points;
+      const minPoints = kind === "region" ? 3 : 2;
+      if (!Array.isArray(rawPoints) || rawPoints.length < minPoints) {
+        failMap(`${label} 的 points 至少要 ${String(minPoints)} 个点`);
+      }
+      const points: [number, number][] = [];
+      for (const [pointIndex, pair] of (rawPoints as unknown[]).entries()) {
+        if (!Array.isArray(pair) || pair.length !== 2) {
+          failMap(`${label}.points[${String(pointIndex)}] 须是 [x, y]`);
+        }
+        const px = asMapNumber((pair as unknown[])[0], `${label}.points[${String(pointIndex)}]`, "x");
+        const py = asMapNumber((pair as unknown[])[1], `${label}.points[${String(pointIndex)}]`, "y");
+        points.push([px, py]);
+      }
+      const shape: MapShape = {
+        id: shapeId,
+        kind,
+        layer: raw.layer as MapLayerKind,
+        points,
+      };
+      if (raw.name !== undefined && raw.name !== null) {
+        shape.name = asMapString(raw.name, label, "name");
+      }
+      shapes.push(shape);
+    }
+  }
+  if (shapes.length > 0) def.shapes = shapes;
 
   // 事件锚点（K08 §3.8）：`id` 可省（默认用 event_ref），但**一个事件只能有一个锚点**——
   // 两个锚点会让"选事件定位到地图上"指向哪儿变得不确定 ⇒ 宁可拒绝加载并点名。

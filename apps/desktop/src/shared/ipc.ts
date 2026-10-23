@@ -100,6 +100,11 @@ export const CHANNELS = {
    * 口径回源 K08 §3.8：事件可挂坐标 ⇒ 选事件能定位到地图上。
    */
   worldMapCreateAnchor: "map:createAnchor",
+  /**
+   * 世界地图·**放区域 / 放行程线**（R143）：**写盘**（作者在图上点出一串点 ⇒ 落一个面 / 一条线）。
+   * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → 放 marker、**区域、行程线** → 绑定实体」。
+   */
+  worldMapCreateShape: "map:createShape",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -3013,6 +3018,27 @@ export interface WorldMapCreateAnchorResult {
   anchor: { id: string; eventRef: string; x: number; y: number } | null;
 }
 
+/**
+ * 放区域 / 行程线的请求（R143）：画什么 + 顶点（**底图像素**）。
+ */
+export interface WorldMapCreateShapeRequestPayload {
+  /** 区域（多边形）还是行程线（折线） */
+  kind: "region" | "route";
+  /** 作者给的名字（可省） */
+  name?: string;
+  /** 顶点（底图像素；区域至少 3 个、行程线至少 2 个） */
+  points: { x: number; y: number }[];
+}
+
+/** 放区域 / 行程线的结果（R143） */
+export interface WorldMapCreateShapeResult {
+  ok: boolean;
+  /** 给作者看的一句话（成了 / 为什么没成） */
+  note: string;
+  /** 新形状的 id（没成时为 null） */
+  shape: { id: string; kind: "region" | "route"; points: { x: number; y: number }[] } | null;
+}
+
 /** 底图登记的结果（R135）：**路径不出主进程**，只回项目内的相对路径与量出来的尺寸 */
 export interface WorldMapUploadBaseResult {
   /** 作者取消了（没挑文件） */
@@ -3102,6 +3128,14 @@ export interface WorldMapViewPayload {
    * 只给 **location 类**的实体（地图上放的是地点，不是事件）。
    */
   places: { id: string; name: string }[];
+  /** 地图上的区域与行程线（R143；顶点已归一化，渲染层直接用） */
+  shapes: {
+    id: string;
+    kind: "region" | "route";
+    layer: string;
+    name?: string;
+    points: { x: number; y: number }[];
+  }[];
   /**
    * **项目里可挂的事件**（R142：放事件锚点时作者要选一个）。
    * 事件锚点 = 事件挂在地图上的坐标（K08 §3.8）⇒ 事件清单来自 `world/timeline.yaml`。

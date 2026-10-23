@@ -65,6 +65,8 @@ const WRITE_CHANNELS = [
   "worldMapSetAnchor",
   // R142 放事件锚点：往 `world/map.yaml` 的 event_anchors 段追加一行 ⇒ 同样是真源写
   "worldMapCreateAnchor",
+  // R143 放区域 / 放行程线：往 `world/map.yaml` 的 regions / routes 段追加一行 ⇒ 同样是真源写
+  "worldMapCreateShape",
 ] as const;
 
 /** 写盘但不写真源（派生物 / 索引器排除文件 / .git 内部）——走只读包装器是有意的 */
