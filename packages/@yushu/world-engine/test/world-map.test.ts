@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendMapMarker, normalizeBounds, parseMapFile, projectWorldMap, setMapAnchorPosition, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
+import { appendMapAnchor, appendMapMarker, normalizeBounds, parseMapFile, projectWorldMap, setMapAnchorPosition, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
 import type { IndexEntityRow } from "../src/index-input.js";
 
 /**
@@ -233,6 +233,44 @@ describe("世界地图投影（R114 引擎侧）", () => {
     const result = setMapAnchorPosition(text, "ev-9", { x: 11, y: 22 });
     expect(result.reason).toBeNull();
     expect(result.content).toContain("x: 11, y: 22");
+  });
+
+  it("追加事件锚点（R142）⇒ **只加那一行**（放在 event_anchors 段的末尾），其余行原样", () => {
+    const text = [
+      "# 作者自己写的注释",
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 1400]]",
+      "event_anchors:",
+      "  - {id: a-1, event_ref: ev-1, x: 300, y: 200}",
+      "layers: [place]",
+      "",
+    ].join("\n");
+    const result = appendMapAnchor(text, { id: "a-2", eventRef: "ev-2", x: 321, y: 654 });
+    expect(result.reason).toBeNull();
+    const content = result.content as string;
+    const before = text.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length + 1);
+    const added = after.filter((line) => line.includes("id: a-2"));
+    expect(added).toHaveLength(1);
+    expect(added[0]).toContain("event_ref: ev-2");
+    expect(added[0]).toContain("x: 321, y: 654");
+    // 去掉新增那一行之后其余**逐字**一样
+    expect(after.filter((line) => !line.includes("id: a-2"))).toEqual(before);
+    // 排在作者自己那条锚点**之后**、且在 layers 之前（= 该段末尾）
+    expect(content.indexOf("id: a-1")).toBeLessThan(content.indexOf("id: a-2"));
+    expect(content.indexOf("id: a-2")).toBeLessThan(content.indexOf("layers:"));
+  });
+
+  it("追加事件锚点：文件里还没有 event_anchors 段 ⇒ 在末尾**新起一段**（不猜作者想放哪）", () => {
+    const text = ["apiVersion: map-v1", "id: map-world", "crs: simple", "bounds: [[0, 0], [1000, 1400]]", ""].join("\n");
+    const result = appendMapAnchor(text, { id: "a-1", eventRef: "ev-1", x: 10, y: 20 });
+    const content = result.content as string;
+    expect(content).toContain("event_anchors:");
+    expect(content).toContain("event_ref: ev-1");
+    expect(content).toContain("bounds: [[0, 0], [1000, 1400]]");
   });
 
   it("两种 bounds 写法等价（{x0,y0,x1,y1} 与 K08 里的 [[x0,y0],[x1,y1]]）", () => {

@@ -3,9 +3,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { uploadMapBase, setMapBounds, setMarkerPosition, setAnchorPosition, createMapMarker, worldMapView } from "../src/main/map-ops.js";
+import { uploadMapBase, setMapBounds, setMarkerPosition, setAnchorPosition, createMapMarker, createMapAnchor, worldMapView } from "../src/main/map-ops.js";
 import { ProjectGateway } from "../src/main/file-gateway.js";
-import { parseMapFile, createSettingCard, serializeCardFile } from "@yushu/world-engine";
+import { parseMapFile, createSettingCard, serializeCardFile, serializeTimelineFile, TIMELINE_API_VERSION } from "@yushu/world-engine";
 
 /**
  * 底图登记（R135）：**写盘**路径的单测。
@@ -505,5 +505,102 @@ describe("挪事件锚点（R141）：作者在图上把锚点拖到新位置 �
     expect(result.note).toContain("地图里没有锚点");
     expect(result.note).toContain("a-zzz");
     expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+});
+
+/**
+ * 放事件锚点（R142）：**写盘**路径的单测。
+ *
+ * 口径回源 K08 §3.8：事件可挂坐标 ⇒ 选事件能定位到地图上。
+ * 判据盯四件事：① **只追加那一行**（放在 event_anchors 段的末尾 ⇒ 顺序不变）；
+ * ② **必须绑一个真实存在的事件**（清单来自 world/timeline.yaml）⇒ 拒绝并点名；
+ * ③ 落在框定的那一块之外 ⇒ 拒绝且盘上不动；④ **锚点 id 不撞**。
+ */
+describe("放事件锚点（R142）：选一个事件 ⇒ 在图上点一下 ⇒ 落一个锚点", () => {
+  const MAP_YAML = [
+    "# 作者自己写的注释",
+    "apiVersion: map-v1",
+    "id: map-world",
+    "crs: simple",
+    "base_size: {width: 1000, height: 700}",
+    "bounds: [[0, 0], [1000, 700]]",
+    "layers: [place, event]",
+    "event_anchors:",
+    "  - {id: a-1, event_ref: ev-war, x: 300, y: 200}",
+    "",
+  ].join("\n");
+
+  /** 项目里放一条时间线（事件的清单来自它） */
+  async function putTimeline(): Promise<void> {
+    const timeline = serializeTimelineFile({
+      apiVersion: TIMELINE_API_VERSION,
+      anchor_event: "ev-war",
+      calendars: [{ id: "default", label: "元年", offset: 0 }],
+      timelines: [{ id: "main", anchor_event: "ev-war", calendar: "default", scale: "numeric", events: ["ev-war"] }],
+      events: [
+        {
+          id: "ev-war",
+          title: "玄元立国",
+          year: 0,
+          timeline: "main",
+          participants: [],
+          causes: [],
+          effects: [],
+        },
+      ],
+    });
+    await gateway.writeDoc("world/timeline.yaml", timeline, undefined);
+  }
+
+  it("落一个锚点 ⇒ **只追加那一行**（排在已有锚点之后），其余行原样", async () => {
+    await putTimeline();
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await createMapAnchor(gateway, { eventRef: "ev-war", x: 450, y: 350 });
+    expect(result.ok).toBe(true);
+    expect(result.anchor).toEqual({ id: "a-2", eventRef: "ev-war", x: 450, y: 350 });
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).toContain("- {id: a-2, event_ref: ev-war, x: 450, y: 350}");
+    // 别的行原样
+    expect(content).toContain("# 作者自己写的注释");
+    expect(content).toContain("bounds: [[0, 0], [1000, 700]]");
+    expect(content).toContain("- {id: a-1, event_ref: ev-war, x: 300, y: 200}");
+    const before = MAP_YAML.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length + 1);
+  });
+
+  it("绑一个**不存在的事件** ⇒ 拒绝（锚点只能挂真实的事件），盘上不动", async () => {
+    await putTimeline();
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await createMapAnchor(gateway, { eventRef: "ev-zzz", x: 450, y: 350 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("ev-zzz");
+    expect(result.anchor).toBeNull();
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("落在框定的那一块之外 ⇒ 拒绝并说清范围，盘上不动", async () => {
+    await putTimeline();
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await createMapAnchor(gateway, { eventRef: "ev-war", x: 5000, y: 5000 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("之外");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("锚点 id **不撞**（已有 a-1 ⇒ 新的是 a-2）", async () => {
+    await putTimeline();
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await createMapAnchor(gateway, { eventRef: "ev-war", x: 450, y: 350 });
+    expect(result.anchor?.id).toBe("a-2");
+  });
+
+  it("地图载荷里带上**事件清单**（作者要选一个事件 ⇒ 清单来自 world/timeline.yaml）", async () => {
+    await putTimeline();
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const view = await worldMapView(gateway, {});
+    expect(view.events).toEqual([{ id: "ev-war", title: "玄元立国" }]);
   });
 });

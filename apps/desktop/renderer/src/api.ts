@@ -26,6 +26,8 @@ import type {
   GraphViewPayload,
   GraphViewRequestPayload,
   WorldMapBasePayload,
+  WorldMapCreateAnchorRequestPayload,
+  WorldMapCreateAnchorResult,
   WorldMapCreateMarkerRequestPayload,
   WorldMapCreateMarkerResult,
   WorldMapSetAnchorRequestPayload,
@@ -286,6 +288,12 @@ export interface YushuApi {
      * 挪事件锚点（R141）：作者在图上把**锚点**拖到新位置（**底图像素坐标**）⇒ 改 map.yaml 里那一个锚点的 x / y。
      */
     setAnchor: (payload: WorldMapSetAnchorRequestPayload) => Promise<WorldMapSetAnchorResult>;
+    /**
+     * 放事件锚点（R142）：作者选一个**事件** ⇒ 在图上点一下 ⇒ 落一个锚点（K08 §3.8）。
+     *
+     * 事件必须真实存在（在 world/timeline.yaml 里）、落点必须落在框定的那一块里 ⇒ 不满足时主进程拒绝。
+     */
+    createAnchor: (payload: WorldMapCreateAnchorRequestPayload) => Promise<WorldMapCreateAnchorResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

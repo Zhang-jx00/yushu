@@ -489,6 +489,31 @@ export function appendMapMarker(
 }
 
 /**
+ * 把**一个新事件锚点**追加进地图文件（R142）：只动 `event_anchors:` 那一段，别的行**原样留着**。
+ *
+ * 与 `appendMapMarker` 同理：不重新序列化整个文件（那会抹掉作者写的注释与排版），
+ * 只**追加那一行**，且排在 `event_anchors:` 段的**末尾**（作者自己写的锚点顺序不变）。
+ */
+export function appendMapAnchor(
+  text: string,
+  anchor: { id: string; eventRef: string; x: number; y: number },
+): { content: string | null; reason: string | null; previous: string[] } {
+  const lines = text.split("\n");
+  const entry =
+    `  - {id: ${anchor.id}, event_ref: ${anchor.eventRef}, ` +
+    `x: ${String(anchor.x)}, y: ${String(anchor.y)}}`;
+  const sectionIndex = lines.findIndex((line) => /^event_anchors\s*:/.test(line));
+  if (sectionIndex < 0) {
+    const head = text.replace(/\n*$/, "");
+    return { content: `${head}\nevent_anchors:\n${entry}\n`, reason: null, previous: [] };
+  }
+  let end = sectionIndex + 1;
+  while (end < lines.length && !/^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(lines[end] as string)) end += 1;
+  const inserted = [...lines.slice(0, end), entry, ...lines.slice(end)];
+  return { content: inserted.join("\n"), reason: null, previous: [] };
+}
+
+/**
  * 把**一个标注**挪到新位置（R139）：只改那一行的 `x` / `y`，别的**一个字都不动**。
  *
  * 为什么不做"解析 → 改对象 → 重新序列化"：那要一个序列化器（会把作者写的注释与排版抹掉），

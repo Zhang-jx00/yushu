@@ -189,6 +189,13 @@ describe("IPC 四处对账（shared → main → preload → renderer api）", (
     expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.setAnchor")).toBe(true);
   });
 
+  it("放事件锚点通道在四处齐备（R142 新增：**写盘**——往 map.yaml 的 event_anchors 段追加一行）", () => {
+    expect(channels.get("worldMapCreateAnchor")).toBe("map:createAnchor");
+    expect(registered).toContain("worldMapCreateAnchor");
+    expect(literals.invoke.has("map:createAnchor")).toBe(true);
+    expect(memberPaths(apiTs, /export interface YushuApi \{/).has("map.createAnchor")).toBe(true);
+  });
+
   it("爽点看板通道在四处齐备（R73 新增）", () => {
     expect(channels.get("satisfactionBoard")).toBe("satisfaction:board");
     expect(registered).toContain("satisfactionBoard");

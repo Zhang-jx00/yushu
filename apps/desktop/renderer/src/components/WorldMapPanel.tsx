@@ -227,7 +227,9 @@ export function WorldMapPanel(props: {
    * 选一个**地点实体** ⇒ 在图上点一下 ⇒ 落一个标注（写盘只追加那一行）。
    */
   const [placing, setPlacing] = useState(false);
-  /** 放标注时选中的地点实体 id（空 = 还没选） */
+  /** 放什么：地点标注（绑地点实体）还是事件锚点（绑时间线上的事件） */
+  const [placeKind, setPlaceKind] = useState<"marker" | "anchor">("marker");
+  /** 放置时选中的那个 id（地点实体 id 或事件 id；空 = 还没选） */
   const [placeEntity, setPlaceEntity] = useState("");
   /** 放标注时的**十字光标**（视图坐标）：鼠标点哪儿、方向键走到哪儿，它就在哪儿 */
   const [placeCursor, setPlaceCursor] = useState<{ x: number; y: number } | null>(null);
@@ -487,34 +489,41 @@ export function WorldMapPanel(props: {
   }, [baseW, baseH, commitFrame]);
 
   /** 进入/退出**放标注**模式（与框定模式互斥：一次只做一件事） */
-  const togglePlacing = useCallback(() => {
-    setStatus("");
-    setStatus("");
-    if (placing) {
-      setPlacing(false);
+  const togglePlacing = useCallback(
+    (kind: "marker" | "anchor") => {
+      setStatus("");
+      if (placing && placeKind === kind) {
+        setPlacing(false);
+        setPlaceEntity("");
+        setPlaceCursor(null);
+        return;
+      }
+      setFraming(false);
+      setFrameRect(null);
+      setPlaceKind(kind);
       setPlaceEntity("");
-      setPlaceCursor(null);
-      return;
-    }
-    setFraming(false);
-    setFrameRect(null);
-    // 光标从**框的正中间**起步（作者一眼看得见起点，方向键一按就能挪）
-    setPlaceCursor({ x: Math.round(frameW / 2), y: Math.round(frameH / 2) });
-    setPlacing(true);
-  }, [placing, frameW, frameH]);
+      // 光标从**框的正中间**起步（作者一眼看得见起点，方向键一按就能挪）
+      setPlaceCursor({ x: Math.round(frameW / 2), y: Math.round(frameH / 2) });
+      setPlacing(true);
+    },
+    [placing, placeKind, frameW, frameH],
+  );
 
-  /** 在图上落一个标注（写盘只追加那一行；范围与地点由主进程校验） */
-  const placeMarkerAt = useCallback(
+  /** 在图上落一个东西（标注或锚点；写盘只追加那一行；范围与对象由主进程校验） */
+  const placeAt = useCallback(
     async (userX: number, userY: number) => {
       if (placeEntity === "") {
-        setStatus("先选一个地点，再在图上点一下");
+        setStatus(placeKind === "marker" ? "先选一个地点，再在图上点一下" : "先选一个事件，再在图上点一下");
         return;
       }
       // 视图坐标 ⇒ 底图像素（框的原点要加回去）
       const x = Math.round(userX + (frame?.x0 ?? 0));
       const y = Math.round(userY + (frame?.y0 ?? 0));
       try {
-        const result = await api().map.createMarker({ entityRef: placeEntity, x: x, y: y });
+        const result =
+          placeKind === "marker"
+            ? await api().map.createMarker({ entityRef: placeEntity, x: x, y: y })
+            : await api().map.createAnchor({ eventRef: placeEntity, x: x, y: y });
         setStatus(result.note);
         if (result.ok) {
           setPlacing(false);
@@ -526,7 +535,7 @@ export function WorldMapPanel(props: {
         setStatus(err instanceof Error ? err.message : String(err));
       }
     },
-    [placeEntity, frame, reloadMap],
+    [placeEntity, placeKind, frame, reloadMap],
   );
 
   /** 放标注的键盘路（契约 §6：键盘债是 0）：方向键挪十字光标、回车落点 */
@@ -543,7 +552,7 @@ export function WorldMapPanel(props: {
       else if (event.key === "ArrowDown") dy = step;
       else if (event.key === "Enter") {
         event.preventDefault();
-        void placeMarkerAt(cursor.x, cursor.y);
+        void placeAt(cursor.x, cursor.y);
         return;
       } else {
         return;
@@ -554,7 +563,7 @@ export function WorldMapPanel(props: {
         y: Math.min(Math.max(cursor.y + dy, 0), height),
       });
     },
-    [placeCursor, width, height, placeMarkerAt],
+    [placeCursor, width, height, placeAt],
   );
 
   const shown = useMemo(
@@ -692,29 +701,45 @@ export function WorldMapPanel(props: {
               框回整张图
             </button>
           )}
-          {/* R140 放标注：选一个地点 ⇒ 在图上点一下 ⇒ 落一个标注（K08 §5「放 marker → 绑定实体」） */}
+          {/* R140 放标注 / R142 放锚点：选一个地点或一个事件 ⇒ 在图上点一下 ⇒ 落一个标注或锚点
+              （K08 §5「放 marker → 绑定实体」/ §3.8「事件可挂坐标」）。两个入口各管一件事。 */}
           <button
             type="button"
             className="map-upload-btn"
-            onClick={togglePlacing}
+            onClick={() => togglePlacing("marker")}
             disabled={placing ? false : map.places.length === 0}
             title={map.places.length === 0 ? "项目里还没有地点实体（标注要绑真实地点）" : ""}
           >
-            {placing ? "取消放标注" : "放标注"}
+            {placing && placeKind === "marker" ? "取消放标注" : "放标注"}
+          </button>
+          <button
+            type="button"
+            className="map-upload-btn"
+            onClick={() => togglePlacing("anchor")}
+            disabled={placing ? false : map.events.length === 0}
+            title={map.events.length === 0 ? "项目里还没有时间线事件（锚点要挂真实的事件）" : ""}
+          >
+            {placing && placeKind === "anchor" ? "取消放锚点" : "放锚点"}
           </button>
           {placing && (
             <select
               className="map-place-select"
               value={placeEntity}
               onChange={(event) => setPlaceEntity(event.target.value)}
-              aria-label="选一个地点"
+              aria-label={placeKind === "marker" ? "选一个地点" : "选一个事件"}
             >
-              <option value="">选一个地点…</option>
-              {map.places.map((place) => (
-                <option key={place.id} value={place.id}>
-                  {place.name}
-                </option>
-              ))}
+              <option value="">{placeKind === "marker" ? "选一个地点…" : "选一个事件…"}</option>
+              {placeKind === "marker"
+                ? map.places.map((place) => (
+                    <option key={place.id} value={place.id}>
+                      {place.name}
+                    </option>
+                  ))
+                : map.events.map((event) => (
+                    <option key={event.id} value={event.id}>
+                      {event.title}
+                    </option>
+                  ))}
             </select>
           )}
         </div>
@@ -1021,7 +1046,7 @@ export function WorldMapPanel(props: {
                     const p = toImagePoint(event);
                     if (p === null) return;
                     setPlaceCursor({ x: p.x, y: p.y });
-                    void placeMarkerAt(p.x, p.y);
+                    void placeAt(p.x, p.y);
                   }}
                   onKeyDown={onPlaceKeyDown}
                 />
@@ -1039,7 +1064,9 @@ export function WorldMapPanel(props: {
             {/* 一行**作者语言**的操作提示（不露实现细节：作者不关心改的是哪个文件） */}
             <div className="map-hint">
               {placing
-                ? "选好地点后在图上点一下（键盘：方向键挪十字光标、回车落点）"
+                ? placeKind === "marker"
+                  ? "选好地点后在图上点一下（键盘：方向键挪十字光标、回车落点）"
+                  : "选好事件后在图上点一下（键盘：方向键挪十字光标、回车落点）"
                 : framing
                   ? "在整张图上拖一块（键盘：方向键移动，+ / - 改大小，回车定下来）"
                   : "拖标注可以改位置；「框定边界」把地图在图里的那一块框出来"}

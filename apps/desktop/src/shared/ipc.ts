@@ -95,6 +95,11 @@ export const CHANNELS = {
    * 世界地图·**挪事件锚点**（R141）：**写盘**（作者在图上把锚点拖到新位置 ⇒ 改 map.yaml 里**那一个**锚点的 x / y）。
    */
   worldMapSetAnchor: "map:setAnchor",
+  /**
+   * 世界地图·**放事件锚点**（R142）：**写盘**（作者选一个事件 ⇒ 在图上点一下 ⇒ 落一个锚点）。
+   * 口径回源 K08 §3.8：事件可挂坐标 ⇒ 选事件能定位到地图上。
+   */
+  worldMapCreateAnchor: "map:createAnchor",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -2990,6 +2995,24 @@ export interface WorldMapSetAnchorResult {
   previous: string[];
 }
 
+/**
+ * 放事件锚点的请求（R142）：绑哪个事件 + 落在哪（**底图像素坐标**）。
+ */
+export interface WorldMapCreateAnchorRequestPayload {
+  eventRef: string;
+  x: number;
+  y: number;
+}
+
+/** 放事件锚点的结果（R142） */
+export interface WorldMapCreateAnchorResult {
+  ok: boolean;
+  /** 给作者看的一句话（成了 / 为什么没成） */
+  note: string;
+  /** 新锚点的 id 与位置（没成时为 null） */
+  anchor: { id: string; eventRef: string; x: number; y: number } | null;
+}
+
 /** 底图登记的结果（R135）：**路径不出主进程**，只回项目内的相对路径与量出来的尺寸 */
 export interface WorldMapUploadBaseResult {
   /** 作者取消了（没挑文件） */
@@ -3079,6 +3102,11 @@ export interface WorldMapViewPayload {
    * 只给 **location 类**的实体（地图上放的是地点，不是事件）。
    */
   places: { id: string; name: string }[];
+  /**
+   * **项目里可挂的事件**（R142：放事件锚点时作者要选一个）。
+   * 事件锚点 = 事件挂在地图上的坐标（K08 §3.8）⇒ 事件清单来自 `world/timeline.yaml`。
+   */
+  events: { id: string; title: string }[];
   /** 事件锚点（K08 §3.8：事件挂坐标 ⇒ 选事件能定位到地图上） */
   anchors: {
     id: string;

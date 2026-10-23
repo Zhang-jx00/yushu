@@ -33,6 +33,8 @@ import {
   type GraphViewPayload,
   type GraphViewRequestPayload,
   type WorldMapBasePayload,
+  type WorldMapCreateAnchorRequestPayload,
+  type WorldMapCreateAnchorResult,
   type WorldMapCreateMarkerRequestPayload,
   type WorldMapCreateMarkerResult,
   type WorldMapSetAnchorRequestPayload,
@@ -183,7 +185,7 @@ import { applyProposal, decideProposal, listProposals, previewPropagation, propo
 import { foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
-import { createMapMarker, setAnchorPosition, setMapBounds, setMarkerPosition, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
+import { createMapAnchor, createMapMarker, setAnchorPosition, setMapBounds, setMarkerPosition, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
 import {
@@ -676,6 +678,10 @@ export function registerIpcHandlers(): void {
   // 世界地图·**挪事件锚点**（R141）：**写盘**（作者在图上把锚点拖到新位置 ⇒ 改那一个锚点的 x / y）⇒ wrapWrite
   ipcMain.handle(CHANNELS.worldMapSetAnchor, (_event, payload: WorldMapSetAnchorRequestPayload) =>
     wrapWrite<WorldMapSetAnchorResult>(() => setAnchorPosition(requireGateway(), payload)),
+  );
+  // 世界地图·**放事件锚点**（R142）：**写盘**（作者选一个事件 ⇒ 在图上点一下 ⇒ 落一个锚点）⇒ wrapWrite
+  ipcMain.handle(CHANNELS.worldMapCreateAnchor, (_event, payload: WorldMapCreateAnchorRequestPayload) =>
+    wrapWrite<WorldMapCreateAnchorResult>(() => createMapAnchor(requireGateway(), payload)),
   );
   // 编年史（T4-8）：复用时间线刻度，只读 ⇒ wrap
   ipcMain.handle(CHANNELS.chronicleBook, (_event, payload: ChronicleBookRequestPayload) =>

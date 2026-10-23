@@ -2,11 +2,14 @@
 import { readFile } from "node:fs/promises";
 import {
   MAP_PATH,
+  TIMELINE_PATH,
+  appendMapAnchor,
   appendMapBase,
   appendMapMarker,
   checkStructureFromSources,
   normalizeBounds,
   parseMapFile,
+  parseTimelineFile,
   projectWorldMap,
   setMapAnchorPosition,
   setMapMarkerPosition,
@@ -14,6 +17,8 @@ import {
 } from "@yushu/world-engine";
 import type {
   WorldMapBasePayload,
+  WorldMapCreateAnchorRequestPayload,
+  WorldMapCreateAnchorResult,
   WorldMapCreateMarkerRequestPayload,
   WorldMapCreateMarkerResult,
   WorldMapSetAnchorRequestPayload,
@@ -66,6 +71,7 @@ export async function worldMapView(
       baseSize: null,
       markers: [],
       places: [],
+      events: [],
       anchors: [],
       layers: [],
       findings: [],
@@ -90,6 +96,7 @@ export async function worldMapView(
       baseSize: null,
       markers: [],
       places: [],
+      events: [],
       anchors: [],
       layers: [],
       findings: [],
@@ -146,6 +153,19 @@ export async function worldMapView(
     .sort((a, b) =>
       a.name === b.name ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) : a.name < b.name ? -1 : 1,
     );
+  // **可挂的事件**（R142：放事件锚点时作者要选一个）——来自 world/timeline.yaml（K08 §3.8）
+  const timelineSnapshot = await gateway.readDoc(TIMELINE_PATH).catch(() => null);
+  let events: { id: string; title: string }[] = [];
+  if (timelineSnapshot !== null) {
+    try {
+      events = parseTimelineFile(timelineSnapshot.content)
+        .events.map((event) => ({ id: event.id, title: event.title }))
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    } catch {
+      // 时间线读不了 ⇒ 地图这边就**不列事件**（不放一个假的清单给作者选）
+      events = [];
+    }
+  }
 
   const note = [
     `${markers.length} 个标注 · ${projection.layers.length} 个图层`,
@@ -163,6 +183,7 @@ export async function worldMapView(
     baseSize,
     markers,
     places,
+    events,
     // 事件锚点（K08 §3.8）：事件挂坐标 ⇒ 选事件能定位到地图上
     anchors: projection.anchors.map((anchor) => ({
       id: anchor.id,
@@ -693,6 +714,99 @@ export async function createMapMarker(
     ok: true,
     note: `已放标注 ${id}：${place.name}（${String(x)},${String(y)}）`,
     marker: { id, entityRef: request.entityRef, x, y },
+  };
+}
+
+/**
+ * **放事件锚点**（R142）：**写盘**——作者选一个事件 ⇒ 在图上点一下 ⇒ 落一个锚点。
+ *
+ * 口径回源 K08 §3.8「事件可挂坐标 ⇒ 选事件能定位到地图上」：
+ * R131 之后锚点只能**手写**在 map.yaml 里 ⇒ 这一轮把它交给作者动手。
+ *
+ * 四条不静默 / 不越权（与放标注、挪标注同一条纪律）：
+ * ① **只追加那一行**（放在 `event_anchors:` 段的末尾 ⇒ 作者自己写的锚点顺序不变）；
+ * ② **必须绑一个真实存在的事件**（事件清单来自 `world/timeline.yaml`）⇒ 拒绝并点名；
+ * ③ **落点必须落在框定的那一块里** ⇒ 拒绝并说清范围；
+ * ④ 写盘带 baseHash ⇒ 作者在别处改过 map.yaml 时**报冲突**、不覆盖。
+ *
+ * 锚点 id 由**主进程**生成（`a-<n>`，跳过已占用的）⇒ 两个锚点不会撞 id
+ * （撞 id 的话地图文件会被严格解析拒绝 ⇒ 整个地图都读不出来）。
+ */
+export async function createMapAnchor(
+  gateway: ProjectGateway,
+  request: WorldMapCreateAnchorRequestPayload,
+): Promise<WorldMapCreateAnchorResult> {
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) {
+    return { ok: false, note: "项目还没有世界地图（先登记底图）", anchor: null };
+  }
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return {
+      ok: false,
+      note: `地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`,
+      anchor: null,
+    };
+  }
+  const bounds = normalizeBounds(def.bounds).bounds;
+  if (bounds === null) {
+    return { ok: false, note: "地图没有有效边界（框不出范围）", anchor: null };
+  }
+  const x = Math.round(request.x);
+  const y = Math.round(request.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { ok: false, note: "坐标里有非数字", anchor: null };
+  }
+  if (x < bounds.x0 || x > bounds.x1 || y < bounds.y0 || y > bounds.y1) {
+    return {
+      ok: false,
+      note:
+        `这个点落在框定的那一块之外（${String(bounds.x0)},${String(bounds.y0)} → ` +
+        `${String(bounds.x1)},${String(bounds.y1)}）`,
+      anchor: null,
+    };
+  }
+  // ② 事件必须真实存在（清单来自 world/timeline.yaml）
+  const timelineSnapshot = await gateway.readDoc(TIMELINE_PATH).catch(() => null);
+  if (timelineSnapshot === null) {
+    return { ok: false, note: "项目还没有世界时间线（world/timeline.yaml）⇒ 无从挂事件", anchor: null };
+  }
+  let eventTitle: string | null = null;
+  try {
+    const event = parseTimelineFile(timelineSnapshot.content).events.find(
+      (item) => item.id === request.eventRef,
+    );
+    eventTitle = event?.title ?? null;
+  } catch (err) {
+    return {
+      ok: false,
+      note: `时间线读不了：${err instanceof Error ? err.message : String(err)}`,
+      anchor: null,
+    };
+  }
+  if (eventTitle === null) {
+    return {
+      ok: false,
+      note: `时间线里没有这个事件：${request.eventRef}（锚点只能挂真实的事件）`,
+      anchor: null,
+    };
+  }
+  // id 不能撞（撞了 ⇒ 地图文件被严格解析拒绝 ⇒ 整个地图读不出来）
+  const used = new Set((def.eventAnchors ?? []).map((anchorItem) => anchorItem.id));
+  let index = 1;
+  while (used.has(`a-${String(index)}`)) index += 1;
+  const id = `a-${String(index)}`;
+  const appended = appendMapAnchor(snapshot.content, { id, eventRef: request.eventRef, x, y });
+  if (appended.content === null) {
+    return { ok: false, note: appended.reason ?? "没放成", anchor: null };
+  }
+  await gateway.writeDoc(MAP_PATH, appended.content, snapshot.hash);
+  return {
+    ok: true,
+    note: `已放锚点 ${id}：${eventTitle}（${String(x)},${String(y)}）`,
+    anchor: { id, eventRef: request.eventRef, x, y },
   };
 }
 

@@ -2141,7 +2141,8 @@ describe("放标注（R140）：选一个地点 ⇒ 在图上点一下 ⇒ 落�
   it("地图面板给作者一个**放标注**的入口（真的调 map.createMarker，不是只画个点）", () => {
     expect(panel, "面板里没有「放标注」这个入口").toContain("放标注");
     expect(panel, "没有调用 map.createMarker").toContain("map.createMarker(");
-    expect(panel, "放标注的按钮没有绑上").toMatch(/onClick=\{togglePlacing\}/);
+    // R142：放置分两种（地点标注 / 事件锚点）⇒ 按钮带上**种类**
+    expect(panel, "放标注的按钮没有绑上").toMatch(/onClick=\{\(\) => togglePlacing\("marker"\)\}/);
   });
 
   it("可选的地点**来自真源**（只给 location 类实体，地图上放的是地点不是事件）", () => {
@@ -2155,7 +2156,7 @@ describe("放标注（R140）：选一个地点 ⇒ 在图上点一下 ⇒ 落�
     expect(panel, "没有十字光标").toContain("map-place-cursor");
     // 认**绑定**（覆盖层真的接了键盘），不是"文件里定义过这个函数"
     expect(panel, "覆盖层没有接键盘").toMatch(/onKeyDown=\{onPlaceKeyDown\}/);
-    expect(panel, "回车没落点").toMatch(/event\.key === "Enter"[\s\S]{0,120}placeMarkerAt/);
+    expect(panel, "回车没落点").toMatch(/event\.key === "Enter"[\s\S]{0,120}placeAt/);
   });
 
   it("写盘走 **wrapWrite**（真源写 ⇒ 索引要刷、上一轮结论要置脏）", () => {
@@ -2165,6 +2166,42 @@ describe("放标注（R140）：选一个地点 ⇒ 在图上点一下 ⇒ 落�
   it("引擎只**追加**那一行（不重排整个文件 ⇒ 作者的标注顺序不变）", () => {
     expect(engine, "引擎里没有追加标注这个函数").toContain("export function appendMapMarker");
     expect(ops, "主进程没有用引擎的追加函数").toContain("appendMapMarker(snapshot.content");
+  });
+});
+
+/**
+ * 放事件锚点（R142）：作者选一个**事件** ⇒ 在图上点一下 ⇒ 落一个锚点。
+ *
+ * 口径回源 K08 §3.8：事件可挂坐标 ⇒ 选事件能定位到地图上。
+ * R131 之后锚点只能**手写**在 map.yaml 里 ⇒ 这一轮把它交给作者动手。
+ */
+describe("放事件锚点（R142）：选一个事件 ⇒ 在图上点一下 ⇒ 落一个锚点", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const ipc = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "ipc.ts"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+  const engine = readFileSync(join(ROOT, "packages", "@yushu", "world-engine", "src", "world-map.ts"), "utf8");
+
+  it("地图面板给作者一个**放锚点**的入口（真的调 map.createAnchor，不是只画个预览）", () => {
+    expect(panel, "面板里没有「放锚点」这个入口").toContain("放锚点");
+    expect(panel, "没有调用 map.createAnchor").toContain("map.createAnchor(");
+    expect(panel, "放锚点的按钮没有绑上").toMatch(/onClick=\{\(\) => togglePlacing\("anchor"\)\}/);
+  });
+
+  it("事件清单来自**真源**（world/timeline.yaml ⇒ 锚点只能挂真实的事件）", () => {
+    expect(ops, "主进程没有读时间线").toContain("TIMELINE_PATH");
+    expect(ops, "地图载荷没有带事件清单").toMatch(/events = parseTimelineFile/);
+    // 认**渲染那一处**（下拉的选项是从 map.events 画出来的）——
+    // 只认"文件里出现过 map.events"太弱（按钮的 disabled 判断里也有这几个字 ⇒ 照样绿）
+    expect(panel, "下拉的选项不是从真源事件清单画的").toMatch(/map\.events\.map\(\(event\)/);
+  });
+
+  it("写盘走 **wrapWrite**（真源写 ⇒ 索引要刷、上一轮结论要置脏）", () => {
+    expect(ipc, "放锚点没有走 wrapWrite").toMatch(/CHANNELS\.worldMapCreateAnchor[\s\S]{0,200}wrapWrite/);
+  });
+
+  it("引擎只**追加**那一行（不重排整个文件 ⇒ 作者自己写的锚点顺序不变）", () => {
+    expect(engine, "引擎里没有追加锚点这个函数").toContain("export function appendMapAnchor");
+    expect(ops, "主进程没有用引擎的追加函数").toContain("appendMapAnchor(snapshot.content");
   });
 });
 

@@ -7144,6 +7144,116 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 104,
+    title: '放事件锚点：选一个事件 ⇒ 在图上点一下 ⇒ 盘上多一行，其余原样（R142）',
+    file: 'step104-place-anchor.png',
+    body: String.raw`
+      // 这一步证 R142：**放事件锚点**（K08 §3.8：事件可挂坐标 ⇒ 选事件能定位到地图上）。
+      // R131 之后锚点只能手写在 map.yaml 里 ⇒ 这一轮交给作者动手。
+      //
+      // 断的是三件事：
+      // ① 盘上**多了一行**锚点（id / 绑的事件 / 落点都对），**别的行一个字都没动**；
+      // ② 新锚点**画出来了**；
+      // ③ 下拉里的事件**来自真源**（world/timeline.yaml）。
+      const timelineYaml = [
+        'apiVersion: yushu.timeline/v1',
+        'anchor_event: ev-map',
+        'calendars:',
+        '  - {id: default, label: 元年, offset: 0}',
+        'timelines:',
+        '  - {id: main, anchor_event: ev-map, calendar: default, scale: numeric, events: [ev-map]}',
+        'events:',
+        '  - {id: ev-map, title: 玄元立国, year: 0, timeline: main, participants: [], causes: [], effects: []}',
+        '',
+      ].join('\n');
+      const currentTimeline = await window.yushu.doc.read('world/timeline.yaml').catch(() => null);
+      await window.yushu.doc.write(
+        'world/timeline.yaml',
+        timelineYaml,
+        currentTimeline === null ? undefined : currentTimeline.hash,
+      );
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        '# 作者自己写的注释（放锚点之后应当原样留着）',
+        'base_image: world/assets/map/base.png',
+        'base_size: {width: 1000, height: 700}',
+        'bounds: [[0, 0], [1000, 700]]',
+        'layers: [place, event]',
+        '',
+      ].join('\n');
+      const currentMap = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      await window.yushu.doc.write('world/map.yaml', yaml, currentMap === null ? undefined : currentMap.hash);
+
+      await tab('规则');
+      await tab('世界观档案');
+      const anchorBtn = await waitFor(
+        () => [...document.querySelectorAll('.map-panel button')]
+          .find((b) => String(b.textContent || '').trim() === '放锚点') || null,
+        8000,
+      );
+      if (!anchorBtn) return { ok: false, note: '地图面板没有「放锚点」这个入口' };
+      anchorBtn.click();
+      await sleep(500);
+      const select = await waitFor(() => document.querySelector('.map-panel .map-place-select') || null, 3000);
+      if (!select) return { ok: false, note: '放锚点模式里没有事件下拉' };
+      const options = [...select.querySelectorAll('option')].map((o) => String(o.value || '')).filter((v) => v !== '');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, 'ev-map');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(300);
+      const overlay = await waitFor(() => document.querySelector('.map-panel .map-place-overlay') || null, 3000);
+      if (!overlay) return { ok: false, note: '放锚点模式里没有那个覆盖层（点一下落不了）' };
+      const svg = document.querySelector('.map-panel .map-svg');
+      const ctm = svg ? svg.getScreenCTM() : null;
+      if (!ctm) return { ok: false, note: '拿不到画布的坐标变换' };
+      const pt = svg.createSVGPoint();
+      pt.x = 700;
+      pt.y = 500;
+      const at = pt.matrixTransform(ctm);
+      overlay.dispatchEvent(new MouseEvent('click', {
+        clientX: at.x,
+        clientY: at.y,
+        bubbles: true,
+        cancelable: true,
+      }));
+      await sleep(900);
+
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const content = after.content;
+      const beforeLines = yaml.split('\n');
+      const afterLines = content.split('\n');
+      const othersOk =
+        content.indexOf('# 作者自己写的注释（放锚点之后应当原样留着）') >= 0 &&
+        content.indexOf('bounds: [[0, 0], [1000, 700]]') >= 0;
+      const added = afterLines.filter((line) => line.indexOf('event_ref: ev-map') >= 0);
+      const onlyOne = added.length === 1;
+      // 落点：点击位置经「屏幕 ↔ 用户坐标」往返有零点几像素误差 ⇒ 容差 1 像素
+      const spot = /x: (\d+), y: (\d+)/.exec(added[0] || '');
+      const px = spot ? Number(spot[1]) : -1;
+      const py = spot ? Number(spot[2]) : -1;
+      const atSpot = px === 700 && Math.abs(py - 500) <= 1;
+      const drawn = document.querySelector('.map-panel .map-anchor[data-event="ev-map"]') !== null;
+      // 证据要看得见：把地图面板滚到画面中间
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+
+      return {
+        // 行数：文件原本**没有 event_anchors 段**时，引擎会新建一段（+2 行）；
+        // 已有段时只追加那一行（+1 行）⇒ 两种都算对，关键是"作者那些行一个字都没动"（othersOk）
+        ok: atSpot && othersOk && onlyOne && afterLines.length >= beforeLines.length + 1 && drawn,
+        note: '盘上多了一行=' + String(atSpot) + '（新增行数=' + String(added.length) +
+          '，落点=' + String(px) + ',' + String(py) + '（目标 700,500，容差 1px）' +
+          '，总行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) + '）' +
+          '；别的行原样=' + String(othersOk) +
+          '；事件下拉里的选项=' + String(options.length) + ' 个（来自真源）' +
+          '；新锚点画出来了=' + String(drawn),
+      };
+    `,
+  },
 ];
 
 /**
