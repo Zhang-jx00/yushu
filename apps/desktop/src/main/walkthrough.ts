@@ -7586,6 +7586,50 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 108,
+    title: '起源工作台：一句话开局（入口是主角）+ 进度看得见（R146）',
+    file: 'step108-genesis-kickoff.png',
+    body: String.raw`
+      // 这一步证 R146 的三件事（学 codex / trae SOLO / zcode 那类 AI 工具的主页）：
+      // ① **入口是主角**：作者最卡的是"从哪开始" ⇒ 首屏有一句话的入口 + 几个快捷起点；
+      // ② 那句话**真的接上了表单**（填进当前步的必填字段，不是摆设）；
+      // ③ **只填进表单，不自动保存**（真源只收作者确认过的）⇒ 盘上的卡数一个字都不多。
+      await tab('起源工作台');
+      const kickoff = await waitFor(() => document.querySelector('.genesis-kickoff input') || null, 8000);
+      if (!kickoff) return { ok: false, note: '起源工作台没有「一句话开局」的输入框' };
+      const phrase = '混沌中第一缕灵光开天，天柱断裂，碎片坠为人间九城';
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(kickoff, phrase);
+      kickoff.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(250);
+      const useBtn = [...document.querySelectorAll('.genesis-kickoff button')]
+        .find((b) => String(b.textContent || '').indexOf('用这句话开局') >= 0);
+      if (!useBtn) return { ok: false, note: '没有「用这句话开局」这个按钮' };
+      const cardsBefore = (await window.yushu.card.list()).length;
+      useBtn.click();
+      await sleep(500);
+      const field = document.querySelector('.genesis .step-form textarea') || document.querySelector('.genesis .step-form input');
+      const filled = field ? String(field.value || '') : '';
+      const filledOk = filled.indexOf(phrase) >= 0;
+      const cardsAfter = (await window.yushu.card.list()).length;
+      const notSaved = cardsAfter === cardsBefore;
+      // 进度看得见（role=progressbar 且带 aria-valuenow）
+      const bar = document.querySelector('.genesis-progress-bar[role="progressbar"]');
+      const progressOk = bar !== null && bar.getAttribute('aria-valuenow') !== null;
+      // 快捷起点在（作者不用自己想）
+      const starters = document.querySelectorAll('.genesis-starter').length;
+      const panelEl = document.querySelector('.genesis');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: filledOk && notSaved && progressOk && starters >= 4,
+        note: '一句话接上了表单=' + String(filledOk) + '（填进的是：' + filled.slice(0, 24) + '…）' +
+          '；只填没保存=' + String(notSaved) + '（卡数 ' + cardsBefore + '→' + cardsAfter + '）' +
+          '；进度条在=' + String(progressOk) + '；快捷起点=' + String(starters) + ' 个',
+      };
+    `,
+  },
 ];
 
 /**

@@ -2494,3 +2494,45 @@ describe("UI 重构五批总复核（R119）：空/错态只留一个信号 + �
     expect(rows.join("\n"), "登记表里还留着 `inbox`（R119 已回收：它没有落点了）").not.toContain("inbox");
   });
 });
+
+/**
+ * R146：**起源工作台首屏**（学 codex / trae SOLO / zcode 这类 AI 工具的主页）。
+ *
+ * 参考站实地看到的三条做法，映射到御书进项目后的第一屏：
+ * ① **入口是主角**：AI 工具的主页都是"一个入口 + 几个快捷动作"，
+ *    不是一堆表单；作者最卡的恰恰是"从哪开始" ⇒ 给一句「一句话开局」+ 四个常用起点；
+ * ② **进度常驻可见**："我建了多少、还差多少"不该只靠一行小字 ⇒ 真进度条（role=progressbar）；
+ * ③ **不替作者做决定**：那句话**只填进表单**，不自动保存
+ *    （与本项目"候选要作者显式采纳才写库"的口径一致）。
+ */
+describe("起源工作台首屏（R146）：入口是主角 + 进度看得见", () => {
+  const genesis = readFileSync(join(VIEW_ROOT, "views", "GenesisView.tsx"), "utf8");
+
+  it("有**一句话开局**的入口（一个大输入 + 一个「用这句话开局」按钮）", () => {
+    // **认精确的类名**：`toContain("genesis-kickoff")` 会被 `genesis-kickoff-x` 蒙混过关
+    // （子串匹配 = 恒绿，变异 M1 就是这么没抓到的）⇒ 用带引号的正则。
+    expect(genesis, "没有一句话开局这一块").toMatch(/className="genesis-kickoff"/);
+    expect(genesis, "没有「用这句话开局」这个动作").toContain("用这句话开局");
+    expect(genesis, "输入框没接上状态").toContain("setKickoff");
+  });
+
+  it("那句话**只填进表单，不自动保存**（真源只收作者确认过的）", () => {
+    const block = /const fillKickoff = \(\) => \{[\s\S]*?\n  \};/.exec(genesis)?.[0] ?? "";
+    expect(block, "没找到 fillKickoff").not.toBe("");
+    expect(block, "填完就自己保存了（作者还没确认）").not.toMatch(/api\(\)\.card\.write/);
+    expect(block, "没填进表单字段").toMatch(/setValue\(target\.key, text\)/);
+  });
+
+  it("有四个**快捷起点**（作者不用自己想）", () => {
+    const starters = /KICKOFF_STARTERS:[\s\S]*?\n\];/.exec(genesis)?.[0] ?? "";
+    expect(starters, "没有快捷起点清单").not.toBe("");
+    expect((starters.match(/label:/g) ?? []).length, "快捷起点不够四个").toBeGreaterThanOrEqual(4);
+  });
+
+  it("**进度条**看得见（role=progressbar + 目标张数）", () => {
+    expect(genesis, "没有进度条").toMatch(/className="genesis-progress-bar"/);
+    expect(genesis, "进度条不是 role=progressbar（读屏软件读不到）").toContain('role="progressbar"');
+    expect(genesis, "进度条没有 aria-valuenow").toContain("aria-valuenow={cards.length}");
+    expect(genesis, "没有目标张数").toContain("GOAL_CARDS");
+  });
+});

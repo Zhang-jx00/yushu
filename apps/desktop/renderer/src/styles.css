@@ -1095,12 +1095,86 @@ h4 {
   min-height: 0;
 }
 
+/* R146 起源工作台首屏：**一句话开局 + 进度条**
+   （学 AI 工具的主页：**入口是主角**、**进度常驻可见**）。
+   全部用既有令牌 —— 新样式不许引入 px 字面量（CSS 令牌棘轮 R83）。 */
+.genesis-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-4);
+}
+
+.genesis-progress-bar {
+  flex: 1;
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.genesis-progress-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  /* **不过渡 width** —— 它是布局属性，每一帧都重排 ⇒ 掉帧（R124 那条门禁会拦）。
+     进度条本来就是低频变化，不需要动画。 */
+}
+
+.genesis-kickoff {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-6);
+  background: var(--panel-2);
+  padding: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+
+.genesis-kickoff-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.genesis-kickoff-row {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.genesis-kickoff-row input {
+  flex: 1;
+}
+
+.genesis-kickoff-starts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.genesis-starter {
+  padding: var(--space-1) var(--space-5);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color var(--motion-state) linear, border-color var(--motion-state) linear;
+}
+
+.genesis-starter:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
 .genesis aside {
   border-right: 1px solid var(--border);
   padding: 12px;
   overflow: auto;
-  min-height: 0;
-}
+  min-height: 0;}
 
 /* R124：只命中**直接子级**。原先写的是后代选择器（`.genesis section`）⇒
    列里**嵌套的那个 section** 也被套上这组规则（flex 列 + min-height:0）⇒

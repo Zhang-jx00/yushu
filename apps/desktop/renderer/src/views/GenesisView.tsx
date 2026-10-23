@@ -4,6 +4,21 @@ import type { CardSummary, WorldSummary } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { GENESIS_STEPS, buildCardBody } from "../genesis-steps";
 
+/** 设定卡目标张数（M1 验收基线：≥5 张） */
+const GOAL_CARDS = 5;
+
+/**
+ * **快捷起点**（R146）：作者最卡的不是"填表"，是"从哪开始"。
+ * 四个起点各给一句**能直接改**的样板文字 ⇒ 点一下落到那句话的输入框里，
+ * 由作者改完再填进表单（**不自动保存**——真源只接受作者确认过的东西）。
+ */
+const KICKOFF_STARTERS: Array<{ label: string; text: string }> = [
+  { label: "起一个事件", text: "混沌中第一缕灵光开天，天柱断裂，碎片坠为人间九城" },
+  { label: "起一个人物", text: "守着一盏不肯灭的旧灯的少年，把自己的名字押进了天柱裂缝" },
+  { label: "起一场冲突", text: "两族立约百年，盟书却被换成了同一枚血印" },
+  { label: "起一座城", text: "潮水每天退到城外三百步，退潮时能看见沉在海底的旧钟" },
+];
+
 /** 起源工作台（T1-6）：引导式问卷脚手架——逐步建档、可跳过、可稍后补充 */
 export function GenesisView() {
   const [world, setWorld] = useState<WorldSummary | null>(null);
@@ -15,6 +30,8 @@ export function GenesisView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** R146：一句话开局（作者还没想好怎么开局的草稿） */
+  const [kickoff, setKickoff] = useState("");
 
   const refresh = useCallback(async () => {
     const [worldSummary, cardList] = await Promise.all([
@@ -81,12 +98,45 @@ export function GenesisView() {
     setStepIndex((index) => Math.min(index + 1, GENESIS_STEPS.length - 1));
   };
 
+  /**
+   * R146：把那句话填进**当前步的必填字段**。
+   * **不自动保存** —— 真源只接受作者确认过的东西（与 AI 候选化的口径一致）。
+   */
+  const fillKickoff = () => {
+    const text = kickoff.trim();
+    if (text === "") return;
+    const target = step.fields.find((field) => field.required) ?? step.fields[0];
+    if (!target) return;
+    setValue(target.key, text);
+    setNotice(`已填进「${target.label}」—— 改一改再保存也行`);
+  };
+
+  const kickoffTargetLabel = step.fields.find((field) => field.required)?.label ?? "名称";
+  const progressPct = Math.min(100, Math.round((cards.length / GOAL_CARDS) * 100));
+
   return (
     <div className="genesis">
       <aside>
         <div className="panel-title">
           <span className="muted">世界构建层级</span>
           <span className="muted">已建卡 {cards.length} 张</span>
+        </div>
+        {/* R146：**进度看得见**（AI 工具的主页都有上下文/进度条 ——
+            "我建了多少、还差多少"不该只靠一行小字）。 */}
+        <div className="genesis-progress">
+          <div
+            className="genesis-progress-bar"
+            role="progressbar"
+            aria-label="设定卡进度"
+            aria-valuemin={0}
+            aria-valuemax={GOAL_CARDS}
+            aria-valuenow={cards.length}
+          >
+            <span style={{ width: `${String(progressPct)}%` }} />
+          </div>
+          <span className="muted">
+            设定卡 {cards.length} / {GOAL_CARDS}
+          </span>
         </div>
         <ol className="stepper">
           {GENESIS_STEPS.map((item, index) => {
@@ -131,6 +181,45 @@ export function GenesisView() {
         <div className="wizard-head">
           <h3>{step.title}</h3>
           <span className="muted">{step.intro}</span>
+        </div>
+
+        {/* R146：**一句话开局**（学 AI 工具的主页：**入口是主角**，不是一堆表单）。
+            作者最卡的是"从哪开始" ⇒ 给一个一句话的入口 + 四个常用起点；
+            它**只是把这句话填进下面这一步的必填字段**，不自动保存（真源只收作者确认过的）。 */}
+        <div className="genesis-kickoff">
+          <div className="genesis-kickoff-head">
+            <strong>这本书从哪里开始？</strong>
+            <span className="muted">写一句话就行 —— 它会自动填进下面这一步的「{kickoffTargetLabel}」</span>
+          </div>
+          <div className="genesis-kickoff-row">
+            <input
+              value={kickoff}
+              placeholder="如：混沌中第一缕灵光开天，天柱断裂化为九城"
+              onChange={(event) => setKickoff(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  fillKickoff();
+                }
+              }}
+            />
+            <button type="button" className="primary" onClick={fillKickoff} disabled={kickoff.trim() === ""}>
+              用这句话开局
+            </button>
+          </div>
+          <div className="genesis-kickoff-starts">
+            {KICKOFF_STARTERS.map((starter) => (
+              <button
+                key={starter.label}
+                type="button"
+                className="genesis-starter"
+                onClick={() => setKickoff(starter.text)}
+                title={starter.text}
+              >
+                {starter.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {layerClosed ? (
