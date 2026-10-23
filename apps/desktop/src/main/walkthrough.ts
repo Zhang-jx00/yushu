@@ -6936,6 +6936,115 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 102,
+    title: '放标注：选一个地点 ⇒ 在图上点一下 ⇒ 盘上多一行，其余原样（R140）',
+    file: 'step102-place-marker.png',
+    body: String.raw`
+      // 这一步证 R140：**放标注**（口径回源 K08 §5「上传底图 → 框定 bounds → **放 marker** → 绑定实体」）。
+      // 作者选一个**地点实体** ⇒ 在图上点一下 ⇒ 落一个标注。
+      //
+      // 断的是三件事：
+      // ① 盘上**多了一行**标注（id / 绑的地点 / 落点坐标都对），**别的行一个字都没动**；
+      // ② 新标注**画出来了**（不是写进去了但看不见）；
+      // ③ 地点清单来自**真源**（面板里的下拉列的就是项目里的地点）。
+      const cardId = 'loc-map-probe';
+      const cardPath = 'world/cards/location/' + cardId + '.md';
+      const card = { id: cardId, type: 'location', name: '天启_probe', layer: 'geography' };
+      const cardBody = '临时地点卡：只为让世界地图有一个可放的地点。';
+      const existingCard = await window.yushu.card.read(cardPath).catch(() => null);
+      if (existingCard === null) await window.yushu.card.write({ path: cardPath, card: card, body: cardBody });
+      else await window.yushu.card.write({ path: cardPath, card: card, body: cardBody, baseHash: existingCard.hash });
+
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        '# 作者自己写的注释（放标注之后应当原样留着）',
+        'base_image: world/assets/map/base.png',
+        'base_size: {width: 1000, height: 700}',
+        'bounds: [[0, 0], [1000, 700]]',
+        'layers: [place]',
+        'markers:',
+        '  - {id: m-1, layer: place, entity_ref: ' + cardId + ', x: 250, y: 175}',
+        '',
+      ].join('\n');
+      const currentMap = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      await window.yushu.doc.write('world/map.yaml', yaml, currentMap === null ? undefined : currentMap.hash);
+
+      // 面板只在挂载时取数 ⇒ 先去别的页再回来，强制重挂载（R68 的教训）
+      await tab('规则');
+      await tab('世界观档案');
+      const placeBtn = await waitFor(
+        () => [...document.querySelectorAll('.map-panel button')]
+          .find((b) => String(b.textContent || '').trim() === '放标注') || null,
+        8000,
+      );
+      if (!placeBtn) return { ok: false, note: '地图面板没有「放标注」这个入口' };
+      placeBtn.click();
+      await sleep(400);
+      // 选那个地点（下拉里的选项来自真源的地点清单）
+      const select = await waitFor(() => document.querySelector('.map-panel .map-place-select') || null, 3000);
+      if (!select) return { ok: false, note: '放标注模式里没有地点下拉' };
+      const options = [...select.querySelectorAll('option')].map((o) => String(o.value || '')).filter((v) => v !== '');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, cardId);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(300);
+      // 在图上点一下（用户坐标 600,400 ⇒ 底图像素也是 600,400，因为框从 0 开始）
+      const overlay = await waitFor(() => document.querySelector('.map-panel .map-place-overlay') || null, 3000);
+      if (!overlay) return { ok: false, note: '放标注模式里没有那个覆盖层（点一下落不了）' };
+      const svg = document.querySelector('.map-panel .map-svg');
+      const ctm = svg ? svg.getScreenCTM() : null;
+      if (!ctm) return { ok: false, note: '拿不到画布的坐标变换' };
+      const pt = svg.createSVGPoint();
+      pt.x = 600;
+      pt.y = 400;
+      const at = pt.matrixTransform(ctm);
+      overlay.dispatchEvent(new MouseEvent('click', {
+        clientX: at.x,
+        clientY: at.y,
+        bubbles: true,
+        cancelable: true,
+      }));
+      await sleep(900);
+
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const content = after.content;
+      const beforeLines = yaml.split('\n');
+      const afterLines = content.split('\n');
+      const othersOk =
+        content.indexOf('# 作者自己写的注释（放标注之后应当原样留着）') >= 0 &&
+        content.indexOf('bounds: [[0, 0], [1000, 700]]') >= 0 &&
+        content.indexOf('x: 250, y: 175') >= 0;
+      const added = afterLines.filter(
+        (line) => line.indexOf('id: m-2') >= 0 && line.indexOf('entity_ref: ' + cardId) >= 0,
+      );
+      const onlyOne = added.length === 1;
+      // 落点：点击位置经「屏幕 ↔ 用户坐标」往返会有**零点几像素**的误差 ⇒ 容差 1 像素
+      // （这不是放宽判据：画布有 700 像素高，差 1 像素是同一个点）
+      const spot = /x: (\d+), y: (\d+)/.exec(added[0] || '');
+      const px = spot ? Number(spot[1]) : -1;
+      const py = spot ? Number(spot[2]) : -1;
+      const atSpot = px === 600 && Math.abs(py - 400) <= 1;
+      // 新标注**画出来了**（m-2 在图上）
+      const drawn = document.querySelector('.map-panel .map-marker[data-marker="m-2"]') !== null;
+      // 证据要看得见：把地图面板滚到画面中间
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'center' });
+      await sleep(300);
+
+      return {
+        ok: atSpot && othersOk && onlyOne && beforeLines.length + 1 === afterLines.length && drawn,
+        note: '盘上多了一行=' + String(atSpot) + '（新增行数=' + String(added.length) +
+          '，落点=' + String(px) + ',' + String(py) + '（目标 600,400，容差 1px）' +
+          '，总行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) + '）' +
+          '；别的行原样=' + String(othersOk) +
+          '；地点下拉里的选项=' + String(options.length) + ' 个（来自真源）' +
+          '；新标注画出来了=' + String(drawn),
+      };
+    `,
+  },
 ];
 
 /**

@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeBounds, parseMapFile, projectWorldMap, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
+import { appendMapMarker, normalizeBounds, parseMapFile, projectWorldMap, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
 import type { IndexEntityRow } from "../src/index-input.js";
 
 /**
@@ -138,6 +138,61 @@ describe("世界地图投影（R114 引擎侧）", () => {
     const result = setMapMarkerPosition(text, "m-a", { x: 10, y: 20 });
     expect(result.content).toBeNull();
     expect(result.reason).toContain("认不出");
+  });
+
+  it("追加标注（R140）⇒ **只加那一行**（放在 markers 段的末尾），其余行原样", () => {
+    const text = [
+      "# 作者自己写的注释",
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 1400]]",
+      "markers:",
+      "  - {id: m-a, layer: place, entity_ref: loc-a, x: 100, y: 200}",
+      "layers: [place]",
+      "",
+    ].join("\n");
+    const result = appendMapMarker(text, { id: "m-new", layer: "place", entityRef: "loc-b", x: 321, y: 654 });
+    expect(result.reason).toBeNull();
+    const content = result.content as string;
+    // 只多了那一行，且**排在 markers 段的末尾**（作者自己写的标注顺序不变）
+    const before = text.split("\n");
+    const after = content.split("\n");
+    expect(after.length).toBe(before.length + 1);
+    // 去掉新增的那一行之后，其余**逐字**一样（插入会让后面的行号整体后移 ⇒ 不能按行号比）
+    const added = after.filter((line) => line.includes("id: m-new"));
+    expect(added).toHaveLength(1);
+    expect(after.filter((line) => !line.includes("id: m-new"))).toEqual(before);
+    expect(added[0]).toContain("entity_ref: loc-b");
+    expect(added[0]).toContain("x: 321, y: 654");
+    // 注释 / bounds / 图层原样
+    expect(content).toContain("# 作者自己写的注释");
+    expect(content).toContain("bounds: [[0, 0], [1000, 1400]]");
+    expect(content).toContain("layers: [place]");
+    // 新行在 `layers:` 之前（= markers 段的末尾）
+    expect(content.indexOf("id: m-new")).toBeLessThan(content.indexOf("layers:"));
+    // **并且排在作者自己那条标注之后**（作者写的顺序不变 ⇒ 钉住"追加"而不是"插到段首"）
+    expect(content.indexOf("id: m-a")).toBeLessThan(content.indexOf("id: m-new"));
+  });
+
+  it("追加标注：文件里还没有 markers 段 ⇒ 在末尾**新起一段**（不猜作者想放哪）", () => {
+    const text = ["apiVersion: map-v1", "id: map-world", "crs: simple", "bounds: [[0, 0], [1000, 1400]]", ""].join("\n");
+    const result = appendMapMarker(text, { id: "m-new", layer: "place", entityRef: "loc-b", x: 10, y: 20 });
+    const content = result.content as string;
+    expect(content).toContain("markers:");
+    expect(content).toContain("id: m-new");
+    expect(content).toContain("bounds: [[0, 0], [1000, 1400]]");
+  });
+
+  it("追加标注之后，文件**仍能严格解析**（生成的那一行是合法 YAML ⇒ 投影得出那个点）", () => {
+    const text = ["apiVersion: map-v1", "id: map-world", "crs: simple", "bounds: [[0, 0], [1000, 1400]]", ""].join("\n");
+    const result = appendMapMarker(text, { id: "m-new", layer: "place", entityRef: "loc-a", x: 100, y: 200 });
+    const def = parseMapFile(result.content as string);
+    const markers = def.markers ?? [];
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.id).toBe("m-new");
+    expect(markers[0]?.x).toBe(100);
+    expect(markers[0]?.entityRef).toBe("loc-a");
   });
 
   it("两种 bounds 写法等价（{x0,y0,x1,y1} 与 K08 里的 [[x0,y0],[x1,y1]]）", () => {

@@ -2123,6 +2123,49 @@ describe("挪标注（R139）：拖到新位置 ⇒ 只改那一个标注的 x /
 });
 
 /**
+ * 放标注（R140）：作者选一个**地点实体** ⇒ 在图上点一下 ⇒ 落一个标注。
+ *
+ * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」。
+ *
+ * 判据认**具体的形状**（哪个按钮、哪个调用、十字光标的类名、哪条通道走 wrapWrite）。
+ */
+describe("放标注（R140）：选一个地点 ⇒ 在图上点一下 ⇒ 落一个标注", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const ipc = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "ipc.ts"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "map-ops.ts"), "utf8");
+  const engine = readFileSync(join(ROOT, "packages", "@yushu", "world-engine", "src", "world-map.ts"), "utf8");
+
+  it("地图面板给作者一个**放标注**的入口（真的调 map.createMarker，不是只画个点）", () => {
+    expect(panel, "面板里没有「放标注」这个入口").toContain("放标注");
+    expect(panel, "没有调用 map.createMarker").toContain("map.createMarker(");
+    expect(panel, "放标注的按钮没有绑上").toMatch(/onClick=\{togglePlacing\}/);
+  });
+
+  it("可选的地点**来自真源**（只给 location 类实体，地图上放的是地点不是事件）", () => {
+    expect(ops, "没有按 location 类筛地点").toMatch(/entity\.type === "location"/);
+    // 认**渲染那一处**（下拉的选项是从 map.places 画出来的）——
+    // 只认"文件里出现过 map.places"太弱（按钮的 disabled 判断里也有这几个字 ⇒ 照样绿）
+    expect(panel, "下拉的选项不是从真源地点清单画的").toMatch(/map\.places\.map\(\(place\)/);
+  });
+
+  it("放标注也要**键盘可达**（十字光标 + 方向键 + 回车）——点一下不是唯一的路", () => {
+    expect(panel, "没有十字光标").toContain("map-place-cursor");
+    // 认**绑定**（覆盖层真的接了键盘），不是"文件里定义过这个函数"
+    expect(panel, "覆盖层没有接键盘").toMatch(/onKeyDown=\{onPlaceKeyDown\}/);
+    expect(panel, "回车没落点").toMatch(/event\.key === "Enter"[\s\S]{0,120}placeMarkerAt/);
+  });
+
+  it("写盘走 **wrapWrite**（真源写 ⇒ 索引要刷、上一轮结论要置脏）", () => {
+    expect(ipc, "放标注没有走 wrapWrite").toMatch(/CHANNELS\.worldMapCreateMarker[\s\S]{0,200}wrapWrite/);
+  });
+
+  it("引擎只**追加**那一行（不重排整个文件 ⇒ 作者的标注顺序不变）", () => {
+    expect(engine, "引擎里没有追加标注这个函数").toContain("export function appendMapMarker");
+    expect(ops, "主进程没有用引擎的追加函数").toContain("appendMapMarker(snapshot.content");
+  });
+});
+
+/**
  * `place_ref` 的孤儿体检（R134）：引用了**不存在**的地点实体，要有一条**体检结论**点名。
  *
  * 引擎不认地点实体（它只管时间）⇒ 这条判定只能在**桌面接线**这一层做

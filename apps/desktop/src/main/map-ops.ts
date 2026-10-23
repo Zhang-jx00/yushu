@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import {
   MAP_PATH,
   appendMapBase,
+  appendMapMarker,
   checkStructureFromSources,
   normalizeBounds,
   parseMapFile,
@@ -12,6 +13,8 @@ import {
 } from "@yushu/world-engine";
 import type {
   WorldMapBasePayload,
+  WorldMapCreateMarkerRequestPayload,
+  WorldMapCreateMarkerResult,
   WorldMapSetBoundsRequestPayload,
   WorldMapSetBoundsResult,
   WorldMapSetMarkerRequestPayload,
@@ -59,6 +62,7 @@ export async function worldMapView(
       canvas: null,
       baseSize: null,
       markers: [],
+      places: [],
       anchors: [],
       layers: [],
       findings: [],
@@ -82,6 +86,7 @@ export async function worldMapView(
       canvas: null,
       baseSize: null,
       markers: [],
+      places: [],
       anchors: [],
       layers: [],
       findings: [],
@@ -131,6 +136,13 @@ export async function worldMapView(
     bounds === null ? null : { width: bounds.x1 - bounds.x0, height: bounds.y1 - bounds.y0 };
   // 底图**声明**的像素尺寸（框定模式下画整张图 ⇒ 拖出来的坐标就是底图像素坐标）
   const baseSize = def.baseSize ?? null;
+  // **可放的地点**（R140：放标注时作者要选一个）——只给 location 类的实体，按名字排（同名按 id）
+  const places = structure.entities
+    .filter((entity) => entity.type === "location")
+    .map((entity) => ({ id: entity.id, name: entity.name }))
+    .sort((a, b) =>
+      a.name === b.name ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) : a.name < b.name ? -1 : 1,
+    );
 
   const note = [
     `${markers.length} 个标注 · ${projection.layers.length} 个图层`,
@@ -147,6 +159,7 @@ export async function worldMapView(
     canvas,
     baseSize,
     markers,
+    places,
     // 事件锚点（K08 §3.8）：事件挂坐标 ⇒ 选事件能定位到地图上
     anchors: projection.anchors.map((anchor) => ({
       id: anchor.id,
@@ -591,5 +604,91 @@ export async function setMarkerPosition(
     note: `标注 ${request.markerId} 挪到 ${String(x)},${String(y)}`,
     position: { x, y },
     previous: moved.previous,
+  };
+}
+
+/**
+ * **放标注**（R140）：**写盘**——作者选一个地点实体 ⇒ 在图上点一下 ⇒ 落一个标注。
+ *
+ * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」：
+ * R135 做了「上传底图」、R138 做了「框定 bounds」、R139 做了「挪」，这一轮补上「**放**」。
+ *
+ * 四条不静默 / 不越权（与前几轮同一条纪律）：
+ * ① **只追加那一行**（别的标注、底图、bounds、图层、锚点、作者自己的注释**原样留着**）；
+ * ② **必须绑一个真实存在的地点**（K08 §3.7：标注即地点卡 ⇒ 绑一个不存在的地方 = 孤儿标注）⇒ 拒绝并点名；
+ * ③ **落点必须落在框定的那一块里**（落在外面 ⇒ 那个点看不见）⇒ 拒绝并说清范围；
+ * ④ 写盘带 baseHash ⇒ 作者在别处改过 map.yaml 时**报冲突**、不覆盖。
+ *
+ * 标注 id 由**主进程**生成（`m-<n>`，跳过已占用的）⇒ 两个标注不会撞 id
+ * （撞 id 的话地图文件会被严格解析拒绝 ⇒ 整个地图都读不出来）。
+ */
+export async function createMapMarker(
+  gateway: ProjectGateway,
+  request: WorldMapCreateMarkerRequestPayload,
+): Promise<WorldMapCreateMarkerResult> {
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) {
+    return { ok: false, note: "项目还没有世界地图（先登记底图）", marker: null };
+  }
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return {
+      ok: false,
+      note: `地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`,
+      marker: null,
+    };
+  }
+  const bounds = normalizeBounds(def.bounds).bounds;
+  if (bounds === null) {
+    return { ok: false, note: "地图没有有效边界（框不出范围）", marker: null };
+  }
+  const x = Math.round(request.x);
+  const y = Math.round(request.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { ok: false, note: "坐标里有非数字", marker: null };
+  }
+  if (x < bounds.x0 || x > bounds.x1 || y < bounds.y0 || y > bounds.y1) {
+    return {
+      ok: false,
+      note:
+        `这个点落在框定的那一块之外（${String(bounds.x0)},${String(bounds.y0)} → ` +
+        `${String(bounds.x1)},${String(bounds.y1)}）`,
+      marker: null,
+    };
+  }
+  // ② 地点必须真实存在（从**真源**直算，不碰 SQLite 索引）
+  const structure = await checkStructureFromSources(gatewayReader(gateway));
+  const place = structure.entities.find(
+    (entity) => entity.id === request.entityRef && entity.type === "location",
+  );
+  if (place === undefined) {
+    return {
+      ok: false,
+      note: `项目里没有这个地点：${request.entityRef}（标注只能绑真实的地点）`,
+      marker: null,
+    };
+  }
+  // id 不能撞（撞了 ⇒ 地图文件被严格解析拒绝 ⇒ 整个地图读不出来）
+  const used = new Set((def.markers ?? []).map((marker) => marker.id));
+  let index = 1;
+  while (used.has(`m-${String(index)}`)) index += 1;
+  const id = `m-${String(index)}`;
+  const appended = appendMapMarker(snapshot.content, {
+    id,
+    layer: "place",
+    entityRef: request.entityRef,
+    x,
+    y,
+  });
+  if (appended.content === null) {
+    return { ok: false, note: appended.reason ?? "没放成", marker: null };
+  }
+  await gateway.writeDoc(MAP_PATH, appended.content, snapshot.hash);
+  return {
+    ok: true,
+    note: `已放标注 ${id}：${place.name}（${String(x)},${String(y)}）`,
+    marker: { id, entityRef: request.entityRef, x, y },
   };
 }

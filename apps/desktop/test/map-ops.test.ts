@@ -3,9 +3,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { uploadMapBase, setMapBounds, setMarkerPosition, worldMapView } from "../src/main/map-ops.js";
+import { uploadMapBase, setMapBounds, setMarkerPosition, createMapMarker, worldMapView } from "../src/main/map-ops.js";
 import { ProjectGateway } from "../src/main/file-gateway.js";
-import { parseMapFile } from "@yushu/world-engine";
+import { parseMapFile, createSettingCard, serializeCardFile } from "@yushu/world-engine";
 
 /**
  * 底图登记（R135）：**写盘**路径的单测。
@@ -344,5 +344,103 @@ describe("挪标注（R139）：作者在图上把标注拖到新位置 ⇒ 只�
     expect(result.ok).toBe(false);
     expect(result.note).toContain("先登记底图");
     await expect(gateway.readDoc("world/map.yaml")).rejects.toThrow();
+  });
+});
+
+/**
+ * 放标注（R140）：**写盘**路径的单测。
+ *
+ * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」——
+ * R135 做了「上传底图」、R138 做了「框定 bounds」、R139 做了「挪」，这一轮补上「**放**」。
+ *
+ * 判据盯四件事：
+ * ① **只追加那一行**（别的标注、底图、bounds、注释**原样留着**）；
+ * ② **必须绑一个真实存在的地点**（否则就是孤儿标注）⇒ 拒绝并点名；
+ * ③ **落点必须落在框定的那一块里** ⇒ 拒绝且盘上不动；
+ * ④ **标注 id 不撞**（撞了 ⇒ 地图文件被严格解析拒绝 ⇒ 整个地图都读不出来）。
+ */
+describe("放标注（R140）：选一个地点 ⇒ 在图上点一下 ⇒ 落一个标注", () => {
+  const MAP_YAML = [
+    "# 作者自己写的注释",
+    "apiVersion: map-v1",
+    "id: map-world",
+    "crs: simple",
+    "base_size: {width: 1000, height: 700}",
+    "bounds: [[0, 0], [1000, 700]]",
+    "layers: [place]",
+    "markers:",
+    "  - {id: m-1, layer: place, entity_ref: loc-a, x: 250, y: 175}",
+    "",
+  ].join("\n");
+
+  /** 在项目里放一张真实的地点卡（放标注要绑真地点 ⇒ 判据得先有一个） */
+  async function putPlace(id: string, name: string): Promise<void> {
+    const card = createSettingCard({ id: id, type: "location", name: name });
+    await gateway.writeDoc(`world/cards/location/${id}.md`, serializeCardFile(card, "正文"), undefined);
+  }
+
+  /** 在项目里放一张**角色**卡（地图上放的是地点 ⇒ 绑角色要被拒绝） */
+  async function putCharacter(id: string, name: string): Promise<void> {
+    const card = createSettingCard({ id: id, type: "character", name: name });
+    await gateway.writeDoc(`world/cards/character/${id}.md`, serializeCardFile(card, "正文"), undefined);
+  }
+
+  it("落一个标注 ⇒ **只追加那一行**，别的行原样；并给出新标注的 id 与位置", async () => {
+    await putPlace("loc-b", "断桥");
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await createMapMarker(gateway, { entityRef: "loc-b", x: 400, y: 300 });
+    expect(result.ok).toBe(true);
+    expect(result.marker).toEqual({ id: "m-2", entityRef: "loc-b", x: 400, y: 300 });
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).toContain("- {id: m-2, layer: place, entity_ref: loc-b, x: 400, y: 300}");
+    // 别的行原样
+    expect(content).toContain("# 作者自己写的注释");
+    expect(content).toContain("bounds: [[0, 0], [1000, 700]]");
+    expect(content).toContain("- {id: m-1, layer: place, entity_ref: loc-a, x: 250, y: 175}");
+    // 写完的文件**仍能严格解析**（生成的那一行是合法 YAML）
+    expect(parseMapFile(content).markers).toHaveLength(2);
+  });
+
+  it("绑一个**不存在的地点** ⇒ 拒绝（否则就是孤儿标注），盘上不动", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await createMapMarker(gateway, { entityRef: "loc-zzz", x: 400, y: 300 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("loc-zzz");
+    expect(result.marker).toBeNull();
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("绑一个**非地点**的实体（角色）⇒ 拒绝（地图上放的是地点，不是角色）", async () => {
+    await putCharacter("char-x", "林渊之");
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await createMapMarker(gateway, { entityRef: "char-x", x: 400, y: 300 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("char-x");
+    expect(result.marker).toBeNull();
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("落点落在框定的那一块之外 ⇒ 拒绝并说清范围，盘上不动", async () => {
+    await putPlace("loc-b", "断桥");
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await createMapMarker(gateway, { entityRef: "loc-b", x: 5000, y: 5000 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("之外");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("标注 id **不撞**（已有 m-1 ⇒ 新的是 m-2；撞 id 地图就读不出来了）", async () => {
+    await putPlace("loc-b", "断桥");
+    await putPlace("loc-c", "落霞峰");
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const first = await createMapMarker(gateway, { entityRef: "loc-b", x: 400, y: 300 });
+    expect(first.marker?.id).toBe("m-2");
+    const second = await createMapMarker(gateway, { entityRef: "loc-c", x: 500, y: 350 });
+    expect(second.marker?.id).toBe("m-3");
+    const def = parseMapFile((await gateway.readDoc("world/map.yaml")).content);
+    expect((def.markers ?? []).map((marker) => marker.id)).toEqual(["m-1", "m-2", "m-3"]);
   });
 });

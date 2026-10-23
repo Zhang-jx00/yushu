@@ -121,6 +121,8 @@ contextBridge.exposeInMainWorld("yushu", {
     setBounds: (payload) => invoke("map:setBounds", payload),
     /** 挪标注（R139）：作者在图上把标注拖到新位置 ⇒ 写 map.yaml 里那一个标注的 x / y */
     setMarker: (payload) => invoke("map:setMarker", payload),
+    /** 放标注（R140）：作者选一个地点 ⇒ 在图上点一下 ⇒ 落一个标注（写 map.yaml 的 markers 段） */
+    createMarker: (payload) => invoke("map:createMarker", payload),
   },
   chronicle: {
     book: (payload) => invoke("chronicle:book", payload),

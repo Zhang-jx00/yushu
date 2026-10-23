@@ -86,6 +86,11 @@ export const CHANNELS = {
    * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」。
    */
   worldMapSetMarker: "map:setMarker",
+  /**
+   * 世界地图·**放标注**（R140）：**写盘**（作者选一个地点实体 ⇒ 在图上点一下 ⇒ 落一个标注）。
+   * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → **放 marker**、区域、行程线 → 绑定实体」。
+   */
+  worldMapCreateMarker: "map:createMarker",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -2942,6 +2947,25 @@ export interface WorldMapSetMarkerResult {
   previous: string[];
 }
 
+/**
+ * 放标注的请求（R140）：绑哪个地点实体 + 落在哪（**底图像素坐标**）。
+ */
+export interface WorldMapCreateMarkerRequestPayload {
+  /** 地点实体 id（K08 §3.7：标注即地点卡 ⇒ 标注必须绑一个真实存在的地点） */
+  entityRef: string;
+  x: number;
+  y: number;
+}
+
+/** 放标注的结果（R140） */
+export interface WorldMapCreateMarkerResult {
+  ok: boolean;
+  /** 给作者看的一句话（成了 / 为什么没成） */
+  note: string;
+  /** 新标注的 id 与位置（没成时为 null） */
+  marker: { id: string; entityRef: string; x: number; y: number } | null;
+}
+
 /** 底图登记的结果（R135）：**路径不出主进程**，只回项目内的相对路径与量出来的尺寸 */
 export interface WorldMapUploadBaseResult {
   /** 作者取消了（没挑文件） */
@@ -3025,6 +3049,12 @@ export interface WorldMapViewPayload {
    */
   baseSize: { width: number; height: number } | null;
   markers: WorldMapViewMarker[];
+  /**
+   * **项目里可放的地点**（R140：放标注时作者要选一个）。
+   * 放标注 = 选一个地点实体 ⇒ 在图上点一下落一个标注（K08 §3.7：标注即地点卡 ⇒ 必须绑真实地点）。
+   * 只给 **location 类**的实体（地图上放的是地点，不是事件）。
+   */
+  places: { id: string; name: string }[];
   /** 事件锚点（K08 §3.8：事件挂坐标 ⇒ 选事件能定位到地图上） */
   anchors: {
     id: string;

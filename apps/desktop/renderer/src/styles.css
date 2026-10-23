@@ -3822,6 +3822,29 @@ table,
   color: var(--muted);
 }
 
+/* ---------- R140：放标注（选一个地点 ⇒ 在图上点一下 ⇒ 落一个标注） ---------- */
+.map-place-select {
+  padding: 6px 8px;
+  border-radius: var(--radius-5);
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  min-width: 180px;
+}
+
+/* 放标注模式：整张画布接住"点一下"，并给指针一个提示 */
+.map-place-overlay {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+/* 十字光标：作者看得见"现在点在哪儿"（键盘挪的时候全靠它） */
+.map-place-cursor line {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
 /* ---------- R138：框定边界（作者在图上拖出地图在图里的哪一块） ---------- */
 .map-frame-bar {
   display: flex;

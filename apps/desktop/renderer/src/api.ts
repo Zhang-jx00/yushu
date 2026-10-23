@@ -26,6 +26,8 @@ import type {
   GraphViewPayload,
   GraphViewRequestPayload,
   WorldMapBasePayload,
+  WorldMapCreateMarkerRequestPayload,
+  WorldMapCreateMarkerResult,
   WorldMapSetBoundsRequestPayload,
   WorldMapSetBoundsResult,
   WorldMapSetMarkerRequestPayload,
@@ -272,6 +274,12 @@ export interface YushuApi {
      * 落在框定的那一块之外 ⇒ 主进程拒绝并说清范围（**渲染层不自己算**）。
      */
     setMarker: (payload: WorldMapSetMarkerRequestPayload) => Promise<WorldMapSetMarkerResult>;
+    /**
+     * 放标注（R140）：作者选一个**地点实体** ⇒ 在图上点一下 ⇒ 落一个标注（写 map.yaml 的 markers 段）。
+     *
+     * 绑的地点必须真实存在、落点必须落在框定的那一块里 ⇒ 不满足时主进程拒绝并说清楚。
+     */
+    createMarker: (payload: WorldMapCreateMarkerRequestPayload) => Promise<WorldMapCreateMarkerResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

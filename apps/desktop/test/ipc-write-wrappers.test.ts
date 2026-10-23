@@ -59,6 +59,8 @@ const WRITE_CHANNELS = [
   "worldMapSetBounds",
   // R139 挪标注：改 `world/map.yaml` 里那一个标注的 x / y ⇒ 同样是真源写
   "worldMapSetMarker",
+  // R140 放标注：往 `world/map.yaml` 的 markers 段追加一行 ⇒ 同样是真源写
+  "worldMapCreateMarker",
 ] as const;
 
 /** 写盘但不写真源（派生物 / 索引器排除文件 / .git 内部）——走只读包装器是有意的 */

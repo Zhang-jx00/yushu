@@ -429,6 +429,35 @@ function markerLineIndex(lines: string[], markerId: string): number {
 }
 
 /**
+ * 把**一个新标注**追加进地图文件（R140）：只动 `markers:` 那一段，别的行**原样留着**。
+ *
+ * 为什么不是"解析 → 改对象 → 重新序列化"：那要一个序列化器（会把作者写的注释与排版抹掉），
+ * 而作者在意的恰恰是那些标注与顺序 ⇒ 只**追加那一行**（与 `appendMapBase` 同一个道理）。
+ *
+ * 追加的位置：`markers:` 段的**末尾**（下一个顶层键之前）——放最后 ⇒ 作者自己写的标注顺序不变。
+ * 文件里还没有 `markers:` 段 ⇒ 在末尾**新起一段**（不猜作者原本想放哪 ⇒ 追加是最保守的）。
+ */
+export function appendMapMarker(
+  text: string,
+  marker: { id: string; layer: MapLayerKind; entityRef: string; x: number; y: number },
+): { content: string | null; reason: string | null; previous: string[] } {
+  const lines = text.split("\n");
+  const entry =
+    `  - {id: ${marker.id}, layer: ${marker.layer}, entity_ref: ${marker.entityRef}, ` +
+    `x: ${String(marker.x)}, y: ${String(marker.y)}}`;
+  const markersIndex = lines.findIndex((line) => /^markers\s*:/.test(line));
+  if (markersIndex < 0) {
+    const head = text.replace(/\n*$/, "");
+    return { content: `${head}\nmarkers:\n${entry}\n`, reason: null, previous: [] };
+  }
+  // `markers:` 段的末尾 = 下一个**顶层键**（列 0 的 `key:`）或文件末尾
+  let end = markersIndex + 1;
+  while (end < lines.length && !/^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(lines[end] as string)) end += 1;
+  const inserted = [...lines.slice(0, end), entry, ...lines.slice(end)];
+  return { content: inserted.join("\n"), reason: null, previous: [] };
+}
+
+/**
  * 把**一个标注**挪到新位置（R139）：只改那一行的 `x` / `y`，别的**一个字都不动**。
  *
  * 为什么不做"解析 → 改对象 → 重新序列化"：那要一个序列化器（会把作者写的注释与排版抹掉），

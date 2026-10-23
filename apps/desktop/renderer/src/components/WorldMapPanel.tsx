@@ -205,6 +205,16 @@ export function WorldMapPanel(props: {
   const suppressClick = useRef(false);
   /** 挪标注的提示（成功 / 为什么没成） */
   const [markerNote, setMarkerNote] = useState("");
+  /**
+   * R140 **放标注**（K08 §5「放 marker、区域、行程线 → 绑定实体」）：
+   * 选一个**地点实体** ⇒ 在图上点一下 ⇒ 落一个标注（写盘只追加那一行）。
+   */
+  const [placing, setPlacing] = useState(false);
+  /** 放标注时选中的地点实体 id（空 = 还没选） */
+  const [placeEntity, setPlaceEntity] = useState("");
+  const [placeNote, setPlaceNote] = useState("");
+  /** 放标注时的**十字光标**（视图坐标）：鼠标点哪儿、方向键走到哪儿，它就在哪儿 */
+  const [placeCursor, setPlaceCursor] = useState<{ x: number; y: number } | null>(null);
 
   const canvas = map?.canvas ?? FALLBACK_CANVAS;
   // R138：画布 = **作者框定的那一块**（bounds 那一块）；底图按它裁切显示
@@ -264,8 +274,10 @@ export function WorldMapPanel(props: {
     [reloadMap],
   );
 
-  /** SVG 客户端坐标 ⇒ 用户坐标（框定模式下用户坐标 = 底图像素） */
-  const toImagePoint = useCallback((event: ReactPointerEvent<SVGGraphicsElement>) => {
+  /** SVG 客户端坐标 ⇒ 用户坐标（框定模式下用户坐标 = 底图像素）
+   *  参数只取**要用的那三样**（clientX / clientY / currentTarget）⇒ 指针事件与鼠标事件都能传进来。 */
+  const toImagePoint = useCallback(
+    (event: { clientX: number; clientY: number; currentTarget: SVGGraphicsElement }) => {
     // 用**所属的 `<svg>`** 的变换算：标注自己有悬停放大（transform），
     // 拿标注自己的 CTM 会把落点算偏（放大是绕中心缩放的 ⇒ 偏几个像素，作者看不出来但会烦）。
     const owner = event.currentTarget.ownerSVGElement;
@@ -413,6 +425,77 @@ export function WorldMapPanel(props: {
     void commitFrame({ x0: 0, y0: 0, x1: baseW, y1: baseH });
   }, [baseW, baseH, commitFrame]);
 
+  /** 进入/退出**放标注**模式（与框定模式互斥：一次只做一件事） */
+  const togglePlacing = useCallback(() => {
+    setPlaceNote("");
+    setMarkerNote("");
+    if (placing) {
+      setPlacing(false);
+      setPlaceEntity("");
+      setPlaceCursor(null);
+      return;
+    }
+    setFraming(false);
+    setFrameRect(null);
+    // 光标从**框的正中间**起步（作者一眼看得见起点，方向键一按就能挪）
+    setPlaceCursor({ x: Math.round(frameW / 2), y: Math.round(frameH / 2) });
+    setPlacing(true);
+  }, [placing, frameW, frameH]);
+
+  /** 在图上落一个标注（写盘只追加那一行；范围与地点由主进程校验） */
+  const placeMarkerAt = useCallback(
+    async (userX: number, userY: number) => {
+      if (placeEntity === "") {
+        setPlaceNote("先选一个地点，再在图上点一下");
+        return;
+      }
+      // 视图坐标 ⇒ 底图像素（框的原点要加回去）
+      const x = Math.round(userX + (frame?.x0 ?? 0));
+      const y = Math.round(userY + (frame?.y0 ?? 0));
+      try {
+        const result = await api().map.createMarker({ entityRef: placeEntity, x: x, y: y });
+        setPlaceNote(result.note);
+        if (result.ok) {
+          setPlacing(false);
+          setPlaceEntity("");
+          setPlaceCursor(null);
+          reloadMap();
+        }
+      } catch (err: unknown) {
+        setPlaceNote(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [placeEntity, frame, reloadMap],
+  );
+
+  /** 放标注的键盘路（契约 §6：键盘债是 0）：方向键挪十字光标、回车落点 */
+  const onPlaceKeyDown = useCallback(
+    (event: ReactKeyboardEvent<SVGRectElement>) => {
+      const cursor = placeCursor;
+      if (cursor === null) return;
+      const step = event.shiftKey ? 10 : 1;
+      let dx = 0;
+      let dy = 0;
+      if (event.key === "ArrowLeft") dx = -step;
+      else if (event.key === "ArrowRight") dx = step;
+      else if (event.key === "ArrowUp") dy = -step;
+      else if (event.key === "ArrowDown") dy = step;
+      else if (event.key === "Enter") {
+        event.preventDefault();
+        void placeMarkerAt(cursor.x, cursor.y);
+        return;
+      } else {
+        return;
+      }
+      event.preventDefault();
+      setPlaceCursor({
+        x: Math.min(Math.max(cursor.x + dx, 0), width),
+        y: Math.min(Math.max(cursor.y + dy, 0), height),
+      });
+    },
+    [placeCursor, width, height, placeMarkerAt],
+  );
+
   const shown = useMemo(
     () => (map?.markers ?? []).filter((marker) => !hidden.includes(marker.layer)),
     [map, hidden],
@@ -546,12 +629,40 @@ export function WorldMapPanel(props: {
             框回整张图
           </button>
         )}
+        {/* R140 放标注：选一个地点 ⇒ 在图上点一下 ⇒ 落一个标注（K08 §5「放 marker → 绑定实体」） */}
+        <button
+          type="button"
+          className="map-upload-btn"
+          onClick={togglePlacing}
+          disabled={placing ? false : map.places.length === 0}
+          title={map.places.length === 0 ? "项目里还没有地点实体（标注要绑真实地点）" : ""}
+        >
+          {placing ? "取消放标注" : "放标注"}
+        </button>
+        {placing && (
+          <select
+            className="map-place-select"
+            value={placeEntity}
+            onChange={(event) => setPlaceEntity(event.target.value)}
+            aria-label="选一个地点"
+          >
+            <option value="">选一个地点…</option>
+            {map.places.map((place) => (
+              <option key={place.id} value={place.id}>
+                {place.name}
+              </option>
+            ))}
+          </select>
+        )}
         <span className="muted">
-          {framing
-            ? "在整张图上拖一块（键盘也行：方向键移动，+ / - 改大小，回车定下来）"
-            : "作者的大图常常只有中间一块是地图 ⇒ 在这里把那块框出来"}
+          {placing
+            ? "选好地点后在图上点一下（键盘：方向键挪十字光标、回车落点）"
+            : framing
+              ? "在整张图上拖一块（键盘也行：方向键移动，+ / - 改大小，回车定下来）"
+              : "作者的大图常常只有中间一块是地图 ⇒ 在这里把那块框出来；标注也能直接拖"}
         </span>
         {frameNote !== "" && <div className="map-upload-note">{frameNote}</div>}
+        {placeNote !== "" && <div className="map-upload-note">{placeNote}</div>}
       </div>
       {uploadNote !== "" && (
         <div className="map-upload-note">
@@ -802,6 +913,36 @@ export function WorldMapPanel(props: {
                     width={Math.max(frame.x1 - frame.x0, 0)}
                     height={Math.max(frame.y1 - frame.y0, 0)}
                   />
+                )}
+              </>
+            )}
+            {/* R140 放标注模式：一层**透明覆盖层**接住"点一下"，
+                十字光标是**键盘可达**的（方向键挪、回车落点）⇒ 键盘债是 0。
+                它盖在标注之上 ⇒ 放标注时点标注不会误放一个。 */}
+            {placing && (
+              <>
+                <rect
+                  className="map-place-overlay"
+                  x={0}
+                  y={0}
+                  width={width}
+                  height={height}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="放标注：在图上点一下落点；键盘用方向键挪十字光标、回车落点"
+                  onClick={(event) => {
+                    const p = toImagePoint(event);
+                    if (p === null) return;
+                    setPlaceCursor({ x: p.x, y: p.y });
+                    void placeMarkerAt(p.x, p.y);
+                  }}
+                  onKeyDown={onPlaceKeyDown}
+                />
+                {placeCursor !== null && (
+                  <g className="map-place-cursor" aria-hidden="true" pointerEvents="none">
+                    <line x1={placeCursor.x - 10} y1={placeCursor.y} x2={placeCursor.x + 10} y2={placeCursor.y} />
+                    <line x1={placeCursor.x} y1={placeCursor.y - 10} x2={placeCursor.x} y2={placeCursor.y + 10} />
+                  </g>
                 )}
               </>
             )}
