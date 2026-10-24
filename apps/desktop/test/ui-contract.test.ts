@@ -1589,7 +1589,7 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
     // **先剥注释**再扫规则：注释里写着 `{ min-height: 0 }` 这种带花括号的片段时，
     // 规则正则会被切碎、扫出来的"规则"根本不是规则（判据就会恒绿 —— 实测踩过）。
     const bareCss = css.replace(/\/\*[\s\S]*?\*\//g, "");
-    for (const name of ["genesis", "outline", "ai", "memory", "export"]) {
+    for (const name of ["genesis", "outline", "ai", "memory"]) {
       // 规则可能是**分组选择器**（几个页面共用一条）⇒ 不能用"选择器后面紧跟 {"的写法，
       // 要把选择器列表里含它的规则都找出来。
       const bodies = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
@@ -1598,14 +1598,28 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
         .join(" ");
       expect(bodies, `${name} 页面列的子项没有「按内容撑高」这条（flex: none）`).toContain("flex: none");
     }
-    // 左列同理：`.outline` / `.ai` / `.memory` / `.export` 的 aside 也是 flex 列
-    for (const name of ["outline", "ai", "memory", "export"]) {
+    // R156：导出页改成三栏 ⇒ 中栏不是 section 而是 `.export-col-work`，
+    // 那条「按内容撑高」挪到了它身上（**不许因为换结构就把这条丢了**）。
+    const exportWork = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => (m[1] ?? "").includes("export-col-work > *"))
+      .map((m) => m[2] ?? "")
+      .join(" ");
+    expect(exportWork, "导出页中栏的子项没有「按内容撑高」这条（flex: 0 0 auto）").toContain(
+      "flex: 0 0 auto",
+    );
+    // 左列同理：`.outline` / `.ai` / `.memory` 的 aside 也是 flex 列
+    for (const name of ["outline", "ai", "memory"]) {
       const bodies = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
         .filter((m) => (m[1] ?? "").includes(`${name} > aside > *`))
         .map((m) => m[2] ?? "")
         .join(" ");
       expect(bodies, `${name} 页面左列的子项没有「按内容撑高」这条（flex: none）`).toContain("flex: none");
     }
+    const exportAsides = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => /export-col-(matrix|outputs) > \*/.test(m[1] ?? ""))
+      .map((m) => m[2] ?? "")
+      .join(" ");
+    expect(exportAsides, "导出页左右两栏的子项没有「按内容撑高」这条").toContain("flex: 0 0 auto");
   });
 
   it("五个页面列的容器都只命中直接子级", () => {
@@ -1617,11 +1631,15 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
       `这些后代选择器会把列里**嵌套的 section** 也套上 flex 列规则 ⇒ 内容溢出、压住彼此：${offenders.join(" | ")}`,
     ).toEqual([]);
     // 反过来也要看一眼：直接子级那条规则确实在
-    for (const name of ["genesis", "outline", "ai", "memory", "export"]) {
+    for (const name of ["genesis", "outline", "ai", "memory"]) {
       expect(css, `${name} 页面列没有「直接子级」规则`).toMatch(
         new RegExp(`^\\.${name} > section \\{`, "m"),
       );
     }
+    // R156：导出页的中栏是 `.export-col-work`（不是 section）⇒ 那条「直接子级」规则在它身上
+    expect(css, "导出页中栏没有「直接子级」规则").toMatch(/^\.export-col-work \{/m);
+    // 也不许给导出页写回后代选择器（那正是 R124 那条毛病）
+    expect(css, "导出页不许有后代选择器").not.toMatch(/^\.export (section|aside) \{/m);
   });
 });
 
@@ -2929,5 +2947,116 @@ describe("稿件总览页三栏（R155）：左=卷章树 / 中=全库 / 右=选
   it("中栏的各块**不许被压扁**（列表要吃掉剩余高度，其余不许缩）", () => {
     expect(css, "中栏的块没锁住高度").toMatch(/\.library-col-work > \* \{[^}]*flex:\s*0 0 auto/);
     expect(css, "列表没吃掉剩余高度").toMatch(/\.library-col-work \.library-list \{[^}]*flex:\s*1 1 auto/);
+  });
+});
+
+/**
+ * **导出与自查页三栏**（R156）：左=能力矩阵 / 中=导出表单 / 右=最近一次导出与产物清单。
+ *
+ * 判据盯七件事：
+ * ① 页面用的是**共用的三栏骨架**（R154 立的 `.three-col` ⇒ 不是每页另写一套网格）；
+ * ② 三段各在其位，而且**认位置**（左栏里装的确实是能力矩阵，中栏里装的确实是那五块）；
+ * ③ 右栏的**数都从同一份导出结果载荷现算**（不另取数、不写死字面量）；
+ * ④ **还没导出过就如实说「还没有导出过」**（不许装成有）；
+ * ⑤ 中栏的各块不许被压扁，宽表在窄栏里自己横向滚；
+ * ⑥ **导出路径只有一个出处**（中栏不许再摆一遍）；
+ * ⑦ 右栏的**名字不与中栏撞**（同名不同义会误导 —— R154「豁免率 / 豁免占比」那一条）。
+ */
+describe("导出与自查页三栏（R156）：左=能力矩阵 / 中=导出表单 / 右=最近一次导出与产物清单", () => {
+  const view = readFileSync(join(VIEW_ROOT, "views", "ExportView.tsx"), "utf8");
+  const mod = readFileSync(join(VIEW_ROOT, "components", "export-artifacts.ts"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+
+  /** 认位置：锚点在源码里的位置（-1 = 没有 ⇒ 那条判据就不成立） */
+  const at = (needle: string): number => view.indexOf(needle);
+
+  it("页面用的是**共用的三栏骨架**（不是每页另写一套网格）", () => {
+    expect(view, "导出页没用三栏骨架").toContain('className="three-col export-three-col"');
+    expect(css, "三栏骨架没写").toMatch(/\.three-col\s*\{[^}]*grid-template-columns:[^;]*22%/);
+    // 这页不许自己再排一套网格（"每页一套网格"就是从这种地方长出来的）
+    expect(css, "导出页自己又写了一套网格").not.toMatch(
+      /\.export-three-col\s*\{[^}]*grid-template-columns/,
+    );
+  });
+
+  it("三段各在其位（认**位置**，不是「文件里出现过」就算）", () => {
+    expect(view, "左栏不在").toContain('className="export-col-matrix"');
+    expect(view, "中栏不在").toContain('className="export-col-work"');
+    expect(view, "右栏不在").toContain('className="export-col-outputs"');
+    const matrix = at('className="export-col-matrix"');
+    // 认的是**面板自己的类名**（不是源码里随便哪句提到它的话 —— 文件头的说明与注释里也提到过）
+    const capability = at('className="panel export-capabilities"');
+    const work = at('className="export-col-work"');
+    const run = at('className="panel export-run-panel"');
+    const platform = at('className="panel export-platform-panel"');
+    const clipboard = at('className="panel export-clipboard-panel"');
+    const reconcile = at('className="panel export-reconcile-panel"');
+    const wordlist = at('className="panel export-wordlist-panel"');
+    const outputs = at('className="export-col-outputs"');
+    for (const [name, pos] of [
+      ["左栏", matrix],
+      ["能力矩阵", capability],
+      ["中栏", work],
+      ["导出表单", run],
+      ["平台章节格式", platform],
+      ["干净剪贴板", clipboard],
+      ["字数对账", reconcile],
+      ["敏感词词库", wordlist],
+      ["右栏", outputs],
+    ] as const) {
+      expect(pos, `源码里找不到「${name}」`).toBeGreaterThan(-1);
+    }
+    // 左栏里装的确实是能力矩阵；中栏里装的确实是那五块（顺序不许换）
+    expect(matrix).toBeLessThan(capability);
+    expect(capability).toBeLessThan(work);
+    expect(work).toBeLessThan(run);
+    expect(run).toBeLessThan(platform);
+    expect(platform).toBeLessThan(clipboard);
+    expect(clipboard).toBeLessThan(reconcile);
+    expect(reconcile).toBeLessThan(wordlist);
+    expect(wordlist).toBeLessThan(outputs);
+  });
+
+  it("右栏的**数都从同一份导出结果载荷现算**（不另取数、不写死）", () => {
+    // 认的是**调用**：右栏那一栏必须走那个纯函数
+    expect(view, "右栏没走纯函数").toMatch(/summarizeExportArtifacts\(exported\)/);
+    expect(view, "右栏没取路径").toContain("summary.path");
+    expect(view, "右栏没取章数").toContain("summary.chapters");
+    expect(view, "右栏没取字数").toContain("summary.words");
+    expect(view, "右栏没取敏感词结论").toContain("summary.sensitive");
+    expect(view, "右栏没取产物清单").toContain("summary.artifacts");
+    // 纯函数里的数**取自载荷**（写死字面量 ⇒ 与盘上对不上）
+    expect(mod, "路径没取自载荷").toMatch(/path:\s*result\.path/);
+    expect(mod, "章数没取自载荷").toMatch(/chapters:\s*result\.chapters/);
+    expect(mod, "字数没取自载荷").toMatch(/words:\s*result\.words/);
+  });
+
+  it("**还没导出过就如实说「还没有导出过」**（不许装成有）", () => {
+    expect(mod, "没导出过时的说法不对").toContain("还没有导出过");
+    expect(view, "右栏没渲染那句话说").toContain("summary.emptyNote");
+    // 没有导出 ⇒ 不许给出任何路径或数字（"装成有"就是从这里长出来的）
+    expect(mod, "没导出过时也给了路径").toMatch(/hasExport:\s*false[\s\S]{0,400}path:\s*""/);
+  });
+
+  it("中栏的各块**不许被压扁**；宽表在窄栏里自己横向滚", () => {
+    expect(css, "中栏的块没锁住高度").toMatch(/\.export-col-work > \* \{[^}]*flex:\s*0 0 auto/);
+    expect(css, "中栏没进滚动区").toMatch(
+      /\.three-col > \.export-col-work \{[^}]*overflow:\s*auto/,
+    );
+  });
+
+  it("导出路径**只有一个出处**（中栏不许再摆一遍）", () => {
+    const workBlock = view.slice(at('className="export-col-work"'), at('className="export-col-outputs"'));
+    expect(workBlock, "中栏不许再摆一次导出路径").not.toContain("exported.path");
+    expect(workBlock, "中栏不许再摆一次导出章数").not.toContain("exported.chapters");
+    expect(workBlock, "中栏不许再摆一次导出字数").not.toContain("exported.words");
+  });
+
+  it("右栏的**名字不与中栏撞**（同名不同义会误导）", () => {
+    const outputsBlock = view.slice(at('className="export-col-outputs"'));
+    for (const name of ["敏感词自查", "敏感词词库", "字数对账", "平台章节格式", "干净剪贴板"]) {
+      expect(outputsBlock, `右栏不许叫「${name}」（中栏已有 ⇒ 同名不同义）`).not.toContain(name);
+    }
+    expect(outputsBlock, "右栏没有自己的标题").toContain("最近一次导出");
   });
 });

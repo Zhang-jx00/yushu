@@ -1825,13 +1825,16 @@ select {
 .genesis > section > *,
 .outline > section > *,
 .ai > section > *,
-.memory > section > *,
-.export > section > *,
-/* 左列同理：`.outline` / `.ai` / `.memory` / `.export` 的 aside 也是 flex 列 ⇒ 同样的压扁。 */
+.memory > section > * {
+  flex: none;
+}
+
+/* 左列同理：`.outline` / `.ai` / `.memory` 的 aside 也是 flex 列 ⇒ 同样的压扁。
+   R156：导出页改三栏 ⇒ 它的列不再走"直接子级 section / aside"这条路，
+   那条「按内容撑高」挪到了 `.export-col-work > *` 与两栏的 `> *`（见 R156 那段）。 */
 .outline > aside > *,
 .ai > aside > *,
-.memory > aside > *,
-.export > aside > * {
+.memory > aside > * {
   flex: none;
 }
 
@@ -1844,8 +1847,7 @@ select {
 .genesis > section > *,
 .outline > section > *,
 .ai > section > *,
-.memory > section > *,
-.export > section > * {
+.memory > section > * {
   flex: none;
 }
 
@@ -1977,34 +1979,24 @@ select {
 
 /* ---------- 导出与自查 ---------- */
 
+/* R156：外层不再自己排两列（那把 340px 窄列是"一摞竖排面板"时代的做法）⇒
+   列交给共用的三栏骨架（`.three-col`）管，这里只当**一行容器**。 */
 .export {
   flex: 1;
-  display: grid;
-  grid-template-columns: 340px 1fr;
-  min-height: 0;
-}
-
-.export aside {
-  border-right: 1px solid var(--border);
-  padding: 12px;
-  overflow: auto;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  min-height: 0;
+  padding: var(--space-4) var(--space-6);
 }
+
+/* R156：两栏（能力矩阵 / 最近一次导出）不再自己排版 ——
+   滚动与留白交给共用的三栏骨架（`.three-col > aside`），这里只留一条**不许后代选择器**的提醒。 */
 
 /* R124：只命中**直接子级**。原先写的是后代选择器（`.export section`）⇒
    列里**嵌套的那个 section** 也被套上这组规则（flex 列 + min-height:0）⇒
-   它被压缩、内容溢出自己、压住下面的卡片（用户截图里的「卡片全叠在一起」）。 */
-.export > section {
-  padding: 16px 20px;
-  overflow: auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+   它被压缩、内容溢出自己、压住下面的卡片（用户截图里的「卡片全叠在一起」）。
+   R156：三栏之后中栏是 `.export-col-work`（不是直接子级 section）⇒ 这条规则连同
+   它带来的 `padding: 16px 20px` 一起作废（页面内边距改由 `.export` 统一给）。 */
 
 .export-summary {
   font-size: 13px;
@@ -4329,7 +4321,8 @@ table,
 
 /* 三栏各自的滚动区（宽表在窄栏里**自己横向滚**，不许把整页撑出横向滚动条） */
 .three-col > aside,
-.three-col > .rules-col-work {
+.three-col > .rules-col-work,
+.three-col > .export-col-work {
   overflow: auto;
   min-height: 0;
 }
@@ -4358,6 +4351,64 @@ table,
 .rules-outputs-line {
   color: var(--ink);
   font-size: var(--text-sm);
+}
+
+/* ---------- R156：导出与自查页也走共用的三栏骨架（左=能力矩阵 / 中=导出表单 / 右=最近一次导出） ----------
+   骨架是 R154 立的 `.three-col`（**不是每页各写一套网格**）；右栏 22% 用百分比 ⇒
+   不给"长度字面量棘轮"（只许降不升）添新账。 */
+.export-three-col {
+  flex: 1;
+  min-height: 0;
+}
+
+.export-col-work {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* 中栏的各块**不许被压扁**（flex 默认会缩 ⇒ 内容越出自己的盒子 ⇒ 排版巡检当场抓到） */
+.export-col-work > * {
+  flex: 0 0 auto;
+}
+
+/* 左右两栏的子项同样不许被压扁（万一有人把它们改回 flex 列，这条兜着） */
+.export-col-matrix > *,
+.export-col-outputs > * {
+  flex: 0 0 auto;
+}
+
+.export-col-outputs {
+  border-left: var(--border-width) solid var(--border);
+  padding-left: var(--space-6);
+}
+
+/* 右栏那一栏：条目名与值两列（值可能很长 ⇒ 允许折行，不许把整页撑出横向滚动条） */
+.export-outputs {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.export-outputs li {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.export-outputs li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.export-output-path {
+  overflow-wrap: anywhere;
 }
 /* ---------- R138：框定边界（作者在图上拖出地图在图里的哪一块） ---------- */
 .map-frame-bar {

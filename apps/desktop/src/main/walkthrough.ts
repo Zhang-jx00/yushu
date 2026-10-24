@@ -3944,14 +3944,17 @@ const STEPS: StepDef[] = [
       const failText = errBar === null ? '' : String(errBar.textContent).replace(/\s+/g, ' ').slice(0, 200);
       let diskOk = false;
       let diskNote = '没有回执，未读盘';
+      // R156：导出路径**搬到了右栏**（中栏不再摆一遍 ⇒ 路径只有一个出处）⇒ 这里从右栏取，
+      // 不再从提示文案里抠（那是判据写窄了：路径换了地方，判据得跟着走）。
+      const receipt = document.querySelector('[data-export-path]');
+      const exportPath = receipt === null ? '' : String(receipt.getAttribute('data-export-path') || '');
       if (notice !== null && samples.length > 0) {
-        const pathMatch = /→ (\S+?\.txt)/.exec(notice);
-        if (pathMatch === null) {
-          diskNote = '回执里抠不出路径：' + notice.slice(0, 120);
+        if (exportPath === '') {
+          diskNote = '右栏没有产物路径：' + notice.slice(0, 120);
         } else {
-          const doc = await window.yushu.doc.read(pathMatch[1]).catch(() => null);
+          const doc = await window.yushu.doc.read(exportPath).catch(() => null);
           if (doc === null) {
-            diskNote = '读不到 ' + pathMatch[1];
+            diskNote = '读不到 ' + exportPath;
           } else {
             diskOk = String(doc.content).indexOf(samples[0].head) >= 0;
             diskNote = '盘上章头等于样例=' + diskOk + '（' + samples[0].head + '）';
@@ -8170,6 +8173,84 @@ const STEPS: StepDef[] = [
           String(Math.round(b2.left)) + ' / 右 ' + String(Math.round(b3.left)) + '）' +
           '；点的是「' + label + '」；右栏摆的是那一章=' + String(titleOk) +
           '；树上的选中态=' + String(pressed) + '；右栏字数栏=' + String(words ? words[0] : '（没有）'),
+      };
+    `,
+  },
+  {
+    step: 118,
+    title: '导出与自查三栏：能力矩阵 / 导出表单 / 最近一次导出与产物清单（R156）',
+    file: 'step118-export-three-col.png',
+    body: String.raw`
+      // 这一步证 R156 的五件事：
+      // ① **三栏并排**（量左边界，不是只认类名）；
+      // ② **还没导出过时右栏如实说「还没有导出过」**（不许装成有）；
+      // ③ 导完之后右栏的**产物路径在盘上真的读得到**（读盘核对，不是看界面自己说什么）；
+      // ④ 右栏的**章节数与盘上文件的章头行数逐字一致**；
+      // ⑤ 右栏说的**目录在盘上真的是目录**（树里查得到，且产物是个文件）。
+      await tab('稿件总览'); // 切走 ⇒ 卸载导出页
+      await tab('导出与自查'); // 切回 ⇒ 重新挂载 ⇒ 回执归零（**重试也幂等**：上一次的回执不许留在场）
+      const matrix = document.querySelector('.export-col-matrix');
+      const work = document.querySelector('.export-col-work');
+      const outs = document.querySelector('.export-col-outputs');
+      if (!matrix || !work || !outs) {
+        return { ok: false, note: '导出页没有三栏（能力矩阵 / 导出表单 / 产物清单）' };
+      }
+      const b1 = matrix.getBoundingClientRect();
+      const b2 = work.getBoundingClientRect();
+      const b3 = outs.getBoundingClientRect();
+      const sideBySide = b1.left < b2.left && b2.left < b3.left;
+      // ② 这一页刚挂上，还没导过 ⇒ 右栏必须如实说没有（不许装成有）
+      const saidNone = String(outs.textContent || '').indexOf('还没有导出过') >= 0;
+      // ③ 走产品自己的那条路导一次：勾「我已核对」→ 点「确认导出」
+      const confirm = document.querySelector('.export-col-work .confirm-check input');
+      if (!confirm) return { ok: false, note: '中栏里没有那个「我已核对」的勾选框' };
+      confirm.click();
+      await sleep(300);
+      const runBtn = [...document.querySelectorAll('.export-col-work button')]
+        .find((b) => String(b.textContent || '').indexOf('确认导出') === 0 && !b.disabled);
+      if (!runBtn) return { ok: false, note: '中栏里没有可点的「确认导出」按钮' };
+      runBtn.click();
+      const holder = await waitFor(() => document.querySelector('[data-export-path]') || null, 20000);
+      if (!holder) return { ok: false, note: '导完之后右栏仍然没有产物路径' };
+      const path = String(holder.getAttribute('data-export-path') || '');
+      const chapters = Number(holder.getAttribute('data-export-chapters') || '0');
+      const dir = String(holder.getAttribute('data-export-dir') || '');
+      const shownHash = String(holder.getAttribute('data-export-hash') || '');
+      // 读盘核对：走产品自己的读通道，读到的就是盘上那个文件
+      let content = '';
+      let diskHash = '';
+      let readOk = false;
+      try {
+        const snap = await window.yushu.doc.read(path);
+        content = String(snap.content || '');
+        diskHash = String(snap.hash || '');
+        readOk = true;
+      } catch (err) {
+        readOk = false;
+      }
+      // 章头行数：目录里那几行前面有全角空格 ⇒ 数不进 /^第N章/（只数正文里的章头）。
+      // 两处栽过跟头，判据都写窄了：① 章名自带「第N章」时行里没有空格（"第1章（待拟标题）"）；
+      // ② 章名用的是**中文数字**（"第一章 起"）⇒ 数字类必须跟产品自己的那套一样
+      // （assemble.ts 的 formatChapterHead 就是这个类）。
+      const heads = (content.match(/^第[0-9一二三四五六七八九十百千]+章/gm) || []).length;
+      const chaptersOk = readOk && heads > 0 && heads === chapters;
+      const hashOk = readOk && shownHash !== '' && shownHash === diskHash;
+      // ⑤ 右栏说的目录在盘上真的是目录，产物真的是文件
+      const tree = await window.yushu.project.tree();
+      const dirOk = tree.some((entry) => entry.path === dir && entry.type === 'dir') &&
+        tree.some((entry) => entry.path === path && entry.type === 'file');
+      const panelEl = document.querySelector('.export');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: sideBySide && saidNone && chaptersOk && hashOk && dirOk,
+        note: '三栏并排=' + String(sideBySide) + '（左 ' + String(Math.round(b1.left)) + ' / 中 ' +
+          String(Math.round(b2.left)) + ' / 右 ' + String(Math.round(b3.left)) + '）' +
+          '；没导出过时的说法=' + String(saidNone) +
+          '；右栏路径=' + path +
+          '；盘上章头行数=' + String(heads) + ' vs 右栏章数=' + String(chapters) +
+          '；回执指纹与盘上一致=' + String(hashOk) +
+          '；产物与目录在盘上=' + String(dirOk),
       };
     `,
   },
