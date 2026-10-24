@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendMapAnchor, appendMapMarker, appendMapShape, normalizeBounds, parseMapFile, projectWorldMap, setMapAnchorPosition, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
+import { appendMapAnchor, appendMapMarker, appendMapShape, normalizeBounds, parseMapFile, projectWorldMap, replaceMapShapeEntry, setMapAnchorPosition, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
 import type { IndexEntityRow } from "../src/index-input.js";
 
 /**
@@ -619,5 +619,188 @@ describe("事件锚点（R131）：K08 §3.8 的事件挂坐标", () => {
     const projection = projectWorldMap(parseMapFile(degenerate), []);
     expect(projection.anchors).toHaveLength(0);
     expect(projection.findings.some((f) => f.code === "map-bounds-missing")).toBe(true);
+  });
+});
+
+/**
+ * **区域的洞**（R151）：区域从**单环**走到**外环 + 洞**。
+ *
+ * 为什么要这个：R143 的区域只有一个外环 ⇒ 画不出"一块被别处围住的地"、
+ * 也画不出"区域里的另一片空白" ⇒ 作者只能把区域拆成两个互不相连的面
+ * ⇒ 「它们本来是一块」这件事丢了。
+ *
+ * 三条口径（本项目自定，K08 只给了图层类型没给几何）：
+ * ① **向后兼容**：`holes` 是可选的 ⇒ R143 写的单环文件**照样能读**（不迁移、不改老文件）；
+ * ② 洞的顶点必须**严格在**外环内部（压线 ⇒ 挖不出确定的形状 ⇒ 拒绝）；
+ * ③ 洞与洞、与外环不得相交 / 套嵌（挖出来的面会自交 ⇒ 拒绝）。
+ */
+describe("区域的洞（R151）：外环 + 挖掉的一块", () => {
+  const SQUARE = "  - {id: r-1, layer: political, points: [[100, 100], [500, 100], [500, 500], [100, 500]]}";
+  const withRegion = (extra: string): string =>
+    [
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 700]]",
+      "regions:",
+      extra,
+    ].join("\n");
+
+  it("旧单环文件**照样能读**（R143 写的区域不迁移、不改老文件）", () => {
+    const def = parseMapFile(withRegion(SQUARE));
+    expect(def.shapes).toHaveLength(1);
+    expect(def.shapes?.[0]?.holes).toBeUndefined();
+  });
+
+  it("带洞的文件读得出洞（洞是**一圈顶点**）", () => {
+    const def = parseMapFile(
+      withRegion(
+        "  - {id: r-1, layer: political, points: [[100, 100], [500, 100], [500, 500], [100, 500]], holes: [[[200, 200], [300, 200], [250, 300]]]}",
+      ),
+    );
+    expect(def.shapes?.[0]?.holes).toHaveLength(1);
+    expect(def.shapes?.[0]?.holes?.[0]).toHaveLength(3);
+  });
+
+  it("洞的顶点在区域外面 ⇒ 拒绝并点名（挖出来的是另一块地，不是洞）", () => {
+    expect(() =>
+      parseMapFile(
+        withRegion(
+          "  - {id: r-1, layer: political, points: [[100, 100], [500, 100], [500, 500], [100, 500]], holes: [[[600, 600], [700, 600], [650, 700]]]}",
+        ),
+      ),
+    ).toThrow(/落在区域外面/);
+  });
+
+  it("洞的顶点压在外环边界上 ⇒ 拒绝（挖不出确定的形状）", () => {
+    expect(() =>
+      parseMapFile(
+        withRegion(
+          "  - {id: r-1, layer: political, points: [[100, 100], [500, 100], [500, 500], [100, 500]], holes: [[[100, 200], [300, 200], [200, 300]]]}",
+        ),
+      ),
+    ).toThrow(/落在区域边界上/);
+  });
+
+  it("洞不足 3 个点 ⇒ 拒绝（少於 3 个点画不出一个面）", () => {
+    expect(() =>
+      parseMapFile(
+        withRegion(
+          "  - {id: r-1, layer: political, points: [[100, 100], [500, 100], [500, 500]], holes: [[[200, 200], [300, 200]]]}",
+        ),
+      ),
+    ).toThrow(/至少要 3 个点/);
+  });
+
+  it("行程线带洞 ⇒ 拒绝（说不通的事不做）", () => {
+    const text = [
+      "apiVersion: map-v1",
+      "id: map-world",
+      "crs: simple",
+      "bounds: [[0, 0], [1000, 700]]",
+      "routes:",
+      "  - {id: rt-1, layer: route, points: [[10, 10], [20, 20]], holes: [[[12, 12], [15, 12], [13, 15]]]}",
+    ].join("\n");
+    expect(() => parseMapFile(text)).toThrow(/行程线，不能有洞/);
+  });
+
+  it("洞与洞相交 ⇒ 拒绝（挖出来的面会自交）", () => {
+    expect(() =>
+      parseMapFile(
+        withRegion(
+          "  - {id: r-1, layer: political, points: [[100, 100], [900, 100], [900, 900], [100, 900]], holes: [[[200, 200], [600, 200], [600, 400], [200, 400]], [[350, 300], [450, 300], [450, 500], [350, 500]]]}",
+        ),
+      ),
+    ).toThrow(/第 1 个洞与第 2 个洞相交/);
+  });
+
+  it("洞钻进另一个洞里 ⇒ 拒绝（洞不能套洞）", () => {
+    expect(() =>
+      parseMapFile(
+        withRegion(
+          "  - {id: r-1, layer: political, points: [[100, 100], [900, 100], [900, 900], [100, 900]], holes: [[[200, 200], [500, 200], [500, 500], [200, 500]], [[300, 300], [400, 300], [400, 400], [300, 400]]]}",
+        ),
+      ),
+    ).toThrow(/钻进/);
+  });
+
+  it("追加带洞的区域 ⇒ 那一行里写着 holes（洞是**第二层**）", () => {
+    const appended = appendMapShape(withRegion(SQUARE), {
+      id: "r-2",
+      kind: "region",
+      layer: "political",
+      points: [
+        [10, 10],
+        [20, 10],
+        [10, 20],
+      ],
+      holes: [
+        [
+          [12, 12],
+          [15, 12],
+          [13, 15],
+        ],
+      ],
+    });
+    expect(appended.content).toContain("holes: [[[12, 12], [15, 12], [13, 15]]]");
+    // 追加的行排在原区域**后面**（作者自己的顺序不变）
+    expect(appended.content?.indexOf("r-2")).toBeGreaterThan(appended.content?.indexOf("r-1") ?? -1);
+  });
+
+  it("改一个形状 ⇒ **只动那一行**（别的一行原样）", () => {
+    const text = withRegion(
+      `${SQUARE}\n  - {id: r-2, layer: political, points: [[10, 10], [20, 10], [10, 20]]}`,
+    );
+    const replaced = replaceMapShapeEntry(text, {
+      id: "r-2",
+      kind: "region",
+      layer: "political",
+      points: [
+        [10, 10],
+        [20, 10],
+        [10, 20],
+      ],
+      holes: [
+        [
+          [12, 12],
+          [15, 12],
+          [13, 15],
+        ],
+      ],
+    });
+    expect(replaced.content).toContain("holes: [[[12, 12], [15, 12], [13, 15]]]");
+    const before = text.split("\n");
+    const after = (replaced.content ?? "").split("\n");
+    expect(after.length).toBe(before.length);
+    const changed = before.filter((line, index) => line !== after[index]);
+    expect(changed).toHaveLength(1);
+  });
+
+  it("改一个**不存在**的形状 ⇒ 说清楚，不静默新增一行（那会变成复制了一个区域）", () => {
+    const replaced = replaceMapShapeEntry(withRegion(SQUARE), {
+      id: "r-9",
+      kind: "region",
+      layer: "political",
+      points: [
+        [10, 10],
+        [20, 10],
+        [10, 20],
+      ],
+    });
+    expect(replaced.content).toBeNull();
+    expect(replaced.reason).toContain("r-9");
+  });
+
+  it("投影：洞也归一化（渲染层直接用，不用自己再算一遍）", () => {
+    const def = parseMapFile(
+      withRegion(
+        "  - {id: r-1, layer: political, points: [[100, 100], [500, 100], [500, 500], [100, 500]], holes: [[[200, 200], [300, 200], [250, 300]]]}",
+      ),
+    );
+    const projection = projectWorldMap(def, []);
+    const holes = projection.shapes[0]?.holes;
+    expect(holes).toHaveLength(1);
+    expect(holes?.[0]?.[0]?.[0]).toBeCloseTo(0.2);
+    expect(holes?.[0]?.[0]?.[1]).toBeCloseTo(0.2 / 0.7);
   });
 });

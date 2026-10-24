@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { uploadMapBase, setMapBounds, setMarkerPosition, setAnchorPosition, createMapMarker, createMapAnchor, createMapShape, worldMapView } from "../src/main/map-ops.js";
+import { uploadMapBase, setMapBounds, setMarkerPosition, setAnchorPosition, createMapMarker, createMapAnchor, createMapShape, addMapHole, removeMapHole, worldMapView } from "../src/main/map-ops.js";
 import { ProjectGateway } from "../src/main/file-gateway.js";
 import { parseMapFile, createSettingCard, serializeCardFile, serializeTimelineFile, TIMELINE_API_VERSION } from "@yushu/world-engine";
 
@@ -713,5 +713,158 @@ describe("放区域 / 放行程线（R143）：点出一串点 ⇒ 落一个面 
     const route = view.layers.find((layer) => layer.kind === "route");
     expect(route?.markerCount).toBe(0);
     expect(route?.shapeCount).toBe(1);
+  });
+});
+
+/**
+ * **挖洞 / 删洞**（R151）：**写盘**路径的单测。
+ *
+ * 口径（同前几轮）：
+ * ① **只动那一个区域那一行**（作者写的注释与别的形状原样 ⇒ 行数不变）；
+ * ② 洞的顶点必须**在这个区域里面**（挖出来的是另一块地 ⇒ 拒绝且盘上不动）；
+ * ③ 洞不足 3 个点、对行程线挖洞 ⇒ 拒绝；
+ * ④ 洞的几何**只有一份规则**（引擎读盘时用同一个校验 ⇒ 写进去的读回来不会被拒）。
+ */
+describe("挖洞 / 删洞（R151）：区域里挖掉一块 ⇒ 改那一个区域的 holes", () => {
+  const MAP_YAML = [
+    "# 作者自己写的注释",
+    "apiVersion: map-v1",
+    "id: map-world",
+    "crs: simple",
+    "base_size: {width: 1000, height: 700}",
+    "bounds: [[0, 0], [1000, 700]]",
+    "layers: [place, political, route]",
+    "regions:",
+    '  - {id: r-1, layer: political, name: "北境", points: [[100, 100], [500, 100], [500, 500], [100, 500]]}',
+    "routes:",
+    "  - {id: rt-1, layer: route, points: [[10, 10], [20, 20]]}",
+    "",
+  ].join("\n");
+
+  it("挖一个洞 ⇒ 写进那一个区域的 holes（**别的行不动**，行数不变）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await addMapHole(gateway, {
+      shapeId: "r-1",
+      points: [
+        { x: 200, y: 200 },
+        { x: 300, y: 200 },
+        { x: 250, y: 300 },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.holeCount).toBe(1);
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).toContain("holes: [[[200, 200], [300, 200], [250, 300]]]");
+    // 名字与别的形状都还在
+    expect(content).toContain('name: "北境"');
+    expect(content).toContain("points: [[10, 10], [20, 20]]");
+    expect(content).toContain("# 作者自己写的注释");
+    expect(content.split("\n").length).toBe(MAP_YAML.split("\n").length);
+  });
+
+  it("洞的顶点在区域外面 ⇒ 拒绝并点名，盘上不动", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await addMapHole(gateway, {
+      shapeId: "r-1",
+      points: [
+        { x: 600, y: 600 },
+        { x: 700, y: 600 },
+        { x: 650, y: 700 },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("落在区域外面");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("洞不足 3 个点 ⇒ 拒绝", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const result = await addMapHole(gateway, {
+      shapeId: "r-1",
+      points: [
+        { x: 200, y: 200 },
+        { x: 300, y: 200 },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("至少要 3 个点");
+  });
+
+  it("对**行程线**挖洞 ⇒ 拒绝（行程线没有洞）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await addMapHole(gateway, {
+      shapeId: "rt-1",
+      points: [
+        { x: 12, y: 12 },
+        { x: 15, y: 12 },
+        { x: 13, y: 15 },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("行程线");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("对**不存在的形状**挖洞 ⇒ 拒绝（不静默新增一行）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await addMapHole(gateway, {
+      shapeId: "r-9",
+      points: [
+        { x: 200, y: 200 },
+        { x: 300, y: 200 },
+        { x: 250, y: 300 },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("r-9");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("删掉一个洞 ⇒ holes 里少一个；删到最后一个 ⇒ 那**一行**里不再有 holes", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    await addMapHole(gateway, {
+      shapeId: "r-1",
+      points: [
+        { x: 200, y: 200 },
+        { x: 300, y: 200 },
+        { x: 250, y: 300 },
+      ],
+    });
+    const removed = await removeMapHole(gateway, { shapeId: "r-1", holeIndex: 0 });
+    expect(removed.ok).toBe(true);
+    expect(removed.holeCount).toBe(0);
+    const content = (await gateway.readDoc("world/map.yaml")).content;
+    expect(content).not.toContain("holes:");
+    expect(content).toContain('name: "北境"');
+    expect(content.split("\n").length).toBe(MAP_YAML.split("\n").length);
+  });
+
+  it("删一个**不存在**的洞 ⇒ 拒绝并说清是第几个", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    const before = (await gateway.readDoc("world/map.yaml")).hash;
+    const result = await removeMapHole(gateway, { shapeId: "r-1", holeIndex: 3 });
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain("第 4 个洞");
+    expect((await gateway.readDoc("world/map.yaml")).hash).toBe(before);
+  });
+
+  it("地图载荷里带洞（顶点已归一化，渲染层直接用）", async () => {
+    await gateway.writeDoc("world/map.yaml", MAP_YAML);
+    await addMapHole(gateway, {
+      shapeId: "r-1",
+      points: [
+        { x: 200, y: 200 },
+        { x: 300, y: 200 },
+        { x: 250, y: 300 },
+      ],
+    });
+    const view = await worldMapView(gateway, {});
+    const region = view.shapes.find((shape) => shape.id === "r-1");
+    expect(region?.holes).toHaveLength(1);
+    expect(region?.holes?.[0]?.[0]?.x).toBeCloseTo(0.2);
+    expect(region?.holes?.[0]?.[0]?.y).toBeCloseTo(0.2 / 0.7);
   });
 });

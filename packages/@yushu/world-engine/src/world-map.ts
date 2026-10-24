@@ -34,11 +34,26 @@ export type MapLayerKind = "base" | "place" | "political" | "event" | "route" | 
  * 口径回源 K08 §5 的图层类型（`type: region` / `type: polyline`）——
  * K08 给了**图层类型**但没给几何 ⇒ 这一段的几何由本项目定，并写进 docs/11：
  * **点用底图像素**（与标注/锚点同一套坐标空间），一行一个形状：
- * `regions: [{id, layer, name?, points: [[x,y], …]}]` / `routes: [{id, layer, name?, points: [[x,y], …]}]`。
+ * `regions: [{id, layer, name?, points: [[x,y], …], holes?: [[[x,y], …], …]}]` /
+ * `routes: [{id, layer, name?, points: [[x,y], …]}]`。
  *
  * 为什么不用经纬度：K08 §3.6 明写「坐标以图片像素 / 归一化坐标记录（不用真实经纬度）」。
  */
 export type MapShapeKind = "region" | "route";
+
+/**
+ * **洞**（R151）：区域里"挖掉的那一块"，一圈顶点。
+ *
+ * 为什么要有洞：R143 的区域只有**一个外环** ⇒ 画不出"飞地"（一块被别处围住的地）、
+ * 也画不出"湖"（在区域里面的另一片空白）⇒ 作者只能把区域拆成两个互不相连的面
+ * ⇒ 「它们本来是一块」这件事丢了。**洞**让一个区域能同时有外边界与内边界。
+ *
+ * 几何口径（本项目自定，K08 只给了图层类型没给几何）：
+ * ① 洞的**所有顶点**须**严格在**外环内部（压在外环边界上 ⇒ 挖不出确定的形状 ⇒ 拒绝）；
+ * ② 洞的**边**不得与外环的边相交（相交 ⇒ 挖出来的面会自交 ⇒ 拒绝）；
+ * ③ 洞与洞之间不得相交、不得套在一起（两个洞重叠 ⇒ 挖出来的面会自交 ⇒ 拒绝）。
+ */
+export type MapHole = [number, number][];
 
 /** 地图上的一个面 / 线 */
 export interface MapShape {
@@ -49,6 +64,130 @@ export interface MapShape {
   name?: string;
   /** 顶点（底图像素；区域是闭合多边形，行程线是折线） */
   points: [number, number][];
+  /**
+   * 洞（R151）：**只有区域有**；行程线带洞是说不通的事 ⇒ 解析时直接拒绝。
+   *
+   * 向后兼容：`holes` 是**可选**的 ⇒ R143 写的单环区域文件**照样能读**（不迁移、不改老文件）。
+   */
+  holes?: MapHole[];
+}
+
+/* ------------------------------------------------------------------ *
+ * R151：区域的几何（洞）
+ *
+ * 这一段是**纯几何**（不读文件、不碰磁盘）⇒ 主进程写盘前与引擎读盘时**共用同一份**：
+ * 一套规则写两遍 ⇒ 两遍会漂 ⇒ 这里只写一遍。
+ * ------------------------------------------------------------------ */
+
+/** 点是否落在某条边**（含端点） */
+function pointOnSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): boolean {
+  const cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+  if (Math.abs(cross) > 1e-9) return false;
+  const minX = Math.min(x1, x2) - 1e-9;
+  const maxX = Math.max(x1, x2) + 1e-9;
+  const minY = Math.min(y1, y2) - 1e-9;
+  const maxY = Math.max(y1, y2) + 1e-9;
+  return px >= minX && px <= maxX && py >= minY && py <= maxY;
+}
+
+/** 点是否落在这圈顶点的**边界**上 */
+export function pointOnRing(point: [number, number], ring: [number, number][]): boolean {
+  const [px, py] = point;
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i] as [number, number];
+    const b = ring[(i + 1) % ring.length] as [number, number];
+    if (pointOnSegment(px, py, a[0], a[1], b[0], b[1])) return true;
+  }
+  return false;
+}
+
+/**
+ * 点是否**严格在**多边形内部（射线法）。
+ *
+ * 边界上的点算**不在**里面 ⇒ 洞的顶点压在外环边界上会被拒（挖出来的形状不唯一）。
+ */
+export function pointInRing(point: [number, number], ring: [number, number][]): boolean {
+  const [px, py] = point;
+  if (pointOnRing(point, ring)) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const xi = (ring[i] as [number, number])[0];
+    const yi = (ring[i] as [number, number])[1];
+    const xj = (ring[j] as [number, number])[0];
+    const yj = (ring[j] as [number, number])[1];
+    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** 两条线段是否**真正**相交（只碰个端点不算） */
+function segmentsCross(
+  a1: [number, number],
+  a2: [number, number],
+  b1: [number, number],
+  b2: [number, number],
+): boolean {
+  const d = (a2[0] - a1[0]) * (b2[1] - b1[1]) - (a2[1] - a1[1]) * (b2[0] - b1[0]);
+  if (Math.abs(d) < 1e-9) return false;
+  const t = ((b1[0] - a1[0]) * (b2[1] - b1[1]) - (b1[1] - a1[1]) * (b2[0] - b1[0])) / d;
+  const u = ((b1[0] - a1[0]) * (a2[1] - a1[1]) - (b1[1] - a1[1]) * (a2[0] - a1[0])) / d;
+  return t > 1e-9 && t < 1 - 1e-9 && u > 1e-9 && u < 1 - 1e-9;
+}
+
+/** 两圈顶点的边是否相交 */
+export function ringsCross(a: [number, number][], b: [number, number][]): boolean {
+  for (let i = 0; i < a.length; i += 1) {
+    const a1 = a[i] as [number, number];
+    const a2 = a[(i + 1) % a.length] as [number, number];
+    for (let j = 0; j < b.length; j += 1) {
+      const b1 = b[j] as [number, number];
+      const b2 = b[(j + 1) % b.length] as [number, number];
+      if (segmentsCross(a1, a2, b1, b2)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 校验**一组洞**能不能长在**这个外环**里面（R151）。
+ *
+ * 失败一律 `failMap`（抛出 ⇒ 读盘失败 / 写盘被拒）⇒ 不给作者"看着能用其实画不出来"的区域。
+ * 规则见 `MapHole` 的注释（①顶点严格在外环内 ②边不相交 ③洞之间不相交不套嵌）。
+ */
+export function validateRegionHoles(
+  outer: [number, number][],
+  holes: [number, number][][],
+  label: string,
+): void {
+  for (const [index, hole] of holes.entries()) {
+    if (hole.length < 3) failMap(`${label} 的第 ${String(index + 1)} 个洞至少要 3 个点`);
+    for (const [vertexIndex, vertex] of hole.entries()) {
+      const at = `${label} 的第 ${String(index + 1)} 个洞第 ${String(vertexIndex + 1)} 个点`;
+      if (pointOnRing(vertex, outer)) failMap(`${at}落在区域边界上（压线 ⇒ 挖不出确定的形状）`);
+      if (!pointInRing(vertex, outer)) failMap(`${at}落在区域外面`);
+    }
+    if (ringsCross(hole, outer)) failMap(`${label} 的第 ${String(index + 1)} 个洞与区域边界相交`);
+    for (const [otherIndex, other] of holes.entries()) {
+      if (otherIndex === index) continue;
+      if (ringsCross(hole, other)) {
+        failMap(`${label} 的第 ${String(index + 1)} 个洞与第 ${String(otherIndex + 1)} 个洞相交`);
+      }
+      for (const vertex of hole) {
+        if (pointInRing(vertex, other)) {
+          failMap(
+            `${label} 的第 ${String(index + 1)} 个洞钻进第 ${String(otherIndex + 1)} 个洞里了（洞不能套洞）`,
+          );
+        }
+      }
+    }
+  }
 }
 
 /** 底图边界（图片像素坐标） */
@@ -126,6 +265,8 @@ export interface MapProjectedAnchor extends MapEventAnchor {
 export interface MapProjectedShape extends MapShape {
   /** 归一化后的顶点（0..1） */
   points: [number, number][];
+  /** 归一化后的洞（R151；没有洞时不带这个键） */
+  holes?: [number, number][][];
 }
 
 export type MapFindingCode =
@@ -362,7 +503,29 @@ export function projectWorldMap(
         refs: [shape.id],
       });
     }
-    shapes.push({ ...shape, points });
+    // 洞（R151）也要归一化；洞的顶点在边界外 ⇒ 与外环同一个毛病（同一句话，不另起一条）。
+    const holes: [number, number][][] = [];
+    for (const hole of shape.holes ?? []) {
+      const normalized: [number, number][] = [];
+      let holeOutside = false;
+      for (const [px, py] of hole) {
+        const nx = (px - bounds.x0) / (bounds.x1 - bounds.x0);
+        const ny = (py - bounds.y0) / (bounds.y1 - bounds.y0);
+        if (nx < 0 || nx > 1 || ny < 0 || ny > 1) holeOutside = true;
+        normalized.push([nx, ny]);
+      }
+      if (holeOutside && !outside) {
+        outside = true;
+        findings.push({
+          code: "map-shape-outside",
+          severity: "warn",
+          message: `区域 ${shape.id} 有洞的顶点落在底图边界之外`,
+          refs: [shape.id],
+        });
+      }
+      holes.push(normalized);
+    }
+    shapes.push({ ...shape, points, ...(holes.length > 0 ? { holes } : {}) });
   }
   }
 
@@ -549,6 +712,31 @@ export function appendMapMarker(
 }
 
 /**
+ * 把一个形状写成**那一行**（R143 的行内格式；R151 在后面接 `holes:`）。
+ *
+ * **单一真源**：追加（R143）与改写（R151 挖洞 / 删洞）都走这里 ⇒ 两种写法的形状**长得一样**，
+ * 不会出现"新加的带洞、老的是不带洞、格式还不一样"这种两套真源。
+ */
+export function formatMapShapeEntry(shape: {
+  id: string;
+  kind: MapShapeKind;
+  layer: MapLayerKind;
+  name?: string;
+  points: [number, number][];
+  holes?: [number, number][][];
+}): string {
+  const points = shape.points.map(([x, y]) => `[${String(x)}, ${String(y)}]`).join(", ");
+  const namePart = shape.name === undefined ? "" : `, name: "${shape.name.replace(/["\\]/g, "\\$&")}"`;
+  const holesPart =
+    shape.holes === undefined || shape.holes.length === 0
+      ? ""
+      : `, holes: [${shape.holes
+          .map((hole) => `[${hole.map(([x, y]) => `[${String(x)}, ${String(y)}]`).join(", ")}]`)
+          .join(", ")}]`;
+  return `  - {id: ${shape.id}, layer: ${shape.layer}${namePart}, points: [${points}]${holesPart}}`;
+}
+
+/**
  * 把**一个区域 / 行程线**追加进地图文件（R143）：只动 `regions:` / `routes:` 那一段。
  *
  * 与 `appendMapMarker` / `appendMapAnchor` 同一条纪律：**只追加那一行**，
@@ -556,12 +744,17 @@ export function appendMapMarker(
  */
 export function appendMapShape(
   text: string,
-  shape: { id: string; kind: MapShapeKind; layer: MapLayerKind; name?: string; points: [number, number][] },
+  shape: {
+    id: string;
+    kind: MapShapeKind;
+    layer: MapLayerKind;
+    name?: string;
+    points: [number, number][];
+    holes?: [number, number][][];
+  },
 ): { content: string | null; reason: string | null; previous: string[] } {
   const key = shape.kind === "region" ? "regions" : "routes";
-  const points = shape.points.map(([x, y]) => `[${String(x)}, ${String(y)}]`).join(", ");
-  const namePart = shape.name === undefined ? "" : `, name: "${shape.name.replace(/["\\]/g, "\\$&")}"`;
-  const entry = `  - {id: ${shape.id}, layer: ${shape.layer}${namePart}, points: [${points}]}`;
+  const entry = formatMapShapeEntry(shape);
   const lines = text.split("\n");
   const sectionIndex = lines.findIndex((line) => new RegExp(`^${key}\\s*:`).test(line));
   if (sectionIndex < 0) {
@@ -572,6 +765,40 @@ export function appendMapShape(
   while (end < lines.length && !/^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(lines[end] as string)) end += 1;
   const inserted = [...lines.slice(0, end), entry, ...lines.slice(end)];
   return { content: inserted.join("\n"), reason: null, previous: [] };
+}
+
+/**
+ * **改写某一个形状**（R151 挖洞 / 删洞）：只动**那一行**。
+ *
+ * 与 `appendMapShape` 同一条纪律（**只动一行，别的一行不动**）⇒ 作者写的注释、排版、
+ * 顺序都不变；找不到那个形状就说清楚（不静默新增一行 ⇒ 那会变成"复制了一个区域"）。
+ */
+export function replaceMapShapeEntry(
+  text: string,
+  shape: {
+    id: string;
+    kind: MapShapeKind;
+    layer: MapLayerKind;
+    name?: string;
+    points: [number, number][];
+    holes?: [number, number][][];
+  },
+): { content: string | null; reason: string | null; previous: string[] } {
+  const key = shape.kind === "region" ? "regions" : "routes";
+  const lines = text.split("\n");
+  const sectionIndex = lines.findIndex((line) => new RegExp(`^${key}\\s*:`).test(line));
+  if (sectionIndex < 0) return { content: null, reason: `地图文件里没有 ${key} 这一段`, previous: [] };
+  let end = sectionIndex + 1;
+  while (end < lines.length && !/^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(lines[end] as string)) end += 1;
+  const idPattern = new RegExp(`^\\s*-\\s*\\{\\s*id:\\s*${escapeRegExp(shape.id)}\\s*,`);
+  const target = lines.findIndex(
+    (line, index) => index > sectionIndex && index < end && idPattern.test(line),
+  );
+  if (target < 0) return { content: null, reason: `地图文件里没有形状 ${shape.id}`, previous: [] };
+  const previous = [lines[target] as string];
+  const replaced = [...lines];
+  replaced[target] = formatMapShapeEntry(shape);
+  return { content: replaced.join("\n"), reason: null, previous };
 }
 
 /**
@@ -805,7 +1032,7 @@ export function parseMapFile(text: string): WorldMapDef {
     for (const [index, item] of ((root[key] ?? []) as unknown[]).entries()) {
       const label = `${key}[${index}]`;
       const raw = asMapObject(item, label);
-      checkMapKeys(raw, ["id", "layer", "name", "points"], label);
+      checkMapKeys(raw, ["id", "layer", "name", "points", "holes"], label);
       const shapeId = asMapString(raw.id, label, "id");
       if (shapeIds.has(shapeId)) failMap(`形状 id 重复：${shapeId}`);
       shapeIds.add(shapeId);
@@ -832,6 +1059,28 @@ export function parseMapFile(text: string): WorldMapDef {
         layer: raw.layer as MapLayerKind,
         points,
       };
+      // 洞（R151）：**只有区域有**；行程线带洞说不通 ⇒ 直接拒绝（不静默忽略）。
+      if (raw.holes !== undefined && raw.holes !== null) {
+        if (kind !== "region") failMap(`${label} 是行程线，不能有洞`);
+        if (!Array.isArray(raw.holes)) failMap(`${label} 的 holes 须是数组`);
+        const holes: [number, number][][] = [];
+        for (const [holeIndex, rawHole] of (raw.holes as unknown[]).entries()) {
+          if (!Array.isArray(rawHole) || rawHole.length < 3) {
+            failMap(`${label}.holes[${String(holeIndex)}] 至少要 3 个点`);
+          }
+          const hole: [number, number][] = [];
+          for (const [pointIndex, pair] of (rawHole as unknown[]).entries()) {
+            const at = `${label}.holes[${String(holeIndex)}][${String(pointIndex)}]`;
+            if (!Array.isArray(pair) || pair.length !== 2) failMap(`${at} 须是 [x, y]`);
+            const px = asMapNumber((pair as unknown[])[0], at, "x");
+            const py = asMapNumber((pair as unknown[])[1], at, "y");
+            hole.push([px, py]);
+          }
+          holes.push(hole);
+        }
+        validateRegionHoles(points, holes, label);
+        shape.holes = holes;
+      }
       if (raw.name !== undefined && raw.name !== null) {
         shape.name = asMapString(raw.name, label, "name");
       }

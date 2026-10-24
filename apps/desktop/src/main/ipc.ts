@@ -33,10 +33,14 @@ import {
   type GraphViewPayload,
   type GraphViewRequestPayload,
   type WorldMapBasePayload,
+  type WorldMapAddHoleRequestPayload,
+  type WorldMapAddHoleResult,
   type WorldMapCreateAnchorRequestPayload,
   type WorldMapCreateShapeRequestPayload,
   type WorldMapCreateShapeResult,
   type WorldMapCreateAnchorResult,
+  type WorldMapRemoveHoleRequestPayload,
+  type WorldMapRemoveHoleResult,
   type WorldMapCreateMarkerRequestPayload,
   type WorldMapCreateMarkerResult,
   type WorldMapSetAnchorRequestPayload,
@@ -187,7 +191,7 @@ import { applyProposal, decideProposal, listProposals, previewPropagation, propo
 import { foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
-import { createMapAnchor, createMapMarker, createMapShape, setAnchorPosition, setMapBounds, setMarkerPosition, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
+import { addMapHole, createMapAnchor, createMapMarker, createMapShape, removeMapHole, setAnchorPosition, setMapBounds, setMarkerPosition, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
 import {
@@ -688,6 +692,13 @@ export function registerIpcHandlers(): void {
   // 世界地图·**放区域 / 放行程线**（R143）：**写盘**（作者点出一串点 ⇒ 落一个面 / 一条线）⇒ wrapWrite
   ipcMain.handle(CHANNELS.worldMapCreateShape, (_event, payload: WorldMapCreateShapeRequestPayload) =>
     wrapWrite<WorldMapCreateShapeResult>(() => createMapShape(requireGateway(), payload)),
+  );
+  // 世界地图·**挖洞 / 删洞**（R151）：**写盘**（改那一个区域的 `holes:`）⇒ wrapWrite
+  ipcMain.handle(CHANNELS.worldMapAddHole, (_event, payload: WorldMapAddHoleRequestPayload) =>
+    wrapWrite<WorldMapAddHoleResult>(() => addMapHole(requireGateway(), payload)),
+  );
+  ipcMain.handle(CHANNELS.worldMapRemoveHole, (_event, payload: WorldMapRemoveHoleRequestPayload) =>
+    wrapWrite<WorldMapRemoveHoleResult>(() => removeMapHole(requireGateway(), payload)),
   );
   // 编年史（T4-8）：复用时间线刻度，只读 ⇒ wrap
   ipcMain.handle(CHANNELS.chronicleBook, (_event, payload: ChronicleBookRequestPayload) =>

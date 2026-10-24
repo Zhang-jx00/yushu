@@ -120,3 +120,28 @@ export function zoomAtPoint(
   );
   return { zoom: nextZoom, pan };
 }
+
+/**
+ * 区域（含洞）⇒ SVG 路径的 `d`（R151）。
+ *
+ * 为什么用 `path` 而不是 `polygon`：**polygon 只能一个环**。
+ * 有洞的区域要画成「外环 + 若干内环」，而且内环要**挖掉**（不是再画一块底色）⇒
+ * 靠 `fill-rule="evenodd"`：内环落在偶数层 ⇒ 不填 ⇒ 那块就是空的。
+ *
+ * 坐标是**画面坐标**（渲染层已经乘过宽高）⇒ 这里只负责把环拼成字符串。
+ * 空的外环返回空串（画不出东西就别画一条空路径）。
+ */
+export function shapePathData(
+  outer: { x: number; y: number }[],
+  holes: { x: number; y: number }[][] = [],
+): string {
+  // 没有外环就**什么都没有**（洞是"从外环里挖掉的"，没有外环的洞画不出来 ⇒ 不画）
+  if (outer.length === 0) return "";
+  const ring = (points: { x: number; y: number }[]): string => {
+    if (points.length === 0) return "";
+    const head = points[0] as { x: number; y: number };
+    const rest = points.slice(1).map((p) => `${String(p.x)},${String(p.y)}`).join(" L ");
+    return `M ${String(head.x)},${String(head.y)}${rest === "" ? "" : ` L ${rest}`} Z`;
+  };
+  return [ring(outer), ...holes.map(ring)].filter((part) => part !== "").join(" ");
+}

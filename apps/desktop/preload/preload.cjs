@@ -129,6 +129,10 @@ contextBridge.exposeInMainWorld("yushu", {
     createAnchor: (payload) => invoke("map:createAnchor", payload),
     /** 放区域 / 放行程线（R143）：作者点出一串点 ⇒ 落一个面 / 一条线 */
     createShape: (payload) => invoke("map:createShape", payload),
+    /** 挖洞（R151）：在某个区域里挖掉一块 ⇒ 改那一个区域的 holes */
+    addHole: (payload) => invoke("map:addHole", payload),
+    /** 删洞（R151）：把某个区域的某一个洞去掉 */
+    removeHole: (payload) => invoke("map:removeHole", payload),
   },
   chronicle: {
     book: (payload) => invoke("chronicle:book", payload),

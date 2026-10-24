@@ -2347,7 +2347,7 @@ describe("地图缩放与平移（R145）：放大看局部，挪动看别处", 
     const handler = /const onViewKeyDown = useCallback\([\s\S]*?\n  \);/.exec(panel)?.[0] ?? "";
     expect(handler, "没找到缩放平移的键盘处理").not.toBe("");
     expect(handler, "没让位给放置/框定/画形状").toMatch(
-      /if \(framing \|\| placing \|\| shapeKind !== null\) return;/,
+      /if \(framing \|\| placing \|\| shapeKind !== null[^)]*\) return;/,
     );
     expect(handler, "没让位给被聚焦的标注/锚点").toMatch(
       /if \(event\.target !== event\.currentTarget\) return;/,
@@ -2609,7 +2609,7 @@ describe("滚轮缩放以指针为锚点（R148）", () => {
     const block = /const onWheel = \(event: WheelEvent\) => \{[\s\S]*?\n    \};/.exec(panel)?.[0] ?? "";
     expect(block, "没找到滚轮处理").not.toBe("");
     expect(block, "没让位给放置/框定/画形状").toMatch(
-      /if \(framing \|\| placing \|\| shapeKind !== null\) return;/,
+      /if \(framing \|\| placing \|\| shapeKind !== null[^)]*\) return;/,
     );
   });
 
@@ -2676,9 +2676,12 @@ describe("拖拽平移（R150）：只在空白处拖，各模式一律让位", 
 
   it("**框定 / 放置 / 画形状时一律让位**（别抢指针）", () => {
     expect(downBlock, "没找到平移的 pointerdown").not.toBe("");
+    // R151：让位的模式又多了一个（挖洞）⇒ 这里认「模式名单里还有别的模式」，
+    // 而不是把名单钉死成三个（R151 起名单会继续长，钉死就成了一条假绿）。
     expect(downBlock, "没让位给框定/放置/画形状").toMatch(
-      /if \(framing \|\| placing \|\| shapeKind !== null\) return;/,
+      /if \(framing \|\| placing \|\| shapeKind !== null[^)]*\) return;/,
     );
+    expect(downBlock, "挖洞时不平移（挖洞也要让位）").toContain("holeMode");
   });
 
   it("点在**标注 / 锚点**上不开始平移（那是挪这个点）", () => {
@@ -2688,5 +2691,58 @@ describe("拖拽平移（R150）：只在空白处拖，各模式一律让位", 
   it("平移**要钳住**（不许把画面推出作者框定的那一块）", () => {
     expect(moveBlock, "没找到平移的 pointermove").not.toBe("");
     expect(moveBlock, "平移没钳制").toMatch(/clampPan\(/);
+  });
+});
+
+/**
+ * **挖洞**（R151）：区域从**单环**走到**外环 + 洞**。
+ *
+ * 为什么要有这个：R143 的区域只有一个外环 ⇒ 画不出"一块被别处围住的地"、
+ * 也画不出"区域里的另一片空白" ⇒ 作者只能把区域拆成两个互不相连的面
+ * ⇒ 「它们本来是一块」这件事丢了。
+ *
+ * 判据盯三件事：
+ * ① **区域必须用 `path` + `evenodd`**（`polygon` 只能一个环 ⇒ 洞画不出来）；
+ * ② **洞的顶点走洞那份状态**（不是形状那份 ⇒ 挖洞与画形状不串味）；
+ * ③ **写盘只走主进程**（渲染层不自己改 map.yaml —— 真源是 Markdown+YAML 文件树）。
+ */
+describe("挖洞（R151）：区域的外环 + 洞", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const regionTag = /<path\b[^>]*className="map-region"[^>]*>/.exec(panel)?.[0] ?? "";
+
+  it("区域用 **path + evenodd**（`polygon` 只能一个环 ⇒ 挖不出洞）", () => {
+    expect(regionTag, "没找到区域的 path 渲染").not.toBe("");
+    expect(regionTag, "区域没走 evenodd（洞不会被挖掉）").toContain('fillRule="evenodd"');
+    expect(regionTag, "区域路径不是从外环+洞算出来的").toMatch(/shapePathData\(outer, holes\)/);
+    // 旧的那个单环 polygon **不许**还在（两套画法 = 两个真源）
+    expect(panel, "还留着单环的 polygon 渲染").not.toContain('<polygon key={shape.id} className="map-region"');
+  });
+
+  it("洞的**个数**写在元素上（渲染层与判据都能读到）", () => {
+    expect(regionTag, "区域元素上没有洞的个数").toContain("data-holes=");
+  });
+
+  it("洞的顶点走**洞那份状态**（不是形状那份）", () => {
+    expect(panel, "洞的顶点没进洞的状态").toContain("setHolePoints(");
+    expect(panel, "洞还没画完就落盘了").toContain("holePoints.length < 3");
+  });
+
+  it("**写盘只走主进程**（渲染层不自己改 map.yaml）", () => {
+    expect(panel, "挖洞没有走主进程").toMatch(
+      /api\(\)\.map\.addHole\(\{ shapeId: holeTarget, points: holePoints \}\)/,
+    );
+    expect(panel, "删洞没有走主进程").toMatch(/api\(\)\.map\.removeHole\(\{ shapeId: holeTarget, holeIndex: index \}\)/);
+  });
+
+  it("**没有区域就挖不成** ⇒ 入口是灰的（不是进去才发现没东西可挖）", () => {
+    expect(panel, "挖洞入口没跟区域数挂钩").toMatch(
+      /disabled=\{holeMode \? false : regionShapes\.length === 0\}/,
+    );
+    expect(panel, "区域候选不是从真源现算的").toMatch(/regionShapes\s*=\s*\(map\?\.shapes/);
+  });
+
+  it("目标区域用**下拉**选（键盘也能选 ⇒ 键盘债是 0）", () => {
+    expect(panel, "没有选区域的入口").toContain('aria-label="选一个要挖洞的区域"');
+    expect(panel, "没有挖洞的那一栏").toContain('className="map-hole-bar"');
   });
 });

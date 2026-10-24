@@ -11,6 +11,7 @@ import {
   visibleSize,
   zoomAtPoint,
   zoomStep,
+  shapePathData,
 } from "../renderer/src/components/map-view.js";
 
 /**
@@ -198,5 +199,74 @@ describe("滚轮缩放以指针为锚点（R148）", () => {
     expect(after.pan.y).toBeGreaterThanOrEqual(0);
     expect(after.pan.x + w).toBeLessThanOrEqual(FRAME_W + 0.001);
     expect(after.pan.y + h).toBeLessThanOrEqual(FRAME_H + 0.001);
+  });
+});
+
+/**
+ * **区域路径**（R151）：外环 + 洞 ⇒ 一条路径。
+ *
+ * 为什么要有这个函数：区域从一个环变成"外环 + 若干洞"⇒ `<polygon>` 画不了（它只能一个环）
+ * ⇒ 改用 `<path>` + `fill-rule="evenodd"`（洞落在偶数层 ⇒ 不填 ⇒ 那块是空的）。
+ *
+ * 判据盯两件事：① 洞**必须真的多出一段**（少一段 ⇒ 洞没画出来，看起来还是一整块地）；
+ * ② 空的外环**不许**画出一条空路径（浏览器会警告，作者还看见一条莫名其妙的线）。
+ */
+describe("区域路径（R151）：外环 + 洞", () => {
+  it("没有洞 ⇒ 只有一段 M…Z", () => {
+    const d = shapePathData([
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+    ]);
+    expect(d).toBe("M 0,0 L 10,0 L 10,10 Z");
+  });
+
+  it("有一个洞 ⇒ **两段**（洞靠 evenodd 挖掉；少一段就等于没挖）", () => {
+    const d = shapePathData(
+      [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ],
+      [
+        [
+          { x: 2, y: 2 },
+          { x: 4, y: 2 },
+          { x: 3, y: 4 },
+        ],
+      ],
+    );
+    expect(d).toBe("M 0,0 L 10,0 L 10,10 L 0,10 Z M 2,2 L 4,2 L 3,4 Z");
+    // 两段 ⇒ 两个闭合
+    expect(d.split("Z").length - 1).toBe(2);
+  });
+
+  it("两个洞 ⇒ 三段", () => {
+    const d = shapePathData(
+      [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+      ],
+      [
+        [
+          { x: 1, y: 1 },
+          { x: 2, y: 1 },
+          { x: 1, y: 2 },
+        ],
+        [
+          { x: 5, y: 5 },
+          { x: 6, y: 5 },
+          { x: 5, y: 6 },
+        ],
+      ],
+    );
+    expect(d.split("Z").length - 1).toBe(3);
+  });
+
+  it("空的外环 ⇒ 空串（不画空路径）", () => {
+    expect(shapePathData([])).toBe("");
+    expect(shapePathData([], [[{ x: 1, y: 1 }]])).toBe("");
   });
 });

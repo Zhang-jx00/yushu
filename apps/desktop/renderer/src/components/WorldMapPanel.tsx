@@ -5,7 +5,7 @@ import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../..
 import { api } from "../api";
 import { StateNote } from "./StateNote";
 import { SummaryRows } from "./SummaryRows";
-import { ZOOM_MAX, ZOOM_MIN, clampPan, computeViewBox, panStep, zoomAtPoint, zoomStep } from "./map-view";
+import { ZOOM_MAX, ZOOM_MIN, clampPan, computeViewBox, panStep, shapePathData, zoomAtPoint, zoomStep } from "./map-view";
 
 /**
  * 世界地图（M5 / T5-1，R120）：**只读**面板。
@@ -239,6 +239,18 @@ export function WorldMapPanel(props: {
   const [shapeKind, setShapeKind] = useState<"region" | "route" | null>(null);
   /** 已经点出来的顶点（底图像素） */
   const [shapePoints, setShapePoints] = useState<{ x: number; y: number }[]>([]);
+  /**
+   * R151 **挖洞**：在**已经画好的区域**里挖掉一块（湖 / 飞地 / 别处的地盘）。
+   *
+   * 为什么要这个：R143 的区域只有**一个外环** ⇒ 画不出"一块被别处围住的地"、
+   * 也画不出"区域里的另一片空白" ⇒ 作者只能把区域拆成两个互不相连的面
+   * ⇒ 「它们本来是一块」这件事丢了。
+   */
+  const [holeMode, setHoleMode] = useState(false);
+  /** 挖洞的**目标区域** id（空 = 还没选；选区域用下拉 ⇒ 键盘也能选） */
+  const [holeTarget, setHoleTarget] = useState("");
+  /** 正在画的那一圈**洞**的顶点（底图像素） */
+  const [holePoints, setHolePoints] = useState<{ x: number; y: number }[]>([]);
   /** 放标注时的**十字光标**（视图坐标）：鼠标点哪儿、方向键走到哪儿，它就在哪儿 */
   const [placeCursor, setPlaceCursor] = useState<{ x: number; y: number } | null>(null);
   /**
@@ -267,6 +279,11 @@ export function WorldMapPanel(props: {
   const imageY = framing ? 0 : -(frame?.y0 ?? 0);
   /** 有没有底图尺寸可依（没有 base_size ⇒ 框不出范围，入口不给按） */
   const hasBaseSize = map?.baseSize != null;
+  /**
+   * R151：**区域**（不是行程线）—— 洞只能挖在区域里面 ⇒ 挖洞的候选只有这些。
+   * 从真源现算（`map.shapes`）⇒ 盘上删了一个，这里立刻少一个。
+   */
+  const regionShapes = (map?.shapes ?? []).filter((shape) => shape.kind === "region");
 
   /** 缩放（±1 步）：看得见的范围变了 ⇒ 平移要重新钳一遍 */
   const changeZoom = useCallback(
@@ -299,7 +316,7 @@ export function WorldMapPanel(props: {
    */
   const onViewKeyDown = useCallback(
     (event: ReactKeyboardEvent<SVGSVGElement>) => {
-      if (framing || placing || shapeKind !== null) return;
+      if (framing || placing || shapeKind !== null || holeMode) return;
       if (event.target !== event.currentTarget) return;
       if (event.key === "+" || event.key === "=") {
         event.preventDefault();
@@ -327,7 +344,7 @@ export function WorldMapPanel(props: {
       event.preventDefault();
       moveView(dx, dy);
     },
-    [framing, placing, shapeKind, view.zoom, width, height, changeZoom, resetView, moveView],
+    [framing, placing, shapeKind, holeMode, view.zoom, width, height, changeZoom, resetView, moveView],
   );
 
   /** 进入/退出框定模式：进来时把当前那一块放进工作区（虚线画出来，他看得见自己框到哪了） */
@@ -432,7 +449,7 @@ export function WorldMapPanel(props: {
     const svg = canvasRef.current;
     if (svg === null) return;
     const onWheel = (event: WheelEvent) => {
-      if (framing || placing || shapeKind !== null) return;
+      if (framing || placing || shapeKind !== null || holeMode) return;
       event.preventDefault();
       const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
       const anchor = toImagePoint({
@@ -457,7 +474,7 @@ export function WorldMapPanel(props: {
     };
     svg.addEventListener("wheel", onWheel, { passive: false });
     return () => svg.removeEventListener("wheel", onWheel);
-  }, [framing, placing, shapeKind, width, height, toImagePoint, map]);
+  }, [framing, placing, shapeKind, holeMode, width, height, toImagePoint, map]);
 
   /**
    * R150：**拖拽平移** —— 放大之后要看别处，键盘方向键能挪，但按住鼠标拖更顺手。
@@ -472,7 +489,7 @@ export function WorldMapPanel(props: {
 
   const onCanvasPointerDown = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
-      if (framing || placing || shapeKind !== null) return;
+      if (framing || placing || shapeKind !== null || holeMode) return;
       const target = event.target as Element | null;
       if (
         target !== null &&
@@ -489,7 +506,7 @@ export function WorldMapPanel(props: {
       if (p === null) return;
       panDrag.current = { x: p.x, y: p.y, panX: view.pan.x, panY: view.pan.y };
     },
-    [framing, placing, shapeKind, toImagePoint, view.pan.x, view.pan.y],
+    [framing, placing, shapeKind, holeMode, toImagePoint, view.pan.x, view.pan.y],
   );
 
   const onCanvasPointerMove = useCallback(
@@ -701,6 +718,67 @@ export function WorldMapPanel(props: {
       setStatus(err instanceof Error ? err.message : String(err));
     }
   }, [shapeKind, shapePoints, reloadMap]);
+
+  /**
+   * R151 **进入/退出挖洞模式**（与框定 / 放标注 / 画形状**互斥**：一次只做一件事）。
+   *
+   * 挖洞要**先有区域** ⇒ 没有区域时这个入口是灰的（而不是进去以后才发现没东西可挖）。
+   */
+  const toggleHole = useCallback(() => {
+    setStatus("");
+    if (holeMode) {
+      setHoleMode(false);
+      setHoleTarget("");
+      setHolePoints([]);
+      return;
+    }
+    setFraming(false);
+    setFrameRect(null);
+    setPlacing(false);
+    setPlaceEntity("");
+    setShapeKind(null);
+    setShapePoints([]);
+    setHoleMode(true);
+    setHoleTarget("");
+    setHolePoints([]);
+  }, [holeMode]);
+
+  /** 把点出来的那一圈点写成那个区域的**一个新洞**（主进程校验：必须在区域里面） */
+  const commitHole = useCallback(async () => {
+    if (!holeMode || holeTarget === "") return;
+    if (holePoints.length < 3) {
+      setStatus(`洞至少要 3 个点（现在 ${String(holePoints.length)} 个）`);
+      return;
+    }
+    try {
+      const result = await api().map.addHole({ shapeId: holeTarget, points: holePoints });
+      setStatus(result.note);
+      if (result.ok) {
+        setHolePoints([]);
+        reloadMap();
+      }
+    } catch (err: unknown) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, [holeMode, holeTarget, holePoints, reloadMap]);
+
+  /** 删掉那个区域的某一个洞（写盘只改那一行） */
+  const dropHole = useCallback(
+    async (index: number) => {
+      if (!holeMode || holeTarget === "") return;
+      try {
+        const result = await api().map.removeHole({ shapeId: holeTarget, holeIndex: index });
+        setStatus(result.note);
+        if (result.ok) {
+          setHolePoints([]);
+          reloadMap();
+        }
+      } catch (err: unknown) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [holeMode, holeTarget, reloadMap],
+  );
 
   /** 一键框回整张图（作者想回退时的**最短路**） */
   const useWholeImage = useCallback(() => {
@@ -962,6 +1040,22 @@ export function WorldMapPanel(props: {
           >
             放行程线
           </button>
+          {/* R151 **挖洞**：在**已经画好的区域**里挖掉一块（湖 / 飞地 / 别处的地盘）。
+              没有区域就挖不成 ⇒ 没区域时这个入口是灰的。 */}
+          <button
+            type="button"
+            className={"map-mode-btn" + (holeMode ? " is-on" : "")}
+            aria-pressed={holeMode}
+            onClick={toggleHole}
+            disabled={holeMode ? false : regionShapes.length === 0}
+            title={
+              regionShapes.length === 0
+                ? "还没有区域（区域是外面那块 ⇒ 洞只能挖在区域里面）"
+                : "挖洞：选一个区域，在它里面挖掉一块"
+            }
+          >
+            挖洞
+          </button>
         </div>
         {framing && (
           <button type="button" className="map-upload-btn" onClick={useWholeImage} disabled={framingBusy}>
@@ -994,6 +1088,59 @@ export function WorldMapPanel(props: {
                   ))}
             </select>
           )}
+        {/* R151 挖洞：选目标区域（**下拉** ⇒ 键盘也能选）→ 在图上点出一圈点 → 挖下去。
+            已有的洞列出来，每个后面一个「删」⇒ 挖错了能退。 */}
+        {holeMode && (
+          <div className="map-hole-bar">
+            <select
+              className="map-place-select"
+              value={holeTarget}
+              onChange={(event) => {
+                setHoleTarget(event.target.value);
+                setHolePoints([]);
+              }}
+              aria-label="选一个要挖洞的区域"
+            >
+              <option value="">选一个区域…</option>
+              {regionShapes.map((shape) => (
+                <option key={shape.id} value={shape.id}>
+                  {shape.name ?? shape.id}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="map-upload-btn"
+              onClick={() => void commitHole()}
+              disabled={holeTarget === "" || holePoints.length < 3}
+              title={
+                holeTarget === ""
+                  ? "先选一个区域（洞只能挖在区域里面）"
+                  : "点出三个以上的点，把这一圈挖掉"
+              }
+            >
+              挖好了（{holePoints.length} 个点）
+            </button>
+            {holeTarget !== "" &&
+              (regionShapes.find((shape) => shape.id === holeTarget)?.holes ?? []).length > 0 && (
+                <span className="map-hole-list">
+                  {(regionShapes.find((shape) => shape.id === holeTarget)?.holes ?? []).map(
+                    (_hole, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        className="map-hole-del"
+                        onClick={() => void dropHole(index)}
+                        title={`删掉第 ${String(index + 1)} 个洞`}
+                      >
+                        删第{String(index + 1)}洞
+                      </button>
+                    ),
+                  )}
+                </span>
+              )}
+          </div>
+        )}
         {status !== "" && <div className="map-status">{status}</div>}
       </div>
       {uploadNote !== "" && (
@@ -1310,12 +1457,30 @@ export function WorldMapPanel(props: {
                 它盖在标注之上 ⇒ 放标注时点标注不会误放一个。 */}
             {/* R143：地图上的区域（面）与行程线（线）——从真源直算，顶点已归一化 */}
             {map.shapes.filter((shape) => !hidden.includes(shape.layer)).map((shape) => {
-              const points = shape.points.map((point) => `${String(point.x * width)},${String(point.y * height)}`).join(" ");
-              return shape.kind === "region" ? (
-                <polygon key={shape.id} className="map-region" data-shape={shape.id} points={points}>
-                  <title>{shape.name ?? shape.id}</title>
-                </polygon>
-              ) : (
+              if (shape.kind === "region") {
+                // R151：**区域用 path**（`polygon` 只能一个环）⇒ 外环 + 若干洞，
+                // `fill-rule="evenodd"` 把洞**挖掉**（洞落在偶数层 ⇒ 不填 ⇒ 那块是空的）。
+                const outer = shape.points.map((point) => ({ x: point.x * width, y: point.y * height }));
+                const holes = (shape.holes ?? []).map((hole) =>
+                  hole.map((point) => ({ x: point.x * width, y: point.y * height })),
+                );
+                return (
+                  <path
+                    key={shape.id}
+                    className="map-region"
+                    data-shape={shape.id}
+                    data-holes={String(holes.length)}
+                    fillRule="evenodd"
+                    d={shapePathData(outer, holes)}
+                  >
+                    <title>{shape.name ?? shape.id}</title>
+                  </path>
+                );
+              }
+              const points = shape.points
+                .map((point) => `${String(point.x * width)},${String(point.y * height)}`)
+                .join(" ");
+              return (
                 <polyline key={shape.id} className="map-route" data-shape={shape.id} points={points}>
                   <title>{shape.name ?? shape.id}</title>
                 </polyline>
@@ -1341,7 +1506,27 @@ export function WorldMapPanel(props: {
                 ))}
               </g>
             )}
-            {(placing || shapeKind !== null) && (
+            {/* R151 挖洞：画到一半的那一圈点（还没落盘 ⇒ 虚线 + 小点，作者看得见自己挖到哪了） */}
+            {holeMode && holePoints.length > 0 && (
+              <g className="map-hole-pending" aria-hidden="true" pointerEvents="none">
+                {holePoints.length > 1 && (
+                  <polyline
+                    points={holePoints
+                      .map((point) => `${String(point.x - (frame?.x0 ?? 0))},${String(point.y - (frame?.y0 ?? 0))}`)
+                      .join(" ")}
+                  />
+                )}
+                {holePoints.map((point, index) => (
+                  <circle
+                    key={index}
+                    cx={point.x - (frame?.x0 ?? 0)}
+                    cy={point.y - (frame?.y0 ?? 0)}
+                    r={3.5}
+                  />
+                ))}
+              </g>
+            )}
+            {(placing || shapeKind !== null || holeMode) && (
               <>
                 <rect
                   className="map-place-overlay"
@@ -1352,14 +1537,28 @@ export function WorldMapPanel(props: {
                   role="button"
                   tabIndex={0}
                   aria-label={
-                    shapeKind !== null
-                      ? "画形状：点一下加一个顶点；键盘用方向键挪十字光标、回车加点、退格删点"
-                      : "放标注：在图上点一下落点；键盘用方向键挪十字光标、回车落点"
+                    holeMode
+                      ? "挖洞：点一下加一个顶点；键盘用方向键挪十字光标、回车加点、退格删点"
+                      : shapeKind !== null
+                        ? "画形状：点一下加一个顶点；键盘用方向键挪十字光标、回车加点、退格删点"
+                        : "放标注：在图上点一下落点；键盘用方向键挪十字光标、回车落点"
                   }
                   onClick={(event) => {
                     const p = toImagePoint(event);
                     if (p === null) return;
                     setPlaceCursor({ x: p.x, y: p.y });
+                    if (holeMode) {
+                      // 挖洞：点一下是**加一个洞的顶点**（还没选区域 ⇒ 先不记点，提示一句）
+                      if (holeTarget === "") {
+                        setStatus("先在上面选一个要挖洞的区域");
+                        return;
+                      }
+                      setHolePoints((prev) => [
+                        ...prev,
+                        { x: Math.round(p.x + (frame?.x0 ?? 0)), y: Math.round(p.y + (frame?.y0 ?? 0)) },
+                      ]);
+                      return;
+                    }
                     if (shapeKind !== null) {
                       // 画形状：点一下是**加一个顶点**
                       setShapePoints((prev) => [
@@ -1371,6 +1570,30 @@ export function WorldMapPanel(props: {
                     void placeAt(p.x, p.y);
                   }}
                   onKeyDown={(event) => {
+                    if (holeMode) {
+                      // 挖洞：回车加一个顶点、退格删掉最后一个（键盘也能挖）
+                      if (event.key === "Enter" && placeCursor !== null) {
+                        event.preventDefault();
+                        if (holeTarget === "") {
+                          setStatus("先在上面选一个要挖洞的区域");
+                          return;
+                        }
+                        setHolePoints((prev) => [
+                          ...prev,
+                          {
+                            x: Math.round(placeCursor.x + (frame?.x0 ?? 0)),
+                            y: Math.round(placeCursor.y + (frame?.y0 ?? 0)),
+                          },
+                        ]);
+                        return;
+                      }
+                      if (event.key === "Backspace") {
+                        event.preventDefault();
+                        setHolePoints((prev) => prev.slice(0, -1));
+                        return;
+                      }
+                      return;
+                    }
                     if (shapeKind !== null) {
                       // 画形状：回车加一个顶点、退格删掉最后一个（键盘也能画）
                       if (event.key === "Enter" && placeCursor !== null) {

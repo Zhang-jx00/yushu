@@ -7865,6 +7865,113 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 113,
+    title: '挖洞：区域里挖掉一块 ⇒ 盘上多一个 holes，别的行原样（R151）',
+    file: 'step113-map-hole.png',
+    body: String.raw`
+      // 这一步证 R151 的四件事：
+      // ① **区域能挖洞**（区域从单环走到外环 + 洞）；
+      // ② 洞**真的在区域里面**（点是从区域自己的包围盒里算出来的，不是我写死的坐标）；
+      // ③ 盘上**只多了那一行的 holes**，别的行一个字都没动；
+      // ④ 洞**画出来了**（区域那条路径的 data-holes 变成 1）。
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        '# 作者自己写的注释（挖洞之后应当原样留着）',
+        'base_image: world/assets/map/base.png',
+        'base_size: {width: 1000, height: 700}',
+        'bounds: [[0, 0], [1000, 700]]',
+        'layers: [place, political]',
+        'regions:',
+        '  - {id: r-1, layer: political, name: "北境", points: [[100, 100], [500, 100], [500, 500], [100, 500]]}',
+        '',
+      ].join('\n');
+      const currentMap = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      await window.yushu.doc.write('world/map.yaml', yaml, currentMap === null ? undefined : currentMap.hash);
+
+      await tab('规则');
+      await tab('世界观档案');
+      const holeBtn = await waitFor(
+        () => [...document.querySelectorAll('.map-panel button')]
+          .find((b) => String(b.textContent || '').trim() === '挖洞' && !b.disabled) || null,
+        8000,
+      );
+      if (!holeBtn) return { ok: false, note: '地图面板没有「挖洞」这个入口（或还没有区域可挖）' };
+      const disabled = String(holeBtn.getAttribute('disabled') || '');
+      holeBtn.click();
+      await sleep(400);
+      const modeOn = [...document.querySelectorAll('.map-panel .map-mode-btn')]
+        .filter((b) => String(b.className || '').indexOf('is-on') >= 0)
+        .map((b) => String(b.textContent || '').trim());
+      const segmentedOk = modeOn.length === 1 && modeOn[0] === '挖洞';
+      // 选目标区域（下拉 ⇒ 键盘也能选）
+      const sel = await waitFor(() => document.querySelector('.map-panel .map-hole-bar select') || null, 4000);
+      if (!sel) return { ok: false, note: '挖洞模式里没有那个区域下拉' };
+      sel.value = 'r-1';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(300);
+      const overlay = await waitFor(() => document.querySelector('.map-panel .map-place-overlay') || null, 4000);
+      if (!overlay) return { ok: false, note: '挖洞模式里没有那个覆盖层（点不了）' };
+      const regionEl = document.querySelector('.map-panel .map-region[data-shape="r-1"]');
+      if (!regionEl) return { ok: false, note: '那个区域没画出来' };
+      const evenodd = String(regionEl.getAttribute('fill-rule') || '');
+      const svg = document.querySelector('.map-panel .map-svg');
+      const ctm = svg ? svg.getScreenCTM() : null;
+      if (!ctm) return { ok: false, note: '拿不到画布的坐标变换' };
+      // 三个点**从区域自己的包围盒里算**（这样缩放/平移过了也落在区域里面）
+      const bb = regionEl.getBBox();
+      const clickAt = (ux, uy) => {
+        const pt = svg.createSVGPoint();
+        pt.x = ux;
+        pt.y = uy;
+        const at = pt.matrixTransform(ctm);
+        overlay.dispatchEvent(new MouseEvent('click', {
+          clientX: at.x,
+          clientY: at.y,
+          bubbles: true,
+          cancelable: true,
+        }));
+      };
+      const inside = [
+        [bb.x + bb.width * 0.3, bb.y + bb.height * 0.3],
+        [bb.x + bb.width * 0.6, bb.y + bb.height * 0.3],
+        [bb.x + bb.width * 0.45, bb.y + bb.height * 0.6],
+      ];
+      clickAt(inside[0][0], inside[0][1]);
+      await sleep(150);
+      clickAt(inside[1][0], inside[1][1]);
+      await sleep(150);
+      clickAt(inside[2][0], inside[2][1]);
+      await sleep(200);
+      const pendingDrawn = document.querySelector('.map-panel .map-hole-pending') !== null;      const doneBtn = await waitFor(
+        () => [...document.querySelectorAll('.map-panel button')]
+          .find((b) => String(b.textContent || '').indexOf('挖好了') >= 0) || null,
+        3000,
+      );
+      if (!doneBtn) return { ok: false, note: '没有「挖好了」这个按钮' };
+      doneBtn.click();
+      await sleep(900);
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const holesWritten = after.content.indexOf('holes:') >= 0;
+      const otherLinesKept =
+        after.content.indexOf('# 作者自己写的注释（挖洞之后应当原样留着）') >= 0 &&
+        after.content.indexOf('bounds: [[0, 0], [1000, 700]]') >= 0;
+      const regionEl2 = document.querySelector('.map-panel .map-region[data-shape="r-1"]');
+      const holesDrawn = regionEl2 ? String(regionEl2.getAttribute('data-holes') || '') === '1' : false;
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: holesWritten && otherLinesKept && holesDrawn && segmentedOk && pendingDrawn && evenodd === 'evenodd',
+        note: '挖洞：holes 写进盘上=' + String(holesWritten) + '；别的行原样=' + String(otherLinesKept) +
+          '；洞画出来了(data-holes=1)=' + String(holesDrawn) + '；模式高亮=' + String(segmentedOk) +
+          '；画到一半看得见=' + String(pendingDrawn) + '；区域用 evenodd=' + String(evenodd) +
+          '；有区域时入口可点=' + String(disabled === '') ,
+      };
+    `,
+  },
 ];
 
 /**

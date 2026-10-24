@@ -12,11 +12,15 @@ import {
   parseMapFile,
   parseTimelineFile,
   projectWorldMap,
+  replaceMapShapeEntry,
   setMapAnchorPosition,
   setMapMarkerPosition,
+  validateRegionHoles,
   type WorldMapDef,
 } from "@yushu/world-engine";
 import type {
+  WorldMapAddHoleRequestPayload,
+  WorldMapAddHoleResult,
   WorldMapBasePayload,
   WorldMapCreateAnchorRequestPayload,
   WorldMapCreateAnchorResult,
@@ -24,6 +28,8 @@ import type {
   WorldMapCreateShapeResult,
   WorldMapCreateMarkerRequestPayload,
   WorldMapCreateMarkerResult,
+  WorldMapRemoveHoleRequestPayload,
+  WorldMapRemoveHoleResult,
   WorldMapSetAnchorRequestPayload,
   WorldMapSetAnchorResult,
   WorldMapSetBoundsRequestPayload,
@@ -195,6 +201,10 @@ export async function worldMapView(
       layer: shape.layer,
       ...(shape.name === undefined ? {} : { name: shape.name }),
       points: shape.points.map(([nx, ny]) => ({ x: nx, y: ny })),
+      // 洞（R151）：一起归一化给渲染层 ⇒ 渲染层不用再算一遍
+      ...(shape.holes === undefined
+        ? {}
+        : { holes: shape.holes.map((hole) => hole.map(([nx, ny]) => ({ x: nx, y: ny }))) }),
     })),
     // 事件锚点（K08 §3.8）：事件挂坐标 ⇒ 选事件能定位到地图上
     anchors: projection.anchors.map((anchor) => ({
@@ -904,6 +914,153 @@ export async function createMapShape(
     ok: true,
     note: `已放${request.kind === "region" ? "区域" : "行程线"} ${id}（${String(points.length)} 个点）`,
     shape: { id, kind: request.kind, points },
+  };
+}
+
+/**
+ * **挖洞**（R151）：**写盘**——作者在某个区域里挖掉一块 ⇒ 改 `world/map.yaml` 里
+ * **那一个区域**的 `holes:`（**只动那一行**）。
+ *
+ * 与前几轮同一条纪律：
+ * ① **只动那一行**（`replaceMapShapeEntry` ⇒ 作者的注释与排版不动）；
+ * ② **洞必须在那个区域里面**（顶点全在外 ⇒ 挖出来的是另一块地，不是洞 ⇒ 拒绝）；
+ * ③ 洞与洞、与外环**不许相交 / 套嵌**（挖出来的面会自交 ⇒ 拒绝）；
+ * ④ 顶点仍须落在框定的那一块里（与放形状同一条纪律）。
+ *
+ * **校验只有一份**：`validateRegionHoles` 与引擎读盘时用的是同一个函数
+ * ⇒ 写盘时放过去的、读回来时会被拒的，不会发生。
+ */
+export async function addMapHole(
+  gateway: ProjectGateway,
+  request: WorldMapAddHoleRequestPayload,
+): Promise<WorldMapAddHoleResult> {
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) {
+    return { ok: false, note: "项目还没有世界地图（先登记底图）", holeCount: 0 };
+  }
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return {
+      ok: false,
+      note: `地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`,
+      holeCount: 0,
+    };
+  }
+  const shape = (def.shapes ?? []).find((item) => item.id === request.shapeId);
+  if (shape === undefined) {
+    return { ok: false, note: `地图里没有形状 ${request.shapeId}`, holeCount: 0 };
+  }
+  if (shape.kind !== "region") {
+    return { ok: false, note: `${request.shapeId} 是行程线，行程线没有洞`, holeCount: 0 };
+  }
+  if (request.points.length < 3) {
+    return {
+      ok: false,
+      note: `洞至少要 3 个点（现在 ${String(request.points.length)} 个）`,
+      holeCount: (shape.holes ?? []).length,
+    };
+  }
+  const bounds = normalizeBounds(def.bounds).bounds;
+  if (bounds === null) {
+    return { ok: false, note: "地图没有有效边界（框不出范围）", holeCount: 0 };
+  }
+  const hole: [number, number][] = request.points.map((point) => [
+    Math.round(point.x),
+    Math.round(point.y),
+  ]);
+  for (const [x, y] of hole) {
+    if (x < bounds.x0 || x > bounds.x1 || y < bounds.y0 || y > bounds.y1) {
+      return {
+        ok: false,
+        note:
+          `有个顶点落在框定的那一块之外（${String(bounds.x0)},${String(bounds.y0)} → ` +
+          `${String(bounds.x1)},${String(bounds.y1)}）`,
+        holeCount: (shape.holes ?? []).length,
+      };
+    }
+  }
+  const holes = [...(shape.holes ?? []), hole];
+  try {
+    validateRegionHoles(shape.points, holes, `区域 ${request.shapeId}`);
+  } catch (err) {
+    return {
+      ok: false,
+      note: err instanceof Error ? err.message : String(err),
+      holeCount: (shape.holes ?? []).length,
+    };
+  }
+  const replaced = replaceMapShapeEntry(snapshot.content, {
+    id: shape.id,
+    kind: shape.kind,
+    layer: shape.layer,
+    ...(shape.name === undefined ? {} : { name: shape.name }),
+    points: shape.points,
+    holes,
+  });
+  if (replaced.content === null) {
+    return { ok: false, note: replaced.reason ?? "没挖成", holeCount: (shape.holes ?? []).length };
+  }
+  await gateway.writeDoc(MAP_PATH, replaced.content, snapshot.hash);
+  return {
+    ok: true,
+    note: `已在区域 ${request.shapeId} 挖了第 ${String(holes.length)} 个洞`,
+    holeCount: holes.length,
+  };
+}
+
+/**
+ * **删洞**（R151）：**写盘**——把某个区域的某一个洞去掉 ⇒ 改 `world/map.yaml` 里
+ * **那一个区域**的 `holes:`（**只动那一行**）。
+ */
+export async function removeMapHole(
+  gateway: ProjectGateway,
+  request: WorldMapRemoveHoleRequestPayload,
+): Promise<WorldMapRemoveHoleResult> {
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) {
+    return { ok: false, note: "项目还没有世界地图（先登记底图）", holeCount: 0 };
+  }
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return {
+      ok: false,
+      note: `地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`,
+      holeCount: 0,
+    };
+  }
+  const shape = (def.shapes ?? []).find((item) => item.id === request.shapeId);
+  if (shape === undefined) {
+    return { ok: false, note: `地图里没有形状 ${request.shapeId}`, holeCount: 0 };
+  }
+  const holes = shape.holes ?? [];
+  if (request.holeIndex < 0 || request.holeIndex >= holes.length) {
+    return {
+      ok: false,
+      note: `区域 ${request.shapeId} 没有第 ${String(request.holeIndex + 1)} 个洞`,
+      holeCount: holes.length,
+    };
+  }
+  const kept = holes.filter((_, index) => index !== request.holeIndex);
+  const replaced = replaceMapShapeEntry(snapshot.content, {
+    id: shape.id,
+    kind: shape.kind,
+    layer: shape.layer,
+    ...(shape.name === undefined ? {} : { name: shape.name }),
+    points: shape.points,
+    ...(kept.length > 0 ? { holes: kept } : {}),
+  });
+  if (replaced.content === null) {
+    return { ok: false, note: replaced.reason ?? "没删成", holeCount: holes.length };
+  }
+  await gateway.writeDoc(MAP_PATH, replaced.content, snapshot.hash);
+  return {
+    ok: true,
+    note: `已删掉区域 ${request.shapeId} 的第 ${String(request.holeIndex + 1)} 个洞`,
+    holeCount: kept.length,
   };
 }
 

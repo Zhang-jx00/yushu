@@ -4077,6 +4077,46 @@ table,
 .map-shape-pending circle {
   fill: var(--accent);
 }
+
+/* ---------- R151：挖洞（区域里挖掉一块；洞只挖在区域里面） ---------- */
+.map-hole-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.map-hole-list {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.map-hole-del {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: var(--border-width) solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.map-hole-del:hover {
+  color: var(--ink);
+}
+
+.map-hole-pending polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.map-hole-pending circle {
+  fill: var(--accent);
+}
 /* ---------- R138：框定边界（作者在图上拖出地图在图里的哪一块） ---------- */
 .map-frame-bar {
   display: flex;

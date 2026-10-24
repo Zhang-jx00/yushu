@@ -26,12 +26,16 @@ import type {
   GraphViewPayload,
   GraphViewRequestPayload,
   WorldMapBasePayload,
+  WorldMapAddHoleRequestPayload,
+  WorldMapAddHoleResult,
   WorldMapCreateAnchorRequestPayload,
   WorldMapCreateShapeRequestPayload,
   WorldMapCreateShapeResult,
   WorldMapCreateAnchorResult,
   WorldMapCreateMarkerRequestPayload,
   WorldMapCreateMarkerResult,
+  WorldMapRemoveHoleRequestPayload,
+  WorldMapRemoveHoleResult,
   WorldMapSetAnchorRequestPayload,
   WorldMapSetAnchorResult,
   WorldMapSetBoundsRequestPayload,
@@ -302,6 +306,14 @@ export interface YushuApi {
      * 顶点用**底图像素**；区域至少 3 个点、行程线至少 2 个；落在框定的那一块之外 ⇒ 主进程拒绝。
      */
     createShape: (payload: WorldMapCreateShapeRequestPayload) => Promise<WorldMapCreateShapeResult>;
+    /**
+     * **挖洞**（R151）：作者在某个**区域**里挖掉一块 ⇒ 改 map.yaml 里那一个区域的 `holes:`。
+     *
+     * 洞的顶点必须**全在那个区域里面**（否则挖出来的是另一块地）⇒ 主进程拒绝并说清楚。
+     */
+    addHole: (payload: WorldMapAddHoleRequestPayload) => Promise<WorldMapAddHoleResult>;
+    /** **删洞**（R151）：把某个区域的某一个洞去掉 */
+    removeHole: (payload: WorldMapRemoveHoleRequestPayload) => Promise<WorldMapRemoveHoleResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

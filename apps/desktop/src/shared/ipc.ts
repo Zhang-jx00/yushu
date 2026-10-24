@@ -105,6 +105,14 @@ export const CHANNELS = {
    * 口径回源 K08 §5「地图编辑器：上传底图 → 框定 bounds → 放 marker、**区域、行程线** → 绑定实体」。
    */
   worldMapCreateShape: "map:createShape",
+  /**
+   * 世界地图·**挖洞**（R151）：**写盘**（作者在某个区域里挖掉一块 ⇒ 改那一个区域的 `holes:`）。
+   */
+  worldMapAddHole: "map:addHole",
+  /**
+   * 世界地图·**删洞**（R151）：**写盘**（把某个区域的某一个洞去掉 ⇒ 改那一个区域的 `holes:`）。
+   */
+  worldMapRemoveHole: "map:removeHole",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -3039,6 +3047,44 @@ export interface WorldMapCreateShapeResult {
   shape: { id: string; kind: "region" | "route"; points: { x: number; y: number }[] } | null;
 }
 
+/**
+ * **挖洞**的请求（R151）：在**哪一个区域**里、挖**哪一圈顶点**（**底图像素**）。
+ *
+ * 洞的顶点数下限与外环一样是 3（少於 3 个点画不出一个面）。
+ */
+export interface WorldMapAddHoleRequestPayload {
+  /** 要挖洞的**区域** id（行程线没有洞 ⇒ 不是区域就拒绝） */
+  shapeId: string;
+  /** 洞的顶点（底图像素；至少 3 个） */
+  points: { x: number; y: number }[];
+}
+
+/** 挖洞的结果（R151） */
+export interface WorldMapAddHoleResult {
+  ok: boolean;
+  /** 给作者看的一句话（成了 / 为什么没成） */
+  note: string;
+  /** 改完之后这个区域有几个洞（没成时是 0） */
+  holeCount: number;
+}
+
+/** **删洞**的请求（R151）：删掉这个区域的**第几个**洞（从 0 起） */
+export interface WorldMapRemoveHoleRequestPayload {
+  /** 区域 id */
+  shapeId: string;
+  /** 第几个洞（从 0 起） */
+  holeIndex: number;
+}
+
+/** 删洞的结果（R151） */
+export interface WorldMapRemoveHoleResult {
+  ok: boolean;
+  /** 给作者看的一句话（成了 / 为什么没成） */
+  note: string;
+  /** 改完之后这个区域有几个洞 */
+  holeCount: number;
+}
+
 /** 底图登记的结果（R135）：**路径不出主进程**，只回项目内的相对路径与量出来的尺寸 */
 export interface WorldMapUploadBaseResult {
   /** 作者取消了（没挑文件） */
@@ -3135,6 +3181,8 @@ export interface WorldMapViewPayload {
     layer: string;
     name?: string;
     points: { x: number; y: number }[];
+    /** 洞（R151；只有区域有；顶点同样已归一化） */
+    holes?: { x: number; y: number }[][];
   }[];
   /**
    * **项目里可挂的事件**（R142：放事件锚点时作者要选一个）。
