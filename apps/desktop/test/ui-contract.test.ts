@@ -2785,3 +2785,49 @@ describe("地图图例（R152）：形状说明 + 当前倍率", () => {
     expect(legendBlock, "图例里摆了计数").not.toContain("map.markers.length");
   });
 });
+
+/**
+ * **记忆页的「接下来做什么」**（R153）：把 R147 的第三段复用到记忆页。
+ *
+ * 为什么要：记忆页本来就有「冷启动待补」那批清单，但**清单只说"缺哪些"**，
+ * 没说"先补哪一条" ⇒ 作者打开这页仍然要自己挑。
+ *
+ * 判据盯四件事：
+ * ① 第三段**在**（作者打开就知道该干什么）；
+ * ② 三条**都从同一份 state 现算**（不另取数 ⇒ 同一个数不会有两处）；
+ * ③ **点得动**（点「先补这一条」就选中那个目标 ⇒ 与下面那批同一条路）；
+ * ④ 没有缺口时**说清楚**（不许装成有活可干）。
+ */
+describe("记忆页「接下来做什么」（R153）：三条都从同一份 state 现算", () => {
+  const memory = readFileSync(join(VIEW_ROOT, "views", "MemoryView.tsx"), "utf8");
+  const nextBlock = /<section className="panel memory-next">[\s\S]*?<\/section>/.exec(memory)?.[0] ?? "";
+
+  it("第三段在（作者打开这页就知道该干什么）", () => {
+    expect(nextBlock, "记忆页没有「接下来做什么」这一段").not.toBe("");
+    expect(nextBlock).toContain("接下来做什么");
+  });
+
+  it("三条**都从 state 现算**（数与文案都绑在一起，不是写死的）", () => {
+    expect(nextBlock).toMatch(/\{state\.summaries\.length\} 条摘要已入库/);
+    expect(nextBlock).toMatch(/\{state\.targets\.length\} 个摘要目标/);
+    expect(nextBlock).toContain("state.coldStart.coverageRatio === null");
+    expect(nextBlock).toMatch(/state\.coldStart\.firstChapterMissing\s*\?\s*"第一章还没有摘要/);
+  });
+
+  it("「先补这一条」取的是**缺口里的第一条**（不是随便一条）", () => {
+    expect(memory, "没算出缺口的第一条").toMatch(
+      /const firstGap = state\?\.coldStart\.batch\[0\] \?\? null/,
+    );
+    expect(nextBlock).toContain("firstGap === null");
+    expect(nextBlock).toMatch(/selectTarget\(`\$\{firstGap\.layer\}:\$\{firstGap\.id\}`\)/);
+  });
+
+  it("**点得动**（真按钮 ⇒ 键盘也能到）", () => {
+    expect(nextBlock, "「先补这一条」不是按钮").toMatch(/<button/);
+    expect(nextBlock).toContain("className=\"memory-next-action\"");
+  });
+
+  it("没有缺口时**说清楚**（不许装成有活可干）", () => {
+    expect(nextBlock, "没缺口时没说实话").toContain("没有缺口");
+  });
+});

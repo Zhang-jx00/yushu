@@ -318,9 +318,62 @@ export function MemoryView() {
     setError(null);
   };
 
+  /**
+   * R153：**「接下来做什么」**（R147 的第三段复用到记忆页）——
+   * 覆盖率缺口里**第一条**（点它就是把那个目标选中，与下面「冷启动待补」那批点同一条路）。
+   */
+  const firstGap = state?.coldStart.batch[0] ?? null;
+
   return (
     <div className="memory">
       <aside>
+        {/* R153：**「接下来做什么」** —— 三条**都从同一份 state 现算**（不另取数 ⇒ 同一个数不会有两处）：
+            ① 先补这一条（覆盖率缺口里的第一条，点它就选中）；
+            ② 这本书的记忆（摘要条数 / 目标条数 / 覆盖率）；
+            ③ 开场会不会失忆（第一章有没有摘要——这一页最要紧的一件事）。 */}
+        <section className="panel memory-next">
+          <div className="panel-title">
+            <span className="muted">接下来做什么</span>
+          </div>
+          {state === null ? (
+            <p className="muted">正在读取记忆状态…</p>
+          ) : (
+            <ul className="memory-next-list">
+              <li>
+                <span className="memory-next-label">先补这一条</span>
+                {firstGap === null ? (
+                  <span className="muted">没有缺口：待补 0 条（有素材的卷与章都已有摘要）</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="memory-next-action"
+                    onClick={() => selectTarget(`${firstGap.layer}:${firstGap.id}`)}
+                  >
+                    {firstGap.title}（素材 {firstGap.sourceChars} 字 · 选中后可生成候选）
+                  </button>
+                )}
+              </li>
+              <li>
+                <span className="memory-next-label">这本书的记忆</span>
+                <span>
+                  {state.summaries.length} 条摘要已入库 · {state.targets.length} 个摘要目标 ·{" "}
+                  {state.coldStart.coverageRatio === null
+                    ? "覆盖率无从计算"
+                    : `覆盖率 ${Math.round(state.coldStart.coverageRatio * 100)}%`}
+                </span>
+              </li>
+              <li>
+                <span className="memory-next-label">开场会不会失忆</span>
+                <span>
+                  {state.coldStart.firstChapterMissing
+                    ? "第一章还没有摘要 ⇒ 开场注入此时只能靠世界核心卡"
+                    : "第一章已有摘要 ⇒ 开场注入有章摘要可用"}
+                </span>
+              </li>
+            </ul>
+          )}
+        </section>
+
         <section className="panel">
           <h3>
             摘要目标 <span className="muted">卷 / 章（有正文素材）</span>

@@ -8029,6 +8029,60 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 115,
+    title: '记忆页「接下来做什么」：先补哪一条，三条都从同一份 state 现算（R153）',
+    file: 'step115-memory-next.png',
+    body: String.raw`
+      // 这一步证 R153 的三件事：
+      // ① **第三段在**（作者打开这页就知道该干什么）；
+      // ② 三条**同源**（第三段里的覆盖率与「冷启动待补」那段里的**逐字一致**——
+      //    两处读的是同一份 state，不一致就说明有一处是写死的）；
+      // ③ 「先补这一条」**点得动**（点它 ⇒ 上面「摘要目标」里那一条被选中）。
+      await tab('记忆');
+      const next = await waitFor(() => document.querySelector('.memory .memory-next') || null, 8000);
+      if (!next) return { ok: false, note: '记忆页没有「接下来做什么」这一段' };
+      const items = [...next.querySelectorAll('.memory-next-list li')];
+      const labels = items.map((li) => String(li.querySelector('.memory-next-label')?.textContent || '').trim());
+      const cold = document.querySelector('.memory .memory-coldstart');
+      const coldText = cold ? String(cold.textContent || '') : '';
+      const nextText = String(next.textContent || '');
+      const pickCoverage = (src) => {
+        const m = /覆盖率\s*(\d+)%/.exec(src);
+        return m ? m[1] : '';
+      };
+      const nextCoverage = pickCoverage(nextText);
+      const coldCoverage = pickCoverage(coldText);
+      const sameCoverage = nextCoverage !== '' && nextCoverage === coldCoverage;
+      // 点「先补这一条」⇒ 摘要目标里那一条被选中
+      const action = next.querySelector('.memory-next-action');
+      let picked = false;
+      let pickedTitle = '';
+      let noGap = false;
+      if (action) {
+        const btnText = String(action.textContent || '');
+        action.click();
+        await sleep(500);
+        const on = document.querySelector('.memory .memory-targets li.on');
+        const strong = on ? String(on.querySelector('strong')?.textContent || '') : '';
+        pickedTitle = strong;
+        picked = strong !== '' && btnText.indexOf(strong) >= 0;
+      } else {
+        // 没有缺口时**说清楚**也算对（不许装成有活可干）
+        noGap = nextText.indexOf('没有缺口') >= 0;
+      }
+      const panelEl = document.querySelector('.memory');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: items.length === 3 && sameCoverage && (picked || noGap),
+        note: '条目数=' + String(items.length) + '（期望 3）；标签=' + labels.join('/') +
+          '；覆盖率两处一致=' + String(sameCoverage) + '（第三段=' + nextCoverage + ' / 冷启动=' + coldCoverage + '）' +
+          '；点「先补这一条」选中了=' + String(picked) + '（选中的那条=' + pickedTitle + '）' +
+          '；没有缺口时说清楚了=' + String(noGap),
+      };
+    `,
+  },
 ];
 
 /**
