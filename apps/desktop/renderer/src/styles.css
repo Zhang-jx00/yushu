@@ -4117,6 +4117,67 @@ table,
 .map-hole-pending circle {
   fill: var(--accent);
 }
+
+/* ---------- R152：图例（画布旁：四样东西各是什么形状 + 当前倍率） ---------- */
+.map-legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-5);
+  background: var(--panel);
+}
+
+.map-legend-title {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.map-legend-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.map-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+
+.map-legend-glyph {
+  width: var(--space-10);
+  height: var(--space-10);
+  flex: 0 0 auto;
+}
+
+.map-legend-glyph circle,
+.map-legend-glyph path {
+  fill: var(--accent);
+  stroke: none;
+}
+
+.map-legend-glyph .map-legend-core {
+  fill: var(--ink);
+}
+
+.map-legend-glyph polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+.map-legend-zoom {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
 /* ---------- R138：框定边界（作者在图上拖出地图在图里的哪一块） ---------- */
 .map-frame-bar {
   display: flex;

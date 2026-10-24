@@ -5,7 +5,7 @@ import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../..
 import { api } from "../api";
 import { StateNote } from "./StateNote";
 import { SummaryRows } from "./SummaryRows";
-import { ZOOM_MAX, ZOOM_MIN, clampPan, computeViewBox, panStep, shapePathData, zoomAtPoint, zoomStep } from "./map-view";
+import { ZOOM_MAX, ZOOM_MIN, clampPan, computeViewBox, panStep, shapePathData, zoomAtPoint, zoomFromViewBox, zoomLabel, zoomStep, zoomVisiblePercent } from "./map-view";
 
 /**
  * 世界地图（M5 / T5-1，R120）：**只读**面板。
@@ -284,6 +284,20 @@ export function WorldMapPanel(props: {
    * 从真源现算（`map.shapes`）⇒ 盘上删了一个，这里立刻少一个。
    */
   const regionShapes = (map?.shapes ?? []).filter((shape) => shape.kind === "region");
+  /**
+   * R152：**画布上真正在用的 viewBox**（图例上的倍率从它反推 ⇒ 说的就是眼睛看到的那个）。
+   *
+   * 画布与图例**共用这一个字符串** ⇒ 两处不会各说各话（各算一份就迟早对不上）。
+   *
+   * R145 的口径：缩放/平移只改 viewBox ⇒ 画面跟着变，而落点换算走 getScreenCTM() 的逆变换
+   * （那个矩阵会跟着 viewBox 变）⇒ **放大之后落点仍然准**；
+   * 框定模式画整张图 ⇒ 缩放/平移让位（作者要看到全图才能框）。
+   */
+  const viewBoxText = framing
+    ? `0 0 ${String(baseW)} ${String(baseH)}`
+    : computeViewBox(width, height, view.zoom, view.pan.x, view.pan.y);
+  /** 当前倍率（从 viewBox 反推，不是另存一份状态） */
+  const zoomFactor = zoomFromViewBox(width, viewBoxText);
 
   /** 缩放（±1 步）：看得见的范围变了 ⇒ 平移要重新钳一遍 */
   const changeZoom = useCallback(
@@ -1191,14 +1205,7 @@ export function WorldMapPanel(props: {
             className={
               "map-svg" + (entered ? " is-entered" : "") + (framing ? " is-framing" : "")
             }
-            viewBox={
-              /* R145：缩放/平移只改 viewBox ⇒ 画面跟着变，而落点换算走 getScreenCTM() 的逆变换
-                 （那个矩阵会跟着 viewBox 变）⇒ **放大之后落点仍然准**。
-                 框定模式画整张图 ⇒ 缩放/平移让位（作者要看到全图才能框）。 */
-              framing
-                ? `0 0 ${String(baseW)} ${String(baseH)}`
-                : computeViewBox(width, height, view.zoom, view.pan.x, view.pan.y)
-            }
+            viewBox={viewBoxText}
             ref={canvasRef}
             id="yushu-map-canvas"
             role="img"
@@ -1678,6 +1685,42 @@ export function WorldMapPanel(props: {
         </div>
 
         <div className="map-side">
+          {/* R152 **图例**：作者看的是**形状**，不是术语 ⇒ 四样东西各是什么形状，写在画布旁边。
+              **图例不摆计数**（计数在图层开关与摘要里，各有各的真源；图例再摆一份就会有两个数）——
+              这里只回答"这个形状是什么"与"我现在看的是多大"。 */}
+          <div className="map-legend" aria-label="图例">
+            <div className="map-legend-title">图例</div>
+            <ul className="map-legend-list">
+              <li className="map-legend-item" data-kind="marker">
+                <svg className="map-legend-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="6" />
+                </svg>
+                <span className="map-legend-label">标注（圆点）</span>
+              </li>
+              <li className="map-legend-item" data-kind="anchor">
+                <svg className="map-legend-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="7" />
+                  <circle cx="12" cy="12" r="2.5" className="map-legend-core" />
+                </svg>
+                <span className="map-legend-label">事件锚点（圆环）</span>
+              </li>
+              <li className="map-legend-item" data-kind="region">
+                <svg className="map-legend-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M 4 6 L 20 6 L 20 18 L 4 18 Z" />
+                </svg>
+                <span className="map-legend-label">区域（色块）</span>
+              </li>
+              <li className="map-legend-item" data-kind="route">
+                <svg className="map-legend-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                  <polyline points="4,18 10,9 15,14 20,6" />
+                </svg>
+                <span className="map-legend-label">行程线（虚线）</span>
+              </li>
+            </ul>
+            <div className="map-legend-zoom" data-zoom={String(zoomFactor)}>
+              当前 {zoomLabel(zoomFactor)}（看得见整块的 {String(zoomVisiblePercent(zoomFactor))}%）
+            </div>
+          </div>
           {selectedMarker === null ? (
             <div className="muted">点一个标注查它的地点卡</div>
           ) : (

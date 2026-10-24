@@ -2746,3 +2746,42 @@ describe("挖洞（R151）：区域的外环 + 洞", () => {
     expect(panel, "没有挖洞的那一栏").toContain('className="map-hole-bar"');
   });
 });
+
+/**
+ * **地图图例**（R152）：作者看的是**形状**，不是术语。
+ *
+ * 判据盯三件事：
+ * ① **图例在画布旁边**，四样东西各占一条（标注 / 事件锚点 / 区域 / 行程线）——
+ *    少一条就有一类东西作者认不出来；
+ * ② **倍率从画布上的 viewBox 反推**（不是另存一份状态 ⇒ 两处不会各说各话）；
+ * ③ 图例**不摆计数**（计数在图层开关与摘要里，各有各的真源；图例再摆一份就变成两个数）。
+ */
+describe("地图图例（R152）：形状说明 + 当前倍率", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const legendBlock = /<div className="map-legend"[\s\S]*?<\/div>\s*\n\s*\{selectedMarker/.exec(panel)?.[0] ?? "";
+
+  it("图例在画布旁，四样东西各占一条", () => {
+    expect(legendBlock, "没找到图例").not.toBe("");
+    const kinds = [...legendBlock.matchAll(/data-kind="([a-z]+)"/g)].map((m) => m[1] as string);
+    expect(kinds, "图例条目不对（多了 / 少了 / 顺序变了）").toEqual(["marker", "anchor", "region", "route"]);
+  });
+
+  it("每一条都说清**是什么形状**（不只给术语）", () => {
+    expect(legendBlock).toContain("标注（圆点）");
+    expect(legendBlock).toContain("事件锚点（圆环）");
+    expect(legendBlock).toContain("区域（色块）");
+    expect(legendBlock).toContain("行程线（虚线）");
+  });
+
+  it("倍率**从画布上的 viewBox 反推**（不是另存一份状态）", () => {
+    expect(panel, "倍率不是从 viewBox 反推的").toContain("zoomFromViewBox(width, viewBoxText)");
+    // 画布与图例**共用同一个字符串** ⇒ 两处不会各说各话
+    expect(panel, "画布没用那个共用的 viewBox").toMatch(/viewBox=\{viewBoxText\}/);
+    expect(panel, "没算出那个共用的 viewBox").toMatch(/const viewBoxText =/);
+  });
+
+  it("图例**不摆计数**（计数在图层开关与摘要里 ⇒ 别让同一个数有两处）", () => {
+    expect(legendBlock, "图例里摆了计数").not.toContain("map-legend-count");
+    expect(legendBlock, "图例里摆了计数").not.toContain("map.markers.length");
+  });
+});

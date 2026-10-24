@@ -12,6 +12,9 @@ import {
   zoomAtPoint,
   zoomStep,
   shapePathData,
+  zoomFromViewBox,
+  zoomLabel,
+  zoomVisiblePercent,
 } from "../renderer/src/components/map-view.js";
 
 /**
@@ -268,5 +271,39 @@ describe("区域路径（R151）：外环 + 洞", () => {
   it("空的外环 ⇒ 空串（不画空路径）", () => {
     expect(shapePathData([])).toBe("");
     expect(shapePathData([], [[{ x: 1, y: 1 }]])).toBe("");
+  });
+});
+
+/**
+ * **图例上的倍率**（R152）：从**画布上真正在用的 viewBox** 反推。
+ *
+ * 为什么不直接用组件里的 `view.zoom`：作者看到的是**画布**。
+ * 两处一旦对不上，图例上写的倍率就是一句假话 ⇒ 判据盯的是"从 viewBox 反推"这件事本身。
+ */
+describe("图例的倍率（R152）：从画布上的 viewBox 反推", () => {
+  it("1 倍 ⇒ viewBox 宽 = 框宽 ⇒ 反推回来是 1", () => {
+    expect(zoomFromViewBox(1000, "0 0 1000 700")).toBe(1);
+  });
+
+  it("放大 2 倍 ⇒ viewBox 宽 = 框宽的一半 ⇒ 反推回来是 2", () => {
+    expect(zoomFromViewBox(1000, "0 0 500 350")).toBe(2);
+  });
+
+  it("**平移**不影响倍率（viewBox 的宽没变）", () => {
+    expect(zoomFromViewBox(1000, "120 30 500 350")).toBe(2);
+  });
+
+  it("读不出来 ⇒ 落回 1 倍（**不猜**）", () => {
+    expect(zoomFromViewBox(1000, "")).toBe(1);
+    expect(zoomFromViewBox(1000, "0 0 0 0")).toBe(1);
+    expect(zoomFromViewBox(1000, "abc")).toBe(1);
+    expect(zoomFromViewBox(0, "0 0 500 350")).toBe(1);
+  });
+
+  it("倍率 ⇒ 人话 / 看得见的百分比（1 倍 = 100%）", () => {
+    expect(zoomLabel(1)).toBe("1 倍");
+    expect(zoomLabel(1.5)).toBe("1.5 倍");
+    expect(zoomVisiblePercent(1)).toBe(100);
+    expect(zoomVisiblePercent(2)).toBe(50);
   });
 });

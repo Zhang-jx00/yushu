@@ -7972,6 +7972,63 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 114,
+    title: '地图图例：四样东西各是什么形状 + 当前倍率（R152）',
+    file: 'step114-map-legend.png',
+    body: String.raw`
+      // 这一步证 R152 的三件事：
+      // ① **图例在屏上**（作者看的是形状，不是术语 ⇒ 四样东西各占一条）；
+      // ② 四条**不多不少**（多一条是有一类东西作者认不出，少一条是有一类没登记）；
+      // ③ **倍率与画布一致**（图例上的倍率是从**画布那个 viewBox** 反推的）——
+      //    放大之后图例上的数要跟着变（不变 ⇒ 那是一句写死的假话）。
+      await tab('规则');
+      await tab('世界观档案');
+      const legend = await waitFor(() => document.querySelector('.map-panel .map-legend') || null, 8000);
+      if (!legend) return { ok: false, note: '地图面板旁边没有图例' };
+      const items = [...legend.querySelectorAll('.map-legend-item')];
+      const kinds = items.map((el) => String(el.getAttribute('data-kind') || ''));
+      // 框宽从**真源**读（不写死）⇒ 倍率才能和画布对得上
+      const yamlDoc = await window.yushu.doc.read('world/map.yaml');
+      const bm = /bounds:\s*\[\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]\s*,\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]\]/.exec(yamlDoc.content);
+      const frameW = bm ? Number(bm[3]) - Number(bm[1]) : NaN;
+      const readZoom = () => {
+        const el = document.querySelector('.map-panel .map-legend-zoom');
+        return el ? Number(el.getAttribute('data-zoom')) : NaN;
+      };
+      const boxWidth = () => {
+        const s = document.getElementById('yushu-map-canvas');
+        const v = String(s ? s.getAttribute('viewBox') || '' : '').split(' ').map(Number);
+        return v.length === 4 ? v[2] : NaN;
+      };
+      const zoomBefore = readZoom();
+      const expectBefore = frameW / boxWidth();
+      // 放大两次 ⇒ 图例上的倍率要跟着变
+      const zoomIn = [...document.querySelectorAll('.map-panel button')]
+        .find((b) => String(b.title || '').indexOf('放大') === 0);
+      if (!zoomIn) return { ok: false, note: '没有「放大」控件' };
+      zoomIn.click();
+      await sleep(300);
+      zoomIn.click();
+      await sleep(450);
+      const zoomAfter = readZoom();
+      const expectAfter = frameW / boxWidth();
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      const kindsOk = kinds.join(',') === 'marker,anchor,region,route';
+      const beforeOk = Math.abs(zoomBefore - expectBefore) < 0.001;
+      const afterOk = Math.abs(zoomAfter - expectAfter) < 0.001;
+      const tracked = zoomAfter > zoomBefore;
+      return {
+        ok: kindsOk && beforeOk && afterOk && tracked,
+        note: '图例条目=' + kinds.join('/') + '（期望 marker/anchor/region/route）' +
+          '；放大前图例倍率=' + String(zoomBefore) + '（画布反推=' + String(expectBefore) + '）' +
+          '；放大后图例倍率=' + String(zoomAfter) + '（画布反推=' + String(expectAfter) + '）' +
+          '；跟着画布变=' + String(tracked),
+      };
+    `,
+  },
 ];
 
 /**

@@ -145,3 +145,31 @@ export function shapePathData(
   };
   return [ring(outer), ...holes.map(ring)].filter((part) => part !== "").join(" ");
 }
+
+/**
+ * 从**画布上真正在用的 viewBox** 反推当前倍率（R152）。
+ *
+ * 为什么不直接用组件里的 `view.zoom`：作者看到的是**画布**，不是某个状态。
+ * 两处一旦对不上（手滑改了状态 / 别处改了 viewBox），图例上写的倍率就是一句假话
+ * ⇒ 这里从**画布上那个字符串**反推 ⇒ 说的就是眼睛看到的那个。
+ *
+ * 读不出来（不是四个数 / 宽不是正数）⇒ 落回 1 倍（**不猜**，宁可说"1 倍"也不说一个编出来的数）。
+ */
+export function zoomFromViewBox(frameWidth: number, viewBox: string): number {
+  const parts = viewBox.trim().split(/\s+/).map(Number);
+  if (parts.length !== 4) return ZOOM_MIN;
+  const w = parts[2] as number;
+  if (!Number.isFinite(w) || w <= 0) return ZOOM_MIN;
+  if (!Number.isFinite(frameWidth) || frameWidth <= 0) return ZOOM_MIN;
+  return clampZoom(frameWidth / w);
+}
+
+/** 倍率 ⇒ 人话（R152：「1.5 倍」） */
+export function zoomLabel(zoom: number): string {
+  return `${String(clampZoom(zoom))} 倍`;
+}
+
+/** 倍率 ⇒ 看得见整块的百分之几（1 倍 = 100%；放大 2 倍 = 50%） */
+export function zoomVisiblePercent(zoom: number): number {
+  return Math.round((1 / clampZoom(zoom)) * 100);
+}
