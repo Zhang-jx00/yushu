@@ -5,7 +5,7 @@ import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../..
 import { api } from "../api";
 import { StateNote } from "./StateNote";
 import { SummaryRows } from "./SummaryRows";
-import { ZOOM_MAX, ZOOM_MIN, clampPan, computeViewBox, panStep, zoomStep } from "./map-view";
+import { ZOOM_MAX, ZOOM_MIN, clampPan, computeViewBox, panStep, zoomAtPoint, zoomStep } from "./map-view";
 
 /**
  * 世界地图（M5 / T5-1，R120）：**只读**面板。
@@ -248,6 +248,8 @@ export function WorldMapPanel(props: {
    * 那不该变成 map.yaml 里的一行）。看得见的范围永远在作者框定的那一块里。
    */
   const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
+  /** 画布元素（R148 滚轮缩放要用：React 的 onWheel 是**被动**监听器 ⇒ preventDefault 无效） */
+  const canvasRef = useRef<SVGSVGElement | null>(null);
 
   const canvas = map?.canvas ?? FALLBACK_CANVAS;
   // R138：画布 = **作者框定的那一块**（bounds 那一块）；底图按它裁切显示
@@ -412,6 +414,50 @@ export function WorldMapPanel(props: {
     const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
     return { x: p.x, y: p.y };
   }, []);
+
+  /**
+   * R148：**滚轮缩放，以指针为锚点**（滚轮该有的手感：指针下那一点不动）。
+   *
+   * 为什么不用 React 的 `onWheel`：React 17+ 的 wheel 监听是**被动**的 ⇒
+   * `preventDefault()` **不生效** ⇒ 滚轮会连带把整页滚起来。
+   * ⇒ 这里用 ref + `addEventListener("wheel", handler, { passive: false })`。
+   *
+   * **依赖里必须有 `map`**（R148 实踩的坑）：地图没加载时组件走 early return
+   * （先渲染「正在读地图…」）⇒ 那时**画布根本不在 DOM 里** ⇒ effect 拿到的 ref 是 null
+   * ⇒ 直接 return ⇒ 监听没挂上；而 `width` / `height` 在加载前后**恰好相同**
+   * （bounds 正好 1000×700）⇒ 依赖没变 ⇒ effect 不重跑 ⇒ **监听永远挂不上**。
+   * ⇒ 依赖里有 `map`（它才是「画布出现与否」的那个状态）才会重跑。
+   */
+  useEffect(() => {
+    const svg = canvasRef.current;
+    if (svg === null) return;
+    const onWheel = (event: WheelEvent) => {
+      if (framing || placing || shapeKind !== null) return;
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
+      const anchor = toImagePoint({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        currentTarget: svg,
+      });
+      if (anchor === null) return;
+      setView((prev) => {
+        const next = zoomAtPoint(
+          width,
+          height,
+          prev.zoom,
+          prev.pan.x,
+          prev.pan.y,
+          anchor.x,
+          anchor.y,
+          factor,
+        );
+        return { zoom: next.zoom, pan: next.pan };
+      });
+    };
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, [framing, placing, shapeKind, width, height, toImagePoint, map]);
 
   /** 挪标注：写盘（**只改那一个标注的 x / y**；范围由主进程校验、冲突由主进程报） */
   const moveMarker = useCallback(
@@ -950,6 +996,8 @@ export function WorldMapPanel(props: {
                 ? `0 0 ${String(baseW)} ${String(baseH)}`
                 : computeViewBox(width, height, view.zoom, view.pan.x, view.pan.y)
             }
+            ref={canvasRef}
+            id="yushu-map-canvas"
             role="img"
             aria-label={
               framing

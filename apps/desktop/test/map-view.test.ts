@@ -9,6 +9,7 @@ import {
   computeViewBox,
   panStep,
   visibleSize,
+  zoomAtPoint,
   zoomStep,
 } from "../renderer/src/components/map-view.js";
 
@@ -92,5 +93,110 @@ describe("地图缩放与平移（R145）", () => {
     for (const part of parts) {
       expect(Number.isFinite(Number(part)), `viewBox 里有非数：${part}`).toBe(true);
     }
+  });
+});
+
+/**
+ * R148：**滚轮缩放以指针为锚点** —— 滚轮该"指针下的那一点不动"。
+ *
+ * 为什么这是判据而不是感觉：滚轮放大若一律以**画布中心**缩放，作者想看的是
+ * 指针指着的那一块 ⇒ 手感是"越放大越跑偏"。⇒ 判据量的是**锚点的相对位置**
+ * （锚点内容坐标在可见范围里的位置）在缩放前后**不变**。
+ *
+ * **边界优先**：锚点贴在可见范围边缘、或缩到 1 倍（可见范围 = 整块 ⇒ 没有平移余地）时，
+ * "锚点不动"与"不许出框"**不能同时满足** ⇒ 以边界优先，锚点允许移动。
+ */
+describe("滚轮缩放以指针为锚点（R148）", () => {
+  const FRAME_W = 1000;
+  const FRAME_H = 700;
+
+  /** 锚点在可见范围里的相对位置（0..1） */
+  const relative = (
+    anchorX: number,
+    anchorY: number,
+    panX: number,
+    panY: number,
+    zoom: number,
+  ): { rx: number; ry: number } => {
+    const { w, h } = visibleSize(FRAME_W, FRAME_H, zoom);
+    return { rx: (anchorX - panX) / w, ry: (anchorY - panY) / h };
+  };
+
+  it("放大时，**指针下的那一点不动**（锚点的相对位置不变）", () => {
+    const anchor = { x: 300, y: 200 };
+    const before = { zoom: 1, pan: { x: 0, y: 0 } };
+    const after = zoomAtPoint(
+      FRAME_W,
+      FRAME_H,
+      before.zoom,
+      before.pan.x,
+      before.pan.y,
+      anchor.x,
+      anchor.y,
+      1.5,
+    );
+    expect(after.zoom).toBeGreaterThan(before.zoom);
+    const r0 = relative(anchor.x, anchor.y, before.pan.x, before.pan.y, before.zoom);
+    const r1 = relative(anchor.x, anchor.y, after.pan.x, after.pan.y, after.zoom);
+    expect(r1.rx).toBeCloseTo(r0.rx, 6);
+    expect(r1.ry).toBeCloseTo(r0.ry, 6);
+  });
+
+  it("缩小时同样以指针为锚点（锚点放在**可见范围内部**）", () => {
+    // 锚点放在可见范围内部：贴边时会与"不许出框"打架（见下一条），缩到 1 倍时也一样
+    // （可见范围 = 整块 ⇒ 没有平移余地 ⇒ 锚点必然移动）⇒ 这里缩到 1.6 倍。
+    const anchor = { x: 400, y: 300 };
+    const before = { zoom: 2, pan: { x: 250, y: 175 } };
+    const after = zoomAtPoint(
+      FRAME_W,
+      FRAME_H,
+      before.zoom,
+      before.pan.x,
+      before.pan.y,
+      anchor.x,
+      anchor.y,
+      0.8,
+    );
+    expect(after.zoom).toBeLessThan(before.zoom);
+    const r0 = relative(anchor.x, anchor.y, before.pan.x, before.pan.y, before.zoom);
+    const r1 = relative(anchor.x, anchor.y, after.pan.x, after.pan.y, after.zoom);
+    expect(r1.rx).toBeCloseTo(r0.rx, 6);
+    expect(r1.ry).toBeCloseTo(r0.ry, 6);
+  });
+
+  it("锚点贴在可见范围边缘时，**边界优先**（不许为了锚点不动而把画面推出框外）", () => {
+    const anchor = { x: 700, y: 500 };
+    const before = { zoom: 2, pan: { x: 200, y: 100 } };
+    const after = zoomAtPoint(
+      FRAME_W,
+      FRAME_H,
+      before.zoom,
+      before.pan.x,
+      before.pan.y,
+      anchor.x,
+      anchor.y,
+      0.5,
+    );
+    const { w, h } = visibleSize(FRAME_W, FRAME_H, after.zoom);
+    expect(after.pan.x).toBeGreaterThanOrEqual(0);
+    expect(after.pan.y).toBeGreaterThanOrEqual(0);
+    expect(after.pan.x + w).toBeLessThanOrEqual(FRAME_W + 0.001);
+    expect(after.pan.y + h).toBeLessThanOrEqual(FRAME_H + 0.001);
+  });
+
+  it("到上限就停住（不会越界放大）", () => {
+    const atMax = zoomAtPoint(FRAME_W, FRAME_H, ZOOM_MAX, 0, 0, 500, 350, 1.5);
+    expect(atMax.zoom).toBe(ZOOM_MAX);
+    const atMin = zoomAtPoint(FRAME_W, FRAME_H, 1, 0, 0, 500, 350, 0.5);
+    expect(atMin.zoom).toBe(1);
+  });
+
+  it("滚完之后**看得见的范围仍然在框内**（平移要重新钳一遍）", () => {
+    const after = zoomAtPoint(FRAME_W, FRAME_H, 1, 0, 0, 990, 690, 1.5);
+    const { w, h } = visibleSize(FRAME_W, FRAME_H, after.zoom);
+    expect(after.pan.x).toBeGreaterThanOrEqual(0);
+    expect(after.pan.y).toBeGreaterThanOrEqual(0);
+    expect(after.pan.x + w).toBeLessThanOrEqual(FRAME_W + 0.001);
+    expect(after.pan.y + h).toBeLessThanOrEqual(FRAME_H + 0.001);
   });
 });

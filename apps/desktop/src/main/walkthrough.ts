@@ -7681,6 +7681,72 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 110,
+    title: '滚轮缩放：以指针为锚点（指针下那一点不动），且**不写盘**（R148）',
+    file: 'step110-map-wheel.png',
+    body: String.raw`
+      // 这一步证 R148 的三件事：
+      // ① 滚轮**以指针为锚点**（硬证据：滚轮前后，**指针下的内容坐标**不变）；
+      // ② 滚轮放大后看得见的范围真的变窄了；
+      // ③ **不写盘**（放大还是"看"，不是作品的一部分）。
+      await tab('规则');
+      await tab('世界观档案');
+      // 按 **id** 选画布（页面上不止一个 svg ⇒ 选错元素就永远触发不了）
+      const svg = await waitFor(() => document.getElementById('yushu-map-canvas') || null, 8000);
+      if (!svg) return { ok: false, note: '地图面板没有画布' };
+      const before = await window.yushu.doc.read('world/map.yaml');
+      const rect = svg.getBoundingClientRect();
+      const clientX = rect.left + rect.width * 0.35;
+      const clientY = rect.top + rect.height * 0.55;
+      // 指针下的**内容坐标**（滚轮前后要一样 ⇒ 这就是"以指针为锚点"的硬证据）
+      const contentAt = () => {
+        const ctm = svg.getScreenCTM();
+        if (!ctm) return null;
+        const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+        return { x: p.x, y: p.y };
+      };
+      const viewBoxNow = () => String(svg.getAttribute('viewBox') || '');
+      const boxBefore = viewBoxNow();
+      const anchorBefore = contentAt();
+      if (!anchorBefore) return { ok: false, note: '拿不到画布的坐标变换' };
+      // 往上滚 = 放大
+      svg.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: -120, clientX: clientX, clientY: clientY, bubbles: true, cancelable: true,
+      }));
+      await sleep(400);
+      const boxZoomed = viewBoxNow();
+      const anchorAfter = contentAt();
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const baseParts = boxBefore.split(' ').map(Number);
+      const zoomParts = boxZoomed.split(' ').map(Number);
+      const narrower =
+        baseParts.length === 4 && zoomParts.length === 4 && zoomParts[2] < baseParts[2];
+      const anchorHeld =
+        anchorAfter !== null &&
+        Math.abs(anchorAfter.x - anchorBefore.x) <= 1 &&
+        Math.abs(anchorAfter.y - anchorBefore.y) <= 1;
+      const notWritten = after.content === before.content;
+      // 往下滚 = 缩小
+      svg.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: 120, clientX: clientX, clientY: clientY, bubbles: true, cancelable: true,
+      }));
+      await sleep(400);
+      const boxBack = viewBoxNow();
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: narrower && anchorHeld && notWritten,
+        note: '滚轮放大后 viewBox=' + boxBefore + ' → ' + boxZoomed + '（看得见的范围变窄=' + String(narrower) + '）' +
+          '；指针下的内容坐标 ' + anchorBefore.x.toFixed(1) + ',' + anchorBefore.y.toFixed(1) +
+          ' → ' + (anchorAfter ? anchorAfter.x.toFixed(1) + ',' + anchorAfter.y.toFixed(1) : '?') +
+          '（没动=' + String(anchorHeld) + '，容差 1px）' +
+          '；盘上一个字节没动=' + String(notWritten) +
+          '；再往下滚 viewBox=' + boxBack,
+      };
+    `,
+  },
 ];
 
 /**

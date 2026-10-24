@@ -81,3 +81,42 @@ export function computeViewBox(
   const pan = clampPan(panX, panY, frameW, frameH, zoom);
   return `${String(pan.x)} ${String(pan.y)} ${String(w)} ${String(h)}`;
 }
+
+/**
+ * **以某个锚点为心的缩放**（R148：滚轮缩放）。
+ *
+ * 滚轮该有的手感是「**指针下的那一点不动**」：作者指着哪一块，就放大哪一块。
+ * 若一律以画布中心缩放，放大时画面会往别处跑 ⇒ 越放大越看不对地方。
+ *
+ * 做法：记下锚点在**可见范围里的相对位置**（0..1），缩放后按同样的相对位置
+ * 反解平移 ⇒ 锚点下的内容坐标保持不变。
+ *
+ * @param anchorContentX 锚点的**内容坐标**（框内像素，不是屏幕坐标）
+ * @param factor 缩放倍数（>1 放大，<1 缩小）
+ */
+export function zoomAtPoint(
+  frameW: number,
+  frameH: number,
+  zoom: number,
+  panX: number,
+  panY: number,
+  anchorContentX: number,
+  anchorContentY: number,
+  factor: number,
+): { zoom: number; pan: { x: number; y: number } } {
+  const nextZoom = clampZoom(zoom * factor);
+  if (nextZoom === zoom) return { zoom, pan: { x: panX, y: panY } };
+  const before = visibleSize(frameW, frameH, zoom);
+  const after = visibleSize(frameW, frameH, nextZoom);
+  // 锚点在可见范围里的相对位置（缩放前后要一样）
+  const rx = (anchorContentX - panX) / before.w;
+  const ry = (anchorContentY - panY) / before.h;
+  const pan = clampPan(
+    anchorContentX - rx * after.w,
+    anchorContentY - ry * after.h,
+    frameW,
+    frameH,
+    nextZoom,
+  );
+  return { zoom: nextZoom, pan };
+}

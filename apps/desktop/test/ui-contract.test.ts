@@ -2569,3 +2569,55 @@ describe("起源工作台第三段（R147）：「接下来做什么」三条都
     expect(genesis, "没取稿件总览").toContain("api().library.list()");
   });
 });
+
+/**
+ * R148：**滚轮缩放，以指针为锚点**。
+ *
+ * 三条口径：
+ * ① **手感**：滚轮该"指针下那一点不动" ⇒ 缩放要走 `zoomAtPoint`（把指针位置换算成内容坐标）。
+ * ② **实现**：React 17+ 的 `onWheel` 是**被动**监听器 ⇒ `preventDefault()` 不生效
+ *    ⇒ 滚轮会连带把整页滚起来 ⇒ 必须用 ref + `addEventListener("wheel", h, { passive: false })`。
+ * ③ **依赖里必须有 `map`**（R148 实踩）：地图没加载时组件走 early return，
+ *    **画布根本不在 DOM 里** ⇒ 那时 effect 拿到的 ref 是 null ⇒ 监听没挂上；
+ *    而 `width` / `height` 在加载前后**恰好相同**（bounds 正好 1000×700）⇒ 依赖没变
+ *    ⇒ effect 不重跑 ⇒ **监听永远挂不上**。
+ */
+describe("滚轮缩放以指针为锚点（R148）", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+
+  it("滚轮用 **ref + addEventListener(passive:false)**（React 的 onWheel 是被动的 ⇒ preventDefault 无效）", () => {
+    expect(panel, "没有用 ref 拿画布").toContain("canvasRef");
+    expect(panel, "滚轮不是用 addEventListener 挂的（或不是非被动的）").toMatch(
+      /addEventListener\("wheel", onWheel, \{ passive: false \}\)/,
+    );
+    expect(panel, "滚轮没阻止默认行为 ⇒ 整页会跟着滚").toMatch(/event\.preventDefault\(\)/);
+    expect(panel, "不该用 React 的 onWheel（被动监听器 ⇒ preventDefault 无效）").not.toMatch(/onWheel=/);
+  });
+
+  it("滚轮缩放**以指针为锚点**（指针下那一点不动）", () => {
+    expect(panel, "滚轮缩放没走 zoomAtPoint").toContain("zoomAtPoint(");
+    expect(panel, "没把指针位置换算成内容坐标").toMatch(/const anchor = toImagePoint\(\{/);
+  });
+
+  it("滚轮**按方向**缩放（往上滚放大、往下滚缩小）", () => {
+    expect(panel, "滚轮不按方向缩放（写死倍率 = 滚了也白滚）").toMatch(
+      /const factor = event\.deltaY < 0 \? [\d.]+ : 1 \/ [\d.]+;/,
+    );
+  });
+
+  it("放置 / 框定 / 画形状时**滚轮让位**（与键盘同一套让位规则）", () => {
+    const block = /const onWheel = \(event: WheelEvent\) => \{[\s\S]*?\n    \};/.exec(panel)?.[0] ?? "";
+    expect(block, "没找到滚轮处理").not.toBe("");
+    expect(block, "没让位给放置/框定/画形状").toMatch(
+      /if \(framing \|\| placing \|\| shapeKind !== null\) return;/,
+    );
+  });
+
+  it("**依赖里必须有 `map`**（否则监听永远挂不上：地图没加载时画布不在 DOM 里，而 width/height 恰好没变）", () => {
+    const effect = /useEffect\(\(\) => \{\s*\n\s*const svg = canvasRef\.current;[\s\S]*?\n  \}, \[[^\]]*\]\);/.exec(
+      panel,
+    )?.[0] ?? "";
+    expect(effect, "没找到滚轮那个 effect").not.toBe("");
+    expect(effect, "依赖里没有 map ⇒ 地图加载后 effect 不重跑 ⇒ 监听挂不上").toMatch(/\bmap\b/);
+  });
+});
