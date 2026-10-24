@@ -7814,6 +7814,57 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 112,
+    title: '拖拽平移：放大之后拖一下就能看别处，且**不写盘**（R150）',
+    file: 'step112-map-pan.png',
+    body: String.raw`
+      // 这一步证 R150 的两件事：
+      // ① 放大之后**拖一下就能看别处**（拖拽平移生效：viewBox 真的挪了）；
+      // ② **不写盘**（平移只是"看"）。
+      await tab('规则');
+      await tab('世界观档案');
+      const svg = await waitFor(() => document.getElementById('yushu-map-canvas') || null, 8000);
+      if (!svg) return { ok: false, note: '地图面板没有画布' };
+      const before = await window.yushu.doc.read('world/map.yaml');
+      // 先放大（不然没得平移：1 倍时看得见的范围就是整块）
+      const zoomIn = [...document.querySelectorAll('.map-panel button')]
+        .find((b) => String(b.title || '').indexOf('放大') === 0);
+      if (!zoomIn) return { ok: false, note: '没有「放大」控件' };
+      zoomIn.click();
+      await sleep(250);
+      zoomIn.click();
+      await sleep(350);
+      const boxBefore = String(svg.getAttribute('viewBox') || '');
+      // 在**空白处**按下并拖（0.8 → 0.55）
+      const rect = svg.getBoundingClientRect();
+      const at = (fx, fy) => ({ clientX: rect.left + rect.width * fx, clientY: rect.top + rect.height * fy });
+      const pointer = (type, fx, fy) => svg.dispatchEvent(new PointerEvent(type, Object.assign({}, at(fx, fy), {
+        bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, button: 0, buttons: 1,
+      })));
+      pointer('pointerdown', 0.8, 0.8);
+      await sleep(150);
+      pointer('pointermove', 0.55, 0.8);
+      await sleep(150);
+      pointer('pointerup', 0.55, 0.8);
+      await sleep(400);
+      const boxAfter = String(svg.getAttribute('viewBox') || '');
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const beforeParts = boxBefore.split(' ').map(Number);
+      const afterParts = boxAfter.split(' ').map(Number);
+      const panned =
+        beforeParts.length === 4 && afterParts.length === 4 && Math.abs(afterParts[0] - beforeParts[0]) > 1;
+      const notWritten = after.content === before.content;
+      const panelEl = document.querySelector('.map-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: panned && notWritten,
+        note: '拖拽平移：viewBox ' + boxBefore + ' → ' + boxAfter + '（画面挪了=' + String(panned) + '）' +
+          '；盘上一个字节没动=' + String(notWritten),
+      };
+    `,
+  },
 ];
 
 /**

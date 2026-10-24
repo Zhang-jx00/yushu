@@ -2653,3 +2653,40 @@ describe("主界面三栏（R149）：左=进行中的任务 / 中=主工作区 
     expect(genesis, "没有跳到规则体检").toContain('onNavigate?.("rules")');
   });
 });
+
+/**
+ * R150：**拖拽平移** —— 放大之后要看别处。
+ *
+ * 口径（**指针是稀缺资源，先定清楚再动手**）：
+ * · **只在无模式、且点在空白处时**才平移（框定 / 放置 / 画形状一律让位）；
+ * · **点在标注 / 锚点上不开始平移**（那是"挪这个点"，不是"挪画面"）——
+ *   标注的 pointerdown **会冒泡到画布**（没有 stopPropagation）⇒ 所以必须**自己判**；
+ * · 平移只是"看" ⇒ **不写盘**。
+ */
+describe("拖拽平移（R150）：只在空白处拖，各模式一律让位", () => {
+  const panel = readFileSync(join(VIEW_ROOT, "components", "WorldMapPanel.tsx"), "utf8");
+  const downBlock = /const onCanvasPointerDown = useCallback\([\s\S]*?\n  \);/.exec(panel)?.[0] ?? "";
+  const moveBlock = /const onCanvasPointerMove = useCallback\([\s\S]*?\n  \);/.exec(panel)?.[0] ?? "";
+
+  it("画布有**拖拽平移**的三件套（down / move / up）", () => {
+    expect(panel, "没有平移的 pointerdown").toContain("onCanvasPointerDown");
+    expect(panel, "没有平移的 pointermove").toContain("onCanvasPointerMove");
+    expect(panel, "没有平移的 pointerup").toContain("onCanvasPointerUp");
+  });
+
+  it("**框定 / 放置 / 画形状时一律让位**（别抢指针）", () => {
+    expect(downBlock, "没找到平移的 pointerdown").not.toBe("");
+    expect(downBlock, "没让位给框定/放置/画形状").toMatch(
+      /if \(framing \|\| placing \|\| shapeKind !== null\) return;/,
+    );
+  });
+
+  it("点在**标注 / 锚点**上不开始平移（那是挪这个点）", () => {
+    expect(downBlock, "没判「点的是不是标注」").toMatch(/closest\("\.map-marker-in/);
+  });
+
+  it("平移**要钳住**（不许把画面推出作者框定的那一块）", () => {
+    expect(moveBlock, "没找到平移的 pointermove").not.toBe("");
+    expect(moveBlock, "平移没钳制").toMatch(/clampPan\(/);
+  });
+});

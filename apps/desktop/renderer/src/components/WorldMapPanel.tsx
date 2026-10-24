@@ -459,6 +459,63 @@ export function WorldMapPanel(props: {
     return () => svg.removeEventListener("wheel", onWheel);
   }, [framing, placing, shapeKind, width, height, toImagePoint, map]);
 
+  /**
+   * R150：**拖拽平移** —— 放大之后要看别处，键盘方向键能挪，但按住鼠标拖更顺手。
+   *
+   * 口径（**先定清楚再动手** —— 指针是稀缺资源）：
+   * · **只在无模式、且点在空白处时**才平移（框定 / 放置 / 画形状一律让位）；
+   * · **点在标注 / 锚点上不开始平移**（那是"挪这个点"，不是"挪画面"）——
+   *   标注的 pointerdown **会冒泡到画布**（没有 stopPropagation）⇒ 这里**自己判**。
+   * · 平移只是"看" ⇒ **不写盘**。
+   */
+  const panDrag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+
+  const onCanvasPointerDown = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      if (framing || placing || shapeKind !== null) return;
+      const target = event.target as Element | null;
+      if (
+        target !== null &&
+        typeof target.closest === "function" &&
+        target.closest(".map-marker-in, .map-anchor, .map-place-overlay, .map-shape-pending") !== null
+      ) {
+        return;
+      }
+      const p = toImagePoint({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        currentTarget: event.currentTarget,
+      });
+      if (p === null) return;
+      panDrag.current = { x: p.x, y: p.y, panX: view.pan.x, panY: view.pan.y };
+    },
+    [framing, placing, shapeKind, toImagePoint, view.pan.x, view.pan.y],
+  );
+
+  const onCanvasPointerMove = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      const drag = panDrag.current;
+      if (drag === null) return;
+      const p = toImagePoint({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        currentTarget: event.currentTarget,
+      });
+      if (p === null) return;
+      const dx = p.x - drag.x;
+      const dy = p.y - drag.y;
+      setView((prev) => ({
+        zoom: prev.zoom,
+        pan: clampPan(drag.panX - dx, drag.panY - dy, width, height, prev.zoom),
+      }));
+    },
+    [toImagePoint, width, height],
+  );
+
+  const onCanvasPointerUp = useCallback(() => {
+    panDrag.current = null;
+  }, []);
+
   /** 挪标注：写盘（**只改那一个标注的 x / y**；范围由主进程校验、冲突由主进程报） */
   const moveMarker = useCallback(
     async (markerId: string, x: number, y: number) => {
@@ -577,8 +634,7 @@ export function WorldMapPanel(props: {
     [framing, toImagePoint, commitFrame],
   );
 
-  /** 键盘框定：方向键移动、`+`/`-` 改大小、回车定下来（契约 §6：键盘债是 0） */
-  const onFrameKeyDown = useCallback(
+  /** 键盘框定：方向键移动、`+`/`-` 改大小、回车定下来（契约 §6：键盘债是 0） */  const onFrameKeyDown = useCallback(
     (event: ReactKeyboardEvent<SVGSVGElement>) => {
       if (!framing) return;
       const current = frameRect;
@@ -1008,9 +1064,18 @@ export function WorldMapPanel(props: {
                **R145：画布恒可聚焦** —— 缩放与平移的键盘路（+ / - / 方向键 / 0）也挂在这里。
                原来只在框定模式里可聚焦（tabIndex={framing ? 0 : -1}），那时缩放平移还没有键盘路。 */
             tabIndex={0}
-            onPointerDown={onFramePointerDown}
-            onPointerMove={onFramePointerMove}
-            onPointerUp={onFramePointerUp}
+            onPointerDown={(event) => {
+              onFramePointerDown(event);
+              onCanvasPointerDown(event);
+            }}
+            onPointerMove={(event) => {
+              onFramePointerMove(event);
+              onCanvasPointerMove(event);
+            }}
+            onPointerUp={(event) => {
+              onFramePointerUp(event);
+              onCanvasPointerUp();
+            }}
             onKeyDown={(event) => {
               onFrameKeyDown(event);
               onViewKeyDown(event);
