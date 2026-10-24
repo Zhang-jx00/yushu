@@ -3243,3 +3243,125 @@ describe("码字统计页三栏（R158）：左=汇总与日历 / 中=今日与�
     );
   });
 });
+
+/**
+ * **三栏之后的排版总巡检**（R159）：把"三栏挤出来的问题"一次量完。
+ *
+ * 判据盯五件事：
+ * ① **新加的巡检项真的在跑**（认**回执**：报告里那一行写着"分栏并排=N/N 页"——
+ *    只钉"问题=0"的话，巡检项删了照样绿；只认源码的话，源码写了没跑也照样绿 ⇒ 两条都要）；
+ * ② **七个分栏页面一个都不许漏**（认根容器选择器，含 R158 新加的码字统计）；
+ * ③ 三件事各量各的（并排 / 栏与栏不重叠 / 内容不越栏），不许拿同一条判据糊过去；
+ * ④ **窄栏里塞不下的宽内容自己横向滚**（docs/11 §7.34：宽表在窄栏里自己滚，不许把整页撑宽）；
+ * ⑤ 各栏的块**不许被压扁**（R154 那次中栏的面板被压扁 ⇒ 内容越出盒子 3~329px）。
+ */
+describe("三栏之后的排版总巡检（R159）：并排 / 不重叠 / 不越栏 + 窄栏自己滚", () => {
+  const walk = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "walkthrough.ts"), "utf8");
+  const report = JSON.parse(
+    readFileSync(join(ROOT, "docs", "assets", "m1-preview", "walkthrough-report.json"), "utf8"),
+  ) as { steps: Array<{ step: number; title: string; ok: boolean; detail: string }> };
+
+  /** 取某一步的脚本体（认位置：step N 与 step N+1 之间那一段） */
+  const stepBody = (step: number): string => {
+    const start = walk.indexOf("step: " + String(step) + ",");
+    if (start < 0) return "";
+    const end = walk.indexOf("step: " + String(step + 1) + ",", start);
+    return walk.slice(start, end < 0 ? walk.length : end);
+  };
+
+  /** 取包含该选择器的那条规则的声明块（选择器组里的一行也算） */
+  const ruleBody = (sel: string): string => {
+    const idx = css.indexOf(sel);
+    if (idx < 0) return "";
+    const open = css.indexOf("{", idx);
+    if (open < 0) return "";
+    const close = css.indexOf("}", open);
+    return css.slice(open, close);
+  };
+
+  const COLUMN_ROOTS = [
+    ".genesis",
+    ".memory",
+    ".rules-view",
+    ".export-three-col",
+    ".archive",
+    ".library-three-col",
+    ".stats-three-col",
+  ];
+
+  it("**新加的巡检项真的在跑**（认回执：报告里那一行写着数）", () => {
+    const audit = report.steps.find((row) => row.step === 88);
+    expect(audit, "报告里没有 step88（排版巡检）那一步").toBeTruthy();
+    expect(
+      (audit as { detail: string }).detail,
+      "step88 的回执里没有「分栏并排=N/N 页」⇒ 新的巡检项没在跑（源码写了不算，跑过才算）",
+    ).toContain("分栏并排=");
+    const column = report.steps.find((row) => row.step === 121);
+    expect(column, "报告里没有 step121（分栏取证）那一步").toBeTruthy();
+    expect(
+      (column as { detail: string }).detail,
+      "step121 的回执里没有「自己横向滚的窄栏=N 页」⇒ 那条巡检项没在跑",
+    ).toContain("自己横向滚的窄栏=");
+  });
+
+  it("**七个分栏页面一个都不许漏**（认**那一步的脚本**，含 R158 新加的码字统计）", () => {
+    const audit = stepBody(88);
+    expect(audit, "没找到 step88 的脚本").not.toBe("");
+    const column = stepBody(121);
+    expect(column, "没找到 step121 的脚本").not.toBe("");
+    // 判定那一步与取证那一步，两边都得把七个分栏页面列全（少一个就漏检一页）
+    for (const sel of COLUMN_ROOTS) {
+      expect(audit, `step88 的巡检里没有 ${sel} 这个分栏根容器`).toContain(sel);
+      expect(column, `step121 的取证里没有 ${sel} 这个分栏根容器`).toContain(sel);
+    }
+  });
+
+  it("三件事各量各的：**认量法本身**（并排 / 栏与栏不重叠 / 内容不越栏）", () => {
+    const audit = stepBody(88);
+    // 并排 = 量左边界（不是量宽度，不是认类名）
+    expect(audit, "并排那条没有量左边界").toContain("if (!(prev.left < cur.left)) sideBySide = false;");
+    // 栏与栏不重叠 = 量两栏盒子的交集
+    expect(audit, "重叠那条没有量两个盒子的交集").toContain(
+      "const w = Math.min(prev.right, cur.right) - Math.max(prev.left, cur.left);",
+    );
+    expect(audit, "重叠那条没有判交集大于 2px").toContain("if (w > 2 && h > 2)");
+    // 内容不越栏 = 拿子元素的盒子与栏的内容盒比
+    expect(audit, "不越栏那条没有拿子元素与栏的内容盒比").toContain(
+      "if (ch.right > right || ch.left < left)",
+    );
+  });
+
+  it("**窄栏里塞不下的宽内容自己横向滚**（不许把整页撑宽）", () => {
+    const column = stepBody(121);
+    expect(column, "取证里没有「内容比这一栏宽」的量法").toContain(
+      "if (col.scrollWidth > col.clientWidth + 2)",
+    );
+    expect(column, "取证里没有「overflow-x=visible 就不自己滚」的判据").toContain(
+      "if (cs.overflowX === 'visible')",
+    );
+    expect(css, "规则页的宽表没有自己的滚动区").not.toBe("");
+    expect(ruleBody(".rules-table-scroll"), "规则页的宽表没有自己的横向滚动区").toMatch(
+      /overflow-x:\s*auto/,
+    );
+  });
+
+  it("回执里要**看得见新加的巡检项在跑**（不能只钉「问题=0」）", () => {
+    expect(walk, "step88 的回执里没有分栏并排的计数").toContain("分栏并排=");
+    expect(walk, "step121 的回执里没有自己横向滚的窄栏计数").toContain("自己横向滚的窄栏=");
+  });
+
+  it("各栏的块**不许被压扁**（R154 那次中栏的面板被压扁、内容越出盒子 3~329px）", () => {
+    for (const sel of [
+      ".rules-col-work > .panel",
+      ".export-col-work > *",
+      ".library-col-work > *",
+      ".stats-col-work > *",
+    ]) {
+      const body = ruleBody(sel);
+      expect(body, `${sel} 这条规则没找到`).not.toBe("");
+      expect(body, `${sel} 没锁住高度（flex 默认会缩 ⇒ 内容越出自己的盒子）`).toMatch(
+        /flex:\s*(?:0 0 auto|none)/,
+      );
+    }
+  });
+});

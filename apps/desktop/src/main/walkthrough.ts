@@ -6077,15 +6077,29 @@ const STEPS: StepDef[] = [
 
   {
     step: 88,
-    title: '全应用排版巡检：逐页量面板不相交、内容不溢出、页面不横向溢出（R125）',
+    title: '全应用排版巡检：逐页量面板不相交、内容不溢出、页面不横向溢出；分栏页再量并排 / 不重叠 / 不越栏（R125 + R159）',
     file: 'step88-layout-audit.png',
     body: String.raw`
       // 这一步把"排版不许堆叠"从地图推广到**每一个页面**：逐个标签页量三件事。
       // ① 面板两两不相交；② 面板的**直接子元素**不越出它的内容盒；
       // ③ 页面不横向溢出。
+      // R159：**分栏页面**再多量三件（三栏特有的毛病，面板那三件量不出来）：
+      // ④ 各栏**并排**（量左边界依次右移，不是只认类名）；⑤ 栏与栏**不重叠**；
+      // ⑥ 每栏的内容**不越出自己那一栏**（横向；纵向是各栏自己滚，不算越界）。
       const TABS = ['起源工作台', '三级大纲', '编辑器', '稿件总览', 'AI 副驾', '记忆', '规则', '导出与自查', '世界观档案', '码字统计', '项目文件'];
+      // R159：哪些页是分栏排版的（根容器 → 它的直接子元素就是那一页的栏）
+      const COLUMN_ROOTS = {
+        '起源工作台': '.genesis',
+        '记忆': '.memory',
+        '规则': '.rules-view',
+        '导出与自查': '.export-three-col',
+        '世界观档案': '.archive',
+        '稿件总览': '.library-three-col',
+        '码字统计': '.stats-three-col',
+      };
       const problems = [];
       const seen = [];
+      const columnPages = [];
       for (const name of TABS) {
         await tab(name);
         await sleep(450);
@@ -6127,6 +6141,58 @@ const STEPS: StepDef[] = [
         // ③ 页面不横向溢出
         const overflow = document.documentElement.scrollWidth - document.documentElement.clientWidth;
         if (overflow > 1) problems.push(name + '：页面横向溢出 ' + overflow + 'px');
+        // ④⑤⑥ R159：分栏页面的三件（并排 / 不重叠 / 不越栏）
+        const rootSel = COLUMN_ROOTS[name];
+        if (rootSel) {
+          const root = document.querySelector(rootSel);
+          const cols = root ? [...root.children].filter((el) => {
+            const b = el.getBoundingClientRect();
+            return b.width > 0 && b.height > 0;
+          }) : [];
+          if (cols.length < 2) {
+            problems.push(name + '：分栏页面只量到 ' + String(cols.length) + ' 栏（根容器 ' + rootSel + '）');
+          } else {
+            let sideBySide = true;
+            const lefts = [];
+            for (const col of cols) {
+              lefts.push(Math.round(col.getBoundingClientRect().left));
+            }
+            for (let i = 1; i < cols.length; i += 1) {
+              const prev = cols[i - 1].getBoundingClientRect();
+              const cur = cols[i].getBoundingClientRect();
+              if (!(prev.left < cur.left)) sideBySide = false;
+              // ⑤ 栏与栏不重叠
+              const w = Math.min(prev.right, cur.right) - Math.max(prev.left, cur.left);
+              const h = Math.min(prev.bottom, cur.bottom) - Math.max(prev.top, cur.top);
+              if (w > 2 && h > 2) {
+                problems.push(name + '：第 ' + String(i) + ' 栏与第 ' + String(i + 1) + ' 栏重叠');
+              }
+            }
+            if (!sideBySide) problems.push(name + '：各栏不是并排的（左边界 ' + lefts.join('/') + '）');
+            // ⑥ 每栏的内容不越出自己那一栏（横向）。
+            //    **这一栏自己横向滚的除外**（docs/11 §7.34：宽表在窄栏里自己滚是正当做法，
+            //    那种内容本来就比栏宽，滚的是那一栏 ⇒ 不算越栏）。
+            for (const col of cols) {
+              const cb = col.getBoundingClientRect();
+              const cs = getComputedStyle(col);
+              if (cs.overflowX === 'auto' || cs.overflowX === 'scroll') continue;
+              const padLeft = parseFloat(cs.paddingLeft) || 0;
+              const padRight = parseFloat(cs.paddingRight) || 0;
+              const left = cb.left + padLeft - 2;
+              const right = cb.right - padRight + 2;
+              for (const child of col.children) {
+                const ch = child.getBoundingClientRect();
+                if (ch.height <= 0) continue;
+                if (ch.right > right || ch.left < left) {
+                  problems.push(name + '：有一栏的内容横向越出这一栏 ' +
+                    Math.round(Math.max(ch.right - right, left - ch.left)) + 'px');
+                  break;
+                }
+              }
+            }
+            columnPages.push(name + '(' + String(cols.length) + ' 栏，左边界 ' + lefts.join('/') + ')');
+          }
+        }
         seen.push(name + '(' + panels.length + ' 面板)');
       }
       await tab('世界观档案');
@@ -6134,7 +6200,9 @@ const STEPS: StepDef[] = [
       return {
         ok: problems.length === 0,
         note: '巡检 ' + seen.length + ' 个页面：' + seen.join('、') +
-          '；问题=' + problems.length + '（' + problems.slice(0, 6).join(' | ') + '）',
+          '；问题=' + problems.length + '（' + problems.slice(0, 6).join(' | ') + '）' +
+          '；分栏并排=' + String(columnPages.length) + '/' + String(Object.keys(COLUMN_ROOTS).length) + ' 页（' +
+          columnPages.join('、') + '）',
       };
     `,
   },
@@ -8403,6 +8471,113 @@ const STEPS: StepDef[] = [
           '；目标字数=' + String(goalShown) + ' vs 目标框=' + String(inputValue) +
           '；完成比例=' + String(progressShown) +
           '；主进程载荷对得上=' + String(payloadOk),
+      };
+    `,
+  },
+  {
+    step: 121,
+    title: '分栏页面逐页取证：窄栏里塞不下的宽内容自己横向滚，不把整页撑宽（R159）',
+    file: 'step121-column-scroll.png',
+    body: String.raw`
+      // 这一步是 R159 的**取证**（step88 是判定）：把七个分栏页面逐页量一遍，把数记在案。
+      // ① 每栏的**左边界**依次右移（并排 —— 量出来，不是认类名）；
+      // ② 窄栏里塞不下的宽内容**自己横向滚**（docs/11 §7.34：宽表在窄栏里自己横向滚，
+      //    不许把整页撑出横向滚动条）——滚的必须是那一栏，不是整页；
+      // ③ 整页**不横向溢出**；
+      // ④ 每栏的内容**不横向越出自己那一栏**（中栏被挤扁了，内容就会越出去 ——
+      //    R154 那次中栏的面板被压扁、内容越出盒子 3~329px）。
+      const PAGES = [
+        { tab: '规则', root: '.rules-view' },
+        { tab: '稿件总览', root: '.library-three-col' },
+        { tab: '导出与自查', root: '.export-three-col' },
+        { tab: '起源工作台', root: '.genesis' },
+        { tab: '记忆', root: '.memory' },
+        { tab: '世界观档案', root: '.archive' },
+        { tab: '码字统计', root: '.stats-three-col' },
+      ];
+      const seen = [];
+      const problems = [];
+      const selfScrollNames = [];
+      let sideBySideCount = 0;
+      let selfScrollCount = 0;
+      for (const page of PAGES) {
+        await tab(page.tab);
+        await sleep(450);
+        const root = document.querySelector(page.root);
+        if (!root) {
+          problems.push(page.tab + '：没找到分栏的根容器 ' + page.root);
+          continue;
+        }
+        const cols = [...root.children].filter((el) => {
+          const b = el.getBoundingClientRect();
+          return b.width > 0 && b.height > 0;
+        });
+        if (cols.length < 2) {
+          problems.push(page.tab + '：只量到 ' + String(cols.length) + ' 栏');
+          continue;
+        }
+        // ① 并排：左边界依次右移
+        const lefts = [];
+        const widths = [];
+        for (const col of cols) {
+          const b = col.getBoundingClientRect();
+          lefts.push(Math.round(b.left));
+          widths.push(Math.round(b.width));
+        }
+        let sideBySide = true;
+        for (let i = 1; i < lefts.length; i += 1) {
+          if (!(lefts[i] > lefts[i - 1])) sideBySide = false;
+        }
+        if (sideBySide) sideBySideCount += 1;
+        else problems.push(page.tab + '：各栏不是并排的（左边界 ' + lefts.join('/') + '）');
+        // ② 窄栏自己横向滚 + ④ 内容不横向越出这一栏
+        let selfScroll = 0;
+        for (let i = 0; i < cols.length; i += 1) {
+          const col = cols[i];
+          const cs = getComputedStyle(col);
+          if (col.scrollWidth > col.clientWidth + 2) {
+            selfScroll += 1;
+            if (cs.overflowX === 'visible') {
+              problems.push(page.tab + '：第 ' + String(i + 1) + ' 栏的内容比它宽 ' +
+                String(col.scrollWidth - col.clientWidth) + 'px，却没有自己横向滚（overflow-x=visible）');
+            }
+          }
+          const cb = col.getBoundingClientRect();
+          const padLeft = parseFloat(cs.paddingLeft) || 0;
+          const padRight = parseFloat(cs.paddingRight) || 0;
+          const left = cb.left + padLeft - 2;
+          const right = cb.right - padRight + 2;
+          // 这一栏自己横向滚的 ⇒ 它的内容本来就比栏宽（§7.34 的正当做法）⇒ 不算越栏
+          const scrollsItself = cs.overflowX === 'auto' || cs.overflowX === 'scroll';
+          if (scrollsItself) continue;
+          for (const child of col.children) {
+            const ch = child.getBoundingClientRect();
+            if (ch.height <= 0) continue;
+            if (ch.right > right || ch.left < left) {
+              problems.push(page.tab + '：第 ' + String(i + 1) + ' 栏的内容横向越出这一栏 ' +
+                Math.round(Math.max(ch.right - right, left - ch.left)) + 'px');
+              break;
+            }
+          }
+        }
+        if (selfScroll > 0) {
+          selfScrollCount += 1;
+          selfScrollNames.push(page.tab + '(' + String(selfScroll) + ' 栏自己滚)');
+        }
+        // ③ 整页不横向溢出
+        const overflow = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+        if (overflow > 1) problems.push(page.tab + '：页面横向溢出 ' + String(overflow) + 'px');
+        seen.push(page.tab + '(' + String(cols.length) + ' 栏：宽 ' + widths.join('/') +
+          '，左边界 ' + lefts.join('/') + ')');
+      }
+      await tab('稿件总览');
+      await sleep(300);
+      return {
+        ok: problems.length === 0,
+        note: '分栏并排=' + String(sideBySideCount) + '/' + String(PAGES.length) + ' 页' +
+          '；自己横向滚的窄栏=' + String(selfScrollCount) + ' 页（' + selfScrollNames.join('、') + '）' +
+          '；问题=' + String(problems.length) + '（' + problems.slice(0, 6).join(' | ') + '）' +
+          '；逐页：' + seen.join('、'),
       };
     `,
   },
