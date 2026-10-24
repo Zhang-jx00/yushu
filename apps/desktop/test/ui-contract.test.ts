@@ -2621,3 +2621,35 @@ describe("滚轮缩放以指针为锚点（R148）", () => {
     expect(effect, "依赖里没有 map ⇒ 地图加载后 effect 不重跑 ⇒ 监听挂不上").toMatch(/\bmap\b/);
   });
 });
+
+/**
+ * R149：**主界面三栏**（学 TRAE SOLO：左=正在进行的任务 / 中=主工作区 / 右=产物与工具）。
+ *
+ * 御书进项目后的第一屏原先是两栏（左=层级清单、右=表单），下面还空着 ⇒ 这一轮补上第三栏，
+ * 并且**只放真产物**：作者刚建好的卡、已经写出来的章，以及"去哪儿"（跳到对应页）。
+ * 全部**从真源现算** —— 不摆装饰性的卡片。
+ */
+describe("主界面三栏（R149）：左=进行中的任务 / 中=主工作区 / 右=产物与工具", () => {
+  const genesis = readFileSync(join(VIEW_ROOT, "views", "GenesisView.tsx"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+
+  it("起源工作台是**三栏**（第三栏是加出来的，不是从别处挤的）", () => {
+    expect(genesis, "没有右栏（产物与工具）").toContain('className="genesis-col-outputs"');
+    expect(css, "三栏版式没写进样式").toMatch(
+      /\.genesis\s*\{[^}]*grid-template-columns:[^;]*minmax\(0,\s*1fr\)[^;]*22%/,
+    );
+  });
+
+  it("右栏只放**真产物**（刚建好的卡、已写的章），全部从真源现算", () => {
+    expect(genesis, "右栏没有取卡片（那就不叫产物）").toContain("cards.slice(-5).reverse()");
+    expect(genesis, "右栏没有取稿件").toContain("library?.chapters ?? []");
+    expect(genesis, "右栏没有「刚建好的卡」这一段").toContain("刚建好的卡");
+    expect(genesis, "右栏没有「已写的章」这一段").toContain("已写的章");
+  });
+
+  it("「去哪儿」能跳到对应页（产物栏不只是好看的）", () => {
+    expect(genesis, "跳转没接上").toContain("props.onNavigate?.(");
+    expect(genesis, "没有跳到稿件总览").toContain('onNavigate?.("library")');
+    expect(genesis, "没有跳到规则体检").toContain('onNavigate?.("rules")');
+  });
+});

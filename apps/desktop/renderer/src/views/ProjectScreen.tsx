@@ -163,7 +163,7 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
             <div className="muted">恢复 = 载入编辑器并自动保存（仅当内容与磁盘不一致时提示，绝不静默覆盖）</div>
           </div>
         )}
-        {tab === "workbench" && <GenesisView />}
+        {tab === "workbench" && <GenesisView onNavigate={(next) => setTab(next as Tab)} />}
         {tab === "outline" && <OutlineView />}
         {tab === "editor" && (
           <ChapterEditorView

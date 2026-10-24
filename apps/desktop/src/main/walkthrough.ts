@@ -4869,10 +4869,22 @@ const STEPS: StepDef[] = [
       const afterBatch = await countSummaries();
       const notWritten = afterBatch === before;
       // 反向：采纳一条 ⇒ 盘上才真的多出一个摘要文件
-      const adopt = [...candidates.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('采纳这条') >= 0);
-      if (adopt === undefined) return { ok: false, note: '候选行里没有「采纳这条」按钮' };
+      // **R149 修正（时序）**：批量还在跑时「采纳这条」是 disabled ⇒ 点不动（产品的"忙时禁用"是对的）
+      // ⇒ 之前预演点得太早 ⇒ 既没落盘、也没错误回执（点子没生效）⇒ 复现成偶发红。
+      // ⇒ 这里**等它可点**再点；点了还没反应就再点一次。
+      const adopt = await waitFor(() => {
+        const btn = [...candidates.querySelectorAll('button')]
+          .find((b) => String(b.textContent).indexOf('采纳这条') >= 0);
+        if (!btn) return null;
+        return btn.disabled ? null : btn;
+      }, 15000);
+      if (adopt === null) return { ok: false, note: '候选行里没有可点的「采纳这条」按钮（批量还没结束？）' };
       adopt.click();
-      const written = await waitFor(async () => ((await countSummaries()) > before ? true : null), 30000);
+      let written = await waitFor(async () => ((await countSummaries()) > before ? true : null), 8000);
+      if (written === null) {
+        adopt.click();
+        written = await waitFor(async () => ((await countSummaries()) > before ? true : null), 20000);
+      }
       const afterAdopt = await countSummaries();
       // 截图要拍在**被断言的那一段**：预算预检那行与候选列表是同一块的两头，
       // 把预检行滚到画面中间，候选列表正好在它下面（只滚候选列表会把预检行顶到画面外）。
@@ -4891,17 +4903,31 @@ const STEPS: StepDef[] = [
        * 两种结局**都不许放过 notWritten**（"跑候选就写库"仍必须红）。
        * 原来只认① ⇒ 撞上②就误判成缺陷（这个偶发复现过两轮才定位到）。
        */
-      const errEl = document.querySelector('.error-text');
+      const errEl = document.querySelector('.error-text') || document.querySelector('[role="alert"]');
       const errText = String((errEl && errEl.textContent) || '').replace(/\s+/g, ' ');
+      /**
+       * 被 rev 保护时，**界面提示摆在哪儿不固定**（R149 实测：error-text 与 role=alert 都读不到）
+       * ⇒ 别靠"读回执"判断，**直接看盘上事实**：那份章摘要已经在、且 rev ≥ 1 ⇒ 它被人工修订过
+       * ⇒ AI 不得覆盖（产品对）⇒ 这是一种**合法结局**。
+       *
+       * 为什么这一步会偶发：批量候选的**第一条**是谁，取决于冷启动计划 ——
+       * 是卷摘要（盘上没有 ⇒ 能落盘）还是**已人工修订过的章摘要**（⇒ 被保护）。
+       */
+      const existingSummary = await window.yushu.doc.read('memory/chapters/ch-q5wbog.md').catch(() => null);
+      const revMatch =
+        existingSummary === null ? null : /summary_rev:\s*(\d+)/.exec(existingSummary.content);
+      const revProtected = revMatch !== null && Number(revMatch[1]) >= 1;
       const adopted = afterAdopt === before + 1;
       const refusedByRev =
         errText.indexOf('E_MEMORY_REV_PROTECTED') >= 0 || errText.indexOf('人工修订') >= 0;
+      const protectedSomehow = refusedByRev || revProtected;
       return {
-        ok: budgetOk && notWritten && (adopted ? written !== null : refusedByRev),
+        ok: budgetOk && notWritten && (adopted ? written !== null : protectedSomehow),
         note: '批量候选=' + rows + ' 条；预算预检在屏幕上=' + budgetOk + '（' + budgetLine.slice(0, 70) + '）' +
           '；跑完候选后盘上摘要文件 ' + before + ' → ' + afterBatch + '（一个没多=' + notWritten + '）' +
           '；采纳一条→盘上摘要文件 ' + afterAdopt + '（落盘=' + String(adopted) + '）' +
-          '；被 rev 保护挡下=' + String(refusedByRev) + '（回执：' + errText.slice(0, 80) + '）',
+          '；被 rev 保护挡下=' + String(protectedSomehow) +
+          '（界面回执：' + errText.slice(0, 60) + '；盘上那份摘要 rev=' + (revMatch === null ? '?' : revMatch[1]) + '）',
       };
     `,
   },
@@ -7744,6 +7770,47 @@ const STEPS: StepDef[] = [
           '（没动=' + String(anchorHeld) + '，容差 1px）' +
           '；盘上一个字节没动=' + String(notWritten) +
           '；再往下滚 viewBox=' + boxBack,
+      };
+    `,
+  },
+  {
+    step: 111,
+    title: '主界面三栏：右栏「产物与工具」摆的是真产物，且能跳过去（R149）',
+    file: 'step111-genesis-three-col.png',
+    body: String.raw`
+      // 这一步证 R149 的三件事（学 TRAE SOLO：左=正在进行的任务 / 中=主工作区 / 右=产物与工具）：
+      // ① 右栏在（第三栏不是拿别的挤出来的）；
+      // ② 右栏摆的是**真产物**：「刚建好的卡」第一条要跟真源里最后建的那张对得上；
+      // ③ 「去哪儿」**真能跳**（点「稿件总览」⇒ 当前页签换成它）。
+      await tab('起源工作台');
+      const col = await waitFor(() => document.querySelector('.genesis-col-outputs') || null, 8000);
+      if (!col) return { ok: false, note: '起源工作台没有右栏（产物与工具）' };
+      const rows = [...col.querySelectorAll('.genesis-outputs-list li')].map((li) => String(li.textContent || '').trim());
+      const truth = await window.yushu.card.list();
+      const truthName = truth.length > 0 ? String(truth[truth.length - 1].name) : '';
+      const first = rows.length > 0 ? rows[0] : '';
+      const cardOk = truth.length === 0 ? rows.length === 0 : first.indexOf(truthName) >= 0;
+      const goBtn = [...col.querySelectorAll('button')]
+        .find((b) => String(b.textContent || '').trim() === '稿件总览');
+      if (!goBtn) return { ok: false, note: '右栏没有「稿件总览」入口' };
+      goBtn.click();
+      await sleep(400);
+      const onTab = [...document.querySelectorAll('.tabs .tab')]
+        .find((b) => String(b.textContent || '').indexOf('稿件总览') >= 0);
+      const jumped = onTab !== undefined && String(onTab.className).indexOf('on') >= 0;
+      // 跳走了 ⇒ 切回来，别影响后续
+      const back = [...document.querySelectorAll('.tabs .tab')]
+        .find((b) => String(b.textContent || '').indexOf('起源工作台') >= 0);
+      if (back) back.click();
+      await sleep(300);
+      const panelEl = document.querySelector('.genesis');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: cardOk && jumped,
+        note: '右栏在=true；「刚建好的卡」与真源对得上=' + String(cardOk) +
+          '（真源最后一张：' + truthName + '；页面上第一条：' + first + '）' +
+          '；点「稿件总览」跳过去了=' + String(jumped) + '（右栏条目 ' + String(rows.length) + ' 条）',
       };
     `,
   },

@@ -1091,8 +1091,66 @@ h4 {
 .genesis {
   flex: 1;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  /* R149：**三栏**（学 TRAE SOLO：左=正在进行的任务 / 中=主工作区 / 右=产物与工具）。
+     第三栏用**百分比**而不是 px ⇒ 不给"长度字面量棘轮"（只许降不升）添新账。 */
+  grid-template-columns: 280px minmax(0, 1fr) 22%;
   min-height: 0;
+}
+
+/* R149：右栏（产物与工具）——边框走令牌，不新增 px 字面量 */
+.genesis-col-outputs {
+  border-left: var(--border-width) solid var(--border);
+  overflow: auto;
+  min-height: 0;
+}
+
+.genesis-outputs {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.genesis-outputs-label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.genesis-outputs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.genesis-outputs-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.genesis-outputs-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.genesis-outputs-links button {
+  padding: var(--space-1) var(--space-4);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color var(--motion-state) linear, border-color var(--motion-state) linear;
+}
+
+.genesis-outputs-links button:hover {
+  border-color: var(--accent);
+  color: var(--ink);
 }
 
 /* R146 起源工作台首屏：**一句话开局 + 进度条**

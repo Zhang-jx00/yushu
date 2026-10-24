@@ -20,7 +20,7 @@ const KICKOFF_STARTERS: Array<{ label: string; text: string }> = [
 ];
 
 /** 起源工作台（T1-6）：引导式问卷脚手架——逐步建档、可跳过、可稍后补充 */
-export function GenesisView() {
+export function GenesisView(props: { onNavigate?: (tab: string) => void }) {
   const [world, setWorld] = useState<WorldSummary | null>(null);
   const [cards, setCards] = useState<CardSummary[]>([]);
   /** R147：稿件总览（算"接下来做什么"要用：哪些章写完了、这本书多大了） */
@@ -118,6 +118,18 @@ export function GenesisView() {
 
   const kickoffTargetLabel = step.fields.find((field) => field.required)?.label ?? "名称";
   const progressPct = Math.min(100, Math.round((cards.length / GOAL_CARDS) * 100));
+
+  /**
+   * R149：**右栏「产物与工具」**（学 TRAE SOLO 的三栏：左=正在进行的任务 / 中=主工作区 / 右=产物与工具）。
+   *
+   * 这一栏只放**真产物**（作者刚建好的卡、已经写出来的章）与**去哪儿**（跳到对应页），
+   * 全部从**真源现算** —— 不摆装饰性的卡片。
+   */
+  const recentCards = cards.slice(-5).reverse();
+  const writtenChapters = (library?.chapters ?? [])
+    .filter((chapter) => chapter.chapterPath !== null && chapter.wordCount > 0)
+    .slice(-3)
+    .reverse();
 
   /**
    * R147：**「接下来做什么」三条** —— 全部从**真源现算**（卡列表 + 稿件总览），不是写死的文案。
@@ -324,6 +336,54 @@ export function GenesisView() {
           </ul>
         </div>
       </section>
+
+      {/* R149：**右栏「产物与工具」**（三栏里的第三栏）——
+          只放**真产物**（刚建好的卡、已写出来的章）与**去哪儿**，全部从真源现算。 */}
+      <aside className="genesis-col-outputs">
+        <div className="panel-title">
+          <span className="muted">产物与工具</span>
+        </div>
+        <div className="genesis-outputs">
+          <div className="genesis-outputs-label">刚建好的卡</div>
+          {recentCards.length === 0 ? (
+            <div className="muted">还没建卡 —— 左边走完第一层就有</div>
+          ) : (
+            <ul className="genesis-outputs-list">
+              {recentCards.map((card) => (
+                <li key={card.path}>
+                  <span>{card.name}</span>
+                  <span className="muted">{card.layer}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="genesis-outputs-label">已写的章</div>
+          {writtenChapters.length === 0 ? (
+            <div className="muted">还没建草稿 —— 从大纲里挑一章</div>
+          ) : (
+            <ul className="genesis-outputs-list">
+              {writtenChapters.map((chapter) => (
+                <li key={chapter.chapterId}>
+                  <span>{chapter.title}</span>
+                  <span className="muted">{chapter.wordCount} 字</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="genesis-outputs-label">去哪儿</div>
+          <div className="genesis-outputs-links">
+            <button type="button" onClick={() => props.onNavigate?.("library")}>
+              稿件总览
+            </button>
+            <button type="button" onClick={() => props.onNavigate?.("rules")}>
+              规则体检
+            </button>
+            <button type="button" onClick={() => props.onNavigate?.("archive")}>
+              世界观档案
+            </button>
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }
