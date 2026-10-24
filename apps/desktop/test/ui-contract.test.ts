@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SHORTCUTS } from "../renderer/src/components/shortcuts.js";
 
 /**
  * 前端设计契约的机器判据（R96）。
@@ -3058,5 +3059,61 @@ describe("导出与自查页三栏（R156）：左=能力矩阵 / 中=导出表�
       expect(outputsBlock, `右栏不许叫「${name}」（中栏已有 ⇒ 同名不同义）`).not.toContain(name);
     }
     expect(outputsBlock, "右栏没有自己的标题").toContain("最近一次导出");
+  });
+});
+
+/**
+ * **快捷键一览**（R157）：一个「键盘在哪」的面板，列**代码里真的绑着的**快捷键。
+ *
+ * 判据盯五件事：
+ * ① 入口是**真按钮**（键盘也能到 ⇒ 键盘债 0），面板挂得出来；
+ * ② 面板**从登记表渲染**（不许写死一份清单 —— 那是"照抄一份自己想象的清单"）；
+ * ③ 面板**分全局与局部**（混在一起作者会以为那个键随时都能按）；
+ * ④ 每一条都摆出**键 / 按了会怎样 / 什么时候能按**；
+ * ⑤ 样式只走**既有令牌**（不给长度字面量棘轮添新账）。
+ *
+ * 清单**对不对**（条目数 == 代码里真实的绑定数）由 `apps/desktop/test/shortcuts.test.ts`
+ * 判 —— 那里对着源码**逐处**对账，不靠"文件里出现过这个键"。
+ */
+describe("快捷键一览（R157）：面板能打开，条目数与真实绑定一致", () => {
+  const screen = readFileSync(join(VIEW_ROOT, "views", "ProjectScreen.tsx"), "utf8");
+  const panel = readFileSync(join(VIEW_ROOT, "components", "ShortcutPanel.tsx"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+
+  it("入口是**真按钮**（键盘也能到 ⇒ 键盘债 0），面板挂得出来", () => {
+    expect(screen, "没有「键盘在哪」这个入口").toContain("键盘在哪");
+    expect(screen, "入口不是按钮").toMatch(/<button[\s\S]{0,240}shortcut-trigger/);
+    expect(screen, "入口没标 aria-expanded").toContain("aria-expanded={shortcutsOpen}");
+    expect(screen, "面板没挂出来").toContain("<ShortcutPanel");
+  });
+
+  it("面板**从登记表渲染**（不许写死一份清单）", () => {
+    expect(panel, "面板没走登记表").toContain("SHORTCUTS.filter(");
+    // 认**精确形态**：条目数必须由登记表**现算**（标题里那句"共 N 条"也是同一个来源）
+    expect(panel, "面板声明的条目数不是现算的").toContain("data-shortcut-count={SHORTCUTS.length}");
+    expect(panel, "面板声明的全局条数不是现算的").toContain(
+      "data-shortcut-global-count={GLOBAL_SHORTCUT_COUNT}",
+    );
+    expect(panel, "面板没摆条目数").toContain("SHORTCUTS.length");
+    // 面板源码里手写的条目行必须**少于**登记表里的条目数 ⇒ 行是**渲染出来的**，不是抄进去的
+    const written = (panel.match(/data-shortcut-row=/g) ?? []).length;
+    expect(written, "面板把条目一行行写死了（那样就跟代码脱钩了）").toBeLessThan(SHORTCUTS.length);
+  });
+
+  it("面板**分全局与局部**（混在一起作者会以为那个键随时能按）", () => {
+    expect(panel).toContain('scope === "global"');
+    expect(panel).toContain('scope === "contextual"');
+    expect(panel, "面板没把两类分开说").toContain("全局（任何时候都能按）");
+  });
+
+  it("每一条都摆出**键 / 按了会怎样 / 什么时候能按**", () => {
+    expect(panel).toContain("keysLabel(entry.keys)");
+    expect(panel).toContain("entry.action");
+    expect(panel).toContain("entry.when");
+  });
+
+  it("样式只走**既有令牌**（不给长度字面量棘轮添新账）", () => {
+    expect(css, "快捷键面板的样式没写").toMatch(/\.shortcut-panel\s*\{[^}]*var\(--space-/);
+    expect(css, "入口的样式没写").toMatch(/\.shortcut-trigger\s*\{/);
   });
 });

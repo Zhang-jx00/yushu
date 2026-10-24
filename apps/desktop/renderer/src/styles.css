@@ -4410,6 +4410,75 @@ table,
 .export-output-path {
   overflow-wrap: anywhere;
 }
+/* ---------- R157：快捷键一览（「键盘在哪」面板） ---------- */
+.shortcut-trigger {
+  margin-left: auto;
+  align-self: center;
+  flex: none;
+  border: var(--border-width) solid var(--border);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.shortcut-trigger:hover {
+  border-color: var(--accent);
+}
+
+.shortcut-panel {
+  flex: none;
+  margin: var(--space-3) var(--space-8);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-5);
+  background: var(--panel);
+  /* 内容多了自己滚，不许把下面的正文挤没 */
+  max-height: 60%;
+  overflow: auto;
+}
+
+.shortcut-list {
+  list-style: none;
+  margin: var(--space-2) 0 var(--space-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.shortcut-list li {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.shortcut-list li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.shortcut-keys {
+  color: var(--ink);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.shortcut-action {
+  color: var(--ink);
+}
+
+.shortcut-close {
+  font-size: var(--text-sm);
+}
+
 /* ---------- R138：框定边界（作者在图上拖出地图在图里的哪一块） ---------- */
 .map-frame-bar {
   display: flex;

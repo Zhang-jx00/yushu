@@ -8254,6 +8254,57 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 119,
+    title: '键盘在哪：面板能打开，条数与登记一致，面板说的那条全局快捷键真的能用（R157）',
+    file: 'step119-shortcuts.png',
+    body: String.raw`
+      // 这一步证 R157 的三件事：
+      // ① 「键盘在哪」这个入口**点得开**，面板真的出现；
+      // ② 面板里**摆出来的条数**与它自己声明的条数一致（不是一份写死的文案）；
+      // ③ 面板里那条**全局**快捷键**真的能用**（进专注模式 → 按 Esc → 退出）。
+      await tab('稿件总览');
+      const trigger = await waitFor(() => {
+        const b = [...document.querySelectorAll('button')]
+          .find((x) => String(x.textContent || '').trim() === '键盘在哪');
+        return b || null;
+      }, 8000);
+      if (!trigger) return { ok: false, note: '找不到「键盘在哪」这个入口' };
+      trigger.click();
+      const panel = await waitFor(() => document.querySelector('[data-shortcut-panel]') || null, 8000);
+      if (!panel) return { ok: false, note: '点了入口，但面板没有出现' };
+      const rows = panel.querySelectorAll('[data-shortcut-row]');
+      const declared = Number(panel.getAttribute('data-shortcut-count') || '0');
+      const globalRows = panel.querySelectorAll('[data-shortcut-row="global"]');
+      const globalDeclared = Number(panel.getAttribute('data-shortcut-global-count') || '0');
+      const countOk = rows.length === declared && declared > 0 && globalRows.length === globalDeclared;
+      // ③ 那条全局快捷键真的能用：进专注模式 → 按 Esc → 退出
+      await tab('编辑器');
+      const focusBtn = await waitFor(() => {
+        const b = [...document.querySelectorAll('.mode-switch button')]
+          .find((x) => String(x.textContent || '').indexOf('专注') >= 0 && !x.disabled);
+        return b || null;
+      }, 15000);
+      if (!focusBtn) return { ok: false, note: '编辑器里找不到可点的「专注模式」按钮' };
+      focusBtn.click();
+      await sleep(600);
+      const inFocus = document.querySelector('.focus-mode') !== null;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(600);
+      const outFocus = document.querySelector('.focus-mode') === null;
+      const escWorks = inFocus && outFocus;
+      const panelEl = document.querySelector('.shortcut-panel');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: countOk && escWorks,
+        note: '面板出现了=true；摆出来的条数=' + String(rows.length) + ' vs 它声明的=' + String(declared) +
+          '；全局条数=' + String(globalRows.length) + ' vs 声明的=' + String(globalDeclared) +
+          '；面板说的那条全局快捷键真的能用=' + String(escWorks) +
+          '（进专注=' + String(inFocus) + '，Esc 退出=' + String(outFocus) + '）',
+      };
+    `,
+  },
 ];
 
 /**

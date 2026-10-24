@@ -15,6 +15,7 @@ import { OutlineView } from "./OutlineView";
 import { ProjectView } from "./ProjectView";
 import { RulesView } from "./RulesView";
 import { StatsView } from "./StatsView";
+import { ShortcutPanel } from "../components/ShortcutPanel";
 
 type Tab = "workbench" | "outline" | "editor" | "library" | "ai" | "memory" | "rules" | "export" | "archive" | "files" | "stats";
 
@@ -45,6 +46,8 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [libraryFocus, setLibraryFocus] = useState<{ path: string; tick: number } | null>(null);
   /** 会话异常退出检测（T2-8 切片 B）：仅在检出「上次会话异常退出」时展示提示 */
   const [session, setSession] = useState<SessionStatusPayload | null>(null);
+  /** 「键盘在哪」面板（R157）：作者记不住哪个键在哪儿能按 ⇒ 给一个入口 */
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
     // snapshot.root 变化 = 打开了另一个项目：重新检测该项目的编辑日志
@@ -125,8 +128,18 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
             {item.label}
           </button>
         ))}
+        {/* R157：键盘在哪 —— 真按钮（键盘也能到 ⇒ 键盘债 0） */}
+        <button
+          type="button"
+          className="shortcut-trigger"
+          aria-expanded={shortcutsOpen}
+          onClick={() => setShortcutsOpen((open) => !open)}
+        >
+          键盘在哪
+        </button>
       </div>
       <div className="tab-body">
+        {shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
         {session?.abnormalExit && (
           <div className="session-banner">
             <div className="recovery-title">
