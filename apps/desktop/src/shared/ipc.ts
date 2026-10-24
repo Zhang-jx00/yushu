@@ -2145,6 +2145,41 @@ export interface StatsSpeedPointPayload {
   avg: number;
 }
 
+/** 近 30 天逐日（R158：主进程算好的序列；缺失日补 0，界面不自己补） */
+export interface StatsPaceDayPayload {
+  /** 本地时区日键（YYYY-MM-DD） */
+  date: string;
+  /** 当日章节净增字数（可为负 = 净删） */
+  delta: number;
+}
+
+/**
+ * 近 30 天的节奏（R158：码字统计页右栏那一列的结构）。
+ *
+ * **结构由后端给**：界面只渲染，不自己造数、不自己补零、不自己算比例
+ * （同一份序列在中栏是柱状图、在右栏是逐日日历 ⇒ 两处读的是同一个数）。
+ */
+export interface StatsPacePayload {
+  /** 窗口天数（30） */
+  days: number;
+  /** 目标字数（与 `goal.daily` 同一个来源） */
+  goal: number;
+  /** 今日已写（与 `today.delta` 同一个来源） */
+  todayWritten: number;
+  /** 完成比例（0–100；未设目标时为 0） */
+  progressPercent: number;
+  /** 最近 30 天逐日净增（缺失日补 0，升序） */
+  calendar: StatsPaceDayPayload[];
+  /** 近 30 天合计 */
+  total: number;
+  /** 日均字数（`total ÷ days`，四舍五入） */
+  avgPerDay: number;
+  /** 有产出的天数（近 30 天内当日净增 > 0 的天数） */
+  activeDays: number;
+  /** 最好的一天（近 30 天内净增最大的一天；近 30 天没有产出时为 null） */
+  bestDay: StatsPaceDayPayload | null;
+}
+
 export interface StatsStatePayload {
   /** 每日目标（0 = 未设目标） */
   goal: { daily: number };
@@ -2156,6 +2191,8 @@ export interface StatsStatePayload {
   daily: StatsDailyEntryPayload[];
   /** 最近 30 天连续速度序列（含今日，补零；供速度曲线） */
   speed: StatsSpeedPointPayload[];
+  /** 近 30 天的节奏（R158 右栏用；逐日序列与各项比例都在这里算好） */
+  pace: StatsPacePayload;
   /** 平台档位参考（番茄全勤口径：basic=4,000 / advanced=6,000；I08 §3） */
   tiers: { basic: number; advanced: number };
   summary: {

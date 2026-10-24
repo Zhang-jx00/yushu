@@ -4,6 +4,13 @@ import { dirname, join } from "node:path";
 import { YushuError } from "@yushu/core";
 import type { StatsDailyEntryPayload, StatsStatePayload } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
+import { diffDays, localDateKey, shiftDateKey } from "./stats-days.js";
+import { buildStatsPace } from "./stats-pace.js";
+
+/**
+ * 日期算术（R158 搬到了 `stats-days.ts`，这里原样转出去 ⇒ 旧引用路径不变）。
+ */
+export { diffDays, localDateKey, shiftDateKey } from "./stats-days.js";
 
 /**
  * 码字统计（M2 / T2-9 切片 A/B；docs/01 §4.6 作者刚需套件）：
@@ -57,25 +64,7 @@ function defaultStatsFile(): StatsFile {
   return { schema_version: 1, goal: { daily: DEFAULT_DAILY_GOAL }, updated_at: "", daily: {} };
 }
 
-/** 本地时区日期键（YYYY-MM-DD） */
-export function localDateKey(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-/** 两日期键之间的整天差（to - from；按 UTC 解析避免夏令时误差） */
-export function diffDays(from: string, to: string): number {
-  const parse = (key: string) => Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, Number(key.slice(8, 10)));
-  return Math.round((parse(to) - parse(from)) / 86_400_000);
-}
-
-/** 日期键平移 N 天（UTC 算术，跨月 / 跨年安全） */
-export function shiftDateKey(key: string, deltaDays: number): string {
-  const parse = (k: string) => Date.UTC(Number(k.slice(0, 4)), Number(k.slice(5, 7)) - 1, Number(k.slice(8, 10)));
-  const shifted = new Date(parse(key) + deltaDays * 86_400_000);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
-}
+/** 本地时区日期键（YYYY-MM-DD）——实现搬到了 `stats-days.ts`（R158：右栏那一列也要算窗口） */
 
 /**
  * 平台口径「有效字数」（切片 B；I08 §3：番茄后台打卡字数按「去空白 / 格式符」换算）：
@@ -363,6 +352,8 @@ export async function readStatsState(gateway: ProjectGateway, now?: Date): Promi
     todaySpeedCpm,
     daily: entries.slice(-STATS_WINDOW_DAYS),
     speed: buildSpeedSeries(entries, todayKey),
+    // R158：右栏那一列的结构（逐日序列 + 完成比例 + 三项节奏数）——**主进程算好**，界面只渲染
+    pace: buildStatsPace(entries, todayKey, file.goal.daily),
     tiers: { ...EFFECTIVE_TIERS },
     summary: { week, month, total, monthEffective, activeDays, avgActiveDay, bestDay },
     daysSinceLastWriting,

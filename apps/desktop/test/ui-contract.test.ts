@@ -3117,3 +3117,129 @@ describe("快捷键一览（R157）：面板能打开，条目数与真实绑定
     expect(css, "入口的样式没写").toMatch(/\.shortcut-trigger\s*\{/);
   });
 });
+
+/**
+ * **码字统计页三栏**（R158）：左=汇总与日历 / 中=今日与图表 / 右=今日目标 + 近 30 天逐日 + 近 30 天节奏。
+ *
+ * 判据盯七件事：
+ * ① 页面用的是**共用的三栏骨架**（R154 立的 `.three-col` ⇒ 不是每页另写一套网格）；
+ * ② 三段各在其位，而且**认位置**（右栏里装的就是那三块，顺序也不许换）；
+ * ③ **逐日序列只有一份**（中栏的柱状图与右栏的逐日日历读同一份主进程算好的序列，
+ *    不是各补一次零 ⇒ 两处的数可能对不上）；
+ * ④ **完成比例不自己算**（界面不造数：比例由主进程算好进载荷）；
+ * ⑤ **同一个数只有一个出处**（今日的净增字数只在右栏摆一次）；
+ * ⑥ **右栏的名字不与左中栏撞**（R154「豁免率 / 豁免占比」那一条：同名不同义会误导）；
+ * ⑦ 样式只走**既有令牌**（不给长度字面量棘轮添新账）。
+ *
+ * 「近 30 天节奏」那三个数算得对不对（补零 / 日均 / 最好的一天）由
+ * `apps/desktop/test/stats-pace.test.ts` 判 —— 那里对着**纯函数**逐条对账。
+ */
+describe("码字统计页三栏（R158）：左=汇总与日历 / 中=今日与图表 / 右=今日目标与近 30 天", () => {
+  const view = readFileSync(join(VIEW_ROOT, "views", "StatsView.tsx"), "utf8");
+  const ops = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "stats-ops.ts"), "utf8");
+  const ipc = readFileSync(join(ROOT, "apps", "desktop", "src", "shared", "ipc.ts"), "utf8");
+
+  /** 认位置：锚点在源码里的位置（-1 = 没有 ⇒ 那条判据就不成立） */
+  const at = (needle: string): number => view.indexOf(needle);
+
+  it("页面用的是**共用的三栏骨架**（不是每页另写一套网格）", () => {
+    expect(view, "统计页没用三栏骨架").toContain('className="three-col stats-three-col"');
+    expect(css, "三栏骨架没写").toMatch(/\.three-col\s*\{[^}]*grid-template-columns:[^;]*22%/);
+    // 这页不许自己再排一套网格（"每页一套网格"就是从这种地方长出来的）
+    expect(css, "统计页自己又写了一套网格").not.toMatch(
+      /\.stats-three-col\s*\{[^}]*grid-template-columns/,
+    );
+  });
+
+  it("三段各在其位（认**位置**，不是「文件里出现过」就算）", () => {
+    const summary = at('className="stats-col-summary"');
+    const work = at('className="stats-col-work"');
+    const pace = at('className="stats-col-pace"');
+    for (const [name, pos] of [
+      ["左栏（汇总与日历）", summary],
+      ["中栏（今日与图表）", work],
+      ["右栏（今日目标与近 30 天）", pace],
+    ] as const) {
+      expect(pos, `源码里找不到「${name}」`).toBeGreaterThan(-1);
+    }
+    // 顺序：左 → 中 → 右
+    expect(summary).toBeLessThan(work);
+    expect(work).toBeLessThan(pace);
+  });
+
+  it("右栏摆三样：**今日目标 / 近 30 天逐日 / 近 30 天节奏**（认位置，顺序不许换）", () => {
+    const pace = at('className="stats-col-pace"');
+    const goal = at('className="panel stats-goal-panel"');
+    const days = at('className="panel stats-days-panel"');
+    const rhythm = at('className="panel stats-rhythm-panel"');
+    for (const [name, pos] of [
+      ["今日目标", goal],
+      ["近 30 天逐日", days],
+      ["近 30 天节奏", rhythm],
+    ] as const) {
+      expect(pos, `右栏里找不到「${name}」`).toBeGreaterThan(-1);
+    }
+    // 三块都在右栏这一段里（不是散在页面别处）
+    expect(goal).toBeGreaterThan(pace);
+    expect(pace).toBeLessThan(goal);
+    expect(goal).toBeLessThan(days);
+    expect(days).toBeLessThan(rhythm);
+  });
+
+  it("**逐日序列只有一份**（柱状图与逐日日历读同一份主进程算好的序列）", () => {
+    // 认调用：两处都从 `pace.calendar` 出发
+    expect(view, "柱状图没读主进程算好的逐日序列").toContain("const chart = pace ? pace.calendar : [];");
+    expect(view, "逐日日历没读同一份序列").toContain("pace?.calendar ?? []");
+    // 渲染层不许自己补这 30 天的零（那才是"各算一次"）
+    expect(view, "渲染层自己补了 30 天的零").not.toMatch(/fillDays\(\s*state\.daily\s*,\s*30\b/);
+    // 补零留在渲染层的只有热力图那一段（12 周），且不是 30 天这一段
+    expect(view, "热力图那一段不见了").toMatch(/fillDays\(state\.daily,\s*HEAT_DAYS/);
+  });
+
+  it("**完成比例不自己算**（界面不造数：比例由主进程算好进载荷）", () => {
+    expect(view, "完成比例不是从载荷取的").toContain("pace?.progressPercent");
+    expect(view, "界面自己算了一次完成比例").not.toMatch(/todayDelta\s*\/\s*goal/);
+    // 主进程那一侧：载荷里确实有 pace 这一段，且由纯函数算
+    expect(ipc, "载荷里没有 pace 这一段").toContain("pace: StatsPacePayload;");
+    expect(ops, "主进程没有算 pace").toContain(
+      "pace: buildStatsPace(entries, todayKey, file.goal.daily)",
+    );
+  });
+
+  it("**同一个数只有一个出处**（今日的净增字数只在右栏摆一次）", () => {
+    const summary = at('className="stats-col-summary"');
+    const work = at('className="stats-col-work"');
+    const pace = at('className="stats-col-pace"');
+    // 只看**渲染出来的那三段**（变量声明在函数头部，不算"页面上摆了两处"）
+    const leftBlock = view.slice(summary, work);
+    const middleBlock = view.slice(work, pace);
+    const rightBlock = view.slice(pace);
+    expect(leftBlock, "左栏不许再摆一次今日净增字数").not.toContain("todayDelta");
+    expect(middleBlock, "中栏不许再摆一次今日净增字数").not.toContain("todayDelta");
+    expect(leftBlock + middleBlock, "左栏与中栏不许再摆一次 state.today.delta").not.toContain(
+      "state.today.delta",
+    );
+    // 右栏摆的那一处必须真的取自载荷
+    expect(rightBlock, "右栏没摆今日已写").toContain("data-pace-today-written={todayDelta}");
+  });
+
+  it("右栏的**名字不与左中栏撞**（同名不同义会误导 —— R154「豁免率 / 豁免占比」那一条）", () => {
+    const pace = at('className="stats-col-pace"');
+    const right = view.slice(pace);
+    // 左栏的 12 周那个已经叫「写作日历」⇒ 右栏这一段不许再用同一个名字
+    expect(right, "右栏不许叫「写作日历」（左栏已有 12 周的那个）").not.toContain("写作日历");
+    expect(right, "右栏这一段没摆「近 30 天逐日」").toContain("近 30 天逐日");
+    // 「日均」的分母要写在界面上（不然会被当成"日均（活跃日）"）
+    expect(right, "日均的分母没写出来").toContain("日均 = 近 30 天合计 ÷ 30 天");
+  });
+
+  it("样式只走**既有令牌**（不给长度字面量棘轮添新账）", () => {
+    expect(css, "逐日格那一段没写").toMatch(/\.stats-day-grid\s*\{[^}]*var\(--space-/);
+    expect(css, "逐日格没走既有底色").toMatch(/\.stats-day-cell\s*\{[^}]*background:\s*var\(--panel-2\)/);
+    expect(css, "节奏清单那一段没写").toMatch(/\.stats-rhythm\s*\{[^}]*var\(--space-/);
+    // 各栏的块不许被压扁（flex 默认会缩 ⇒ 面板内容越出自己的盒子 ⇒ 排版巡检当场抓到）
+    expect(css, "各栏的块没锁住高度").toMatch(
+      /\.stats-col-summary > \*[\s\S]*?\.stats-col-pace > \*\s*\{[^}]*flex:\s*0 0 auto/,
+    );
+  });
+});

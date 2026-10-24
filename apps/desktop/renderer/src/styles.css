@@ -2202,11 +2202,52 @@ select {
 
 /* ---------- 码字统计（T2-9 切片 A） ---------- */
 
+/* R158：这一页改成三栏（左=汇总与日历 / 中=今日与图表 / 右=今日目标与近 30 天）——
+   外层只当**一行容器**：分栏交给共用的三栏骨架（`.three-col`）管，
+   滚动与留白交给各栏自己（不许把整页撑出横向滚动条）。 */
 .stats {
   flex: 1;
   min-height: 0;
-  padding: 14px 18px;
+  padding: var(--space-4) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow: hidden;
+}
+
+.stats-head {
+  flex: none;
+}
+
+.stats-three-col {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 三栏各自竖排（骨架是共用的 `.three-col`，这里只管各栏内部怎么排） */
+.stats-col-summary,
+.stats-col-work,
+.stats-col-pace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.stats-col-work {
+  min-height: 0;
   overflow: auto;
+}
+
+/* 各栏的块**不许被压扁**（flex 默认会缩 ⇒ 面板内容越出自己的盒子 ⇒ 排版巡检当场抓到） */
+.stats-col-summary > *,
+.stats-col-work > *,
+.stats-col-pace > * {
+  flex: 0 0 auto;
+}
+
+/* 目标那一行在窄栏里会换行（回执那句"已设置每日目标 2,000 字"较长 ⇒ 不许把整栏撑宽） */
+.stats-goal {
+  flex-wrap: wrap;
 }
 
 .stats-today {
@@ -2247,7 +2288,7 @@ select {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin: 12px 0;
 }
@@ -2439,6 +2480,74 @@ select {
 
 .heat-legend .heat-cell {
   cursor: default;
+}
+
+/* ---------- R158：右栏那一列（今日目标 / 近 30 天逐日 / 近 30 天节奏） ---------- */
+
+/* 近 30 天逐日：格子里是几号，底下一道颜色条是那天的强度。
+   底色只用 `--panel-2`（各主题都跟着走）⇒ 字色永远是 `--ink` 写在纸底上，
+   对比度不靠"这套主题恰好也好看"。 */
+.stats-day-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.stats-day-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border-radius: var(--radius-2);
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  border-bottom: var(--space-1) solid var(--border);
+}
+
+.stats-day-cell.l1 {
+  border-bottom-color: var(--heat-l1);
+}
+
+.stats-day-cell.l2 {
+  border-bottom-color: var(--heat-l2);
+}
+
+.stats-day-cell.l3 {
+  border-bottom-color: var(--heat-l3);
+}
+
+.stats-day-cell.l4 {
+  border-bottom-color: var(--good);
+}
+
+.stats-day-cell.lneg {
+  border-bottom-color: var(--bad);
+}
+
+/* 近 30 天节奏：条目名与值两列（值可能较长 ⇒ 允许折行，不许把整页撑出横向滚动条） */
+.stats-rhythm {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.stats-rhythm li {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.stats-rhythm li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 /* ---------- 取名助手（世界观档案） ---------- */

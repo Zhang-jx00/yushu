@@ -8305,6 +8305,107 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 120,
+    title: '码字统计三栏：今日目标 / 近 30 天逐日 / 近 30 天节奏，右栏与页面汇总逐字对得上（R158）',
+    file: 'step120-stats-three-col.png',
+    body: String.raw`
+      // 这一步证 R158 的五件事：
+      // ① **三栏并排**（量左边界，不是只认类名）；
+      // ② 右栏摆的是那三块（今日目标 / 近 30 天逐日 / 近 30 天节奏）；
+      // ③ **目标字数**在右栏、页面上的目标框、主进程载荷里是**同一个数**；
+      // ④ **近 30 天逐日**那 30 格加起来 == 汇总里的「最近 30 天」== 载荷里的 summary.month；
+      // ⑤ 右栏那三个节奏数（日均 / 有产出的天数 / 最好的一天）与逐日日历**逐字对得上**。
+      // 这一步**只读不写** ⇒ 重跑幂等（不像导出那类步骤要回到初始态）。
+      await tab('码字统计');
+      const left = await waitFor(() => document.querySelector('.stats-col-summary') || null, 12000);
+      const work = document.querySelector('.stats-col-work');
+      const pace = document.querySelector('.stats-col-pace');
+      if (!left || !work || !pace) {
+        return { ok: false, note: '统计页没有三栏（汇总与日历 / 今日与图表 / 今日目标与近 30 天）' };
+      }
+      const b1 = left.getBoundingClientRect();
+      const b2 = work.getBoundingClientRect();
+      const b3 = pace.getBoundingClientRect();
+      const sideBySide = b1.left < b2.left && b2.left < b3.left;
+      // ② 右栏那三块
+      const goalPanel = pace.querySelector('.stats-goal-panel');
+      const daysPanel = pace.querySelector('.stats-days-panel');
+      const rhythmPanel = pace.querySelector('.stats-rhythm-panel');
+      if (!goalPanel || !daysPanel || !rhythmPanel) {
+        return { ok: false, note: '右栏没有那三块（今日目标 / 近 30 天逐日 / 近 30 天节奏）' };
+      }
+      // 逐日日历：30 格，每格一个数
+      const cells = [...pace.querySelectorAll('[data-day-delta]')];
+      const deltas = cells.map((el) => Number(el.getAttribute('data-day-delta') || '0'));
+      const sum = deltas.reduce((acc, value) => acc + value, 0);
+      let bestDate = '';
+      let bestDelta = 0;
+      for (const el of cells) {
+        const value = Number(el.getAttribute('data-day-delta') || '0');
+        if (value > bestDelta) {
+          bestDelta = value;
+          bestDate = String(el.getAttribute('data-day-date') || '');
+        }
+      }
+      const activeFromList = deltas.filter((value) => value > 0).length;
+      // 页面上的读数
+      const monthEl = document.querySelector('[data-summary-month]');
+      const monthShown = monthEl ? Number(monthEl.getAttribute('data-summary-month') || '0') : NaN;
+      const todayEl = pace.querySelector('[data-pace-today-written]');
+      const todayShown = todayEl ? Number(todayEl.getAttribute('data-pace-today-written') || '0') : NaN;
+      const goalEl = pace.querySelector('[data-pace-goal]');
+      const goalShown = goalEl ? Number(goalEl.getAttribute('data-pace-goal') || '0') : NaN;
+      const progressEl = pace.querySelector('[data-pace-progress]');
+      const progressShown = progressEl ? Number(progressEl.getAttribute('data-pace-progress') || '0') : NaN;
+      const avgEl = pace.querySelector('[data-pace-avg]');
+      const avgShown = avgEl ? Number(avgEl.getAttribute('data-pace-avg') || '0') : NaN;
+      const activeEl = pace.querySelector('[data-pace-active-days]');
+      const activeShown = activeEl ? Number(activeEl.getAttribute('data-pace-active-days') || '0') : NaN;
+      const bestEl = pace.querySelector('[data-pace-best-date]');
+      const bestShown = bestEl ? String(bestEl.getAttribute('data-pace-best-date') || '') : '';
+      const input = document.querySelector('.stats-goal input');
+      const inputValue = input ? Number(String(input.value || '').trim()) : NaN;
+      // 跨进程核对：界面上的数必须就是主进程载荷里的那个数
+      let payload = null;
+      try {
+        payload = await window.yushu.stats.read();
+      } catch (err) {
+        payload = null;
+      }
+      const calendarOk = cells.length === 30 && deltas.length === 30;
+      const sumOk = Number.isFinite(monthShown) && monthShown === sum;
+      const bestOk = bestShown !== '' && bestShown === bestDate;
+      const activeOk = activeShown === activeFromList;
+      const avgOk = avgShown === Math.round(sum / 30);
+      const todayOk = todayShown === (deltas.length ? deltas[deltas.length - 1] : NaN);
+      const goalOk = Number.isFinite(inputValue) && inputValue === goalShown;
+      const progressOk =
+        goalShown > 0 ? progressShown === Math.round((todayShown / goalShown) * 100) : progressShown === 0;
+      const payloadOk =
+        payload !== null &&
+        payload.goal.daily === goalShown &&
+        payload.today.delta === todayShown &&
+        payload.summary.month === sum;
+      const panelEl = document.querySelector('.stats');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: sideBySide && calendarOk && sumOk && bestOk && activeOk && avgOk && todayOk && goalOk && progressOk && payloadOk,
+        note: '三栏并排=' + String(sideBySide) + '（左 ' + String(Math.round(b1.left)) + ' / 中 ' +
+          String(Math.round(b2.left)) + ' / 右 ' + String(Math.round(b3.left)) + '）' +
+          '；逐日格=' + String(cells.length) +
+          '；30 格合计=' + String(sum) + ' vs 汇总「最近 30 天」=' + String(monthShown) + '（对上=' + String(sumOk) + '）' +
+          '；最好的一天=' + bestShown + ' vs 日历里最大那天=' + bestDate + '（对上=' + String(bestOk) + '）' +
+          '；有产出的天数=' + String(activeShown) + ' vs 日历里数出来的=' + String(activeFromList) +
+          '；日均=' + String(avgShown) + ' vs 合计÷30=' + String(Math.round(sum / 30)) +
+          '；今日已写=' + String(todayShown) + ' vs 日历最后一格=' + String(deltas.length ? deltas[deltas.length - 1] : NaN) +
+          '；目标字数=' + String(goalShown) + ' vs 目标框=' + String(inputValue) +
+          '；完成比例=' + String(progressShown) +
+          '；主进程载荷对得上=' + String(payloadOk),
+      };
+    `,
+  },
 ];
 
 /**
