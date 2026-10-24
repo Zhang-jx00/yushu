@@ -2831,3 +2831,53 @@ describe("记忆页「接下来做什么」（R153）：三条都从同一份 st
     expect(nextBlock, "没缺口时没说实话").toContain("没有缺口");
   });
 });
+
+/**
+ * **规则体检页三栏**（R154）：左=规则目录 / 中=工作区 / 右=本次体检的产物。
+ *
+ * 判据盯四件事：
+ * ① 页面**真的是三栏**（三段各在其位，且用的是共用的 `.three-col` 骨架）；
+ * ② 右栏的**数字都从同一份体检结果现算**（不另取数 ⇒ 同一个数不会有两处）；
+ * ③ 宽表在窄栏里**自己横向滚**（不许把整页撑出横向滚动条）；
+ * ④ 三栏是**并排**的（判据只认类名的话，堆成一摞也算过）。
+ */
+describe("规则体检页三栏（R154）：左=规则目录 / 中=工作区 / 右=本次体检的产物", () => {
+  const rules = readFileSync(join(VIEW_ROOT, "views", "RulesView.tsx"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+  const outputsBlock = /<aside className="rules-col-outputs">[\s\S]*?<\/aside>/.exec(rules)?.[0] ?? "";
+
+  it("页面用的是**共用的三栏骨架**（R154 起复用给其余页面）", () => {
+    expect(rules, "规则页没用三栏骨架").toContain('className="view rules-view three-col"');
+    expect(css, "三栏骨架没写").toMatch(/\.three-col\s*\{[^}]*grid-template-columns:[^;]*22%/);
+  });
+
+  it("三段各在其位：左=规则目录 / 中=工作区 / 右=产物", () => {
+    expect(rules, "左栏不在").toContain('className="rules-col-catalog"');
+    expect(rules, "中栏不在").toContain('className="rules-col-work"');
+    expect(rules, "右栏不在").toContain('className="rules-col-outputs"');
+  });
+
+  it("右栏的**数字都从同一份体检结果现算**（不另取数）", () => {
+    expect(outputsBlock, "没找到右栏").not.toBe("");
+    expect(outputsBlock).toMatch(/\{String\(consistency\.counted\.entries\)\}/);
+    expect(outputsBlock).toMatch(/\{String\(consistency\.counted\.suppressed\)\}/);
+    expect(outputsBlock).toContain("suppressedPercent");
+    expect(outputsBlock).toContain("errorCount");
+    expect(outputsBlock).toContain("warnCount");
+  });
+
+  it("豁免率的**分母写在界面上**（不让人自己猜）", () => {
+    expect(outputsBlock, "没写清豁免占比怎么算的").toContain("豁免占比 = 豁免 ÷（结论 + 豁免）");
+    // 名字不能与中栏「每条规则的豁免率」撞（同名不同义 ⇒ 作者会以为是一回事）
+    expect(outputsBlock).not.toContain("豁免率 = 豁免 ÷");
+  });
+
+  it("宽表在窄栏里**自己横向滚**（不许把整页撑出横向滚动条）", () => {
+    expect(css, "宽表没有自己的滚动区").toMatch(/\.rules-table-scroll[\s\S]*?overflow-x:\s*auto/);
+    expect(rules, "体检表没进滚动区").toContain('className="rules-table-scroll"');
+  });
+
+  it("中栏的面板**不许被压扁**（flex 默认会缩 ⇒ 面板内容越出自己的盒子）", () => {
+    expect(css, "中栏的面板没锁住高度").toMatch(/\.rules-col-work > \.panel\s*\{[^}]*flex:\s*0 0 auto/);
+  });
+});

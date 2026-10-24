@@ -4220,6 +4220,49 @@ table,
   cursor: pointer;
   text-align: left;
 }
+
+/* ---------- R154：**三栏骨架**（左=清单 / 中=主工作区 / 右=产物） ----------
+   R149 在起源工作台立了三栏，R154 起**复用**给其余页面（docs/11 §7.34）。
+   右栏用**百分比**（22%）而不是 px ⇒ 不给"长度字面量棘轮"（只许降不升）添新账。 */
+.three-col {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 22%;
+  gap: var(--space-6);
+  min-height: 0;
+}
+
+/* 三栏各自的滚动区（宽表在窄栏里**自己横向滚**，不许把整页撑出横向滚动条） */
+.three-col > aside,
+.three-col > .rules-col-work {
+  overflow: auto;
+  min-height: 0;
+}
+
+.rules-col-work {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* 中栏的面板**不许被压扁**（flex 默认会缩 ⇒ 面板内容越出自己的盒子 ⇒ 排版巡检当场抓到） */
+.rules-col-work > .panel {
+  flex: 0 0 auto;
+}
+
+.rules-table-scroll,
+.rules-file {
+  overflow-x: auto;
+}
+
+.rules-col-outputs {
+  border-left: var(--border-width) solid var(--border);
+  padding-left: var(--space-6);
+}
+
+.rules-outputs-line {
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
 /* ---------- R138：框定边界（作者在图上拖出地图在图里的哪一块） ---------- */
 .map-frame-bar {
   display: flex;

@@ -8083,6 +8083,48 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 116,
+    title: '规则体检页三栏：左=规则目录 / 中=工作区 / 右=本次体检的产物（R154）',
+    file: 'step116-rules-three-col.png',
+    body: String.raw`
+      // 这一步证 R154 的三件事：
+      // ① **三栏并排**（不是三段堆在一起——类名对了不等于排版对了 ⇒ 量左边界）；
+      // ② 右栏的**结论数与体检表的行数逐字一致**（两处读的是同一份体检结果 ⇒ 必然一致，
+      //    不一致就说明有一处是写死的）；
+      // ③ 右栏的**豁免数与豁免清单的条数一致**。
+      await tab('规则');
+      const outputs = await waitFor(() => document.querySelector('.rules-view .rules-col-outputs') || null, 10000);
+      if (!outputs) return { ok: false, note: '规则页没有右栏（本次体检的产物）' };
+      const catalog = document.querySelector('.rules-view .rules-col-catalog');
+      const work = document.querySelector('.rules-view .rules-col-work');
+      if (!catalog || !work) return { ok: false, note: '规则页没有左栏 / 中栏' };
+      const b1 = catalog.getBoundingClientRect();
+      const b2 = work.getBoundingClientRect();
+      const b3 = outputs.getBoundingClientRect();
+      const sideBySide = b1.left < b2.left && b2.left < b3.left;
+      const outText = String(outputs.textContent || '');
+      const cm = /结论\s*(\d+)\s*条/.exec(outText);
+      const outCount = cm ? Number(cm[1]) : -1;
+      const sm = /豁免\s*(\d+)\s*条/.exec(outText);
+      const outSup = sm ? Number(sm[1]) : -1;
+      const rows = document.querySelectorAll('.rules-view .consistency-table tbody tr').length;
+      const supList = document.querySelector('.rules-view .consistency-suppressed');
+      const supRows = supList ? supList.querySelectorAll('li').length : 0;
+      const countOk = outCount === rows;
+      const supOk = outSup === supRows;
+      const panelEl = document.querySelector('.rules-view');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: sideBySide && countOk && supOk,
+        note: '三栏并排=' + String(sideBySide) + '（左 ' + String(Math.round(b1.left)) + ' / 中 ' +
+          String(Math.round(b2.left)) + ' / 右 ' + String(Math.round(b3.left)) + '）' +
+          '；右栏结论=' + String(outCount) + ' vs 表里行数=' + String(rows) +
+          '；右栏豁免=' + String(outSup) + ' vs 豁免清单=' + String(supRows),
+      };
+    `,
+  },
 ];
 
 /**

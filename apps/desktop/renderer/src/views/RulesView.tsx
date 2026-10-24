@@ -169,66 +169,372 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
     }
   };
 
+  /**
+   * R154：右栏「本次体检的产物」的数字 —— **全部从同一份体检结果现算**（不另取数 ⇒ 同一个数不会有两处）。
+   *
+   * 为什么右栏值得有：三栏化之后，体检表在**中栏**、结论摘要在**右栏** ⇒
+   * 两处读的是同一个 `consistency` ⇒ 预演里可以把两处的数字**逐字对账**。
+   */
+  const errorCount = (consistency?.entries ?? []).filter((entry) => entry.severity === "error").length;
+  const warnCount = (consistency?.entries ?? []).filter((entry) => entry.severity === "warn").length;
+  /** 豁免**占比** = 豁免 ÷（结论 + 豁免）——分母写进界面，不让人自己猜。
+   *  为什么不叫「豁免率」：中栏的噪音表里已经有**每条规则**的豁免率（被豁免条数 ÷ 该规则条数）
+   *  ⇒ 同名不同义 ⇒ 作者会以为这两个数是一回事。 */
+  const suppressedPercent =
+    consistency === null || consistency.counted.entries + consistency.counted.suppressed === 0
+      ? 0
+      : Math.round(
+          (consistency.counted.suppressed /
+            (consistency.counted.entries + consistency.counted.suppressed)) *
+            100,
+        );
+
   return (
-    <div className="view rules-view">
-      <section className="panel">
-        <h3>规则目录（派系包携带）</h3>
-        <div className="rules-toolbar">
-          <button className="btn rules-refresh" onClick={() => void refresh()}>
-            刷新规则目录
-          </button>
-          <span className="muted rules-pack-ids">
-            本项目派系包：{catalog ? (catalog.packIds.length > 0 ? catalog.packIds.join("、") : "（未选包）") : "加载中…"}
-          </span>
-        </div>
-        {error && <p className="error rules-error">读取失败：{error}</p>}
-        {catalog?.loadError && <p className="error rules-load-error">派系包加载失败（下面的空目录不等于"这些包没有规则"）：{catalog.loadError}</p>}
-        {catalog && (
-          <>
-            <p className="muted rules-summary">
-              规则 {catalog.total} 条 · 解析失败文件 {catalog.brokenFiles} 个 · 表达式有问题 {catalog.problemRules} 条
-              {catalog.duplicateIds.length > 0 ? ` · 跨文件重名 ${catalog.duplicateIds.length} 个` : ""}
-            </p>
-            {catalog.duplicateIds.map((item) => (
-              <p key={item.id} className="warn rules-duplicate">
-                规则 id「{item.id}」在多个文件里重复（{item.files.join("、")}）：同包撞名没有版本依据，拒绝按加载顺序取后者
+    <div className="view rules-view three-col">
+      <aside className="rules-col-catalog">
+        <section className="panel">
+          <h3>规则目录（派系包携带）</h3>
+          <div className="rules-toolbar">
+            <button className="btn rules-refresh" onClick={() => void refresh()}>
+              刷新规则目录
+            </button>
+            <span className="muted rules-pack-ids">
+              本项目派系包：{catalog ? (catalog.packIds.length > 0 ? catalog.packIds.join("、") : "（未选包）") : "加载中…"}
+            </span>
+          </div>
+          {error && <p className="error rules-error">读取失败：{error}</p>}
+          {catalog?.loadError && <p className="error rules-load-error">派系包加载失败（下面的空目录不等于"这些包没有规则"）：{catalog.loadError}</p>}
+          {catalog && (
+            <>
+              <p className="muted rules-summary">
+                规则 {catalog.total} 条 · 解析失败文件 {catalog.brokenFiles} 个 · 表达式有问题 {catalog.problemRules} 条
+                {catalog.duplicateIds.length > 0 ? ` · 跨文件重名 ${catalog.duplicateIds.length} 个` : ""}
               </p>
-            ))}
-            {catalog.files.map((file) => (
-              <div className="rules-file" key={`${file.packId}-${file.file}`}>
-                <div className="muted rules-file-head">
-                  {file.file}（派系包 {file.packId}）
+              {catalog.duplicateIds.map((item) => (
+                <p key={item.id} className="warn rules-duplicate">
+                  规则 id「{item.id}」在多个文件里重复（{item.files.join("、")}）：同包撞名没有版本依据，拒绝按加载顺序取后者
+                </p>
+              ))}
+              {catalog.files.map((file) => (
+                <div className="rules-file" key={`${file.packId}-${file.file}`}>
+                  <div className="muted rules-file-head">
+                    {file.file}（派系包 {file.packId}）
+                  </div>
+                  {file.error !== null ? (
+                    <p className="error rules-file-error">
+                      解析失败，该文件 0 条规则生效：{file.error}
+                    </p>
+                  ) : (
+                    <table className="slot-table rules-table">
+                      <thead>
+                        <tr>
+                          <th>规则 id</th>
+                          <th>级别</th>
+                          <th>作用域</th>
+                          <th>结论</th>
+                          <th>出处</th>
+                          <th>问题</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {file.rules.map((rule) => (
+                          <tr key={rule.id}>
+                            <td>
+                              <code>{rule.id}</code>
+                            </td>
+                            <td className={rule.severity === "error" ? "error" : rule.severity === "warn" ? "warn" : "muted"}>
+                              {SEVERITY_LABEL[rule.severity] ?? rule.severity}
+                            </td>
+                            <td>{SCOPE_LABEL[rule.scope] ?? rule.scope}</td>
+                            <td>{rule.message}</td>
+                            <td className="muted">{rule.origin_source ?? rule.origin_set ?? "—"}</td>
+                            <td className={"rules-problems" + (rule.issues.length > 0 ? " error" : " muted")}>
+                              {rule.issues.length > 0 ? rule.issues.join("；") : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
-                {file.error !== null ? (
-                  <p className="error rules-file-error">
-                    解析失败，该文件 0 条规则生效：{file.error}
+              ))}
+              {catalog.files.length === 0 && <p className="muted">所选派系包没有声明规则件。</p>}
+            </>
+          )}
+        </section>
+
+      </aside>
+
+      <div className="rules-col-work">
+        <section className="panel">
+          <h3>沙箱试算（只读，不写任何数据）</h3>
+          <div className="rules-dryrun-form">
+            <label className="muted" htmlFor="rules-pick">
+              规则
+            </label>
+            <select id="rules-pick" className="rules-rule-pick" value={ruleId} onChange={(event) => setRuleId(event.target.value)}>
+              {allRules.map((rule) => (
+                <option key={`${rule.file}-${rule.id}`} value={rule.id}>
+                  {rule.id}（{rule.file}）
+                </option>
+              ))}
+            </select>
+            <button className="btn rules-dryrun-run" onClick={() => void runDryRun()} disabled={selected === null}>
+              试算
+            </button>
+          </div>
+          <p className="muted">
+            夹具是比对上下文（JSON 对象），规则里的 <code>{"{var: \"a.realm.tier\"}"}</code> 就是按点分路径从这里取值。
+            表达式禁循环、禁 IO，求值有节点预算与深度上限。
+          </p>
+          <textarea className="rules-fixture" rows={6} value={fixture} onChange={(event) => setFixture(event.target.value)} />
+          {dryRunError && <p className="error rules-dryrun-error">调用失败：{dryRunError}</p>}
+          {dryRun && (
+            <div className="rules-dryrun-result">
+              {dryRun.ok ? (
+                <>
+                  <p className={dryRun.matched ? "rules-dryrun-hit" : "muted rules-dryrun-miss"}>
+                    {dryRun.matched ? "命中：" : "未命中："}
+                    {dryRun.message}
                   </p>
-                ) : (
-                  <table className="slot-table rules-table">
+                  <table className="slot-table rules-evidence-table">
                     <thead>
                       <tr>
-                        <th>规则 id</th>
-                        <th>级别</th>
-                        <th>作用域</th>
-                        <th>结论</th>
-                        <th>出处</th>
-                        <th>问题</th>
+                        <th>读取的 var</th>
+                        <th>取到的值</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {file.rules.map((rule) => (
-                        <tr key={rule.id}>
+                      {Object.entries(dryRun.evidence).map(([path, value]) => (
+                        <tr key={path}>
                           <td>
-                            <code>{rule.id}</code>
+                            <code>{path}</code>
                           </td>
-                          <td className={rule.severity === "error" ? "error" : rule.severity === "warn" ? "warn" : "muted"}>
-                            {SEVERITY_LABEL[rule.severity] ?? rule.severity}
+                          <td>{value}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : (
+                <p className="error rules-dryrun-rejected">
+                  沙箱拒绝（不是"没发现问题"）：{dryRun.error}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
+        <section className="panel">
+          <h3>一致性体检（结构类规则 · 只读）</h3>
+          <div className="consistency-toolbar">
+            <button
+              className="btn consistency-manual"
+              onClick={() => void runConsistency({ timing: "manual" })}
+              disabled={consistencyBusy}
+            >
+              全书体检
+            </button>
+            <button
+              className="btn consistency-post-save"
+              onClick={() => void runConsistency({ timing: "post-save" })}
+              disabled={consistencyBusy}
+            >
+              取最近结果
+            </button>
+            <button
+              className="btn consistency-ai"
+              onClick={() => void runConsistency({ timing: "manual", aiAudit: true })}
+              disabled={consistencyBusy}
+            >
+              全书体检 + AI 采样核验
+            </button>
+            <span className="muted consistency-hint">
+              保存正文或改卡后结论即过期；「取最近结果」在未过期时复用缓存，不打断输入。
+              AI 采样会真调用模型并按任务记账（默认不跑）。
+            </span>
+          </div>
+          {consistencyError && <p className="error consistency-error">体检失败：{consistencyError}</p>}
+          {consistency && (
+            <>
+              {consistency.allowError && (
+                <p className="error consistency-allow-error">
+                  豁免清单读不了，本次「未应用任何豁免」（不静默放行）：{consistency.allowError}
+                </p>
+              )}
+              {consistency.worldNote && <p className="warn consistency-world-note">{consistency.worldNote}</p>}
+              <p className="muted consistency-summary">
+                时机 {consistency.timing} · {consistency.ranAgain ? "已重算" : "复用缓存"} · 实体{" "}
+                {consistency.entities} 引用 {consistency.refs} · 结论 {consistency.counted.entries} · 豁免{" "}
+                {consistency.counted.suppressed} · 未纳入范围 {consistency.outOfScope.length}
+                {consistency.counted.filteredOut > 0 ? ` · 范围外过滤 ${consistency.counted.filteredOut}` : ""}
+                {consistency.skipped.cycleDepthCapped > 0
+                  ? ` · 环搜索深度封顶 ${consistency.skipped.cycleDepthCapped} 次（未假装没有环）`
+                  : ""}
+              </p>
+              {/* 派系包规则本轮跑了哪些、哪些没跑、哪些数据读不出——三件都必须看得见 */}
+              <p className="muted consistency-pack">
+                包规则：本轮求值 {consistency.pack.evaluated.length} 条
+                {consistency.pack.evaluated.length > 0 ? `（${consistency.pack.evaluated.join(", ")}）` : ""} · 未参与{" "}
+                {consistency.pack.notEvaluated.length} 条
+                {consistency.pack.errors.length > 0 ? ` · 数据读不出 ${consistency.pack.errors.length} 处` : ""}
+              </p>
+              {consistency.pack.notEvaluated.length > 0 && (
+                <p className="muted consistency-pack-skipped">
+                  没跑的规则不算通过，只是没数据可比：
+                  {consistency.pack.notEvaluated.map((item) => `${item.id}（${item.reason}）`).join("；")}
+                </p>
+              )}
+              {consistency.pack.errors.length > 0 && (
+                <p className="warn consistency-pack-errors">{consistency.pack.errors.join("；")}</p>
+              )}
+              {/* 跨包同 id 的合并结果（T4-12 / R85）：合并后只剩一条结论，看起来与"本来就只有一条"
+                  一模一样——所以谁盖掉谁、谁还没裁定，必须写出来（docs/03 §8.3：禁止静默覆盖） */}
+              {(consistency.pack.merge.overrides.length > 0 || consistency.pack.merge.ambiguous.length > 0) && (
+                <p className="muted consistency-pack-merge">
+                  同名规则合并：
+                  {consistency.pack.merge.overrides.map(
+                    (item) =>
+                      `${item.id} 取 ${item.winner}（版本 ${item.winnerVersion ?? "—"}），盖掉 ${item.loser}（版本 ${item.loserVersion ?? "—"}）`,
+                  ).join("；")}
+                  {consistency.pack.merge.ambiguous.length > 0
+                    ? `${consistency.pack.merge.overrides.length > 0 ? " ｜ " : ""}版本并列待裁定：${consistency.pack.merge.ambiguous
+                        .map((item) => `${item.id}（${item.packs.join("、")}）`)
+                        .join("；")}`
+                    : ""}
+                </p>
+              )}
+              {consistency.pack.merge.dateCheck === "skipped" && (
+                <p className="muted consistency-pack-datecheck">
+                  本轮<strong>未判</strong>规则生效期（调用方没给判定日期）——带 effective_from / until 的规则
+                  一律照常参与，这不等于"它们都在有效期内"。
+                </p>
+              )}
+              {/* AI 采样这次跑没跑、跑成什么样子，必须写在明面上 */}
+              <p className="muted consistency-ai-line">
+                AI 采样：
+                {consistency.aiAudit.ran
+                  ? `已核验 ${consistency.aiAudit.sampled} 段（${consistency.aiAudit.provider}/${consistency.aiAudit.model}）· 结论 ${
+                      consistency.entries.filter((entry) => entry.rule.startsWith("ai-sampled-")).length
+                    } 条 · 丢弃 ${consistency.aiAudit.rejected} 条（越界或白名单外）`
+                  : `未跑（${consistency.aiAudit.reason}）`}
+              </p>
+              {consistency.entries.length === 0 ? (
+                <p className="muted consistency-clean">本次没有一致性结论（结构类 + 已求值的包规则；不代表未纳入范围的项也查过）。</p>
+              ) : (
+                <div className="rules-table-scroll">
+                <table className="slot-table consistency-table">
+                  <thead>
+                    <tr>
+                      <th>级别</th>
+                      <th>规则</th>
+                      <th>主体</th>
+                      <th>依据</th>
+                      <th>建议修法</th>
+                      <th>出处</th>
+                      <th>原文</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {consistency.entries.map((entry, index) => (
+                      <tr key={`${entry.rule}-${entry.subject}-${entry.related ?? ""}-${index}`}>
+                        <td className={entry.severity === "error" ? "error" : "warn"}>{entry.severity}</td>
+                        <td>
+                          <code>{entry.rule}</code>
+                        </td>
+                        <td>
+                          <code>{entry.subject}</code>
+                          {entry.related ? <span className="muted"> → {entry.related}</span> : null}
+                        </td>
+                        <td>{entry.evidence}</td>
+                        <td>{entry.fix}</td>
+                        <td className="muted">{entry.origin ?? "内置结构规则"}</td>
+                        <td>
+                          {entry.span && entry.span.file.startsWith("world/cards/") ? (
+                            <button
+                              className="btn consistency-jump"
+                              onClick={() => onOpenCard?.(entry.span!.file)}
+                            >
+                              {entry.span.file.split("/").pop()}#{entry.span.start}
+                            </button>
+                          ) : (
+                            <span className="muted">{entry.span ? "正文片段（在编辑器里定位）" : "（无原文区间）"}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              )}
+              {consistency.suppressed.length > 0 && (
+                <ul className="issues consistency-suppressed">
+                  {consistency.suppressed.map((item, index) => (
+                    <li key={`sup-${item.rule}-${item.subject}-${index}`} className="muted">
+                      已豁免 <code>{item.rule}</code> · <code>{item.subject}</code>
+                      {item.related ? ` → ${item.related}` : ""}：{item.reason}
+                      {item.decidedAt ? `（${item.decidedAt}）` : "（未记决策时间）"}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {consistency.unusedAllow.length > 0 && (
+                <p className="muted consistency-unused">
+                  用不上的豁免（可能已失效，建议清理）：{consistency.unusedAllow.join("、")}
+                </p>
+              )}
+              {/* 规则豁免率（T4-11 / R84）：阈值可配，但**没判的一律显式标出来**，
+                  不许因为"没配阈值 / 样本不够"就在表里显示成"没问题" */}
+              <div className="consistency-noise">
+                <p className="muted consistency-noise-head">
+                  规则豁免率（= 被豁免条数 ÷ 本次该规则条数）· 阈值{" "}
+                  {consistency.thresholds.rate === null
+                    ? "未配置（只给率，不下结论）"
+                    : `≤ ${(consistency.thresholds.rate * 100).toFixed(0)}%`}{" "}
+                  · 最小样本 {consistency.thresholds.minSamples}
+                </p>
+                {consistency.thresholds.error !== null && (
+                  <p className="error-text consistency-noise-error">
+                    阈值文件读不了，本次「不判噪音」（不静默按默认走）：{consistency.thresholds.error}
+                  </p>
+                )}
+                <p className="muted consistency-noise-note">
+                  豁免率<strong>不等于</strong>误报率：作者豁免一条结论，可能是报错了，
+                  也可能是确有问题但选择留白。要的是"哪条规则总在被打折"这个信号，不是准确率。
+                </p>
+                {consistency.noise.length === 0 ? (
+                  <p className="muted consistency-noise-empty">
+                    本次没有任何规则报出或被豁免（<strong>空表不代表规则健康</strong>）。
+                  </p>
+                ) : (
+                  <table className="slot-table consistency-noise-table">
+                    <thead>
+                      <tr>
+                        <th>规则</th>
+                        <th>报出</th>
+                        <th>被豁免</th>
+                        <th>豁免率</th>
+                        <th>判定</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {consistency.noise.map((row) => (
+                        <tr key={`noise-${row.rule}`} className={`noise-${row.verdict}`}>
+                          <td>
+                            <code>{row.rule}</code>
                           </td>
-                          <td>{SCOPE_LABEL[rule.scope] ?? rule.scope}</td>
-                          <td>{rule.message}</td>
-                          <td className="muted">{rule.origin_source ?? rule.origin_set ?? "—"}</td>
-                          <td className={"rules-problems" + (rule.issues.length > 0 ? " error" : " muted")}>
-                            {rule.issues.length > 0 ? rule.issues.join("；") : "—"}
+                          <td>{row.reported}</td>
+                          <td>{row.suppressed}</td>
+                          <td>{row.rate === null ? "—" : `${(row.rate * 100).toFixed(0)}%`}</td>
+                          <td>
+                            {
+                              {
+                                noisy: "偏吵：值得收紧判定或改规则",
+                                ok: "可接受",
+                                "insufficient-sample": "样本不足，不判",
+                                "not-configured": "未配阈值，不判",
+                              }[row.verdict]
+                            }
                           </td>
                         </tr>
                       ))}
@@ -236,279 +542,115 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
                   </table>
                 )}
               </div>
-            ))}
-            {catalog.files.length === 0 && <p className="muted">所选派系包没有声明规则件。</p>}
-          </>
-        )}
-      </section>
-
-      <section className="panel">
-        <h3>沙箱试算（只读，不写任何数据）</h3>
-        <div className="rules-dryrun-form">
-          <label className="muted" htmlFor="rules-pick">
-            规则
-          </label>
-          <select id="rules-pick" className="rules-rule-pick" value={ruleId} onChange={(event) => setRuleId(event.target.value)}>
-            {allRules.map((rule) => (
-              <option key={`${rule.file}-${rule.id}`} value={rule.id}>
-                {rule.id}（{rule.file}）
-              </option>
-            ))}
-          </select>
-          <button className="btn rules-dryrun-run" onClick={() => void runDryRun()} disabled={selected === null}>
-            试算
-          </button>
-        </div>
-        <p className="muted">
-          夹具是比对上下文（JSON 对象），规则里的 <code>{"{var: \"a.realm.tier\"}"}</code> 就是按点分路径从这里取值。
-          表达式禁循环、禁 IO，求值有节点预算与深度上限。
-        </p>
-        <textarea className="rules-fixture" rows={6} value={fixture} onChange={(event) => setFixture(event.target.value)} />
-        {dryRunError && <p className="error rules-dryrun-error">调用失败：{dryRunError}</p>}
-        {dryRun && (
-          <div className="rules-dryrun-result">
-            {dryRun.ok ? (
-              <>
-                <p className={dryRun.matched ? "rules-dryrun-hit" : "muted rules-dryrun-miss"}>
-                  {dryRun.matched ? "命中：" : "未命中："}
-                  {dryRun.message}
-                </p>
-                <table className="slot-table rules-evidence-table">
-                  <thead>
-                    <tr>
-                      <th>读取的 var</th>
-                      <th>取到的值</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(dryRun.evidence).map(([path, value]) => (
-                      <tr key={path}>
-                        <td>
-                          <code>{path}</code>
-                        </td>
-                        <td>{value}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            ) : (
-              <p className="error rules-dryrun-rejected">
-                沙箱拒绝（不是"没发现问题"）：{dryRun.error}
-              </p>
+            </>
+          )}
+        </section>
+        {/* 视角策略与看板（T4-2 第三批，R102）：结论已并进上面的体检表，这里给策略与逐章绑定 */}
+        <PovPanel />
+        <section className="panel propagate-panel">
+          <h3>影响传播（提案与逐项决策）</h3>
+          <div className="propagate-bar">
+            <input
+              className="propagate-entity"
+              placeholder="被改实体 id（如 law-spirit）"
+              value={propEntity}
+              onChange={(event) => setPropEntity(event.target.value)}
+            />
+            <input
+              className="propagate-field"
+              placeholder="被改字段"
+              value={propField}
+              onChange={(event) => setPropField(event.target.value)}
+            />
+            {propField.trim() === "id" && (
+              <input
+                className="propagate-to"
+                placeholder="新实体 id（改名时必填）"
+                value={propTo}
+                onChange={(event) => setPropTo(event.target.value)}
+              />
             )}
+            <button className="btn propagate-preview" disabled={propBusy || propEntity.trim() === ""} onClick={() => void runPreview()}>
+              生成影响提案
+            </button>
           </div>
-        )}
-      </section>
-
-      <section className="panel">
-        <h3>一致性体检（结构类规则 · 只读）</h3>
-        <div className="consistency-toolbar">
-          <button
-            className="btn consistency-manual"
-            onClick={() => void runConsistency({ timing: "manual" })}
-            disabled={consistencyBusy}
-          >
-            全书体检
-          </button>
-          <button
-            className="btn consistency-post-save"
-            onClick={() => void runConsistency({ timing: "post-save" })}
-            disabled={consistencyBusy}
-          >
-            取最近结果
-          </button>
-          <button
-            className="btn consistency-ai"
-            onClick={() => void runConsistency({ timing: "manual", aiAudit: true })}
-            disabled={consistencyBusy}
-          >
-            全书体检 + AI 采样核验
-          </button>
-          <span className="muted consistency-hint">
-            保存正文或改卡后结论即过期；「取最近结果」在未过期时复用缓存，不打断输入。
-            AI 采样会真调用模型并按任务记账（默认不跑）。
-          </span>
-        </div>
-        {consistencyError && <p className="error consistency-error">体检失败：{consistencyError}</p>}
-        {consistency && (
-          <>
-            {consistency.allowError && (
-              <p className="error consistency-allow-error">
-                豁免清单读不了，本次「未应用任何豁免」（不静默放行）：{consistency.allowError}
-              </p>
-            )}
-            {consistency.worldNote && <p className="warn consistency-world-note">{consistency.worldNote}</p>}
-            <p className="muted consistency-summary">
-              时机 {consistency.timing} · {consistency.ranAgain ? "已重算" : "复用缓存"} · 实体{" "}
-              {consistency.entities} 引用 {consistency.refs} · 结论 {consistency.counted.entries} · 豁免{" "}
-              {consistency.counted.suppressed} · 未纳入范围 {consistency.outOfScope.length}
-              {consistency.counted.filteredOut > 0 ? ` · 范围外过滤 ${consistency.counted.filteredOut}` : ""}
-              {consistency.skipped.cycleDepthCapped > 0
-                ? ` · 环搜索深度封顶 ${consistency.skipped.cycleDepthCapped} 次（未假装没有环）`
-                : ""}
-            </p>
-            {/* 派系包规则本轮跑了哪些、哪些没跑、哪些数据读不出——三件都必须看得见 */}
-            <p className="muted consistency-pack">
-              包规则：本轮求值 {consistency.pack.evaluated.length} 条
-              {consistency.pack.evaluated.length > 0 ? `（${consistency.pack.evaluated.join(", ")}）` : ""} · 未参与{" "}
-              {consistency.pack.notEvaluated.length} 条
-              {consistency.pack.errors.length > 0 ? ` · 数据读不出 ${consistency.pack.errors.length} 处` : ""}
-            </p>
-            {consistency.pack.notEvaluated.length > 0 && (
-              <p className="muted consistency-pack-skipped">
-                没跑的规则不算通过，只是没数据可比：
-                {consistency.pack.notEvaluated.map((item) => `${item.id}（${item.reason}）`).join("；")}
-              </p>
-            )}
-            {consistency.pack.errors.length > 0 && (
-              <p className="warn consistency-pack-errors">{consistency.pack.errors.join("；")}</p>
-            )}
-            {/* 跨包同 id 的合并结果（T4-12 / R85）：合并后只剩一条结论，看起来与"本来就只有一条"
-                一模一样——所以谁盖掉谁、谁还没裁定，必须写出来（docs/03 §8.3：禁止静默覆盖） */}
-            {(consistency.pack.merge.overrides.length > 0 || consistency.pack.merge.ambiguous.length > 0) && (
-              <p className="muted consistency-pack-merge">
-                同名规则合并：
-                {consistency.pack.merge.overrides.map(
-                  (item) =>
-                    `${item.id} 取 ${item.winner}（版本 ${item.winnerVersion ?? "—"}），盖掉 ${item.loser}（版本 ${item.loserVersion ?? "—"}）`,
-                ).join("；")}
-                {consistency.pack.merge.ambiguous.length > 0
-                  ? `${consistency.pack.merge.overrides.length > 0 ? " ｜ " : ""}版本并列待裁定：${consistency.pack.merge.ambiguous
-                      .map((item) => `${item.id}（${item.packs.join("、")}）`)
-                      .join("；")}`
+          {propError && <p className="warn propagate-error">{propError}</p>}
+          <p className="muted propagate-line">
+            {propBusy
+              ? "正在沿引用反向遍历…"
+              : proposals.length === 0
+                ? "还没有提案。填实体 id 点「生成影响提案」——真源只读，提案只写 `.yushu/proposals/`。"
+                : `已记录 ${proposals.length} 份提案 · 未决策 ${proposals.reduce((sum, item) => sum + item.undecidedCount, 0)} 条`}
+          </p>
+          {proposals.map((proposal) => (
+            <div className="proposal-block" key={proposal.proposalId}>
+              <p className="proposal-head">
+                <code>{proposal.change.entity}</code> 的 <code>{proposal.change.field}</code> 改动
+                {proposal.change.to ? <> → 新 id <code>{proposal.change.to}</code></> : null} ·
+                {" "}{proposal.status === "blocked" ? "被环阻断" : "等待逐项确认"} · {proposal.impact.length} 条 ·
+                {" "}未决策 {proposal.undecidedCount} 条 · 封顶 {proposal.maxDepth} 层
+                {proposal.truncated ? `（下一层还有 ${proposal.truncated.count} 个未展开）` : "（未截断）"}
+                {proposal.assumedRelations.length > 0
+                  ? ` · 权重未定义的关系按 1 计：${proposal.assumedRelations.join("、")}`
                   : ""}
               </p>
-            )}
-            {consistency.pack.merge.dateCheck === "skipped" && (
-              <p className="muted consistency-pack-datecheck">
-                本轮<strong>未判</strong>规则生效期（调用方没给判定日期）——带 effective_from / until 的规则
-                一律照常参与，这不等于"它们都在有效期内"。
+              <p className="proposal-apply-row">
+                <button
+                  className="btn proposal-apply"
+                  disabled={proposal.status !== "awaiting_confirmation" || proposal.undecidedCount > 0}
+                  onClick={() => void decideApply(proposal.proposalId)}
+                >
+                  写回已接受的条目
+                </button>
+                <span className="muted">
+                  {proposal.status === "applied"
+                    ? `已写回 ${proposal.applied.length} 条`
+                    : proposal.undecidedCount > 0
+                      ? "还有条目未决策，写回不可用"
+                      : "只改引用指向；改名本身要作者自己在真源里完成"}
+                </span>
               </p>
-            )}
-            {/* AI 采样这次跑没跑、跑成什么样子，必须写在明面上 */}
-            <p className="muted consistency-ai-line">
-              AI 采样：
-              {consistency.aiAudit.ran
-                ? `已核验 ${consistency.aiAudit.sampled} 段（${consistency.aiAudit.provider}/${consistency.aiAudit.model}）· 结论 ${
-                    consistency.entries.filter((entry) => entry.rule.startsWith("ai-sampled-")).length
-                  } 条 · 丢弃 ${consistency.aiAudit.rejected} 条（越界或白名单外）`
-                : `未跑（${consistency.aiAudit.reason}）`}
-            </p>
-            {consistency.entries.length === 0 ? (
-              <p className="muted consistency-clean">本次没有一致性结论（结构类 + 已求值的包规则；不代表未纳入范围的项也查过）。</p>
-            ) : (
-              <table className="slot-table consistency-table">
-                <thead>
-                  <tr>
-                    <th>级别</th>
-                    <th>规则</th>
-                    <th>主体</th>
-                    <th>依据</th>
-                    <th>建议修法</th>
-                    <th>出处</th>
-                    <th>原文</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {consistency.entries.map((entry, index) => (
-                    <tr key={`${entry.rule}-${entry.subject}-${entry.related ?? ""}-${index}`}>
-                      <td className={entry.severity === "error" ? "error" : "warn"}>{entry.severity}</td>
-                      <td>
-                        <code>{entry.rule}</code>
-                      </td>
-                      <td>
-                        <code>{entry.subject}</code>
-                        {entry.related ? <span className="muted"> → {entry.related}</span> : null}
-                      </td>
-                      <td>{entry.evidence}</td>
-                      <td>{entry.fix}</td>
-                      <td className="muted">{entry.origin ?? "内置结构规则"}</td>
-                      <td>
-                        {entry.span && entry.span.file.startsWith("world/cards/") ? (
-                          <button
-                            className="btn consistency-jump"
-                            onClick={() => onOpenCard?.(entry.span!.file)}
-                          >
-                            {entry.span.file.split("/").pop()}#{entry.span.start}
-                          </button>
-                        ) : (
-                          <span className="muted">{entry.span ? "正文片段（在编辑器里定位）" : "（无原文区间）"}</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {consistency.suppressed.length > 0 && (
-              <ul className="issues consistency-suppressed">
-                {consistency.suppressed.map((item, index) => (
-                  <li key={`sup-${item.rule}-${item.subject}-${index}`} className="muted">
-                    已豁免 <code>{item.rule}</code> · <code>{item.subject}</code>
-                    {item.related ? ` → ${item.related}` : ""}：{item.reason}
-                    {item.decidedAt ? `（${item.decidedAt}）` : "（未记决策时间）"}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {consistency.unusedAllow.length > 0 && (
-              <p className="muted consistency-unused">
-                用不上的豁免（可能已失效，建议清理）：{consistency.unusedAllow.join("、")}
-              </p>
-            )}
-            {/* 规则豁免率（T4-11 / R84）：阈值可配，但**没判的一律显式标出来**，
-                不许因为"没配阈值 / 样本不够"就在表里显示成"没问题" */}
-            <div className="consistency-noise">
-              <p className="muted consistency-noise-head">
-                规则豁免率（= 被豁免条数 ÷ 本次该规则条数）· 阈值{" "}
-                {consistency.thresholds.rate === null
-                  ? "未配置（只给率，不下结论）"
-                  : `≤ ${(consistency.thresholds.rate * 100).toFixed(0)}%`}{" "}
-                · 最小样本 {consistency.thresholds.minSamples}
-              </p>
-              {consistency.thresholds.error !== null && (
-                <p className="error-text consistency-noise-error">
-                  阈值文件读不了，本次「不判噪音」（不静默按默认走）：{consistency.thresholds.error}
-                </p>
+              {proposal.status === "blocked" && (
+                <p className="warn proposal-cycle">环路径：{proposal.cycle?.join(" → ")}（先修掉成环的引用再传播）</p>
               )}
-              <p className="muted consistency-noise-note">
-                豁免率<strong>不等于</strong>误报率：作者豁免一条结论，可能是报错了，
-                也可能是确有问题但选择留白。要的是"哪条规则总在被打折"这个信号，不是准确率。
-              </p>
-              {consistency.noise.length === 0 ? (
-                <p className="muted consistency-noise-empty">
-                  本次没有任何规则报出或被豁免（<strong>空表不代表规则健康</strong>）。
-                </p>
-              ) : (
-                <table className="slot-table consistency-noise-table">
+              {proposal.impact.length > 0 && (
+                <table className="slot-table proposal-table">
                   <thead>
                     <tr>
-                      <th>规则</th>
-                      <th>报出</th>
-                      <th>被豁免</th>
-                      <th>豁免率</th>
-                      <th>判定</th>
+                      <th>跳数</th>
+                      <th>受影响实体</th>
+                      <th>经由关系</th>
+                      <th>传播路径</th>
+                      <th>权重</th>
+                      <th>决策</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {consistency.noise.map((row) => (
-                      <tr key={`noise-${row.rule}`} className={`noise-${row.verdict}`}>
-                        <td>
-                          <code>{row.rule}</code>
+                    {proposal.impact.map((row, index) => (
+                      <tr key={`${row.entity}-${index}`}>
+                        <td className={row.severity === "error" ? "error" : row.severity === "warn" ? "warn" : "muted"}>
+                          {row.depth}
                         </td>
-                        <td>{row.reported}</td>
-                        <td>{row.suppressed}</td>
-                        <td>{row.rate === null ? "—" : `${(row.rate * 100).toFixed(0)}%`}</td>
                         <td>
-                          {
-                            {
-                              noisy: "偏吵：值得收紧判定或改规则",
-                              ok: "可接受",
-                              "insufficient-sample": "样本不足，不判",
-                              "not-configured": "未配阈值，不判",
-                            }[row.verdict]
-                          }
+                          <code>{row.entity}</code>
+                        </td>
+                        <td>{row.relation}</td>
+                        <td className="muted">{row.path.join(" → ")}</td>
+                        <td>
+                          {row.weight.toFixed(2)}
+                          {row.weightAssumed ? "（含未定义权重）" : ""}
+                        </td>
+                        <td>
+                          <button className="btn proposal-accept" onClick={() => void decide(proposal.proposalId, index, "accept")}>
+                            接受
+                          </button>
+                          <button className="btn proposal-reject" onClick={() => void decide(proposal.proposalId, index, "reject")}>
+                            拒绝
+                          </button>
+                          <button className="btn proposal-pending" onClick={() => void decide(proposal.proposalId, index, "pending")}>
+                            待定
+                          </button>
+                          <span className="proposal-decision">{proposal.decisions[String(index)] ?? "未决策"}</span>
                         </td>
                       </tr>
                     ))}
@@ -516,128 +658,41 @@ export function RulesView({ onOpenCard }: { onOpenCard?: (path: string) => void 
                 </table>
               )}
             </div>
-          </>
-        )}
-      </section>
-      {/* 视角策略与看板（T4-2 第三批，R102）：结论已并进上面的体检表，这里给策略与逐章绑定 */}
-      <PovPanel />
-      <section className="panel propagate-panel">
-        <h3>影响传播（提案与逐项决策）</h3>
-        <div className="propagate-bar">
-          <input
-            className="propagate-entity"
-            placeholder="被改实体 id（如 law-spirit）"
-            value={propEntity}
-            onChange={(event) => setPropEntity(event.target.value)}
-          />
-          <input
-            className="propagate-field"
-            placeholder="被改字段"
-            value={propField}
-            onChange={(event) => setPropField(event.target.value)}
-          />
-          {propField.trim() === "id" && (
-            <input
-              className="propagate-to"
-              placeholder="新实体 id（改名时必填）"
-              value={propTo}
-              onChange={(event) => setPropTo(event.target.value)}
-            />
-          )}
-          <button className="btn propagate-preview" disabled={propBusy || propEntity.trim() === ""} onClick={() => void runPreview()}>
-            生成影响提案
-          </button>
-        </div>
-        {propError && <p className="warn propagate-error">{propError}</p>}
-        <p className="muted propagate-line">
-          {propBusy
-            ? "正在沿引用反向遍历…"
-            : proposals.length === 0
-              ? "还没有提案。填实体 id 点「生成影响提案」——真源只读，提案只写 `.yushu/proposals/`。"
-              : `已记录 ${proposals.length} 份提案 · 未决策 ${proposals.reduce((sum, item) => sum + item.undecidedCount, 0)} 条`}
-        </p>
-        {proposals.map((proposal) => (
-          <div className="proposal-block" key={proposal.proposalId}>
-            <p className="proposal-head">
-              <code>{proposal.change.entity}</code> 的 <code>{proposal.change.field}</code> 改动
-              {proposal.change.to ? <> → 新 id <code>{proposal.change.to}</code></> : null} ·
-              {" "}{proposal.status === "blocked" ? "被环阻断" : "等待逐项确认"} · {proposal.impact.length} 条 ·
-              {" "}未决策 {proposal.undecidedCount} 条 · 封顶 {proposal.maxDepth} 层
-              {proposal.truncated ? `（下一层还有 ${proposal.truncated.count} 个未展开）` : "（未截断）"}
-              {proposal.assumedRelations.length > 0
-                ? ` · 权重未定义的关系按 1 计：${proposal.assumedRelations.join("、")}`
-                : ""}
-            </p>
-            <p className="proposal-apply-row">
-              <button
-                className="btn proposal-apply"
-                disabled={proposal.status !== "awaiting_confirmation" || proposal.undecidedCount > 0}
-                onClick={() => void decideApply(proposal.proposalId)}
-              >
-                写回已接受的条目
-              </button>
-              <span className="muted">
-                {proposal.status === "applied"
-                  ? `已写回 ${proposal.applied.length} 条`
-                  : proposal.undecidedCount > 0
-                    ? "还有条目未决策，写回不可用"
-                    : "只改引用指向；改名本身要作者自己在真源里完成"}
-              </span>
-            </p>
-            {proposal.status === "blocked" && (
-              <p className="warn proposal-cycle">环路径：{proposal.cycle?.join(" → ")}（先修掉成环的引用再传播）</p>
-            )}
-            {proposal.impact.length > 0 && (
-              <table className="slot-table proposal-table">
-                <thead>
-                  <tr>
-                    <th>跳数</th>
-                    <th>受影响实体</th>
-                    <th>经由关系</th>
-                    <th>传播路径</th>
-                    <th>权重</th>
-                    <th>决策</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {proposal.impact.map((row, index) => (
-                    <tr key={`${row.entity}-${index}`}>
-                      <td className={row.severity === "error" ? "error" : row.severity === "warn" ? "warn" : "muted"}>
-                        {row.depth}
-                      </td>
-                      <td>
-                        <code>{row.entity}</code>
-                      </td>
-                      <td>{row.relation}</td>
-                      <td className="muted">{row.path.join(" → ")}</td>
-                      <td>
-                        {row.weight.toFixed(2)}
-                        {row.weightAssumed ? "（含未定义权重）" : ""}
-                      </td>
-                      <td>
-                        <button className="btn proposal-accept" onClick={() => void decide(proposal.proposalId, index, "accept")}>
-                          接受
-                        </button>
-                        <button className="btn proposal-reject" onClick={() => void decide(proposal.proposalId, index, "reject")}>
-                          拒绝
-                        </button>
-                        <button className="btn proposal-pending" onClick={() => void decide(proposal.proposalId, index, "pending")}>
-                          待定
-                        </button>
-                        <span className="proposal-decision">{proposal.decisions[String(index)] ?? "未决策"}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+          ))}
+          <p className="muted propagate-note">
+            本轮只记录决策，<strong>不写回真源</strong>：写回要和"改前先快照 + 带 baseHash 拒覆盖"一起上，
+            否则等于让引擎替作者改设定。未确认的条目永远不会落库。
+          </p>
+        </section>
+      </div>
+
+      <aside className="rules-col-outputs">
+        <section className="panel">
+          <div className="panel-title">
+            <span className="muted">本次体检的产物</span>
           </div>
-        ))}
-        <p className="muted propagate-note">
-          本轮只记录决策，<strong>不写回真源</strong>：写回要和"改前先快照 + 带 baseHash 拒覆盖"一起上，
-          否则等于让引擎替作者改设定。未确认的条目永远不会落库。
-        </p>
-      </section>
+          {consistency === null ? (
+            <p className="muted">还没有体检结果（跑一次体检，这里才有结论摘要）。</p>
+          ) : (
+            <>
+              <div className="rules-outputs-line">
+                结论 <strong>{String(consistency.counted.entries)}</strong> 条：错误 {String(errorCount)} · 警告{" "}
+                {String(warnCount)}
+              </div>
+              <div className="rules-outputs-line">
+                豁免 <strong>{String(consistency.counted.suppressed)}</strong> 条（豁免占比 {String(suppressedPercent)}%）
+              </div>
+              <div className="rules-outputs-line muted">豁免占比 = 豁免 ÷（结论 + 豁免）</div>
+              <div className="rules-outputs-line">
+                噪音 {String(consistency.noise.length)} 条（低于阈值，不报）
+              </div>
+              <div className="rules-outputs-line muted">
+                时机 {consistency.timing} · 实体 {consistency.entities} · 引用 {consistency.refs}
+              </div>
+            </>
+          )}
+        </section>
+      </aside>
     </div>
   );
 }
