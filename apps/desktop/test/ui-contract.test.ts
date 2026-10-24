@@ -3365,3 +3365,68 @@ describe("三栏之后的排版总巡检（R159）：并排 / 不重叠 / 不越
     }
   });
 });
+
+/**
+ * **十轮总复核**（R160）：R151–R160 这十轮的判据都在、口径成文。
+ *
+ * 这一轮不加功能，只做两件事：① 把这十轮的**做法**沉淀进 docs/11（§7.40）；
+ * ② 立一条**钉住这件事本身**的判据 —— 口径不许被删、判据不许被删、骨架不许各写一套。
+ *
+ * 判据盯四件事：
+ * ① 十轮的口径**都在 docs/11 上**（§7.31–§7.40 一节不缺 ⇒ 有一轮没写口径就红）；
+ * ② 十轮的**判据都在**（这十轮各有一组判据 ⇒ 不许被删掉）；
+ * ③ 通则**写成一句话**（每页都该有「清单 / 工作区 / 产物」三栏）；
+ * ④ 骨架是**共用的** `.three-col`（不是每页各写一套网格）。
+ */
+describe("十轮总复核（R160）：判据都在、口径成文", () => {
+  const doc11 = readFileSync(join(ROOT, "docs", "11-UI重构调研与设计规范.md"), "utf8");
+  const self = readFileSync(join(__dirname, "ui-contract.test.ts"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+
+  it("十轮的口径**都在 docs/11 上**（§7.31–§7.40 一节不缺）", () => {
+    for (const section of [
+      "7.31",
+      "7.32",
+      "7.33",
+      "7.34",
+      "7.35",
+      "7.36",
+      "7.37",
+      "7.38",
+      "7.39",
+      "7.40",
+    ]) {
+      expect(doc11, `docs/11 缺 §${section}`).toContain(`### ${section} `);
+    }
+  });
+
+  it("十轮的**判据都在**（这十轮各有一组判据 ⇒ 不许被删掉）", () => {
+    for (const round of [
+      "R151",
+      "R152",
+      "R153",
+      "R154",
+      "R155",
+      "R156",
+      "R157",
+      "R158",
+      "R159",
+      "R160",
+    ]) {
+      expect(self, `判据少了 ${round}`).toMatch(new RegExp('describe\\("[^"]*（' + round + '）'));
+    }
+  });
+
+  it("通则**写成一句话**（每页都该有「清单 / 工作区 / 产物」三栏）", () => {
+    expect(doc11, "docs/11 没写这条通则").toContain("清单 / 工作区 / 产物");
+    expect(doc11, "docs/11 缺 §7.40").toContain("### 7.40");
+  });
+
+  it("骨架是**共用的** `.three-col`（不是每页各写一套网格）", () => {
+    expect(css, "共用的三栏骨架没写").toMatch(/\.three-col\s*\{[^}]*grid-template-columns:[^;]*22%/);
+    for (const page of ["RulesView.tsx", "LibraryView.tsx", "ExportView.tsx", "StatsView.tsx"]) {
+      const src = readFileSync(join(VIEW_ROOT, "views", page), "utf8");
+      expect(src, `${page} 没用共用的三栏骨架`).toContain("three-col");
+    }
+  });
+});

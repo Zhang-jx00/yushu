@@ -8581,6 +8581,59 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 122,
+    title: '十轮总复核：R151–R160 各自在屏上留的痕迹都还在，没互相踩坏（R160）',
+    file: 'step122-ten-rounds.png',
+    body: String.raw`
+      // 这一步是 R160 的**总复核取证**：十轮里各自在屏上留了痕迹 ⇒ 逐页点一遍，
+      // 确认这一组改动**没有互相踩坏**（每一项都要**在屏上**，不是"代码里写着"）。
+      const found = [];
+      const miss = [];
+      const need = (id, ok) => { if (ok) found.push(id); else miss.push(id); };
+      // ① R151 / R152：地图上那块区域带着洞，图例四条在屏上
+      //    **等它渲染出来再查**（地图面板要先等 IPC 把地图读回来 ⇒ 查得太早就是"还没到"）
+      await tab('规则');
+      await tab('世界观档案');
+      await waitFor(() => document.querySelector('.map-panel .map-legend-item') || null, 10000);
+      const holeRegion = document.querySelectorAll('.map-panel .map-region[data-holes]:not([data-holes="0"])').length;
+      const legendItems = document.querySelectorAll('.map-panel .map-legend-item').length;
+      need('R151 区域带洞', holeRegion > 0);
+      need('R152 图例四条', legendItems === 4);
+      // ② R153：记忆页第三段三条（同样要等它读回来）
+      await tab('记忆');
+      await waitFor(() => document.querySelector('.memory .memory-next-list li') || null, 10000);
+      need('R153 记忆页第三段', document.querySelectorAll('.memory .memory-next-list li').length === 3);
+      // ③ R154 / R155 / R156 / R158：四个页面都是**三段**（数子元素，不是认类名）
+      const threeCol = (sel) => document.querySelectorAll(sel + ' > *').length === 3;
+      await tab('规则');
+      need('R154 规则页三栏', threeCol('.rules-view.three-col'));
+      await tab('稿件总览');
+      need('R155 稿件总览三栏', threeCol('.library-three-col'));
+      await tab('导出与自查');
+      need('R156 导出页三栏', threeCol('.export-three-col'));
+      await tab('码字统计');
+      need('R158 码字统计三栏', threeCol('.stats-three-col'));
+      // ④ R157：快捷键面板点得开，条目在屏上（面板是点开后才渲染 ⇒ 要等它出来）
+      const trig = await waitFor(
+        () => [...document.querySelectorAll('button')]
+          .find((b) => String(b.className || '').indexOf('shortcut-trigger') >= 0) || null,
+        10000,
+      );
+      if (trig) trig.click();
+      const panel = await waitFor(() => document.querySelector('.shortcut-panel') || null, 10000);
+      const rows = panel ? panel.querySelectorAll('.shortcut-list li').length : 0;
+      need('R157 快捷键面板', rows > 0);
+      await tab('规则');
+      await sleep(300);
+      return {
+        ok: miss.length === 0,
+        note: '十轮总复核：屏上能核的 ' + String(found.length) + ' 项全在（' + found.join('、') + '）' +
+          (miss.length === 0 ? '' : '；缺=' + miss.join('、')) +
+          '；R159（巡检）与 R160（口径）不在屏上 —— 在预演回执与 docs/11 §7.40 里',
+      };
+    `,
+  },
 ];
 
 /**
