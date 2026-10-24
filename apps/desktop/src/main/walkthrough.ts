@@ -1495,7 +1495,10 @@ const STEPS: StepDef[] = [
       list.scrollTop = 0;
       list.dispatchEvent(new Event('scroll', { bubbles: true }));
       await sleep(300);
-      const openBtn = [...document.querySelectorAll('.library-row button')].find((b) => !b.disabled);
+      // R155：行里现在有**两个**按钮了（标题=选中、打开=跳编辑器）⇒
+      // 这里必须按**文案**找「打开」那个（原先取"行里第一个可用按钮"⇒ 点到了标题 ⇒ 跳不过去）。
+      const openBtn = [...document.querySelectorAll('.library-row button')]
+        .find((b) => String(b.textContent || '').trim() === '打开' && !b.disabled);
       if (!openBtn) return { ok: false, note: '没有可打开的草稿章节：' + pageText() };
       openBtn.click();
       const editorTab = await waitFor(() => {
@@ -1503,6 +1506,9 @@ const STEPS: StepDef[] = [
         return on && on.textContent.includes('编辑器') ? true : null;
       }, 8000);
       const selected = await waitFor(() => (document.querySelector('.draft-list li.on') ? true : null), 8000);
+      // 诊断（R155）：这两个判据一旦红，得说清**当时页面长什么样**（否则只剩一个 false，没法定位）
+      const tabsNow = [...document.querySelectorAll('.tab')].map((t) => String(t.textContent || '').trim() + (String(t.className || '').indexOf('on') >= 0 ? '*' : '')).join('/');
+      const draftRows = document.querySelectorAll('.draft-list li').length;
       // 回到总览供截图取证（跳转断言已在上方完成）
       await tab('稿件总览');
       await sleep(300);
@@ -1511,7 +1517,8 @@ const STEPS: StepDef[] = [
         note: '汇总：' + headText.replace(/\s+/g, ' ').slice(0, 80) +
           '；虚拟滚动：总章数=' + totalChapters + ' 顶部渲染=' + rowsTop + ' 中部渲染=' + rowsMid +
           '（只渲染视窗窗口=' + virtualized + '，滚动后首行 ' + firstTop + '→' + firstMid + '=' + windowMoved + '）' +
-          '；「打开」跳转编辑器=' + (editorTab === true) + '，草稿列表选中=' + (selected === true),
+          '；「打开」跳转编辑器=' + (editorTab === true) + '，草稿列表选中=' + (selected === true) +
+          '（诊断：当时的标签页=' + tabsNow + '，草稿列表行数=' + String(draftRows) + '）',
       };
     `,
   },
@@ -8122,6 +8129,47 @@ const STEPS: StepDef[] = [
           String(Math.round(b2.left)) + ' / 右 ' + String(Math.round(b3.left)) + '）' +
           '；右栏结论=' + String(outCount) + ' vs 表里行数=' + String(rows) +
           '；右栏豁免=' + String(outSup) + ' vs 豁免清单=' + String(supRows),
+      };
+    `,
+  },
+  {
+    step: 117,
+    title: '稿件总览三栏：卷章树 / 全库 / 选中的那章（R155）',
+    file: 'step117-library-three-col.png',
+    body: String.raw`
+      // 这一步证 R155 的三件事：
+      // ① **三栏并排**（量左边界，不是只认类名）；
+      // ② 点卷章树里的一章 ⇒ **右栏跟着换**（摆的是那一章的产物）；
+      // ③ 右栏摆的那一章**就是点的那一章**（标题逐字对上，不是"随便摆一章"）。
+      await tab('稿件总览');
+      const tree = await waitFor(() => document.querySelector('.library-col-tree') || null, 8000);
+      if (!tree) return { ok: false, note: '总览页没有左栏（卷章树）' };
+      const work = document.querySelector('.library-col-work');
+      const outputs = document.querySelector('.library-col-outputs');
+      if (!work || !outputs) return { ok: false, note: '总览页没有中栏 / 右栏' };
+      const b1 = tree.getBoundingClientRect();
+      const b2 = work.getBoundingClientRect();
+      const b3 = outputs.getBoundingClientRect();
+      const sideBySide = b1.left < b2.left && b2.left < b3.left;
+      const btn = tree.querySelector('.library-tree-btn');
+      if (!btn) return { ok: false, note: '卷章树里没有可选的章' };
+      const label = String(btn.textContent || '').trim();
+      const title = label.replace(/^第\s*\d+\s*章\s*/, '');
+      btn.click();
+      await sleep(500);
+      const pressed = String(btn.getAttribute('aria-pressed') || '');
+      const outText = String(outputs.textContent || '');
+      const titleOk = title !== '' && outText.indexOf(title) >= 0;
+      const words = /\d[\d,]*\s*字|未建草稿/.exec(outText);
+      const panelEl = document.querySelector('.library');
+      if (panelEl) panelEl.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: sideBySide && titleOk && pressed === 'true',
+        note: '三栏并排=' + String(sideBySide) + '（左 ' + String(Math.round(b1.left)) + ' / 中 ' +
+          String(Math.round(b2.left)) + ' / 右 ' + String(Math.round(b3.left)) + '）' +
+          '；点的是「' + label + '」；右栏摆的是那一章=' + String(titleOk) +
+          '；树上的选中态=' + String(pressed) + '；右栏字数栏=' + String(words ? words[0] : '（没有）'),
       };
     `,
   },

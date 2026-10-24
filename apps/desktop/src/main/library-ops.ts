@@ -28,11 +28,14 @@ export async function readLibrary(gateway: ProjectGateway): Promise<LibraryViewP
       let path: string | null = null;
       let wordCount = 0;
       let status = "";
+      /** R155：这一章草稿文件的**当前 hash**（这一版的标识；没建草稿为 null） */
+      let hash: string | null = null;
       if (chapter.chapter_id) {
         const candidate = chapterPath(volume.id, chapter.chapter_id);
         const file = await gateway.readDoc(candidate).catch(() => null);
         if (file) {
           path = candidate;
+          hash = file.hash;
           drafted += 1;
           try {
             const { chapter: entity, body } = readChapterFile(file.content);
@@ -53,6 +56,7 @@ export async function readLibrary(gateway: ProjectGateway): Promise<LibraryViewP
         chapterPath: path,
         wordCount,
         status,
+        hash,
       });
     }
   }

@@ -2881,3 +2881,53 @@ describe("规则体检页三栏（R154）：左=规则目录 / 中=工作区 / �
     expect(css, "中栏的面板没锁住高度").toMatch(/\.rules-col-work > \.panel\s*\{[^}]*flex:\s*0 0 auto/);
   });
 });
+
+/**
+ * **稿件总览页三栏**（R155）：左=卷章树 / 中=全库 / 右=选中的那章的产物。
+ *
+ * 判据盯四件事：
+ * ① 页面用的是**共用的三栏骨架**（R154 立的 `.three-col` ⇒ 不是每页各写一套）；
+ * ② 三段各在其位；
+ * ③ 右栏的**数字来自同一份载荷**（不另取数 ⇒ 同一个数不会有两处）；
+ * ④ **卷章树与全库选中的是同一个 id**（两处各选各的 ⇒ 右栏会跟作者说的对不上）。
+ */
+describe("稿件总览页三栏（R155）：左=卷章树 / 中=全库 / 右=选中的那章", () => {
+  const lib = readFileSync(join(VIEW_ROOT, "views", "LibraryView.tsx"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+
+  it("页面用的是**共用的三栏骨架**（不是每页各写一套）", () => {
+    expect(lib, "总览页没用三栏骨架").toContain('className="three-col library-three-col"');
+    expect(css, "三栏骨架没写").toMatch(/\.three-col\s*\{[^}]*grid-template-columns:[^;]*22%/);
+  });
+
+  it("三段各在其位：左=卷章树 / 中=全库 / 右=选中的那章", () => {
+    expect(lib, "左栏不在").toContain('className="library-col-tree"');
+    expect(lib, "中栏不在").toContain('className="library-col-work"');
+    expect(lib, "右栏不在").toContain('className="library-col-outputs"');
+  });
+
+  it("右栏的**数字来自同一份载荷**（字数 / 状态 / 快照）", () => {
+    expect(lib).toMatch(/selected\.wordCount\.toLocaleString\("zh-CN"\)/);
+    expect(lib).toContain("selected.status");
+    expect(lib).toContain("selected.hash");
+    expect(lib).toContain("selected.chapterPath");
+  });
+
+  it("卷章树与全库选中的是**同一个 id**（两处不会各说各话）", () => {
+    expect(lib, "没算出选中的那一章").toMatch(
+      /find\(\(item\) => item\.chapterId === selectedId\)/,
+    );
+    expect(lib, "树与列表没共用同一个选中状态").toContain("setSelectedId(item.chapterId)");
+    expect(lib, "树上的选中态没标出来").toContain("is-on");
+  });
+
+  it("选中是**真按钮**（键盘也能到 ⇒ 键盘债 0）", () => {
+    expect(lib, "卷章树的条目不是按钮").toMatch(/<button[\s\S]{0,400}library-tree-btn/);
+    expect(lib, "全库那一行的标题不是按钮").toContain('className={"library-title-btn"');
+  });
+
+  it("中栏的各块**不许被压扁**（列表要吃掉剩余高度，其余不许缩）", () => {
+    expect(css, "中栏的块没锁住高度").toMatch(/\.library-col-work > \* \{[^}]*flex:\s*0 0 auto/);
+    expect(css, "列表没吃掉剩余高度").toMatch(/\.library-col-work \.library-list \{[^}]*flex:\s*1 1 auto/);
+  });
+});

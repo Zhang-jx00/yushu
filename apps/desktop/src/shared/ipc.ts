@@ -1841,6 +1841,14 @@ export interface LibraryChapterEntry {
   wordCount: number;
   /** 章节状态（frontmatter status；未建草稿为空串） */
   status: string;
+  /**
+   * 章节草稿文件的**当前 hash**（R155：这一版的标识）。
+   *
+   * 为什么要有：右栏「选中的那章的产物」要给作者看**这一版长什么样**；
+   * 没有 hash 就只能给路径与字数，而路径与字数说不出"是不是刚改过那一版"。
+   * 没建草稿为 null。
+   */
+  hash: string | null;
 }
 
 export interface LibraryViewPayload {
