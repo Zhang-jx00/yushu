@@ -4,12 +4,10 @@ import type { Dirent } from "node:fs";
 import { join } from "node:path";
 import { YushuError, codePointCompare } from "@yushu/core";
 import {
-  checkPlatformSpecConsistency,
   parsePlatformExport,
   parsePlatformSpec,
   type PlatformExportPack,
   type PlatformSpec,
-  type PlatformSpecConflict,
 } from "@yushu/export";
 import type { PlatformPackSummary } from "../shared/ipc.js";
 import { packsRoot } from "./paths.js";
@@ -170,26 +168,4 @@ export async function loadPlatformSpec(id: string, root = platformPacksRoot()): 
     );
   }
   return parsePlatformSpec(text);
-}
-
-/**
- * 跨包一致性校验：把**所有**装了规则包的平台放在一起对账。
- *
- * **必须把全部包都算进来**：漏一个包，这条校验就只剩半个世界——那比没有校验更坏
- * （跨包打架恰恰是"另一个包"带来的）。
- * 坏包也不静默丢：`broken` 里点名哪个包读不动、为什么。
- */
-export async function checkPlatformSpecConflicts(
-  root = platformPacksRoot(),
-): Promise<{ conflicts: PlatformSpecConflict[]; broken: Array<{ packId: string; error: string }> }> {
-  const scanned = await scanPlatformSpecs(root);
-  const conflicts = checkPlatformSpecConsistency(
-    scanned
-      .filter((item): item is { packId: string; spec: PlatformSpec; error: null } => item.spec !== null)
-      .map((item) => ({ packId: item.packId, spec: item.spec })),
-  );
-  const broken = scanned
-    .filter((item) => item.error !== null)
-    .map((item) => ({ packId: item.packId, error: item.error as string }));
-  return { conflicts, broken };
 }
