@@ -1891,7 +1891,7 @@ export function WorldMapPanel(props: {
         </div>
         <div className="map-hole-bar">
           <select
-            className="map-place-select"
+            className="map-marker-filter"
             value={markerFilter.entityRef ?? ""}
             onChange={(event) =>
               changeMarkerFilter({
@@ -1909,7 +1909,7 @@ export function WorldMapPanel(props: {
             ))}
           </select>
           <select
-            className="map-place-select"
+            className="map-marker-filter"
             value={markerFilter.layer ?? ""}
             onChange={(event) =>
               changeMarkerFilter({
@@ -1926,7 +1926,7 @@ export function WorldMapPanel(props: {
               </option>
             ))}
           </select>
-          <label className="map-marker-orphan-toggle">
+          <label className="map-marker-toggle">
             <input
               type="checkbox"
               checked={markerFilter.orphanOnly}
@@ -1946,7 +1946,7 @@ export function WorldMapPanel(props: {
           </button>
         </div>
         <div
-          className="map-status"
+          className="map-marker-count"
           data-marker-total={String(markerRows.length)}
           data-marker-filtered={String(filteredMarkers.length)}
           data-marker-orphan={String(orphanMarkerCount)}
@@ -1955,7 +1955,7 @@ export function WorldMapPanel(props: {
           筛出 {filteredMarkers.length} 个（清单共 {markerRows.length} 个 · 孤儿 {orphanMarkerCount} 个）· 已勾{" "}
           {checkedMarkers.length} 个
         </div>
-        <ul className="map-anchors">
+        <ul className="map-marker-rows">
           {filteredMarkers.length === 0 && <li className="muted">这个筛选下没有标注</li>}
           {filteredMarkers.map((row) => (
             <li key={row.id} data-marker-row={row.id} data-marker-orphan={row.orphan ? "1" : "0"}>
@@ -1965,7 +1965,7 @@ export function WorldMapPanel(props: {
                   checked={checkedMarkers.includes(row.id)}
                   onChange={() => toggleMarkerChecked(row.id)}
                 />
-                <span className="map-finding-code">{row.id}</span>
+                <span className="map-marker-id">{row.id}</span>
                 <span>{row.entityName ?? `绑定的实体不存在（${row.entityRef}）`}</span>
                 <span className="muted">{LAYER_LABEL[row.layer] ?? row.layer}</span>
               </label>
@@ -1985,7 +1985,7 @@ export function WorldMapPanel(props: {
             清空勾选
           </button>
           <select
-            className="map-place-select"
+            className="map-marker-filter"
             value={batchTargetLayer}
             onChange={(event) => setBatchLayer(event.target.value)}
             aria-label="批量改到哪个图层"
@@ -2007,7 +2007,7 @@ export function WorldMapPanel(props: {
         </div>
         {batchNote !== null && (
           <div
-            className="map-status"
+            className="map-marker-note"
             data-batch-changed={batchNote.changed.join(",")}
             data-batch-orphan={batchNote.orphan.join(",")}
           >

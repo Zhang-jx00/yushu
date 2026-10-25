@@ -4908,6 +4908,59 @@ table,
   cursor: pointer;
 }
 
+/* R171：标注清单（筛选 / 批量选中 / 批量改图层）——
+   **专用类名**：`.map-anchors` / `.map-finding-code` / `.map-place-select` 都被别的预演步骤
+   当选择器数（锚点名单、诊断码、地点下拉）⇒ 借用它们会把别人的判据数错。
+   所以这一块自己用一组新名字。 */
+.map-marker-manage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: var(--border-width) solid var(--border);
+  font-size: var(--text-sm);
+}
+
+.map-marker-rows {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-6);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.map-marker-id {
+  margin-right: var(--space-2);
+  color: var(--muted);
+}
+
+.map-marker-filter {
+  padding: 6px 8px;
+  border-radius: var(--radius-5);
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  min-width: 160px;
+}
+
+.map-marker-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.map-marker-count,
+.map-marker-note {
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.map-marker-note {
+  color: var(--muted);
+}
 .map-anchors {
   margin: var(--space-2) 0 0;
   padding-left: var(--space-6);
