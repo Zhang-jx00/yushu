@@ -1,0 +1,37 @@
+# 七猫中文网·导出格式参数（T5-8 平台规则包的第一片，R177）
+#
+# 这一份是**导出层**要的参数（章节标题模板 / 编码 / 卷分隔 / 投稿材料），
+# 与同目录的 platform-spec.yaml（**规则本体**：字数门槛与条款）各管各的字段——
+# 番茄也是这么分的：platform-export.yaml 放格式，platform-rules.yaml 放口径。
+#
+# 每个值都要能在下面的来源里找到出处；找不到出处的字段一律**不填**，
+# 而不是借用别的平台的数字或写法。
+#
+# 关于 chapter_title_format：七猫**没有公开规定**章节标题格式（官方页面里没有这一条）。
+# 这里取的是**该平台在架作品章节目录的通行写法**（观测，不是规则）：
+# 在架作品页的章节目录显示为「第4114章 秦珩714(拿捏)」这种形状 ⇒ 模板取「第{index}章 {title}」。
+# 这条观测的 URL 一并登记在下面的 source_urls 里，核对日期同为 2026-10-25。
+#
+# 关于 valid_word_rule：这里**只带口径名，不带阈值**——阈值属于规则本体，
+# 在 platform-spec.yaml 的 qimao.daily-words.floor 里（同一个事实只放一处）。
+#
+# 关于 submission_materials：七猫官方「投稿要求」原文给的是三样
+# （开篇两万字正文 / 大纲 / 投稿申请表），所以这里列这三项；
+# 番茄那份留空是因为它的官方页面没给材料清单。
+platform: qimao
+version: "1.0.0"
+effective_date: 2025-02-01
+checked_at: 2026-10-25
+source_urls:
+  # 作家签约政策 / 投稿指南（材料清单与规则来源）
+  - https://www.qimao.com/fuli/
+  # 在架作品章节目录（章头写法的观测依据；平台未公开规定章头格式）
+  - https://www.qimao.com/shuku/222767/
+chapter_title_format: "第{index}章 {title}"
+encoding: utf-8
+volume_separator: "\n\n"
+valid_word_rule: "每日更新字数（全勤奖口径）；阈值与出处见同目录 platform-spec.yaml 的 daily-words.floor 规则"
+submission_materials:
+  - 开篇两万字正文
+  - 大纲
+  - 七猫中文网投稿申请表

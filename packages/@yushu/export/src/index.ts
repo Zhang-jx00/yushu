@@ -16,4 +16,5 @@ export * from "./sensitive.js";
 export * from "./formats.js";
 export * from "./markdown.js";
 export * from "./platform-format.js";
+export * from "./platform-spec.js";
 export * from "./bible.js";
