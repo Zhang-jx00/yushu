@@ -3376,16 +3376,23 @@ const STEPS: StepDef[] = [
   },
   {
     step: 53,
-    title: "世界观档案：分析面板各自成框（内容不得溢出框外压住相邻面板）（R71 布局回归锁）",
+    title: "世界观档案：三栏各自成框（栏与栏不重叠 + 每栏自己滚 + 栏内面板不相交）（R162 布局回归锁）",
     file: "step53-panel-boxes.png",
     body: String.raw`
+      // R162 改了骨架 ⇒ 这条锁跟着改写（**不是放松**：检查对象从"页面顶层块"换成"栏 + 栏内面板"）。
+      // 以前四张分析面板与左右两栏同属一个定高网格：面板的 min-height: 0 让 auto 行的基准高变成 0，
+      // 行高被视口均分（实测每行 211px），面板内容整块溢出框外、压在下一个面板的字上。
+      // 现在三栏各自是滚动区 ⇒ 同样的毛病会改头换面出现：内容画到**隔壁栏**上。
       await tab('世界观档案');
-      const boxes = await waitFor(() => {
-        const list = [...document.querySelectorAll('.archive > *, .archive-analysis > *')];
-        return list.length >= 7 ? list : null;
+      const cols = await waitFor(() => {
+        const list = [...document.querySelectorAll('.archive-three-col > *')].filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        });
+        return list.length === 3 ? list : null;
       }, 8000);
-      if (!boxes) return { ok: false, note: '档案页顶层块不足 7 个：' + pageText() };
-      const rects = boxes.map((el) => {
+      if (!cols) return { ok: false, note: '档案页没量到三栏：' + pageText() };
+      const rects = cols.map((el) => {
         const r = el.getBoundingClientRect();
         const cs = getComputedStyle(el);
         return {
@@ -3396,9 +3403,7 @@ const STEPS: StepDef[] = [
           overflowY: cs.overflowY,
         };
       });
-      // ① 内容画到框外：滚动高明显大于盒子高、又没开滚动条——这些字会直接压在下一个面板上
-      const spilling = rects.filter((b) => b.scrollH > b.clientH + 4 && b.overflowY === 'visible');
-      // ② 两个顶层框真的相交（>8px 见方才算，1px 边框贴合不算）
+      // ① 栏与栏不重叠（>8px 见方才算，1px 边框贴合不算）
       const hits = [];
       for (let i = 0; i < rects.length; i += 1) {
         for (let j = i + 1; j < rects.length; j += 1) {
@@ -3409,19 +3414,40 @@ const STEPS: StepDef[] = [
           if (ow > 8 && oh > 8) hits.push(a.cls + ' × ' + b.cls + '(' + ow + 'x' + oh + ')');
         }
       }
+      // ② 内容画到框外：内容高过栏高、而栏**没有开滚动条** ⇒ 这些字会直接压在隔壁栏上
+      const spilling = rects.filter((b) => b.scrollH > b.clientH + 4 && b.overflowY === 'visible');
+      // ③ 同一栏里的面板两两不相交
+      const panelHits = [];
+      for (const col of cols) {
+        const panels = [...col.querySelectorAll('.panel')].filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        });
+        for (let i = 0; i < panels.length; i += 1) {
+          for (let j = i + 1; j < panels.length; j += 1) {
+            const a = panels[i].getBoundingClientRect();
+            const b = panels[j].getBoundingClientRect();
+            const ow = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+            const oh = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+            if (ow > 2 && oh > 2) panelHits.push(String(panels[i].className) + ' × ' + String(panels[j].className));
+          }
+        }
+      }
       const tag = (b) => (String(b.cls).split(' ')[1] || String(b.cls) || '(无类名)');
-      // 截图要能看见"面板各自成框"：把分析区顶部对齐视口（step52 是把编年史居中，两帧必须不同画面，
-      // 否则截图守卫会报"与上一张相同"，那这一帧就不算证据）
+      // 截图要能看见"三栏各自成框"：把中栏滚回顶部（上一张是 step52 把编年史居中的画面，
+      // 两帧必须不同，否则截图守卫会报"与上一张相同"，那这一帧就不算证据）
+      const work = document.querySelector('.archive-col-work');
+      if (work) work.scrollTop = 0;
       const scroller = document.querySelector('.archive-scroll');
-      const analysis = document.querySelector('.archive-analysis');
-      if (scroller && analysis) scroller.scrollTop = analysis.offsetTop - 6;
+      if (scroller) scroller.scrollTop = 0;
       await sleep(220);
       return {
-        ok: spilling.length === 0 && hits.length === 0,
-        note: '顶层块=' + rects.length +
-          '；内容溢出框外=' + (spilling.length === 0 ? '无' : spilling.map((b) => tag(b) + '(框' + b.clientH + '<容' + b.scrollH + ')').join(' ')) +
-          '；框框相交=' + (hits.length === 0 ? '无' : hits.join(' ')) +
-          '；各块高=' + rects.map((b) => tag(b) + ':' + (b.bottom - b.top)).join(' ') +
+        ok: hits.length === 0 && spilling.length === 0 && panelHits.length === 0,
+        note: '栏=' + rects.length +
+          '；栏与栏相交=' + (hits.length === 0 ? '无' : hits.join(' ')) +
+          '；内容画到框外=' + (spilling.length === 0 ? '无' : spilling.map((b) => tag(b) + '(框' + b.clientH + '<容' + b.scrollH + ')').join(' ')) +
+          '；栏内面板相交=' + (panelHits.length === 0 ? '无' : panelHits.join(' ')) +
+          '；各栏高=' + rects.map((b) => tag(b) + ':' + (b.bottom - b.top) + '/' + b.scrollH).join(' ') +
           '；截图前 scrollTop=' + (scroller ? Math.round(scroller.scrollTop) : -1),
       };
     `,
@@ -4156,7 +4182,8 @@ const STEPS: StepDef[] = [
           '；脱敏名出现在产物=' + stillIn.length + '；回执=' + receipt.slice(0, 130),
       };
     `,
-  },  {
+  },
+  {
     step: 62,
     title: '迁移包导出：交给别人的那份没有密钥、也没有派生物；界面数字与盘上文件对账（M3/T3-14 后半，R101）',
     file: 'step62-project-bundle.png',
@@ -4222,7 +4249,8 @@ const STEPS: StepDef[] = [
           '；剥离明文=' + (redacted === null ? '?' : redacted[1]) + ' 处；复扫命中=' + (residue === null ? '?' : residue[1]) + ' 条',
       };
     `,
-  },  {
+  },
+  {
     step: 63,
     title: '视角看板：没声明就不判、策略当场生效、绑视角少一条结论、并进全书体检（M4/T4-2 第三批，R102）',
     file: 'step63-pov-board.png',
@@ -4294,7 +4322,8 @@ const STEPS: StepDef[] = [
           '」前 ' + rowsAfterSave + ' 条 → 后 ' + (bindOk ? dropped : '?') + ' 条=' + bindOk + '；回执点名=' + receiptOk,
       };
     `,
-  },  {
+  },
+  {
     step: 64,
     title: '信息可见性：档案页登记来源章节 → 全书体检当场多出该条结论，清掉登记后又当场消失（M4/T4-2 第四批，R103）',
     file: 'step64-visibility-check.png',
@@ -7144,12 +7173,17 @@ const STEPS: StepDef[] = [
         (line) => line.indexOf('id: m-2') >= 0 && line.indexOf('entity_ref: ' + cardId) >= 0,
       );
       const onlyOne = added.length === 1;
-      // 落点：点击位置经「屏幕 ↔ 用户坐标」往返会有**零点几像素**的误差 ⇒ 容差 1 像素
-      // （这不是放宽判据：画布有 700 像素高，差 1 像素是同一个点）
+      // 落点：浏览器的 clientX / clientY 是**整数** ⇒ 落点与点击位置最多差**半个屏幕像素**；
+      // 折算成**用户坐标**要除以画布比例（scale = 用户坐标 → 屏幕像素）⇒ 容差 = 1/scale。
+      // （这不是放宽判据：物理上的容差始终是「1 个屏幕像素」，只是换算到产品写的那个单位；
+      //   地图挪进窄栏以后画布变小 ⇒ 同一个屏幕像素对应的用户坐标变多 ⇒ 旧写法「容差 1 用户像素」
+      //   就不成立了 —— R162 实跑撞出来的：落点偏了 2 个用户坐标。）
+      const scale = Math.abs(ctm.a) || 1;
+      const tol = Math.max(1, Math.ceil(1 / scale));
       const spot = /x: (\d+), y: (\d+)/.exec(added[0] || '');
       const px = spot ? Number(spot[1]) : -1;
       const py = spot ? Number(spot[2]) : -1;
-      const atSpot = px === 600 && Math.abs(py - 400) <= 1;
+      const atSpot = Math.abs(px - 600) <= tol && Math.abs(py - 400) <= tol;
       // 新标注**画出来了**（m-2 在图上）
       const drawn = document.querySelector('.map-panel .map-marker[data-marker="m-2"]') !== null;
       // 证据要看得见：把地图面板滚到画面中间
@@ -7160,7 +7194,7 @@ const STEPS: StepDef[] = [
       return {
         ok: atSpot && othersOk && onlyOne && beforeLines.length + 1 === afterLines.length && drawn,
         note: '盘上多了一行=' + String(atSpot) + '（新增行数=' + String(added.length) +
-          '，落点=' + String(px) + ',' + String(py) + '（目标 600,400，容差 1px）' +
+          '，落点=' + String(px) + ',' + String(py) + '（目标 600,400，容差 ' + String(tol) + ' 用户坐标 = 1 屏幕像素）' +
           '，总行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) + '）' +
           '；别的行原样=' + String(othersOk) +
           '；地点下拉里的选项=' + String(options.length) + ' 个（来自真源）' +
@@ -7242,11 +7276,14 @@ const STEPS: StepDef[] = [
         content.indexOf('x: 700, y: 500') >= 0;
       const changed = afterLines.filter((line, index) => line !== beforeLines[index]);
       const onlyOne = changed.length === 1 && changed[0].indexOf('a-ev') >= 0;
-      // 落点：点击位置经「屏幕 ↔ 用户坐标」往返有零点几像素误差 ⇒ 容差 1 像素
+      // 落点：浏览器的 clientX / clientY 是**整数** ⇒ 落点与点击位置最多差**半个屏幕像素**；
+      // 折算成**用户坐标**要除以画布比例 ⇒ 容差 = 1/scale（物理容差始终是「1 个屏幕像素」，R162 改写）
+      const scale = Math.abs(ctm.a) || 1;
+      const tol = Math.max(1, Math.ceil(1 / scale));
       const spot = /x: (\d+), y: (\d+)/.exec(changed[0] || '');
       const px = spot ? Number(spot[1]) : -1;
       const py = spot ? Number(spot[2]) : -1;
-      const atSpot = px === 450 && Math.abs(py - 350) <= 1;
+      const atSpot = Math.abs(px - 450) <= tol && Math.abs(py - 350) <= tol;
       const stillDrawn = document.querySelector('.map-panel .map-anchor[data-anchor="a-ev"]') !== null;
       // 证据要看得见：把地图面板滚到画面中间
       const panelEl = document.querySelector('.map-panel');
@@ -7255,7 +7292,7 @@ const STEPS: StepDef[] = [
 
       return {
         ok: atSpot && othersOk && onlyOne && beforeLines.length === afterLines.length && stillDrawn,
-        note: '盘上 a-ev=' + (atSpot ? 'x: ' + String(px) + ', y: ' + String(py) + '（目标 450,350，容差 1px）' : '（没挪成）') +
+        note: '盘上 a-ev=' + (atSpot ? 'x: ' + String(px) + ', y: ' + String(py) + '（目标 450,350，容差 ' + String(tol) + ' 用户坐标 = 1 屏幕像素）' : '（没挪成）') +
           '；改动行数=' + String(changed.length) + '（总行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) + '）' +
           '；别的锚点/标注/注释原样=' + String(othersOk) +
           '；挪完那个锚点还在=' + String(stillDrawn),
@@ -7348,11 +7385,14 @@ const STEPS: StepDef[] = [
         content.indexOf('bounds: [[0, 0], [1000, 700]]') >= 0;
       const added = afterLines.filter((line) => line.indexOf('event_ref: ev-map') >= 0);
       const onlyOne = added.length === 1;
-      // 落点：点击位置经「屏幕 ↔ 用户坐标」往返有零点几像素误差 ⇒ 容差 1 像素
+      // 落点：浏览器的 clientX / clientY 是**整数** ⇒ 落点与点击位置最多差**半个屏幕像素**；
+      // 折算成**用户坐标**要除以画布比例 ⇒ 容差 = 1/scale（物理容差始终是「1 个屏幕像素」，R162 改写）
+      const scale = Math.abs(ctm.a) || 1;
+      const tol = Math.max(1, Math.ceil(1 / scale));
       const spot = /x: (\d+), y: (\d+)/.exec(added[0] || '');
       const px = spot ? Number(spot[1]) : -1;
       const py = spot ? Number(spot[2]) : -1;
-      const atSpot = px === 700 && Math.abs(py - 500) <= 1;
+      const atSpot = Math.abs(px - 700) <= tol && Math.abs(py - 500) <= tol;
       const drawn = document.querySelector('.map-panel .map-anchor[data-event="ev-map"]') !== null;
       // 证据要看得见：把地图面板滚到画面中间
       const panelEl = document.querySelector('.map-panel');
@@ -7364,7 +7404,7 @@ const STEPS: StepDef[] = [
         // 已有段时只追加那一行（+1 行）⇒ 两种都算对，关键是"作者那些行一个字都没动"（othersOk）
         ok: atSpot && othersOk && onlyOne && afterLines.length >= beforeLines.length + 1 && drawn,
         note: '盘上多了一行=' + String(atSpot) + '（新增行数=' + String(added.length) +
-          '，落点=' + String(px) + ',' + String(py) + '（目标 700,500，容差 1px）' +
+          '，落点=' + String(px) + ',' + String(py) + '（目标 700,500，容差 ' + String(tol) + ' 用户坐标 = 1 屏幕像素）' +
           '，总行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) + '）' +
           '；别的行原样=' + String(othersOk) +
           '；事件下拉里的选项=' + String(options.length) + ' 个（来自真源）' +
@@ -7458,7 +7498,10 @@ const STEPS: StepDef[] = [
         content.indexOf('bounds: [[0, 0], [1000, 700]]') >= 0;
       const added = afterLines.filter((line) => line.indexOf('id: rt-1') >= 0 && line.indexOf('points:') >= 0);
       const onlyOne = added.length === 1;
-      // 顶点：点击位置经「屏幕 ↔ 用户坐标」往返有**零点几像素**误差 ⇒ 容差 1 像素
+      // 顶点：浏览器的 clientX / clientY 是**整数** ⇒ 顶点与点击位置最多差**半个屏幕像素**；
+      // 折算成**用户坐标**要除以画布比例 ⇒ 容差 = 1/scale（物理容差始终是「1 个屏幕像素」，R162 改写）
+      const scale = Math.abs(ctm.a) || 1;
+      const tol = Math.max(1, Math.ceil(1 / scale));
       const pointText = added[0] === undefined ? '' : added[0].slice(added[0].indexOf('points:'));
       const nums = (pointText.match(/-?\d+/g) || []).map(Number);
       const pts = [];
@@ -7467,7 +7510,7 @@ const STEPS: StepDef[] = [
       const atSpot =
         pts.length === 3 &&
         pts.every((point, index) =>
-          Math.abs(point[0] - want[index][0]) <= 1 && Math.abs(point[1] - want[index][1]) <= 1);
+          Math.abs(point[0] - want[index][0]) <= tol && Math.abs(point[1] - want[index][1]) <= tol);
       const drawn = document.querySelector('.map-panel .map-route[data-shape="rt-1"]') !== null;
       // 证据要看得见：把地图面板滚到画面中间
       const panelEl = document.querySelector('.map-panel');
@@ -7477,7 +7520,7 @@ const STEPS: StepDef[] = [
       return {
         ok: atSpot && onlyOne && othersOk && drawn && pendingDrawn && segmentedOk,
         note: '盘上多了一行=' + String(atSpot) + '（新增行数=' + String(added.length) +
-          '，顶点=' + JSON.stringify(pts) + '（目标 200,200 / 400,300 / 600,150，容差 1px）' +
+          '，顶点=' + JSON.stringify(pts) + '（目标 200,200 / 400,300 / 600,150，容差 ' + String(tol) + ' 用户坐标 = 1 屏幕像素）' +
           '，总行数 ' + String(beforeLines.length) + '→' + String(afterLines.length) + '）' +
           '；别的行原样=' + String(othersOk) +
           '；画到一半看得见=' + String(pendingDrawn) +
@@ -7670,7 +7713,11 @@ const STEPS: StepDef[] = [
       const spot = /x: (\d+), y: (\d+)/.exec(added[0] || '');
       const px = spot ? Number(spot[1]) : -1;
       const py = spot ? Number(spot[2]) : -1;
-      const atSpot = px === 600 && Math.abs(py - 400) <= 1;
+      // 落点：浏览器的 clientX / clientY 是**整数** ⇒ 落点与点击位置最多差**半个屏幕像素**；
+      // 折算成**用户坐标**要除以画布比例 ⇒ 容差 = 1/scale（物理容差始终是「1 个屏幕像素」，R162 改写）
+      const scale = Math.abs(ctm.a) || 1;
+      const tol = Math.max(1, Math.ceil(1 / scale));
+      const atSpot = Math.abs(px - 600) <= tol && Math.abs(py - 400) <= tol;
       const onlyOne = added.length === 1;
       const lineDelta = afterLines.length - beforeLines.length;
       // 状态行回执：能一次分清「点击根本没触发」与「触发了但被主进程拒了」
@@ -7696,7 +7743,7 @@ const STEPS: StepDef[] = [
         note: '放大后可见范围=' + String(baseWidth) + '→' + String(zoomedParts[2]) + '（变小了=' + String(zoomOk) + '）' +
           '；方向键平移后 viewBox=' + pannedBox + '（x>0=' + String(panOk) + '）' +
           '；放大+平移后盘上一个字节没动=' + String(notWritten) +
-          '；放大后落点=' + String(px) + ',' + String(py) + '（目标 600,400，容差 1px）' +
+          '；放大后落点=' + String(px) + ',' + String(py) + '（目标 600,400，容差 ' + String(tol) + ' 用户坐标 = 1 屏幕像素）' +
           '；新增行数=' + String(added.length) + '（只多一行=' + String(onlyOne) + '，盘上总行数 +' + String(lineDelta) +
           '，选中的地点=' + picked + '，清单里 ' + String(options.length) + ' 个）' +
           '；状态行回执=「' + statusText + '」' +
@@ -8631,6 +8678,123 @@ const STEPS: StepDef[] = [
         note: '十轮总复核：屏上能核的 ' + String(found.length) + ' 项全在（' + found.join('、') + '）' +
           (miss.length === 0 ? '' : '；缺=' + miss.join('、')) +
           '；R159（巡检）与 R160（口径）不在屏上 —— 在预演回执与 docs/11 §7.40 里',
+      };
+    `,
+  },
+  {
+    step: 123,
+    title: '世界观档案页三栏：左=图谱与清单 / 中=地图与工作面板 / 右=伏笔·爽点·编年史的产物（R162）',
+    file: 'step123-archive-three-col.png',
+    body: String.raw`
+      // 这一步证 R162 的五件事：
+      // ① **三栏并排**（量左边界依次右移，不是只认类名）；
+      // ② 左栏里确实是**图谱 + 可点的实体清单**，中栏里确实是**地图 + 工作面板**；
+      // ③ 右栏三块产物的**名单与中栏那张表逐字对得上**（伏笔 / 爽点 / 编年史各对一次）；
+      // ④ 右栏的**数与中栏那张表的行数一致**（条数 / 带标记的行数）；
+      // ⑤ 右栏的**结论摘要与中栏那张表的摘要逐字一致**（同一份载荷的两个读法）。
+      await tab('世界观档案');
+      // 面板只在挂载时取数 ⇒ 先切走再切回来，强制重挂载，等它**读回来**再查
+      await tab('规则');
+      await tab('世界观档案');
+      const ready = await waitFor(() => {
+        const fs = document.querySelector('.foreshadow-board .foreshadow-table tbody tr');
+        const pr = document.querySelector('.satisfaction-panel .satisfaction-promises tbody tr');
+        const ch = document.querySelector('.chronology-panel .chronology-table tbody tr');
+        const blocks = document.querySelectorAll('.archive-col-outputs [data-archive-artifacts]');
+        return fs && pr && ch && blocks.length === 3 ? { fs, pr, ch } : null;
+      }, 25000);
+      if (!ready) return { ok: false, note: '档案页的中栏三张表 / 右栏三块产物没齐：' + pageText().slice(0, 160) };
+      // ① 三栏并排：量左边界依次右移
+      const cols = [...document.querySelectorAll('.archive-three-col > *')].filter((el) => {
+        const b = el.getBoundingClientRect();
+        return b.width > 0 && b.height > 0;
+      });
+      if (cols.length !== 3) return { ok: false, note: '档案页只量到 ' + String(cols.length) + ' 栏' };
+      const rects = cols.map((el) => el.getBoundingClientRect());
+      const sideBySide = rects[0].left < rects[1].left && rects[1].left < rects[2].left;
+      // ② 左栏 = 图谱 + 实体清单；中栏 = 地图 + 工作面板
+      const graph = document.querySelector('.archive-col-graph .graph-panel');
+      const entities = document.querySelectorAll('.archive-col-graph .card-list button');
+      const map = document.querySelector('.archive-col-work .map-panel');
+      const workPanels = document.querySelectorAll('.archive-col-work .panel');
+      const leftOk = graph !== null && entities.length > 0;
+      const midOk = map !== null && workPanels.length > 0;
+      // 右栏三块产物
+      const blockOf = (key) => document.querySelector('[data-archive-artifacts="' + key + '"]');
+      const listedOf = (el) => Number(String(el.getAttribute('data-artifact-listed') || '0'));
+      const markedOf = (el) => Number(String(el.getAttribute('data-artifact-marked') || '0'));
+      const namesOf = (el) => String(el.getAttribute('data-artifact-names') || '');
+      const statesOf = (el) => String(el.getAttribute('data-artifact-states') || '');
+      const attrOf = (rows, sel, name) => rows.map((tr) => {
+        const cell = tr.querySelector(sel);
+        return cell === null ? '' : String(cell.getAttribute(name) || '');
+      }).join('、');
+      const textOf = (rows, sel) => rows.map((tr) => {
+        const cell = tr.querySelector(sel);
+        return cell === null ? '' : String(cell.textContent || '').trim();
+      }).join('、');
+      // 伏笔：条数 / 未回收 / 名字 / 看板
+      const fsRows = [...document.querySelectorAll('.foreshadow-board .foreshadow-table tbody tr')];
+      const prRows = [...document.querySelectorAll('.satisfaction-panel .satisfaction-promises tbody tr')];
+      const chRows = [...document.querySelectorAll('.chronology-panel .chronology-table tbody tr')];
+      const fsBlock = blockOf('foreshadow');
+      const prBlock = blockOf('satisfaction');
+      const chBlock = blockOf('chronicle');
+      if (!fsBlock || !prBlock || !chBlock) return { ok: false, note: '右栏没有三块产物（伏笔 / 爽点 / 编年史）' };
+      const fsOpen = fsRows.filter((tr) => {
+        const cell = tr.querySelector('[data-foreshadow-board]');
+        return cell !== null && String(cell.getAttribute('data-foreshadow-board') || '') === 'open';
+      }).length;
+      const fsOk = listedOf(fsBlock) === fsRows.length
+        && markedOf(fsBlock) === fsOpen
+        && namesOf(fsBlock) === attrOf(fsRows, '[data-foreshadow-name]', 'data-foreshadow-name')
+        && statesOf(fsBlock) === textOf(fsRows, '[data-foreshadow-board]');
+      // 爽点：承诺条数 / 还没兑现 / 名字 / 状态
+      const prOpen = prRows.filter((tr) => {
+        const cell = tr.querySelector('[data-promise-status]');
+        const s = cell === null ? '' : String(cell.getAttribute('data-promise-status') || '');
+        return s === 'open' || s === 'paying' || s === 'deferred';
+      }).length;
+      const prOk = listedOf(prBlock) === prRows.length
+        && markedOf(prBlock) === prOpen
+        && namesOf(prBlock) === attrOf(prRows, '[data-promise-text]', 'data-promise-text')
+        && statesOf(prBlock) === textOf(prRows, '[data-promise-status]');
+      // 编年史：记载条数 / 带分歧徽标的行 / 事件名 / 视角
+      const chDiff = chRows.filter((tr) => String(tr.textContent || '').indexOf('分歧') >= 0).length;
+      const chOk = listedOf(chBlock) === chRows.length
+        && markedOf(chBlock) === chDiff
+        && namesOf(chBlock) === attrOf(chRows, '[data-chronicle-title]', 'data-chronicle-title')
+        && statesOf(chBlock) === textOf(chRows, '[data-chronicle-culture]');
+      // ⑤ 结论摘要：中栏那张表的摘要与右栏那块**逐字一致**（同一份载荷的两个读法）
+      const summaryOf = (el) => el === null ? '' : [...el.querySelectorAll('.summary-row')]
+        .map((r) => String(r.textContent || '').replace(/\s+/g, ' ').trim()).join(' | ');
+      const fsSum = summaryOf(fsBlock);
+      const prSum = summaryOf(prBlock);
+      const chSum = summaryOf(chBlock);
+      const fsSumOk = fsSum !== '' && fsSum === summaryOf(document.querySelector('.foreshadow-board'));
+      const prSumOk = prSum !== '' && prSum === summaryOf(document.querySelector('.satisfaction-panel'));
+      const chSumOk = chSum !== '' && chSum === summaryOf(document.querySelector('.chronology-panel'));
+      const root = document.querySelector('.archive-three-col');
+      if (root) root.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: sideBySide && leftOk && midOk && fsOk && prOk && chOk && fsSumOk && prSumOk && chSumOk,
+        note: '三栏并排=' + String(sideBySide) + '（左 ' + String(Math.round(rects[0].left)) + ' / 中 ' +
+          String(Math.round(rects[1].left)) + ' / 右 ' + String(Math.round(rects[2].left)) + '）' +
+          '；左栏图谱=' + String(graph !== null) + '、可点实体=' + String(entities.length) +
+          '；中栏地图=' + String(map !== null) + '、工作面板=' + String(workPanels.length) +
+          '；伏笔对账（条 ' + String(listedOf(fsBlock)) + '/' + String(fsRows.length) +
+          '、未回收 ' + String(markedOf(fsBlock)) + '/' + String(fsOpen) +
+          '、名单逐字=' + String(namesOf(fsBlock) === attrOf(fsRows, '[data-foreshadow-name]', 'data-foreshadow-name')) +
+          '、摘要逐字=' + String(fsSumOk) + '）' +
+          '；爽点对账（条 ' + String(listedOf(prBlock)) + '/' + String(prRows.length) +
+          '、未兑现 ' + String(markedOf(prBlock)) + '/' + String(prOpen) +
+          '、名单逐字=' + String(namesOf(prBlock) === attrOf(prRows, '[data-promise-text]', 'data-promise-text')) +
+          '、摘要逐字=' + String(prSumOk) + '）' +
+          '；编年史对账（条 ' + String(listedOf(chBlock)) + '/' + String(chRows.length) +
+          '、分歧 ' + String(markedOf(chBlock)) + '/' + String(chDiff) +
+          '、名单逐字=' + String(namesOf(chBlock) === attrOf(chRows, '[data-chronicle-title]', 'data-chronicle-title')) +
+          '、摘要逐字=' + String(chSumOk) + '）',
       };
     `,
   },

@@ -1331,40 +1331,68 @@ h4 {
 
 /* ---------- 世界观档案 ---------- */
 
-/* 工作区（卡片列表 + 设定卡编辑器）吃满一屏，四张分析面板排在它下面整页滚。
-   以前四张面板与左右两栏同属一个定高网格：`.panel` 的 `min-height: 0` 让 auto 行的基准高变成 0，
-   行高被视口均分（实测每行 211px），面板内容整块溢出框外、压在下一个面板的字上。 */
+/* R162：这一页也走**共用的**三栏骨架（左=图谱与清单 / 中=地图与工作面板 / 右=伏笔·爽点·编年史的产物）。
+   骨架是 R154 立的 `.three-col`（不是这一页自己写的网格）⇒ 滚动**交给各栏自己**
+   （`.three-col > aside` 已经给了 overflow:auto）⇒ 整页不横向溢出。 */
 .archive-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+  padding: var(--space-4) var(--space-6);
 }
 
+/* 这一页只补"自己那一块"（高度与内边距）；分栏交给共用的骨架 */
 .archive {
-  flex: none;
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  height: 100%;
-  min-height: 520px;
-}
-
-/* 分析面板区：宽度自适应两列，窄窗退一列；每张面板按自身内容撑高，不再互相拉伸 */
-.archive-analysis {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
-  align-items: start;
-  gap: 12px;
-  padding: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.archive aside {
-  border-right: 1px solid var(--border);
-  padding: 12px;
-  overflow: auto;
+  flex: 1;
   min-height: 0;
+}
+
+/* 三栏各自竖排 */
+.archive-col-graph,
+.archive-col-work,
+.archive-col-outputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-height: 0;
+}
+
+/* 中栏自己滚（左右两栏由 `.three-col > aside` 负责） */
+.archive-col-work {
+  overflow: auto;
+}
+
+/* 三栏的各块**不许被压扁**（flex 默认会缩 ⇒ 面板内容越出自己的盒子 ⇒ 排版巡检当场抓到）
+   —— 这一条是 R162 实跑撞出来的：右栏那三块产物与左栏的图谱都被压扁过（内容越出边界 127~201px）。 */
+.archive-col-graph > *,
+.archive-col-work > *,
+.archive-col-outputs > * {
+  flex: 0 0 auto;
+}
+
+/* 设定卡编辑区要占住中栏一块地方（textarea 才有地方写）——用**百分比**，不给长度字面量棘轮添新账 */
+.archive-col-work > .editor {
+  height: 40%;
+}
+
+/* 右栏那三块产物的名单 */
+.archive-artifact-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.archive-artifact-list li {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.archive-artifact-list li .muted {
+  flex: none;
 }
 
 .card-list {

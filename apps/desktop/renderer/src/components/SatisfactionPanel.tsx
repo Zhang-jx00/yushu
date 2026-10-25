@@ -41,7 +41,17 @@ const TYPE_LABEL: Record<string, string> = {
   sweet: "糖点",
 };
 
-export function SatisfactionPanel() {
+export function SatisfactionPanel({
+  onBoard,
+}: {
+  /**
+   * R162：把取回来的**同一个载荷对象**报给父组件。
+   *
+   * 为什么是"报上去"而不是"父组件再取一次"：再取一次就是**两份载荷** ⇒ 两个数可能对不上
+   * ⇒ 世界观档案页右栏的产物摘要与本面板那张表就对不了账（docs/11 §7.41）。
+   */
+  onBoard?: (board: SatisfactionBoardPayload) => void;
+} = {}) {
   const [board, setBoard] = useState<SatisfactionBoardPayload | null>(null);
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -61,7 +71,9 @@ export function SatisfactionPanel() {
     api()
       .satisfaction.board({ thresholds: thresholds() })
       .then((result) => {
-        if (alive) setBoard(result);
+        if (!alive) return;
+        setBoard(result);
+        onBoard?.(result);
       })
       .catch((err: unknown) => {
         if (alive) setError(err instanceof Error ? err.message : String(err));
@@ -70,6 +82,7 @@ export function SatisfactionPanel() {
       alive = false;
     };
     // 只在挂载与阈值变化时取数；thresholds() 每次渲染都是新对象，故把依赖收敛成序列化后的键
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(inputs)]);
 
   return (
@@ -140,8 +153,8 @@ export function SatisfactionPanel() {
                     <td>
                       <code>{item.id}</code>
                     </td>
-                    <td>{item.promise}</td>
-                    <td>{item.status}</td>
+                    <td data-promise-text={item.promise}>{item.promise}</td>
+                    <td data-promise-status={item.status}>{item.status}</td>
                     <td>{item.overdueBy === null ? "—" : item.overdueBy > 0 ? `逾期 ${String(item.overdueBy)} 章` : "未到期"}</td>
                     <td className="muted">
                       {item.evidence === "hit" ? "有爽点记录" : item.evidence === "foreshadow" ? "挂在伏笔上" : "无"}
@@ -164,7 +177,7 @@ export function SatisfactionPanel() {
             <tbody>
               {board.rows.map((row) => (
                 <tr key={row.chapter} className="satisfaction-row">
-                  <td>
+                  <td data-satisfaction-chapter={row.chapter}>
                     第 {String(row.ordinal)} 章 <span className="muted">{row.chapter}</span>
                   </td>
                   <td>

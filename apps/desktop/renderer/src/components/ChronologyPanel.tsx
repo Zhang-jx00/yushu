@@ -13,7 +13,16 @@ import { SummaryRows } from "./SummaryRows";
  * 因为"作者没写"与"写了但内容为空"是两回事。
  */
 
-export function ChronologyPanel() {
+export function ChronologyPanel({
+  onBook,
+}: {
+  /**
+   * R162：把取回来的**同一个载荷对象**报给父组件（世界观档案页右栏的产物摘要要与本面板对账）。
+   *
+   * 为什么是"报上去"而不是"父组件再取一次"：再取一次就是**两份载荷** ⇒ 两个数可能对不上。
+   */
+  onBook?: (book: ChronicleBookPayload) => void;
+} = {}) {
   const [book, setBook] = useState<ChronicleBookPayload | null>(null);
   const [calendar, setCalendar] = useState("");
   const [error, setError] = useState("");
@@ -23,7 +32,9 @@ export function ChronologyPanel() {
     api()
       .chronicle.book(calendar === "" ? {} : { calendar })
       .then((result) => {
-        if (alive) setBook(result);
+        if (!alive) return;
+        setBook(result);
+        onBook?.(result);
       })
       .catch((err: unknown) => {
         if (alive) setError(err instanceof Error ? err.message : String(err));
@@ -31,6 +42,7 @@ export function ChronologyPanel() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calendar]);
 
   const divergenceOf = (eventId: string) => book?.divergences.find((d) => d.eventId === eventId) ?? null;
@@ -81,7 +93,7 @@ export function ChronologyPanel() {
                       <td>{eraOf(entry.year)?.label ?? "—"}</td>
                       <td>{entry.displayYear ?? "历法未识别"}</td>
                       <td>{entry.year}</td>
-                      <td>
+                      <td data-chronicle-title={entry.title}>
                         {entry.title}
                         {divergence !== null && (
                           <span className={divergence.differing ? "chronology-flag diff" : "chronology-flag same"}>
@@ -89,7 +101,7 @@ export function ChronologyPanel() {
                           </span>
                         )}
                       </td>
-                      <td>{entry.culture ?? "中性记载"}</td>
+                      <td data-chronicle-culture={entry.culture ?? "中性记载"}>{entry.culture ?? "中性记载"}</td>
                       <td>{entry.account ?? "—"}{entry.source !== null ? <span className="muted">（{entry.source}）</span> : null}</td>
                     </tr>
                   );

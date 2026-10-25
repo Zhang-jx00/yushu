@@ -3477,3 +3477,132 @@ describe("口径拉回现状（R161）：「明写没做的」不许指着已经
     expect(todoRow, "待做行还指着已做完的旧规划").not.toContain("未来五轮见 §二之末");
   });
 });
+
+/**
+ * **世界观档案页三栏**（R162）：左=图谱与清单 / 中=地图与工作面板 / 右=伏笔·爽点·编年史的产物。
+ *
+ * 判据盯七件事：
+ * ① 页面用的是**共用的三栏骨架**（R154 立的 `.three-col` ⇒ 不是每页各写一套网格）；
+ * ② 三段各在其位，而且**认位置**（左栏里确实是图谱与清单，中栏里确实是地图与工作面板，
+ *    右栏里确实是那三块产物 —— 不是"文件里出现过这个类名"就算）；
+ * ③ 右栏的**数都从同一份载荷现算**（走纯函数 `summarizeArchiveArtifacts`，界面不写死字面量）；
+ * ④ 面板把**同一个载荷对象**报上来（父组件不许另取一份 ⇒ 那会是两个数可能对不上的两个载荷）；
+ * ⑤ 中栏的表与右栏的名单**一一对应**（对账的抓手在：两边都摆得出名字与状态）；
+ * ⑥ 右栏的**名字不与中栏撞**（R154「豁免率 / 豁免占比」那条教训：同名不同义会误导）；
+ * ⑦ **预演真的跑了**（认回执：step123 的回执里写着对账的数 —— 源码里写了不算，跑过才算）。
+ */
+describe("世界观档案页三栏（R162）：左=图谱与清单 / 中=地图与工作面板 / 右=产物", () => {
+  const view = readFileSync(join(VIEW_ROOT, "views", "ArchiveView.tsx"), "utf8");
+  const sat = readFileSync(join(VIEW_ROOT, "components", "SatisfactionPanel.tsx"), "utf8");
+  const chr = readFileSync(join(VIEW_ROOT, "components", "ChronologyPanel.tsx"), "utf8");
+  const mod = readFileSync(join(VIEW_ROOT, "components", "archive-artifacts.ts"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+  const walk = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "walkthrough.ts"), "utf8");
+  const report = JSON.parse(
+    readFileSync(join(ROOT, "docs", "assets", "m1-preview", "walkthrough-report.json"), "utf8"),
+  ) as { steps: Array<{ step: number; detail: string }> };
+
+  /** 右栏那一段的源码（认位置：右栏是最后一栏 ⇒ 从它的类名往后就是它） */
+  const rightBlock = (): string => view.slice(view.indexOf('className="archive-col-outputs"'));
+
+  it("页面用的是**共用的三栏骨架**（不是每页各写一套网格）", () => {
+    expect(view, "世界观档案页没用共用的三栏骨架").toContain(
+      'className="archive three-col archive-three-col"',
+    );
+    expect(css, "三栏骨架没写").toMatch(/\.three-col\s*\{[^}]*grid-template-columns:[^;]*22%/);
+    // 这一页不许自己再排一套网格（"每页一套网格"就是从这种地方长出来的）
+    expect(css, "世界观档案页自己又写了一套网格").not.toMatch(/\.archive\s*\{[^}]*grid-template-columns/);
+  });
+
+  it("三段各在其位（认**位置**，不是「文件里出现过」就算）", () => {
+    const graph = view.indexOf('className="archive-col-graph"');
+    const work = view.indexOf('className="archive-col-work"');
+    const outputs = view.indexOf('className="archive-col-outputs"');
+    expect(graph, "左栏不在").toBeGreaterThan(-1);
+    expect(work, "中栏不在").toBeGreaterThan(graph);
+    expect(outputs, "右栏不在").toBeGreaterThan(work);
+    // 左栏里装的确实是"图谱 + 可点的实体清单"
+    const left = view.slice(graph, work);
+    expect(left, "左栏里没有关系图谱").toContain("<RelationGraphPanel />");
+    expect(left, "左栏里没有可点的实体清单").toContain('className="card-list"');
+    // 中栏里装的确实是"地图 + 工作面板"
+    const mid = view.slice(work, outputs);
+    expect(mid, "中栏里没有地图").toContain("<WorldMapPanel");
+    expect(mid, "中栏里没有工作面板").toContain('className="panel timeline-view"');
+    // 右栏里装的确实是那三块产物
+    expect(rightBlock(), "右栏里没有产物块").toContain("data-archive-artifacts");
+  });
+
+  it("右栏的**数都从同一份载荷现算**（走纯函数，界面不写死字面量）", () => {
+    expect(view, "右栏没走那个纯函数").toContain("summarizeArchiveArtifacts");
+    expect(mod, "纯函数模块没导出那个函数").toContain("export function summarizeArchiveArtifacts");
+    // 纯函数：只读载荷 ⇒ 可单测（不许碰盘、不许读墙钟）
+    expect(mod, "纯函数模块不许碰 fs").not.toContain("node:fs");
+    expect(mod, "纯函数模块不许读墙钟").not.toContain("Date.now");
+    // 右栏不许写死条数（写死 ⇒ 换个载荷还对不上）
+    expect(rightBlock(), "右栏写死了条数").not.toMatch(/\d+\s*条/);
+  });
+
+  it("面板把**同一个载荷对象**报上来（父组件不许另取一份）", () => {
+    expect(view, "爽点面板没有把载荷报上来").toContain(
+      "<SatisfactionPanel onBoard={setSatisfactionBoard} />",
+    );
+    expect(view, "编年史面板没有把载荷报上来").toContain(
+      "<ChronologyPanel onBook={setChronicleBook} />",
+    );
+    expect(sat, "爽点面板没有上报载荷").toContain("onBoard?.(result);");
+    expect(chr, "编年史面板没有上报载荷").toContain("onBook?.(result);");
+    // 父组件自己再取一次 ⇒ 两份载荷 ⇒ 两个数可能对不上
+    expect(view, "父组件自己又取了一次爽点载荷").not.toContain("api().satisfaction.board(");
+    expect(view, "父组件自己又取了一次编年史载荷").not.toContain("api().chronicle.book(");
+  });
+
+  it("中栏的表与右栏的名单**一一对应**（对账的抓手在）", () => {
+    expect(view, "伏笔表那一列没有名字").toContain("data-foreshadow-name={row.name}");
+    expect(view, "伏笔表那一列没有看板").toContain("data-foreshadow-board={row.board}");
+    expect(sat, "爽点承诺表那一列没有内容").toContain("data-promise-text={item.promise}");
+    expect(sat, "爽点承诺表那一列没有状态").toContain("data-promise-status={item.status}");
+    expect(chr, "编年史表那一列没有事件名").toContain("data-chronicle-title={entry.title}");
+    expect(chr, "编年史表那一列没有视角").toContain("data-chronicle-culture=");
+    expect(view, "右栏没有摆名单").toContain("data-artifact-names=");
+    expect(view, "右栏没有摆条数").toContain("data-artifact-listed=");
+  });
+
+  it("右栏的名字**不与中栏撞**（R154「豁免率 / 豁免占比」那条教训）", () => {
+    // 右栏三块的标题在**纯函数模块**里（界面渲染的是载荷算出来的那三个标题）
+    const titles = [...mod.matchAll(/title:\s*"([^"]+)"/g)].map((m) => m[1] as string);
+    expect(titles.length, "纯函数模块里没有那三块的标题").toBeGreaterThanOrEqual(3);
+    for (const title of ["伏笔产物", "爽点产物", "编年史产物"]) {
+      expect(titles, `右栏没有「${title}」这一块`).toContain(title);
+    }
+    // 中栏那三张面板的标题不许与右栏三块**同名**（同名不同义 ⇒ 作者会以为是一回事）
+    for (const panelTitle of ["伏笔台账", "爽点与期待感", "编年史"]) {
+      expect(titles.includes(panelTitle), `右栏的名字「${panelTitle}」与中栏撞了`).toBe(false);
+    }
+  });
+
+  it("**预演真的跑了**（认回执：step123 的回执里写着对账的数）", () => {
+    const step = report.steps.find((row) => row.step === 123);
+    expect(step, "报告里没有 step123（世界观档案页三栏）那一步").toBeTruthy();
+    const detail = (step as { detail: string }).detail;
+    expect(detail, "step123 的回执里没有「三栏并排=」").toContain("三栏并排=");
+    expect(detail, "step123 的回执里没有伏笔的对账数").toContain("伏笔对账");
+    expect(detail, "step123 的回执里没有爽点的对账数").toContain("爽点对账");
+    expect(detail, "step123 的回执里没有编年史的对账数").toContain("编年史对账");
+  });
+
+  it("预演那一步**真的在对账**（认量法：右栏的数与中栏的行数比）", () => {
+    const start = walk.indexOf("step: 123,");
+    const end = walk.indexOf("step: 124,", start);
+    const body = walk.slice(start, end < 0 ? walk.length : end);
+    expect(body, "没找到 step123 的脚本").not.toBe("");
+    expect(body, "并排那条没有量左边界").toContain("rects[0].left < rects[1].left");
+    expect(body, "对账没有比右栏的条数").toContain("listedOf(fsBlock) === fsRows.length");
+    expect(body, "对账没有比右栏的名单").toContain(
+      "namesOf(fsBlock) === attrOf(fsRows, '[data-foreshadow-name]', 'data-foreshadow-name')",
+    );
+    expect(body, "对账没有比摘要").toContain(
+      "fsSum === summaryOf(document.querySelector('.foreshadow-board'))",
+    );
+  });
+});
