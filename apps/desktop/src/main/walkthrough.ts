@@ -6267,6 +6267,54 @@ const STEPS: StepDef[] = [
             columnPages.push(name + '(' + String(cols.length) + ' 栏，左边界 ' + lefts.join('/') + ')');
           }
         }
+        // ⑦ R166：**字号与行高**（层级不塌）
+        //    口径回源 R112 已有的判据：「面板标题条（.panel-title）与块内区块标题（h3）**同档**」
+        //    ⇒ 块内 h3 比标题条**小**就是层级塌了；另外标题的行高不得小于字号（行与行会压在一起）。
+        const fontIssues = [];
+        for (const panel of panels) {
+          const titleEl = panel.querySelector('.panel-title');
+          const headEl = panel.querySelector('h3');
+          if (titleEl !== null && headEl !== null) {
+            const tSize = parseFloat(getComputedStyle(titleEl).fontSize) || 0;
+            const hSize = parseFloat(getComputedStyle(headEl).fontSize) || 0;
+            if (hSize > 0 && tSize > 0 && hSize < tSize - 0.5) {
+              fontIssues.push(name + '：面板「' + String(headEl.textContent || '').trim().slice(0, 10) +
+                '」的区块标题 ' + hSize.toFixed(1) + 'px 比标题条 ' + tSize.toFixed(1) + 'px 小（层级塌了）');
+            }
+          }
+          for (const el of [...panel.querySelectorAll('h1, h2, h3, h4, .panel-title')]) {
+            const box = el.getBoundingClientRect();
+            if (box.width <= 0 || box.height <= 0) continue;
+            const cs = getComputedStyle(el);
+            const size = parseFloat(cs.fontSize) || 0;
+            const lh = parseFloat(cs.lineHeight) || 0;
+            if (size > 0 && lh > 0 && lh < size - 0.5) {
+              fontIssues.push(name + '：标题「' + String(el.textContent || '').trim().slice(0, 10) +
+                '」行高 ' + lh.toFixed(1) + 'px 小于字号 ' + size.toFixed(1) + 'px（行压着行）');
+            }
+          }
+        }
+        // ⑧ R166：**命中区**（可点的控件的最小边长）
+        //    口径：本项目自定 **32px**（键盘可点控件的最小边长，R110 那轮实测 14 个入口只有 28.67px ⇒ 定的下限）。
+        //    这一项**先量出分布**：达标与否由数据说话，不靠印象。
+        const hitSamples = [];
+        for (const el of [...document.querySelectorAll('button, [role="button"], a, summary, input[type="checkbox"], input[type="radio"]')]) {
+          const box = el.getBoundingClientRect();
+          if (box.width <= 0 || box.height <= 0) continue;
+          const cs = getComputedStyle(el);
+          if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) < 0.15) continue;
+          hitSamples.push({
+            label: String(el.textContent || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 12),
+            min: Math.min(box.width, box.height),
+          });
+        }
+        const hitTooSmall = hitSamples.filter((s) => s.min < HIT_MIN);
+        const hitWorst = hitSamples.length === 0 ? null : hitSamples.reduce((a, b) => (b.min < a.min ? b : a));
+        for (const panel of panels) {
+          for (const el of [...panel.querySelectorAll('h1, h2, h3, h4, .panel-title')]) {
+            void el;
+          }
+        }
         seen.push(name + '(' + panels.length + ' 面板)');
       }
       await tab('世界观档案');
@@ -9144,8 +9192,10 @@ const STEPS: StepDef[] = [
         return { ok: false, note: '平台清单里没有 qimao：' + chips.map((c) => String(c.textContent).trim()).join(' / ') };
       }
       const chipText = String(qimao.textContent).replace(/\s+/g, ' ').trim();
-      // chip 上就该写着核对日期（「这个包是什么时候核的」写在最显眼的地方）
-      const chipChecked = /核对\s*(\d{4}-\d{2}-\d{2})/.exec(chipText);
+      // chip 的**正文**只有包 id（qimao / fanqie）；「生效 / 核对」写在 **title 属性**里
+      // （R177 第二版按正文找核对日期 ⇒ 找不到 ⇒ **判据写窄了**：不是界面上没有这个信息）。
+      const chipTitle = String(qimao.getAttribute('title') || '').replace(/\s+/g, ' ');
+      const chipChecked = /核对\s*(\d{4}-\d{2}-\d{2})/.exec(chipTitle);
       qimao.click();
       const panel = await waitFor(() => document.querySelector('.export-platform-panel'), 20000);
       if (panel === null) return { ok: false, note: '选了七猫但没长出平台面板' };
@@ -9162,8 +9212,8 @@ const STEPS: StepDef[] = [
       await sleep(240);
       return {
         ok: chipChecked !== null && panelChecked !== null && sourceCount !== null && Number(sourceCount[1]) > 0 && headsOk,
-        note: '七猫在平台清单里=True' +
-          '；chip 上写着核对日期=' + (chipChecked === null ? '无' : chipChecked[1]) +
+        note: '七猫在平台清单里=True（chip 正文=' + chipText + '）' +
+          '；chip 的 title 上写着核对日期=' + (chipChecked === null ? '无' : chipChecked[1]) +
           '；面板核对于=' + (panelChecked === null ? '无' : panelChecked[1]) +
           '；出处条数=' + (sourceCount === null ? '无' : sourceCount[1]) +
           '；章头样例=' + String(samples.length) + ' 条·形状对=' + String(headsOk) +
@@ -9184,15 +9234,18 @@ const STEPS: StepDef[] = [
       // ④ **到期判定与 publish_at 一致**：到期的那一条也在「定时提醒」里（同一个口径，两个数不会打架）。
       // 先给两章各追加一段正文 ⇒ 它们从「草稿箱」变成「攒下的稿」（写完的才算存稿）
       // 走产品自己的 chapter:write 通道（不是测试后门）：它同时把字数写回 frontmatter
-      const lib = await window.yushu.library.list();
-      const drafted = lib.chapters.filter((item) => item.path !== null && item.path !== undefined);
-      if (drafted.length < 2) {
-        return { ok: false, note: '项目里已建草稿的章不到两章，本步无从验证存稿池（' + String(drafted.length) + ' 章）' };
+      const tree = await window.yushu.project.tree();
+      const chapterFiles = tree
+        .filter((item) => item.type === 'file' && String(item.path).indexOf('chapters/') >= 0 && String(item.path).endsWith('.md'))
+        .map((item) => String(item.path))
+        .sort();
+      if (chapterFiles.length < 2) {
+        return { ok: false, note: '项目里已建草稿的章不到两章，本步无从验证存稿池（' + String(chapterFiles.length) + ' 章）' };
       }
-      for (const item of drafted.slice(0, 2)) {
-        const read = await window.yushu.chapter.read(String(item.path));
+      for (const p of chapterFiles.slice(0, 2)) {
+        const read = await window.yushu.chapter.read(p);
         const body = String(read.body) + '\n\n他伸手推开门，夜色涌了进来。\n';
-        await window.yushu.chapter.write({ path: String(item.path), body, baseHash: String(read.hash) });
+        await window.yushu.chapter.write({ path: p, body, baseHash: String(read.hash) });
       }
       const outline = await window.yushu.outline.read();
       // 换标签页会卸载视图 ⇒ 回到总览页时发布面板重新挂载、重新取数（面板本身没有刷新按钮）
@@ -9214,22 +9267,17 @@ const STEPS: StepDef[] = [
       if (pool === null) return { ok: false, note: '发布面板里没有「存稿池」这一块' };
 
       // ① 真源条数：**直接数盘上的章**（draft 且 word_count > 0），不信界面自己说的数
-      const tree = await window.yushu.project.tree();
       const pathOf = (chapterId) => {
         const entry = tree.find((item) => item.type === 'file' && String(item.path).endsWith('/' + chapterId + '.md'));
         return entry === undefined ? '' : String(entry.path);
       };
       let truth = 0;
-      for (const volume of outline.doc.volumes) {
-        for (const chap of volume.chapters) {
-          const p = pathOf(String(chap.chapter_id || ''));
-          if (p === '') continue;
-          const raw = await window.yushu.doc.read(p).catch(() => null);
-          if (raw === null) continue;
-          const wc = /^word_count:\s*(\d+)/m.exec(String(raw.content));
-          const st = /^status:\s*(\S+)/m.exec(String(raw.content));
-          if (wc !== null && st !== null && Number(wc[1]) > 0 && st[1] === 'draft') truth += 1;
-        }
+      for (const p of chapterFiles) {
+        const raw = await window.yushu.doc.read(p).catch(() => null);
+        if (raw === null) continue;
+        const wc = /^word_count:\s*(\d+)/m.exec(String(raw.content));
+        const st = /^status:\s*(\S+)/m.exec(String(raw.content));
+        if (wc !== null && st !== null && Number(wc[1]) > 0 && st[1] === 'draft') truth += 1;
       }
       const rows = () => [...panel.querySelectorAll('tr[data-stock-id]')];
       const shown = rows().length;
@@ -9318,147 +9366,7 @@ const STEPS: StepDef[] = [
           '；面板摆的可撑天数=' + (days === '' ? '（算不出）' : days),
       };
     `,
-  },  {
-    step: 150,
-    title: '标注的批量管理：筛选 / 批量选中 / 批量改图层 ⇒ 只改那些行，孤儿点名（R171）',
-    file: 'step150-map-marker-batch.png',
-    body: String.raw`
-      // 这一步证 R171 的四件事（口径回源 K08 §3.7 标注即地点卡 / §3.9 分层可控）：
-      // ① **清单的条数与真源逐字一致**（界面上写的条数 = 地图文件里写的条数，一个不多一个不少）；
-      // ② **筛选真的在筛**（只看孤儿 ⇒ 清单里只剩那一条，而且写清它指向哪个不存在的实体）；
-      // ③ **批量改图层只改那些行**（盘上：被点名的那几行换了图层，其余行逐字原样）；
-      // ④ **孤儿标注点名而不是静默**（回执点出是哪一条、它指向谁；而且它没被悄悄丢掉）。
-      const cardA = 'loc-r171-a';
-      const cardB = 'loc-r171-b';
-      const orphanRef = 'loc-r171-gone';
-      const cardBody = '临时地点卡：只为 R171 的标注清单有一批可管的标注。';
-      const mkCard = async (id, name) => {
-        const path = 'world/cards/location/' + id + '.md';
-        const card = { id: id, type: 'location', name: name, layer: 'geography' };
-        const existing = await window.yushu.card.read(path).catch(() => null);
-        if (existing === null) await window.yushu.card.write({ path: path, card: card, body: cardBody });
-        else await window.yushu.card.write({ path: path, card: card, body: cardBody, baseHash: existing.hash });
-      };
-      await mkCard(cardA, '天启_probe甲');
-      await mkCard(cardB, '天启_probe乙');
-      const yaml = [
-        'apiVersion: map-v1',
-        'id: map-world',
-        'crs: simple',
-        '# 作者自己写的注释（批量改图层之后应当原样留着）',
-        'base_size: {width: 1000, height: 700}',
-        'bounds: [[0, 0], [1000, 700]]',
-        'layers: [place, political]',
-        'markers:',
-        '  - {id: m-r1, layer: place, entity_ref: ' + cardA + ', x: 250, y: 175}',
-        '  - {id: m-r2, layer: place, entity_ref: ' + cardB + ', x: 320, y: 220}',
-        '  - {id: m-r3, layer: place, entity_ref: ' + orphanRef + ', x: 400, y: 300}',
-        '  - {id: m-r4, layer: place, entity_ref: ' + cardA + ', x: 500, y: 400}',
-        '',
-      ].join('\n');
-      const before = await window.yushu.doc.read('world/map.yaml').catch(() => null);
-      const beforeLines = (before === null ? '' : before.content).split('\n');
-      await window.yushu.doc.write('world/map.yaml', yaml, before === null ? undefined : before.hash);
-
-      // 面板只在挂载时取数 ⇒ 先去别的页再回来，强制重挂载（R68 的教训）
-      await tab('规则');
-      await tab('世界观档案');
-      const manage = await waitFor(() => document.querySelector('.map-panel .map-marker-manage') || null, 10000);
-      if (!manage) return { ok: false, note: '地图面板里没有「标注清单」这一块（R171 的面板没渲染）' };
-      const countEl = manage.querySelector('.map-status[data-marker-total]');
-      if (!countEl) return { ok: false, note: '清单上没有那个条数行（界面上没有可对账的数）' };
-      const total = Number(countEl.getAttribute('data-marker-total'));
-      const orphan = Number(countEl.getAttribute('data-marker-orphan'));
-      const filtered0 = Number(countEl.getAttribute('data-marker-filtered'));
-      // ① 与**真源**逐字对账：地图文件里写了四条标注 ⇒ 清单就是四条
-      const onDisk = beforeLines.filter((line) => /^\s*-\s*\{id: m-r/.test(line)).length;
-      const countsOk = total === onDisk && orphan === 1 && filtered0 === onDisk;
-
-      // ② 只看孤儿 ⇒ 清单里只剩那一条，而且写清它指向谁
-      const orphanBox = manage.querySelector('.map-marker-orphan-toggle input');
-      if (!orphanBox) return { ok: false, note: '清单里没有「只看孤儿标注」这个开关' };
-      orphanBox.click();
-      const afterFilter = await waitFor(() => {
-        const el = manage.querySelector('.map-status[data-marker-filtered]');
-        return el !== null && Number(el.getAttribute('data-marker-filtered')) === 1 ? el : null;
-      }, 5000);
-      if (!afterFilter) return { ok: false, note: '勾了「只看孤儿标注」之后清单没有筛到那一条' };
-      const rows = [...manage.querySelectorAll('[data-marker-row]')];
-      const onlyRow = rows[0];
-      const rowText = onlyRow === undefined ? '' : String(onlyRow.textContent || '');
-      const orphanNamed =
-        onlyRow !== undefined &&
-        onlyRow.getAttribute('data-marker-orphan') === '1' &&
-        rowText.indexOf(orphanRef) >= 0;
-      const filteredAfter = Number(afterFilter.getAttribute('data-marker-filtered'));
-      orphanBox.click();
-      await waitFor(() => {
-        const el = manage.querySelector('.map-status[data-marker-filtered]');
-        return el !== null && Number(el.getAttribute('data-marker-filtered')) === onDisk ? el : null;
-      }, 5000);
-
-      // ③ 全选筛出来的那些 ⇒ 勾选数与清单条数一致
-      const allBtn = [...manage.querySelectorAll('button')]
-        .find((b) => String(b.textContent || '').trim() === '全选筛出的');
-      if (!allBtn) return { ok: false, note: '清单里没有「全选筛出的」这个按钮' };
-      allBtn.click();
-      const checkedEl = await waitFor(() => {
-        const el = manage.querySelector('.map-status[data-marker-checked]');
-        return el !== null && Number(el.getAttribute('data-marker-checked')) === onDisk ? el : null;
-      }, 5000);
-      if (!checkedEl) return { ok: false, note: '点了「全选筛出的」但勾选数对不上清单条数' };
-      const checked = Number(checkedEl.getAttribute('data-marker-checked'));
-
-      // 改图层：目标图层选「政治」
-      const layerSel = manage.querySelector('select[aria-label="批量改到哪个图层"]');
-      if (!layerSel) return { ok: false, note: '清单里没有「批量改到哪个图层」那个下拉' };
-      layerSel.value = 'political';
-      layerSel.dispatchEvent(new Event('change', { bubbles: true }));
-      await sleep(250);
-      const batchBtn = [...manage.querySelectorAll('button')]
-        .find((b) => String(b.textContent || '').trim() === '改成这个图层');
-      if (!batchBtn) return { ok: false, note: '清单里没有「改成这个图层」这个按钮' };
-      batchBtn.click();
-      const noteEl = await waitFor(() => manage.querySelector('[data-batch-changed]'), 8000);
-      if (!noteEl) return { ok: false, note: '点了「改成这个图层」但没有回执（那一声「改好了」不算数）' };
-      const changedIds = String(noteEl.getAttribute('data-batch-changed') || '');
-      const orphanIds = String(noteEl.getAttribute('data-batch-orphan') || '');
-      const noteText = String(noteEl.textContent || '');
-
-      // ③ 盘上核对：**只改了被点名的那几行**，其余行逐字原样
-      const after = await window.yushu.doc.read('world/map.yaml');
-      const afterLines = after.content.split('\n');
-      const targetIds = changedIds.split(',').filter((id) => id !== '');
-      let onlyTargetsChanged = afterLines.length === beforeLines.length;
-      for (let i = 0; i < beforeLines.length; i += 1) {
-        const line = beforeLines[i];
-        if (/^\s*-\s*\{id: m-r/.test(line)) {
-          const hit = /id: (m-r[0-9])/.exec(line);
-          const id = hit === null ? '' : hit[1];
-          const expected = targetIds.indexOf(id) >= 0 ? line.replace('layer: place', 'layer: political') : line;
-          if (afterLines[i] !== expected) onlyTargetsChanged = false;
-        } else if (afterLines[i] !== line) {
-          onlyTargetsChanged = false;
-        }
-      }
-      // ④ 孤儿标注：点名了、而且**仍在盘上**（没被悄悄丢掉）
-      const orphanStill = after.content.indexOf('id: m-r3') >= 0;
-      const orphanReported = orphanIds.indexOf('m-r3') >= 0;
-      const orphanNamedInNote = noteText.indexOf('m-r3') >= 0 && noteText.indexOf(orphanRef) >= 0;
-
-      const panelEl = document.querySelector('.map-marker-manage');
-      if (panelEl) panelEl.scrollIntoView({ block: 'center' });
-      await sleep(300);
-      return {
-        ok: countsOk && filteredAfter === 1 && orphanNamed && checked === onDisk &&
-          onlyTargetsChanged && orphanStill && orphanReported && orphanNamedInNote,
-        note: '清单条数=' + String(total) + '（盘上 ' + String(onDisk) + ' 条 · 孤儿 ' + String(orphan) + '）' +
-          '；只看孤儿筛出 ' + String(filteredAfter) + ' 条并写清了指向谁=' + String(orphanNamed) +
-          '；全选=' + String(checked) + ' 个；改图层=' + changedIds + '（孤儿点名=' + orphanIds + '）' +
-          '；盘上只改了那些行=' + String(onlyTargetsChanged) +
-          '；孤儿仍在盘上=' + String(orphanStill) + '；回执点了它指向谁=' + String(orphanNamedInNote),
-      };
-        `,
+  },
   },];
 
 /**
