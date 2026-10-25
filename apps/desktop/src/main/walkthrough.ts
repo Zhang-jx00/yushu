@@ -9113,6 +9113,55 @@ const STEPS: StepDef[] = [
           '；相关实体对账（界面 ' + String(shownRefs) + ' vs 盘上 ' + String(diskRefs) + '）',
       };
     `,
+  },
+  {
+    step: 140,
+    title: '导出与自查：七猫平台包已装上 —— 核对日期与出处条数在界面上看得见（T5-8，R177）',
+    file: 'step140-platform-pack.png',
+    body: String.raw`
+      // 这一步证 R177 的三件事：
+      // ① 平台清单里**有七猫**（包真装上了，不是躺在仓库里没人看见）；
+      // ② 平台面板上写着**核对于哪一天**与**出处有几条**——平台规则不许凭印象写，
+      //    而「这份包什么时候核的、核了几处出处」必须让作者看得见；
+      // ③ 选七猫时章头样例按它的模板来（第N章 标题），且没有重复前缀。
+      await tab('规则');
+      await tab('导出与自查'); // 强制重挂载：不继承上一步选中的平台
+      const chips = await waitFor(() => {
+        const c = [...document.querySelectorAll('.export-platforms .chip')];
+        return c.length >= 2 ? c : null;
+      }, 20000);
+      if (chips === null) return { ok: false, note: '平台清单没长出来' };
+      const qimao = chips.find((c) => String(c.textContent).indexOf('七猫') >= 0);
+      if (qimao === undefined) {
+        return { ok: false, note: '平台清单里没有七猫：' + chips.map((c) => String(c.textContent).trim()).join(' / ') };
+      }
+      const chipText = String(qimao.textContent).replace(/\s+/g, ' ').trim();
+      // chip 上就该写着核对日期（「这个包是什么时候核的」写在最显眼的地方）
+      const chipChecked = /核对\s*(\d{4}-\d{2}-\d{2})/.exec(chipText);
+      qimao.click();
+      const panel = await waitFor(() => document.querySelector('.export-platform-panel'), 20000);
+      if (panel === null) return { ok: false, note: '选了七猫但没长出平台面板' };
+      const meta = String(panel.textContent).replace(/\s+/g, ' ');
+      const panelChecked = /核对于\s*(\d{4}-\d{2}-\d{2})/.exec(meta);
+      const sourceCount = /来源\s*(\d+)\s*条/.exec(meta);
+      const samples = [...panel.querySelectorAll('.export-platform-samples tbody tr')].map((tr) => ({
+        title: String(tr.children[1].textContent).trim(),
+        head: String(tr.children[2].textContent).trim(),
+      }));
+      const DUPLICATED = /第[0-9一二三四五六七八九十百千]+[章节回]\s*第[0-9一二三四五六七八九十百千]+[章节回]/;
+      const headsOk = samples.length > 0 && samples.every((s) => s.head.indexOf('第') >= 0 && !DUPLICATED.test(s.head));
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(240);
+      return {
+        ok: chipChecked !== null && panelChecked !== null && sourceCount !== null && Number(sourceCount[1]) > 0 && headsOk,
+        note: '七猫在平台清单里=True' +
+          '；chip 上写着核对日期=' + (chipChecked === null ? '无' : chipChecked[1]) +
+          '；面板核对于=' + (panelChecked === null ? '无' : panelChecked[1]) +
+          '；出处条数=' + (sourceCount === null ? '无' : sourceCount[1]) +
+          '；章头样例=' + String(samples.length) + ' 条·形状对=' + String(headsOk) +
+          '（' + (samples.length > 0 ? samples[0].head : '无') + '）',
+      };
+    `,
   },];
 
 /**
