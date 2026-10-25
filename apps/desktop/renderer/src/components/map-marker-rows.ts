@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import type { WorldMapMarkerRow } from "../../../src/shared/ipc";
+import type { WorldMapMarkerRow } from "../../../src/shared/ipc.js";
 
 /**
  * 标注清单的**筛选**（R171）。
