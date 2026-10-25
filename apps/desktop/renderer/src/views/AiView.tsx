@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AiAdoptAuditPayload,
   AiCostPanelPayload,
@@ -20,6 +20,7 @@ import type {
 import { api } from "../api";
 import { Disclosure } from "../components/Disclosure";
 import { StateNote } from "../components/StateNote";
+import { summarizeAiSession } from "../components/ai-session";
 import { TypewriterBuffer, type TypewriterMode } from "../typewriter-buffer";
 import { diffSentences, mergeSelected, splitSentences } from "../candidate-diff";
 import { REJECT_REASON_PRESETS, type AiFeedbackState } from "../../../src/shared/ipc";
@@ -37,6 +38,12 @@ import { REJECT_REASON_PRESETS, type AiFeedbackState } from "../../../src/shared
  * - **Token 与成本面板（T3-12，J09）**：usage 实报 + 本地估算双口径聚合（按任务 / 按模型分解、预估 vs 实付偏差、
  *   定价表状态、稳定前缀缓存编排核对）；金额与偏差文本全部由主进程下发，渲染层不再自造格式化口径；
  * - 结果以候选呈现，显式采纳才写正文；AI 使用记录来自 .yushu/ai-usage.jsonl。
+ *
+ * R163 三栏化（docs/11 §7.42）：左=**能力与路由**（开关 / Provider）/ 中=**候选与采纳**（生成目标 /
+ * 上下文预览器 / 候选正文 / 采纳后轻校验 / 多候选对比）/ 右=**本次会话的产物**（候选与采纳的数 +
+ * AI 使用记录 + Token 与成本）。骨架是 R154 立的**共用** `.three-col`。
+ * **候选化不变**：右栏只**报数**（候选 / 已采纳 / 已拒绝 / 还没处置），**不提供任何采纳入口**
+ * ⇒ 采纳这一步仍在中栏、由作者显式操作（docs/11 §7.42）。
  */
 
 interface GenerateResult {
@@ -306,6 +313,27 @@ export function AiView() {
   const bufferRef = useRef<TypewriterBuffer | null>(null);
   const frameRef = useRef<number | null>(null);
   const modeRef = useRef<TypewriterMode>("smooth");
+
+  /**
+   * R163：右栏「本次会话的产物」的数字 —— **纯函数**从**同一份状态**现算
+   * （候选数组与使用记录就是中栏那两个面板渲染的那两份 ⇒ 右栏与中栏必然对得上）。
+   *
+   * 这里只**报数**，不提供任何采纳入口（采纳仍在中栏、由作者显式操作 ⇒ 候选化不变）。
+   */
+  const session = useMemo(
+    () =>
+      summarizeAiSession({
+        candidates: candidates.map((item) => ({
+          streamId: item.streamId,
+          index: item.index,
+          chars: item.chars,
+          adopted: item.adopted,
+          rejected: item.rejected,
+        })),
+        usage: usageList,
+      }),
+    [candidates, usageList],
+  );
 
   // 配置编辑（T3-4：provider 列表草稿——逐行编辑 / 添加本地预设 / 删除）
   const [providersDraft, setProvidersDraft] = useState<AiProviderPayload[] | null>(null);
@@ -798,8 +826,9 @@ export function AiView() {
   };
 
   return (
-    <div className="ai">
-      <aside>
+    <div className="ai three-col ai-three-col">
+      {/* 左栏 = 能力与路由（R163）：这一页「我有什么能调」 */}
+      <aside className="ai-col-capability">
         <section className="panel">
           <h3>
             AI 副驾开关 <span className="muted">默认关闭</span>
@@ -814,7 +843,6 @@ export function AiView() {
             <span>启用 AI 调用（关闭时本地功能不受影响；生成属于唯一联网步骤）</span>
           </label>
         </section>
-
         <section className="panel">
           <h3>
             Provider <span className="muted">{config?.exists ? "config/llm.yaml" : "内置默认（未落盘）"}</span>
@@ -987,7 +1015,10 @@ export function AiView() {
             </button>
           </div>
         </section>
+      </aside>
 
+      {/* 中栏 = 候选与采纳（R163）：这一页「我正在做什么」 */}
+      <div className="ai-col-work">
         <section className="panel">
           <h3>
             生成目标 <span className="muted">{drafts.length} 个草稿章节</span>
@@ -1050,9 +1081,6 @@ export function AiView() {
             />
           </label>
         </section>
-      </aside>
-
-      <section>
         <div className="panel">
           <div className="panel-title">
             <h3>
@@ -1380,7 +1408,48 @@ export function AiView() {
             </ul>
           </div>
         )}
+      </div>
 
+      {/* 右栏 = 本次会话的产物（R163）：这一页「我做出了什么」 */}
+      <aside className="ai-col-outputs">
+        <section
+          className="panel ai-session"
+          data-ai-session-candidates={session.candidates}
+          data-ai-session-adopted={session.adopted}
+          data-ai-session-rejected={session.rejected}
+          data-ai-session-pending={session.pending}
+        >
+          <div className="panel-title">
+            本次会话的产物 <span className="muted">候选 / 采纳 / 用量</span>
+          </div>
+          {session.note !== "" ? (
+            <div className="muted">{session.note}</div>
+          ) : (
+            <>
+              <div className="ai-session-counts">
+                <span>
+                  候选 <strong>{session.candidates}</strong>
+                </span>
+                <span>
+                  已采纳 <strong>{session.adopted}</strong>
+                </span>
+                <span>
+                  已拒绝 <strong>{session.rejected}</strong>
+                </span>
+                <span>
+                  还没处置 <strong>{session.pending}</strong>
+                </span>
+              </div>
+              <div className="muted">
+                候选字数合计 {session.chars} 字 · 使用记录 {session.usage.entries} 条（生成{" "}
+                {session.usage.generate} · 采纳 {session.usage.adopt}）
+              </div>
+              <p className="muted">
+                AI 的输出永远是候选：作者显式采纳才写正文。这一栏只报数，采纳入口在中间那栏。
+              </p>
+            </>
+          )}
+        </section>
         <div className="panel">
           <h3>
             AI 使用记录 <span className="muted">.yushu/ai-usage.jsonl（证据链，T1-17）</span>
@@ -1505,7 +1574,7 @@ export function AiView() {
             </>
           )}
         </div>
-      </section>
+      </aside>
     </div>
   );
 }

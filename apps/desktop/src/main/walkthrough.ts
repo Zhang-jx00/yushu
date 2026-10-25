@@ -6125,6 +6125,8 @@ const STEPS: StepDef[] = [
         '世界观档案': '.archive',
         '稿件总览': '.library-three-col',
         '码字统计': '.stats-three-col',
+        // R163：AI 副驾页也走三栏骨架 ⇒ 排版巡检把它算进来（不许有分栏页面漏在巡检外）
+        'AI 副驾': '.ai-three-col',
       };
       const problems = [];
       const seen = [];
@@ -8317,12 +8319,20 @@ const STEPS: StepDef[] = [
       // ② 这一页刚挂上，还没导过 ⇒ 右栏必须如实说没有（不许装成有）
       const saidNone = String(outs.textContent || '').indexOf('还没有导出过') >= 0;
       // ③ 走产品自己的那条路导一次：勾「我已核对」→ 点「确认导出」
-      const confirm = document.querySelector('.export-col-work .confirm-check input');
-      if (!confirm) return { ok: false, note: '中栏里没有那个「我已核对」的勾选框' };
+      //    **等核对回来再勾**（R122 那条教训：查得太早就是"还没到"）：
+      //    那个勾选框在预览回来之前是**禁用**的 ⇒ 早点一下等于没点 ⇒ 按钮永远点不动。
+      const confirm = await waitFor(() => {
+        const box = document.querySelector('.export-col-work .confirm-check input');
+        return box !== null && box.disabled !== true ? box : null;
+      }, 20000);
+      if (!confirm) return { ok: false, note: '中栏里那个「我已核对」的勾选框一直不可勾（核对还没回来）' };
       confirm.click();
       await sleep(300);
-      const runBtn = [...document.querySelectorAll('.export-col-work button')]
-        .find((b) => String(b.textContent || '').indexOf('确认导出') === 0 && !b.disabled);
+      const runBtn = await waitFor(() => {
+        const btn = [...document.querySelectorAll('.export-col-work button')]
+          .find((b) => String(b.textContent || '').indexOf('确认导出') === 0 && !b.disabled);
+        return btn || null;
+      }, 10000);
       if (!runBtn) return { ok: false, note: '中栏里没有可点的「确认导出」按钮' };
       runBtn.click();
       const holder = await waitFor(() => document.querySelector('[data-export-path]') || null, 20000);
@@ -8541,6 +8551,8 @@ const STEPS: StepDef[] = [
         { tab: '记忆', root: '.memory' },
         { tab: '世界观档案', root: '.archive' },
         { tab: '码字统计', root: '.stats-three-col' },
+        // R163：AI 副驾页也是分栏页面 ⇒ 取证那一步也得逐页量它
+        { tab: 'AI 副驾', root: '.ai-three-col' },
       ];
       const seen = [];
       const problems = [];
@@ -8798,7 +8810,103 @@ const STEPS: StepDef[] = [
       };
     `,
   },
-];
+  {
+    step: 124,
+    title: 'AI 副驾页三栏：左=能力与路由 / 中=候选与采纳 / 右=本次会话的产物（R163）',
+    file: 'step124-ai-three-col.png',
+    body: String.raw`
+      // 这一步证 R163 的五件事：
+      // ① **三栏并排**（量左边界依次右移，不是只认类名）；
+      // ② 右栏的**候选数与中栏的候选卡数一致**（同一份状态的两个读法）；
+      // ③ 采纳一次之后，右栏的**已采纳数跟着变**（不是写死的数）；
+      // ④ **候选化不变**：右栏里**没有**任何采纳入口（采纳按钮还在中栏）；
+      // ⑤ 右栏那三个数与中栏「候选 N 个」那一行**逐字对得上**。
+      await tab('AI 副驾');
+      // ① 三栏在不在（量左边界）
+      const cols = await waitFor(() => {
+        const list = [...document.querySelectorAll('.ai-three-col > *')].filter((el) => {
+          const b = el.getBoundingClientRect();
+          return b.width > 0 && b.height > 0;
+        });
+        return list.length === 3 ? list : null;
+      }, 10000);
+      if (!cols) return { ok: false, note: 'AI 副驾页没有三栏（能力与路由 / 候选与采纳 / 本次会话的产物）' };
+      const rects = cols.map((el) => el.getBoundingClientRect());
+      const sideBySide = rects[0].left < rects[1].left && rects[1].left < rects[2].left;
+      // 右栏那一块在不在
+      const summary = await waitFor(() => document.querySelector('.ai-col-outputs .ai-session') || null, 8000);
+      if (!summary) return { ok: false, note: '右栏没有「本次会话的产物」那一块' };
+      // AI 副驾随标签页卸载重建 ⇒ 开关状态会重置（先开开关，否则生成按钮不可用）
+      const enableBox = document.querySelector('.ai-col-capability input[type="checkbox"]');
+      if (enableBox && !enableBox.checked) enableBox.click();
+      await sleep(250);
+      const runPanel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.ai-col-work .panel h3')].find((x) => x.textContent.includes('候选正文'));
+        return title ? title.closest('.panel') : null;
+      }, 8000);
+      if (!runPanel) return { ok: false, note: '中栏里没有「候选正文」面板' };
+      const multiBtn = [...runPanel.querySelectorAll('button')].find((b) => String(b.textContent || '').includes('个候选'));
+      if (!multiBtn || multiBtn.disabled) return { ok: false, note: '多候选按钮不可用' };
+      multiBtn.click();
+      const cards = await waitFor(() => {
+        const list = [...document.querySelectorAll('.ai-candidate-card')];
+        return list.length >= 2 ? list : null;
+      }, 30000);
+      if (!cards) return { ok: false, note: '多候选未生成' };
+      await sleep(400);
+      // ② 右栏的候选数 == 中栏的候选卡数 == 中栏「候选 N 个」那一行
+      const listed = Number(summary.getAttribute('data-ai-session-candidates') || '0');
+      const multiPanel = await waitFor(() => {
+        const title = [...document.querySelectorAll('.ai-col-work .panel h3')].find((x) => x.textContent.includes('多候选对比'));
+        return title ? title.closest('.panel') : null;
+      }, 8000);
+      const middleText = multiPanel === null ? '' : String(multiPanel.textContent || '');
+      const middleMatch = /候选\s*(\d+)\s*个/.exec(middleText);
+      const middleShown = middleMatch === null ? -1 : Number(middleMatch[1]);
+      const countOk = listed === cards.length && middleShown === cards.length;
+      // ③ 采纳一次 ⇒ 右栏的已采纳数从 0 变成 1
+      const before = Number(summary.getAttribute('data-ai-session-adopted') || '0');
+      const first = cards[0];
+      const toggle = [...first.querySelectorAll('button')].find((b) => String(b.textContent || '').includes('按句采纳'));
+      if (!toggle) return { ok: false, note: '候选卡里没有「按句采纳」按钮' };
+      toggle.click();
+      await sleep(250);
+      const boxes = [...first.querySelectorAll('.sentences input[type="checkbox"]')];
+      if (boxes.length > 0) boxes[0].click();
+      const adoptBtn = document.querySelector('.ai-sentence-adopt');
+      if (!adoptBtn) return { ok: false, note: '没有「采纳所选句」按钮' };
+      adoptBtn.click();
+      const after = await waitFor(() => {
+        const now = Number(summary.getAttribute('data-ai-session-adopted') || '0');
+        return now > 0 ? now : null;
+      }, 15000);
+      const adoptedCards = [...document.querySelectorAll('.ai-candidate-card')]
+        .filter((card) => /已(替换|追加)采纳/.test(String(card.textContent || ''))).length;
+      const adopted = after === null ? -1 : Number(after);
+      const adoptedOk = adopted === adoptedCards && adopted === before + 1;
+      // ④ 候选化不变：右栏里没有能写库的入口
+      const rightWrite = [...document.querySelectorAll('.ai-col-outputs button')]
+        .filter((b) => /采纳|应用|替换|追加/.test(String(b.textContent || '')));
+      const rightClean = rightWrite.length === 0;
+      const midHasAdopt = [...document.querySelectorAll('.ai-col-work button')]
+        .some((b) => String(b.textContent || '').includes('整段采纳'));
+      // 截图要看得见"右栏那三个数" ⇒ 把右栏滚到画面里
+      const right = document.querySelector('.ai-col-outputs');
+      if (right) right.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: sideBySide && countOk && adoptedOk && rightClean && midHasAdopt,
+        note: '三栏并排=' + String(sideBySide) + '（左 ' + String(Math.round(rects[0].left)) + ' / 中 ' +
+          String(Math.round(rects[1].left)) + ' / 右 ' + String(Math.round(rects[2].left)) + '）' +
+          '；候选对账（右栏 ' + String(listed) + ' vs 候选卡 ' + String(cards.length) +
+          ' vs 中栏那一行 ' + String(middleShown) + '）' +
+          '；已采纳对账（采纳前 ' + String(before) + ' → 采纳后 ' +
+          String(adopted === -1 ? '（没变）' : String(adopted)) +
+          ' vs 标了已采纳的卡 ' + String(adoptedCards) + '）' +
+          '；右栏没有采纳入口=' + String(rightClean) + '；中栏还有整段采纳=' + String(midHasAdopt),
+      };
+    `,
+  },];
 
 /**
  * 步骤截图（验收证据，复核修复 2026-09-29）：

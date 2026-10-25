@@ -1641,33 +1641,55 @@ select {
 
 /* ---------- AI 副驾 ---------- */
 
+/* R163：AI 副驾页也走**共用的**三栏骨架（左=能力与路由 / 中=候选与采纳 / 右=本次会话的产物）。
+   骨架是 R154 立的 `.three-col`（不是这一页自己写的网格）⇒ 右栏 22% 用百分比，
+   不给"长度字面量棘轮"（只许降不升）添新账。 */
 .ai {
   flex: 1;
-  display: grid;
-  grid-template-columns: 340px 1fr;
   min-height: 0;
 }
 
-.ai aside {
-  border-right: 1px solid var(--border);
-  padding: 12px;
-  overflow: auto;
-  min-height: 0;
+/* 三栏各自竖排（滚动交给各栏：左右两栏由 `.three-col > aside` 负责，中栏自己滚） */
+.ai-col-capability {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-6);
+  min-height: 0;
+  padding: var(--space-6);
 }
 
-/* R124：只命中**直接子级**。原先写的是后代选择器（`.ai section`）⇒
-   列里**嵌套的那个 section** 也被套上这组规则（flex 列 + min-height:0）⇒
-   它被压缩、内容溢出自己、压住下面的卡片（用户截图里的「卡片全叠在一起」）。 */
-.ai > section {
-  padding: 16px 20px;
-  overflow: auto;
-  min-height: 0;
+.ai-col-work {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-6);
+  min-height: 0;
+  padding: var(--space-8) var(--space-10);
+  overflow: auto;
+}
+
+.ai-col-outputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-height: 0;
+  padding: var(--space-8) var(--space-10);
+}
+
+/* 三栏各自的块**不许被压扁**（flex 默认会缩 ⇒ 面板内容越出自己的盒子 ⇒ 排版巡检当场抓到）。
+   R124 那条纪律的延续：这一页原先是 `.ai > section` / `.ai > aside` 两条直接子级规则，
+   改成三栏以后挪到这三栏自己的类名上（**不许因为换结构就把这条丢了**）。 */
+.ai-col-capability > *,
+.ai-col-work > *,
+.ai-col-outputs > * {
+  flex: 0 0 auto;
+}
+
+/* R163：右栏「本次会话的产物」那四个数并排摆 */
+.ai-session-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
 }
 
 .checkbox {

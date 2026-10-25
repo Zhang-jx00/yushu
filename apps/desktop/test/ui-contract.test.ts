@@ -1590,7 +1590,7 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
     // **先剥注释**再扫规则：注释里写着 `{ min-height: 0 }` 这种带花括号的片段时，
     // 规则正则会被切碎、扫出来的"规则"根本不是规则（判据就会恒绿 —— 实测踩过）。
     const bareCss = css.replace(/\/\*[\s\S]*?\*\//g, "");
-    for (const name of ["genesis", "outline", "ai", "memory"]) {
+    for (const name of ["genesis", "outline", "memory"]) {
       // 规则可能是**分组选择器**（几个页面共用一条）⇒ 不能用"选择器后面紧跟 {"的写法，
       // 要把选择器列表里含它的规则都找出来。
       const bodies = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
@@ -1599,6 +1599,21 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
         .join(" ");
       expect(bodies, `${name} 页面列的子项没有「按内容撑高」这条（flex: none）`).toContain("flex: none");
     }
+    // R163：AI 副驾页改成三栏 ⇒ 中栏不是 section 而是 `.ai-col-work`，
+    // 左右两栏是 `.ai-col-capability` / `.ai-col-outputs` ⇒ 那条「按内容撑高」挪到它们身上
+    // （**不许因为换结构就把这条丢了** —— 与 R156 改导出页时同一条纪律）。
+    const aiWork = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => (m[1] ?? "").includes("ai-col-work > *"))
+      .map((m) => m[2] ?? "")
+      .join(" ");
+    expect(aiWork, "AI 副驾页中栏的子项没有「按内容撑高」这条（flex: 0 0 auto）").toContain(
+      "flex: 0 0 auto",
+    );
+    const aiAsides = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => /ai-col-(capability|outputs) > \*/.test(m[1] ?? ""))
+      .map((m) => m[2] ?? "")
+      .join(" ");
+    expect(aiAsides, "AI 副驾页左右两栏的子项没有「按内容撑高」这条").toContain("flex: 0 0 auto");
     // R156：导出页改成三栏 ⇒ 中栏不是 section 而是 `.export-col-work`，
     // 那条「按内容撑高」挪到了它身上（**不许因为换结构就把这条丢了**）。
     const exportWork = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
@@ -1632,7 +1647,7 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
       `这些后代选择器会把列里**嵌套的 section** 也套上 flex 列规则 ⇒ 内容溢出、压住彼此：${offenders.join(" | ")}`,
     ).toEqual([]);
     // 反过来也要看一眼：直接子级那条规则确实在
-    for (const name of ["genesis", "outline", "ai", "memory"]) {
+    for (const name of ["genesis", "outline", "memory"]) {
       expect(css, `${name} 页面列没有「直接子级」规则`).toMatch(
         new RegExp(`^\\.${name} > section \\{`, "m"),
       );
@@ -1641,6 +1656,9 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
     expect(css, "导出页中栏没有「直接子级」规则").toMatch(/^\.export-col-work \{/m);
     // 也不许给导出页写回后代选择器（那正是 R124 那条毛病）
     expect(css, "导出页不许有后代选择器").not.toMatch(/^\.export (section|aside) \{/m);
+    // R163：AI 副驾页的中栏是 `.ai-col-work`（不是 section）⇒ 那条「直接子级」规则在它身上
+    expect(css, "AI 副驾页中栏没有「直接子级」规则").toMatch(/^\.ai-col-work \{/m);
+    expect(css, "AI 副驾页不许有后代选择器").not.toMatch(/^\.ai (section|aside) \{/m);
   });
 });
 
@@ -3250,7 +3268,7 @@ describe("码字统计页三栏（R158）：左=汇总与日历 / 中=今日与�
  * 判据盯五件事：
  * ① **新加的巡检项真的在跑**（认**回执**：报告里那一行写着"分栏并排=N/N 页"——
  *    只钉"问题=0"的话，巡检项删了照样绿；只认源码的话，源码写了没跑也照样绿 ⇒ 两条都要）；
- * ② **七个分栏页面一个都不许漏**（认根容器选择器，含 R158 新加的码字统计）；
+ * ② **八个分栏页面一个都不许漏**（认根容器选择器：R158 加了码字统计，R163 加了 AI 副驾）；
  * ③ 三件事各量各的（并排 / 栏与栏不重叠 / 内容不越栏），不许拿同一条判据糊过去；
  * ④ **窄栏里塞不下的宽内容自己横向滚**（docs/11 §7.34：宽表在窄栏里自己滚，不许把整页撑宽）；
  * ⑤ 各栏的块**不许被压扁**（R154 那次中栏的面板被压扁 ⇒ 内容越出盒子 3~329px）。
@@ -3287,6 +3305,8 @@ describe("三栏之后的排版总巡检（R159）：并排 / 不重叠 / 不越
     ".archive",
     ".library-three-col",
     ".stats-three-col",
+    // R163：AI 副驾页也走三栏骨架 ⇒ 排版巡检与取证都得把它算进去（不许有分栏页面漏在巡检外）
+    ".ai-three-col",
   ];
 
   it("**新加的巡检项真的在跑**（认回执：报告里那一行写着数）", () => {
@@ -3304,12 +3324,12 @@ describe("三栏之后的排版总巡检（R159）：并排 / 不重叠 / 不越
     ).toContain("自己横向滚的窄栏=");
   });
 
-  it("**七个分栏页面一个都不许漏**（认**那一步的脚本**，含 R158 新加的码字统计）", () => {
+  it("**八个分栏页面一个都不许漏**（认**那一步的脚本**，含 R158 的码字统计与 R163 的 AI 副驾）", () => {
     const audit = stepBody(88);
     expect(audit, "没找到 step88 的脚本").not.toBe("");
     const column = stepBody(121);
     expect(column, "没找到 step121 的脚本").not.toBe("");
-    // 判定那一步与取证那一步，两边都得把七个分栏页面列全（少一个就漏检一页）
+    // 判定那一步与取证那一步，两边都得把八个分栏页面列全（少一个就漏检一页）
     for (const sel of COLUMN_ROOTS) {
       expect(audit, `step88 的巡检里没有 ${sel} 这个分栏根容器`).toContain(sel);
       expect(column, `step121 的取证里没有 ${sel} 这个分栏根容器`).toContain(sel);
@@ -3604,5 +3624,115 @@ describe("世界观档案页三栏（R162）：左=图谱与清单 / 中=地图�
     expect(body, "对账没有比摘要").toContain(
       "fsSum === summaryOf(document.querySelector('.foreshadow-board'))",
     );
+  });
+});
+
+/**
+ * **AI 副驾页三栏**（R163）：左=能力与路由 / 中=候选与采纳 / 右=本次会话的产物。
+ *
+ * 判据盯七件事：
+ * ① 页面用的是**共用的三栏骨架**（R154 立的 `.three-col` ⇒ 不是每页各写一套网格）；
+ * ② 三段各在其位，而且**认位置**（左=开关与 Provider / 中=生成目标与多候选对比 / 右=产物摘要）；
+ * ③ 右栏的数**从同一份状态现算**（走纯函数 `summarizeAiSession`，界面不自己数一遍）；
+ * ④ **候选化不变**：采纳入口**必须还在中栏**，右栏**一个都不许有**（三栏化不许把"采纳"这一步省掉）；
+ * ⑤ 中栏的候选卡与右栏的数**一一对应**（对账的抓手在：两边都摆得出数）；
+ * ⑥ 右栏的名字**不与中栏撞**（R154「豁免率 / 豁免占比」那条教训）；
+ * ⑦ **预演真的跑了**（认回执：step124 的回执里写着对账的数 —— 源码里写了不算，跑过才算）。
+ */
+describe("AI 副驾页三栏（R163）：左=能力与路由 / 中=候选与采纳 / 右=本次会话的产物", () => {
+  const view = readFileSync(join(VIEW_ROOT, "views", "AiView.tsx"), "utf8");
+  const mod = readFileSync(join(VIEW_ROOT, "components", "ai-session.ts"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+  const walk = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "walkthrough.ts"), "utf8");
+  const report = JSON.parse(
+    readFileSync(join(ROOT, "docs", "assets", "m1-preview", "walkthrough-report.json"), "utf8"),
+  ) as { steps: Array<{ step: number; detail: string }> };
+
+  const at = (needle: string): number => view.indexOf(needle);
+  /** 剥掉 JSX 注释（`{/* … *\/}`）—— 注释里也会提到栏的名字，别让它冒充"这一栏里真有那块" */
+  const stripComments = (text: string): string => text.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const leftBlock = (): string => stripComments(view.slice(at('className="ai-col-capability"'), at('className="ai-col-work"')));
+  const midBlock = (): string => stripComments(view.slice(at('className="ai-col-work"'), at('className="ai-col-outputs"')));
+  const rightBlock = (): string => stripComments(view.slice(at('className="ai-col-outputs"')));
+
+  it("页面用的是**共用的三栏骨架**（不是每页各写一套网格）", () => {
+    expect(view, "AI 副驾页没用共用的三栏骨架").toContain('className="ai three-col ai-three-col"');
+    expect(css, "三栏骨架没写").toMatch(/\.three-col\s*\{[^}]*grid-template-columns:[^;]*22%/);
+    // 这一页不许自己再排一套网格
+    expect(css, "AI 副驾页自己又写了一套网格").not.toMatch(/\.ai\s*\{[^}]*grid-template-columns/);
+  });
+
+  it("三段各在其位（认**位置**，不是「文件里出现过」就算）", () => {
+    const capability = at('className="ai-col-capability"');
+    const work = at('className="ai-col-work"');
+    const outputs = at('className="ai-col-outputs"');
+    expect(capability, "左栏不在").toBeGreaterThan(-1);
+    expect(work, "中栏不在").toBeGreaterThan(capability);
+    expect(outputs, "右栏不在").toBeGreaterThan(work);
+    // 左栏 = 能力与路由
+    expect(leftBlock(), "左栏里没有开关").toContain("AI 副驾开关");
+    expect(leftBlock(), "左栏里没有 Provider").toContain("Provider");
+    // 中栏 = 候选与采纳
+    expect(midBlock(), "中栏里没有生成目标").toContain("生成目标");
+    expect(midBlock(), "中栏里没有多候选对比").toContain("多候选对比");
+    // 右栏 = 本次会话的产物
+    expect(rightBlock(), "右栏里没有本次会话的产物").toContain("本次会话的产物");
+    expect(rightBlock(), "右栏里没有 Token 与成本").toContain("Token 与成本");
+  });
+
+  it("右栏的数**从同一份状态现算**（走纯函数，界面不自己数一遍）", () => {
+    expect(view, "右栏没走那个纯函数").toContain("summarizeAiSession");
+    expect(mod, "纯函数模块没导出那个函数").toContain("export function summarizeAiSession");
+    // 纯函数：只读入参 ⇒ 可单测（不许碰盘、不许读墙钟）
+    expect(mod, "纯函数模块不许碰 fs").not.toContain("node:fs");
+    expect(mod, "纯函数模块不许读墙钟").not.toContain("Date.now");
+    // 右栏的数都来自那个纯函数的结果，不许在界面上自己数一遍
+    expect(rightBlock(), "右栏没摆那个纯函数的结果").toContain("session.candidates");
+    expect(rightBlock(), "右栏自己数了一遍候选").not.toContain("candidates.length");
+  });
+
+  it("**候选化不变**：采纳入口还在中栏，右栏一个都没有", () => {
+    // 中栏必须仍有采纳入口（整段 / 追加 / 按句）
+    expect(midBlock(), "中栏里没有整段采纳").toContain("整段采纳");
+    expect(midBlock(), "中栏里没有按句采纳").toContain("ai-sentence-adopt");
+    // 右栏**不许**出现任何能写库的入口（三栏化不许把"采纳"这一步省掉）
+    for (const marker of ["整段采纳", "追加到正文", "ai-sentence-adopt", "adoptCandidate("]) {
+      expect(rightBlock(), `右栏不该有「${marker}」这个采纳入口`).not.toContain(marker);
+    }
+  });
+
+  it("中栏的候选卡与右栏的数**一一对应**（对账的抓手在）", () => {
+    expect(view, "右栏没有摆候选数").toContain("data-ai-session-candidates={session.candidates}");
+    expect(view, "右栏没有摆已采纳数").toContain("data-ai-session-adopted={session.adopted}");
+    expect(view, "右栏没有摆还没处置数").toContain("data-ai-session-pending={session.pending}");
+    // 中栏那个「候选 N 个」就是同一份候选数组的长度 ⇒ 两处必然一致
+    expect(midBlock(), "中栏没有那个候选计数").toContain("候选 {candidates.length} 个");
+  });
+
+  it("右栏的名字**不与中栏撞**（R154「豁免率 / 豁免占比」那条教训）", () => {
+    const rightTitles = ["本次会话的产物", "AI 使用记录", "Token 与成本"];
+    for (const title of rightTitles) {
+      expect(rightBlock(), `右栏没有「${title}」这一块`).toContain(title);
+      expect(midBlock(), `右栏的「${title}」与中栏撞了`).not.toContain(title);
+    }
+  });
+
+  it("**预演真的跑了**（认回执：step124 的回执里写着对账的数）", () => {
+    const step = report.steps.find((row) => row.step === 124);
+    expect(step, "报告里没有 step124（AI 副驾页三栏）那一步").toBeTruthy();
+    const detail = (step as { detail: string }).detail;
+    expect(detail, "step124 的回执里没有「三栏并排=」").toContain("三栏并排=");
+    expect(detail, "step124 的回执里没有候选数的对账").toContain("候选对账");
+    expect(detail, "step124 的回执里没有采纳数的对账").toContain("已采纳对账");
+  });
+
+  it("预演那一步**真的在对账**（认量法：右栏的数与中栏的候选卡比）", () => {
+    const start = walk.indexOf("step: 124,");
+    const end = walk.indexOf("step: 125,", start);
+    const body = walk.slice(start, end < 0 ? walk.length : end);
+    expect(body, "没找到 step124 的脚本").not.toBe("");
+    expect(body, "并排那条没有量左边界").toContain("rects[0].left < rects[1].left");
+    expect(body, "对账没有比右栏的候选数").toContain("listed === cards.length");
+    expect(body, "对账没有比右栏的已采纳数").toContain("adopted === adoptedCards");
   });
 });
