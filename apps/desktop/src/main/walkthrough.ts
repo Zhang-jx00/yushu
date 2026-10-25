@@ -421,6 +421,35 @@ export function buildScript(body: string): string {
     };
     const lines = (el) => (el ? el.innerText.split(String.fromCharCode(10)).join(' | ') : '');
     const pageText = () => document.body.innerText.slice(0, 500);
+    // R166：**全预演一份**的颜色算法与阈值（原先对比度只写在 step99 里一份 ⇒ 巡检要算就得写第二份
+    // ⇒ 两份会漂）。现在提到这里，step99 与排版巡检**共用同一份**。
+    const CONTRAST_FLOOR = 4.5;
+    const HIT_MIN = 32;
+    const FONT_MIN_PX = 11;
+    const relativeLuminance = (rgb) => {
+      const m = String(rgb).match(/(\d+(?:\.\d+)?)/g);
+      if (!m) return 0;
+      const f = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+      return 0.2126 * f(Number(m[0]) / 255) + 0.7152 * f(Number(m[1]) / 255) + 0.0722 * f(Number(m[2]) / 255);
+    };
+    const contrastRatio = (a, b) => {
+      const la = relativeLuminance(a); const lb = relativeLuminance(b);
+      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    };
+    // 元素"所在的那层背景"：往上找**第一个不透明**的祖先背景（找不到就用 body 的）
+    const bgOf = (el) => {
+      let node = el;
+      while (node !== null && node !== document.body) {
+        const c = getComputedStyle(node).backgroundColor;
+        const m = String(c).match(/(\d+(?:\.\d+)?)(?:,\s*(\d+(?:\.\d+)?))?/);
+        if (m !== null && m[1] !== undefined) {
+          const alpha = m[2] === undefined ? 1 : Number(m[2]);
+          if (alpha > 0.05) return c;
+        }
+        node = node.parentElement;
+      }
+      return getComputedStyle(document.body).backgroundColor;
+    };
     window.confirm = () => true;
     try {
       ${body}
@@ -6808,30 +6837,7 @@ const STEPS: StepDef[] = [
       // 把样式表声明的所有「字色 × 底色」组合逐套主题算一遍。两道门禁各管一半。
       const TABS = ['起源工作台', '三级大纲', '编辑器', '稿件总览', 'AI 副驾', '记忆', '规则', '导出与自查', '世界观档案', '码字统计', '项目文件'];
       const THEMES = ['light', 'dark', 'dark-soft'];
-      const lum = (rgb) => {
-        const m = String(rgb).match(/(\d+(?:\.\d+)?)/g);
-        if (!m) return 0;
-        const f = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
-        return 0.2126 * f(Number(m[0]) / 255) + 0.7152 * f(Number(m[1]) / 255) + 0.0722 * f(Number(m[2]) / 255);
-      };
-      const ratio = (a, b) => {
-        const la = lum(a); const lb = lum(b);
-        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-      };
-      // 元素"所在的那层背景"：往上找**第一个不透明**的祖先背景（找不到就用 body 的）
-      const bgOf = (el) => {
-        let node = el;
-        while (node !== null && node !== document.body) {
-          const c = getComputedStyle(node).backgroundColor;
-          const m = String(c).match(/(\d+(?:\.\d+)?)(?:,\s*(\d+(?:\.\d+)?))?/);
-          if (m !== null && m[1] !== undefined) {
-            const alpha = m[2] === undefined ? 1 : Number(m[2]);
-            if (alpha > 0.05) return c;
-          }
-          node = node.parentElement;
-        }
-        return getComputedStyle(document.body).backgroundColor;
-      };
+      // R166：对比度算法与"元素所在背景"已提到 buildScript 的**共享前置段**（全预演一份）⇒ 这里不再写第二份。
       const setTheme = async (value) => {
         const select = document.querySelector('.theme-picker select');
         if (select === null) return;
@@ -6858,7 +6864,7 @@ const STEPS: StepDef[] = [
             const cs = getComputedStyle(el);
             if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) < 0.15) continue;
             const bg = bgOf(el);
-            const r = ratio(cs.color, bg);
+            const r = contrastRatio(cs.color, bg);
             if (r < min) {
               min = r;
               who = text.slice(0, 12);
@@ -9131,9 +9137,11 @@ const STEPS: StepDef[] = [
         return c.length >= 2 ? c : null;
       }, 20000);
       if (chips === null) return { ok: false, note: '平台清单没长出来' };
-      const qimao = chips.find((c) => String(c.textContent).indexOf('七猫') >= 0);
+      // chip 上摆的是包里的 **platform 字段**（qimao / fanqie），不是中文平台名
+      // （R177 第一版按「七猫」找 ⇒ 清单里明明有它却找不到 ⇒ **判据写窄了**，不是产品缺包）。
+      const qimao = chips.find((c) => String(c.textContent).indexOf('qimao') >= 0);
       if (qimao === undefined) {
-        return { ok: false, note: '平台清单里没有七猫：' + chips.map((c) => String(c.textContent).trim()).join(' / ') };
+        return { ok: false, note: '平台清单里没有 qimao：' + chips.map((c) => String(c.textContent).trim()).join(' / ') };
       }
       const chipText = String(qimao.textContent).replace(/\s+/g, ' ').trim();
       // chip 上就该写着核对日期（「这个包是什么时候核的」写在最显眼的地方）
@@ -9175,18 +9183,18 @@ const STEPS: StepDef[] = [
       //    点一下 ⇒ 盘上 publish_at 没了、不再到期，而**稿子仍在池子里**（撤的是提醒，不是稿子）；
       // ④ **到期判定与 publish_at 一致**：到期的那一条也在「定时提醒」里（同一个口径，两个数不会打架）。
       // 先给两章各追加一段正文 ⇒ 它们从「草稿箱」变成「攒下的稿」（写完的才算存稿）
-      const outline = await window.yushu.outline.read();
-      const vol = outline.doc.volumes[0];
-      const targets = vol.chapters.slice(0, 2);
-      for (const chap of targets) {
-        await window.yushu.ai.adopt({
-          usageId: 'walkthrough-stock',
-          volumeId: vol.id,
-          chapterId: chap.id,
-          text: '\n\n他伸手推开门，夜色涌了进来。',
-          mode: 'append',
-        });
+      // 走产品自己的 chapter:write 通道（不是测试后门）：它同时把字数写回 frontmatter
+      const lib = await window.yushu.library.list();
+      const drafted = lib.chapters.filter((item) => item.path !== null && item.path !== undefined);
+      if (drafted.length < 2) {
+        return { ok: false, note: '项目里已建草稿的章不到两章，本步无从验证存稿池（' + String(drafted.length) + ' 章）' };
       }
+      for (const item of drafted.slice(0, 2)) {
+        const read = await window.yushu.chapter.read(String(item.path));
+        const body = String(read.body) + '\n\n他伸手推开门，夜色涌了进来。\n';
+        await window.yushu.chapter.write({ path: String(item.path), body, baseHash: String(read.hash) });
+      }
+      const outline = await window.yushu.outline.read();
       // 换标签页会卸载视图 ⇒ 回到总览页时发布面板重新挂载、重新取数（面板本身没有刷新按钮）
       await tab('规则');
       await sleep(400);
@@ -9310,8 +9318,7 @@ const STEPS: StepDef[] = [
           '；面板摆的可撑天数=' + (days === '' ? '（算不出）' : days),
       };
     `,
-  },
-  {
+  },  {
     step: 150,
     title: '标注的批量管理：筛选 / 批量选中 / 批量改图层 ⇒ 只改那些行，孤儿点名（R171）',
     file: 'step150-map-marker-batch.png',
@@ -9452,7 +9459,7 @@ const STEPS: StepDef[] = [
           '；孤儿仍在盘上=' + String(orphanStill) + '；回执点了它指向谁=' + String(orphanNamedInNote),
       };
         `,
-  },  },];
+  },];
 
 /**
  * 步骤截图（验收证据，复核修复 2026-09-29）：
