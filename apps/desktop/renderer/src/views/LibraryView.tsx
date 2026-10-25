@@ -6,6 +6,7 @@ import { Disclosure } from "../components/Disclosure";
 import { ImportPanel } from "../components/ImportPanel";
 import { PublishPanel } from "../components/PublishPanel";
 import { computeVirtualWindow } from "../virtual-list";
+import { buildOutlineTree } from "../components/outline-tree";
 
 /**
  * 稿件总览（M2 / T2-4 切片 A「全库视图 + 虚拟滚动」）：
@@ -77,16 +78,25 @@ export function LibraryView({ onOpen }: { onOpen: (path: string) => void }) {
    * R155 左栏的**卷章树**：按卷分组（从同一份 `chapters` 现算 ⇒ 不另取数）。
    *
    * 分组只认 `volumeId` 相邻 ⇒ 顺序与总览里那一份完全一致（不重排、不排序）。
+   *
+   * R164：这棵树改走**共用**的 `buildOutlineTree`（大纲页那棵也是它 ⇒ 两页的树不会长歪）。
    */
-  const volumes = useMemo(() => {
-    const groups: { volumeId: string; title: string; chapters: LibraryChapterEntry[] }[] = [];
-    for (const item of data?.chapters ?? []) {
-      const last = groups[groups.length - 1];
-      if (last !== undefined && last.volumeId === item.volumeId) last.chapters.push(item);
-      else groups.push({ volumeId: item.volumeId, title: item.volumeTitle, chapters: [item] });
-    }
-    return groups;
-  }, [data]);
+  const volumes = useMemo(
+    () =>
+      buildOutlineTree(
+        (data?.chapters ?? []).map((item) => ({
+          id: item.chapterId,
+          title: item.title,
+          volumeId: item.volumeId,
+          volumeTitle: item.volumeTitle,
+          idx: item.idx,
+          wordCount: item.wordCount,
+          status: item.status,
+          chapterPath: item.chapterPath,
+        })),
+      ),
+    [data],
+  );
 
   /** R155 右栏：选中那一章（**全库**与**卷章树**选中的是同一个 id ⇒ 两处不会各说各话） */
   const selected = useMemo(
@@ -139,12 +149,12 @@ export function LibraryView({ onOpen }: { onOpen: (path: string) => void }) {
                     <div className="muted library-tree-volume">{volume.title}</div>
                     <ul>
                       {volume.chapters.map((item) => (
-                        <li key={item.chapterId}>
+                        <li key={item.id}>
                           <button
                             type="button"
-                            className={"library-tree-btn" + (item.chapterId === selectedId ? " is-on" : "")}
-                            aria-pressed={item.chapterId === selectedId}
-                            onClick={() => setSelectedId(item.chapterId)}
+                            className={"library-tree-btn" + (item.id === selectedId ? " is-on" : "")}
+                            aria-pressed={item.id === selectedId}
+                            onClick={() => setSelectedId(item.id)}
                           >
                             第 {item.idx} 章 {item.title}
                           </button>

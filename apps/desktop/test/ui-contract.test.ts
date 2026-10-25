@@ -1590,7 +1590,7 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
     // **先剥注释**再扫规则：注释里写着 `{ min-height: 0 }` 这种带花括号的片段时，
     // 规则正则会被切碎、扫出来的"规则"根本不是规则（判据就会恒绿 —— 实测踩过）。
     const bareCss = css.replace(/\/\*[\s\S]*?\*\//g, "");
-    for (const name of ["genesis", "outline", "memory"]) {
+    for (const name of ["genesis", "memory"]) {
       // 规则可能是**分组选择器**（几个页面共用一条）⇒ 不能用"选择器后面紧跟 {"的写法，
       // 要把选择器列表里含它的规则都找出来。
       const bodies = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
@@ -1599,6 +1599,16 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
         .join(" ");
       expect(bodies, `${name} 页面列的子项没有「按内容撑高」这条（flex: none）`).toContain("flex: none");
     }
+    // R164：三级大纲页改成三栏 ⇒ 中栏不是 section 而是 `.outline-col-work`，
+    // 左右两栏是 `.outline-col-tree` / `.outline-col-outputs` ⇒ 那条「按内容撑高」挪到它们身上
+    // （**不许因为换结构就把这条丢了** —— 与 R156 改导出页、R163 改 AI 副驾页时同一条纪律）。
+    const outlineCols = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => /outline-col-(tree|work|outputs) > \*/.test(m[1] ?? ""))
+      .map((m) => m[2] ?? "")
+      .join(" ");
+    expect(outlineCols, "三级大纲页三栏的子项没有「按内容撑高」这条（flex: 0 0 auto）").toContain(
+      "flex: 0 0 auto",
+    );
     // R163：AI 副驾页改成三栏 ⇒ 中栏不是 section 而是 `.ai-col-work`，
     // 左右两栏是 `.ai-col-capability` / `.ai-col-outputs` ⇒ 那条「按内容撑高」挪到它们身上
     // （**不许因为换结构就把这条丢了** —— 与 R156 改导出页时同一条纪律）。
@@ -1623,14 +1633,20 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
     expect(exportWork, "导出页中栏的子项没有「按内容撑高」这条（flex: 0 0 auto）").toContain(
       "flex: 0 0 auto",
     );
-    // 左列同理：`.outline` / `.ai` / `.memory` 的 aside 也是 flex 列
-    for (const name of ["outline", "ai", "memory"]) {
+    // 左列同理：`.ai` / `.memory` 的 aside 也是 flex 列
+    for (const name of ["ai", "memory"]) {
       const bodies = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
         .filter((m) => (m[1] ?? "").includes(`${name} > aside > *`))
         .map((m) => m[2] ?? "")
         .join(" ");
       expect(bodies, `${name} 页面左列的子项没有「按内容撑高」这条（flex: none）`).toContain("flex: none");
     }
+    // R164：三级大纲页的左栏是 `.outline-col-tree`（不是 aside）⇒ 那条「按内容撑高」在它身上
+    const outlineTree = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => (m[1] ?? "").includes("outline-col-tree > *"))
+      .map((m) => m[2] ?? "")
+      .join(" ");
+    expect(outlineTree, "三级大纲页左栏的子项没有「按内容撑高」这条").toContain("flex: 0 0 auto");
     const exportAsides = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
       .filter((m) => /export-col-(matrix|outputs) > \*/.test(m[1] ?? ""))
       .map((m) => m[2] ?? "")
@@ -1647,11 +1663,14 @@ describe("页面列的容器选择器不许写成后代（R124：卡片叠在一
       `这些后代选择器会把列里**嵌套的 section** 也套上 flex 列规则 ⇒ 内容溢出、压住彼此：${offenders.join(" | ")}`,
     ).toEqual([]);
     // 反过来也要看一眼：直接子级那条规则确实在
-    for (const name of ["genesis", "outline", "memory"]) {
+    for (const name of ["genesis", "memory"]) {
       expect(css, `${name} 页面列没有「直接子级」规则`).toMatch(
         new RegExp(`^\\.${name} > section \\{`, "m"),
       );
     }
+    // R164：三级大纲页的中栏是 `.outline-col-work`（不是 section）⇒ 那条「直接子级」规则在它身上
+    expect(css, "三级大纲页中栏没有「直接子级」规则").toMatch(/^\.outline-col-work \{/m);
+    expect(css, "三级大纲页不许有后代选择器").not.toMatch(/^\.outline (section|aside) \{/m);
     // R156：导出页的中栏是 `.export-col-work`（不是 section）⇒ 那条「直接子级」规则在它身上
     expect(css, "导出页中栏没有「直接子级」规则").toMatch(/^\.export-col-work \{/m);
     // 也不许给导出页写回后代选择器（那正是 R124 那条毛病）
@@ -3268,7 +3287,7 @@ describe("码字统计页三栏（R158）：左=汇总与日历 / 中=今日与�
  * 判据盯五件事：
  * ① **新加的巡检项真的在跑**（认**回执**：报告里那一行写着"分栏并排=N/N 页"——
  *    只钉"问题=0"的话，巡检项删了照样绿；只认源码的话，源码写了没跑也照样绿 ⇒ 两条都要）；
- * ② **八个分栏页面一个都不许漏**（认根容器选择器：R158 加了码字统计，R163 加了 AI 副驾）；
+ * ② **九个分栏页面一个都不许漏**（认根容器选择器：R158 加了码字统计，R163 加了 AI 副驾，R164 加了三级大纲）；
  * ③ 三件事各量各的（并排 / 栏与栏不重叠 / 内容不越栏），不许拿同一条判据糊过去；
  * ④ **窄栏里塞不下的宽内容自己横向滚**（docs/11 §7.34：宽表在窄栏里自己滚，不许把整页撑宽）；
  * ⑤ 各栏的块**不许被压扁**（R154 那次中栏的面板被压扁 ⇒ 内容越出盒子 3~329px）。
@@ -3307,6 +3326,8 @@ describe("三栏之后的排版总巡检（R159）：并排 / 不重叠 / 不越
     ".stats-three-col",
     // R163：AI 副驾页也走三栏骨架 ⇒ 排版巡检与取证都得把它算进去（不许有分栏页面漏在巡检外）
     ".ai-three-col",
+    // R164：三级大纲页也走三栏骨架 ⇒ 同上
+    ".outline-three-col",
   ];
 
   it("**新加的巡检项真的在跑**（认回执：报告里那一行写着数）", () => {
@@ -3324,12 +3345,12 @@ describe("三栏之后的排版总巡检（R159）：并排 / 不重叠 / 不越
     ).toContain("自己横向滚的窄栏=");
   });
 
-  it("**八个分栏页面一个都不许漏**（认**那一步的脚本**，含 R158 的码字统计与 R163 的 AI 副驾）", () => {
+  it("**九个分栏页面一个都不许漏**（认**那一步的脚本**，含 R158 的码字统计、R163 的 AI 副驾与 R164 的三级大纲）", () => {
     const audit = stepBody(88);
     expect(audit, "没找到 step88 的脚本").not.toBe("");
     const column = stepBody(121);
     expect(column, "没找到 step121 的脚本").not.toBe("");
-    // 判定那一步与取证那一步，两边都得把八个分栏页面列全（少一个就漏检一页）
+    // 判定那一步与取证那一步，两边都得把九个分栏页面列全（少一个就漏检一页）
     for (const sel of COLUMN_ROOTS) {
       expect(audit, `step88 的巡检里没有 ${sel} 这个分栏根容器`).toContain(sel);
       expect(column, `step121 的取证里没有 ${sel} 这个分栏根容器`).toContain(sel);
@@ -3734,5 +3755,104 @@ describe("AI 副驾页三栏（R163）：左=能力与路由 / 中=候选与采�
     expect(body, "并排那条没有量左边界").toContain("rects[0].left < rects[1].left");
     expect(body, "对账没有比右栏的候选数").toContain("listed === cards.length");
     expect(body, "对账没有比右栏的已采纳数").toContain("adopted === adoptedCards");
+  });
+});
+
+/**
+ * **三级大纲页三栏**（R164）：左=卷章树 / 中=大纲表 / 右=选中的那章的产物。
+ *
+ * 判据盯六件事：
+ * ① 页面用的是**共用的三栏骨架**（R154 立的 `.three-col` ⇒ 不是每页各写一套网格）；
+ * ② 三段各在其位，而且**认位置**（左=卷章树 / 中=大纲表 / 右=选中的那章）；
+ * ③ **卷章树与稿件总览页共用同一个 `buildOutlineTree`**（同一份卷章数据 ⇒ 两页的树不会长歪）；
+ * ④ **树与表选中的是同一个 id**（R155 那条纪律：同一页里"选中了什么"只能有一个出处）；
+ * ⑤ 右栏的**章纲要素来自大纲真源、状态与字数来自那份章清单**（计划与结果分开，不混）；
+ * ⑥ **预演真的跑了**（认回执：step125 的回执里写着对账的数 —— 源码里写了不算，跑过才算）。
+ */
+describe("三级大纲页三栏（R164）：左=卷章树 / 中=大纲表 / 右=选中的那章的产物", () => {
+  const view = readFileSync(join(VIEW_ROOT, "views", "OutlineView.tsx"), "utf8");
+  const lib = readFileSync(join(VIEW_ROOT, "views", "LibraryView.tsx"), "utf8");
+  const mod = readFileSync(join(VIEW_ROOT, "components", "outline-tree.ts"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+  const walk = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "walkthrough.ts"), "utf8");
+  const report = JSON.parse(
+    readFileSync(join(ROOT, "docs", "assets", "m1-preview", "walkthrough-report.json"), "utf8"),
+  ) as { steps: Array<{ step: number; detail: string }> };
+
+  const at = (needle: string): number => view.indexOf(needle);
+  const stripComments = (text: string): string => text.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  // 注：模块路径**拼在一个常量里**（不写成 `from "…"` 的字面量）——
+  // 否则 esm-relative-imports 那条锁会把它当成一条**缺 .js 后缀的 import**（它扫的是文本）。
+  const OUTLINE_TREE_MODULE = "../components/" + "outline-tree";
+  const treeBlock = (): string => stripComments(view.slice(at('className="outline-col-tree"'), at('className="outline-col-work"')));
+  const workBlock = (): string => stripComments(view.slice(at('className="outline-col-work"'), at('className="outline-col-outputs"')));
+  const rightBlock = (): string => stripComments(view.slice(at('className="outline-col-outputs"')));
+
+  it("页面用的是**共用的三栏骨架**（不是每页各写一套网格）", () => {
+    expect(view, "三级大纲页没用共用的三栏骨架").toContain(
+      'className="outline three-col outline-three-col"',
+    );
+    expect(css, "三栏骨架没写").toMatch(/\.three-col\s*\{[^}]*grid-template-columns:[^;]*22%/);
+    expect(css, "三级大纲页自己又写了一套网格").not.toMatch(/\.outline\s*\{[^}]*grid-template-columns/);
+  });
+
+  it("三段各在其位（认**位置**）", () => {
+    const tree = at('className="outline-col-tree"');
+    const work = at('className="outline-col-work"');
+    const outputs = at('className="outline-col-outputs"');
+    expect(tree, "左栏不在").toBeGreaterThan(-1);
+    expect(work, "中栏不在").toBeGreaterThan(tree);
+    expect(outputs, "右栏不在").toBeGreaterThan(work);
+    expect(treeBlock(), "左栏里没有卷章树").toContain("卷章树");
+    expect(workBlock(), "中栏里没有章纲表").toContain("章纲");
+    expect(rightBlock(), "右栏里没有选中的那章的产物").toContain("选中的那章的产物");
+  });
+
+  it("卷章树与稿件总览页**共用同一个 buildOutlineTree**（同一份卷章数据）", () => {
+    expect(mod, "共用模块没导出那个函数").toContain("export function buildOutlineTree");
+    // 认的是**调用**（认调用，不认"文件里出现过这个名字"）
+    expect(view, "大纲页没调用共用的那棵树").toMatch(/buildOutlineTree\(/);
+    expect(lib, "总览页没调用共用的那棵树").toMatch(/buildOutlineTree\(/);
+    expect(view, "大纲页没从共用模块取那棵树").toContain(OUTLINE_TREE_MODULE);
+    expect(lib, "总览页没从共用模块取那棵树").toContain(OUTLINE_TREE_MODULE);
+    // 两页取的是**同一份章清单**（同一套 API）
+    expect(view, "大纲页没取那份章清单").toContain("api().library.list()");
+    expect(lib, "总览页没取那份章清单").toContain("api().library.list()");
+  });
+
+  it("**树与表选中的是同一个 id**（R155 那条纪律）", () => {
+    // 树点的那一章 = 章纲表展开的那一章 = 右栏摆的那一章
+    expect(treeBlock(), "树点的那一章没写进同一个选中状态").toContain("setExpandedChapterId(item.id)");
+    expect(view, "章纲表不是按那个 id 展开的").toContain("chapter.id === expandedChapterId");
+    expect(rightBlock(), "右栏不是按那个 id 摆的").toContain("chapterSummary.chapterId");
+  });
+
+  it("右栏的**章纲要素来自大纲真源、状态与字数来自那份章清单**（计划与结果不混）", () => {
+    expect(view, "右栏没走那个纯函数").toContain("summarizeOutlineChapter");
+    expect(mod, "共用模块没导出那个函数").toContain("export function summarizeOutlineChapter");
+    // 纯函数：只读入参 ⇒ 可单测
+    expect(mod, "纯函数模块不许碰 fs").not.toContain("node:fs");
+    expect(mod, "纯函数模块不许读墙钟").not.toContain("Date.now");
+    expect(rightBlock(), "右栏没摆字数").toContain("data-outline-words={String(chapterSummary.words)}");
+    expect(rightBlock(), "右栏没摆状态").toContain("data-outline-status={chapterSummary.status}");
+  });
+
+  it("**预演真的跑了**（认回执：step125 的回执里写着对账的数）", () => {
+    const step = report.steps.find((row) => row.step === 125);
+    expect(step, "报告里没有 step125（三级大纲页三栏）那一步").toBeTruthy();
+    const detail = (step as { detail: string }).detail;
+    expect(detail, "step125 的回执里没有「三栏并排=」").toContain("三栏并排=");
+    expect(detail, "step125 的回执里没有两页树的对比").toContain("两页的树逐字对上=");
+    expect(detail, "step125 的回执里没有同一个 id 的对比").toContain("同一个 id=");
+  });
+
+  it("预演那一步**真的在对账**（认量法：两页的树逐字比 + 同一个 id）", () => {
+    const start = walk.indexOf("step: 125,");
+    const end = walk.indexOf("step: 126,", start);
+    const body = walk.slice(start, end < 0 ? walk.length : end);
+    expect(body, "没找到 step125 的脚本").not.toBe("");
+    expect(body, "并排那条没有量左边界").toContain("rects[0].left < rects[1].left");
+    expect(body, "没有逐字比两页的树").toContain("outlineTexts.every((text, index) => text === libraryTree[index])");
+    expect(body, "没有比同一个 id").toContain("shownId === pick.id");
   });
 });

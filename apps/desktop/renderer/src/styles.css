@@ -1448,33 +1448,100 @@ select {
 
 /* ---------- 三级大纲 ---------- */
 
+/* R164：这一页也走**共用的**三栏骨架（左=卷章树 / 中=大纲表 / 右=选中的那章的产物）。
+   骨架是 R154 立的 `.three-col`（不是这一页自己写的网格）⇒ 右栏 22% 用百分比。 */
 .outline {
   flex: 1;
-  display: grid;
-  grid-template-columns: 320px 1fr;
   min-height: 0;
 }
 
-.outline aside {
-  border-right: 1px solid var(--border);
-  padding: 12px;
-  overflow: auto;
-  min-height: 0;
+.outline-col-tree {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-6);
+  min-height: 0;
+  padding: var(--space-6);
 }
 
-/* R124：只命中**直接子级**。原先写的是后代选择器（`.outline section`）⇒
-   列里**嵌套的那个 section** 也被套上这组规则（flex 列 + min-height:0）⇒
-   它被压缩、内容溢出自己、压住下面的卡片（用户截图里的「卡片全叠在一起」）。 */
-.outline > section {
-  padding: 16px 20px;
-  overflow: auto;
-  min-height: 0;
+.outline-col-work {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-6);
+  min-height: 0;
+  padding: var(--space-8) var(--space-10);
+  overflow: auto;
+}
+
+.outline-col-outputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-height: 0;
+  padding: var(--space-8) var(--space-10);
+}
+
+/* 三栏各自的块**不许被压扁**（flex 默认会缩 ⇒ 面板内容越出自己的盒子） */
+.outline-col-tree > *,
+.outline-col-work > *,
+.outline-col-outputs > * {
+  flex: 0 0 auto;
+}
+
+/* R164：左栏那棵卷章树（R155 总览页那棵的同一套算法） */
+.outline-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outline-tree-volume {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.outline-tree-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-4);
+  cursor: pointer;
+}
+
+.outline-tree-btn:hover {
+  background: var(--panel-2);
+}
+
+.outline-tree-btn.is-on {
+  background: var(--accent-soft);
+}
+
+/* R164：右栏「选中的那章的产物」 */
+.outline-summary-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.outline-summary-elements {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outline-summary-elements li {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.outline-summary-elements li .muted {
+  flex: none;
 }
 
 .outline-scale {
@@ -1873,7 +1940,6 @@ select {
    （用户截图：按钮浮在正文上、几段文字叠成一团）。
    列本来就有 `overflow: auto` ⇒ 内容多了就滚，而不是互相压。 */
 .genesis > section > *,
-.outline > section > *,
 .ai > section > *,
 .memory > section > * {
   flex: none;
@@ -1882,7 +1948,6 @@ select {
 /* 左列同理：`.outline` / `.ai` / `.memory` 的 aside 也是 flex 列 ⇒ 同样的压扁。
    R156：导出页改三栏 ⇒ 它的列不再走"直接子级 section / aside"这条路，
    那条「按内容撑高」挪到了 `.export-col-work > *` 与两栏的 `> *`（见 R156 那段）。 */
-.outline > aside > *,
 .ai > aside > *,
 .memory > aside > * {
   flex: none;
@@ -1895,7 +1960,6 @@ select {
    （用户截图：按钮浮在正文上、几段文字叠成一团）。
    列本来就有 `overflow: auto` ⇒ 内容多了就滚，而不是互相压。 */
 .genesis > section > *,
-.outline > section > *,
 .ai > section > *,
 .memory > section > * {
   flex: none;

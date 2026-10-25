@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  LibraryViewPayload,
   OutlineBrief,
   OutlineChapterPayload,
   OutlineDocPayload,
@@ -10,6 +11,7 @@ import type {
 } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { StateNote } from "../components/StateNote";
+import { buildOutlineTree, summarizeOutlineChapter } from "../components/outline-tree";
 
 /**
  * 三级大纲（T1-10 / T1-11 / T1-12）：
@@ -55,6 +57,10 @@ export function OutlineView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * R164：与稿件总览页**同一份章清单**（左栏的卷章树与右栏的「状态 / 字数」都从它来）。
+   */
+  const [library, setLibrary] = useState<LibraryViewPayload | null>(null);
 
   const dirty = doc !== null && state?.doc !== undefined && JSON.stringify(doc) !== JSON.stringify(state.doc);
 
@@ -70,9 +76,16 @@ export function OutlineView() {
   const refresh = useCallback(async () => {
     try {
       setError(null);
-      const [outlineState, world] = await Promise.all([api().outline.read(), api().project.world()]);
+      // R164：左栏的卷章树与右栏的「状态 / 字数」都取自**与稿件总览页同一份章清单**
+      // （同一套 API + 同一个 `buildOutlineTree` ⇒ 两页的树不会长歪）
+      const [outlineState, world, library] = await Promise.all([
+        api().outline.read(),
+        api().project.world(),
+        api().library.list(),
+      ]);
       applyState(outlineState);
       if (world) setWorldTitle(world.title);
+      setLibrary(library);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -292,9 +305,93 @@ export function OutlineView() {
 
   const selectedVolume = doc?.volumes.find((volume) => volume.id === selectedVolumeId) ?? null;
 
+  /**
+   * R164：左栏的**卷章树** —— 与稿件总览页**同一份章清单**、**同一个** `buildOutlineTree`
+   * （两页各写一遍分组 ⇒ 两页的树会慢慢长歪）。
+   */
+  const tree = useMemo(
+    () =>
+      buildOutlineTree(
+        (library?.chapters ?? []).map((item) => ({
+          id: item.chapterId,
+          title: item.title,
+          volumeId: item.volumeId,
+          volumeTitle: item.volumeTitle,
+          idx: item.idx,
+          wordCount: item.wordCount,
+          status: item.status,
+          chapterPath: item.chapterPath,
+        })),
+      ),
+    [library],
+  );
+
+  /**
+   * R164 右栏：选中的那章的**产物**（章纲要素来自大纲真源 / 状态与字数来自那份章清单）。
+   *
+   * **树与表选中的是同一个 id**（R155 那条纪律）：树点的那一章，就是章纲表里展开的那一章，
+   * 也是右栏摆的那一章 ⇒ 三处不会各说各话。
+   */
+  const chapterSummary = useMemo(() => {
+    const outlineChapter =
+      doc?.volumes
+        .flatMap((volume) => volume.chapters)
+        .find((chapter) => chapter.id === expandedChapterId) ?? null;
+    const entry = tree.flatMap((volume) => volume.chapters).find((item) => item.id === expandedChapterId) ?? null;
+    return summarizeOutlineChapter({
+      chapterId: expandedChapterId,
+      outline:
+        outlineChapter === null
+          ? null
+          : { id: outlineChapter.id, title: outlineChapter.title, brief: outlineChapter.brief },
+      entry,
+    });
+  }, [doc, expandedChapterId, tree]);
+
   return (
-    <div className="outline">
-      <aside>
+    <div className="outline three-col outline-three-col">
+      {/* 左栏 = 卷章树（R164）：这一页「有哪些卷章」（与稿件总览页同一份章清单） */}
+      <aside className="outline-col-tree">
+        <section className="panel">
+          <h3>卷章树</h3>
+          <div className="muted">
+            与「稿件总览」同一份章清单（同一套分组算法）⇒ 两页看到的卷章永远对得上
+          </div>
+          {tree.length === 0 ? (
+            <p className="muted">还没有卷章（先在中间那一栏建卷建章）。</p>
+          ) : (
+            <ul className="outline-tree">
+              {tree.map((volume) => (
+                <li key={volume.volumeId}>
+                  <div className="muted outline-tree-volume">{volume.title}</div>
+                  <ul>
+                    {volume.chapters.map((item) => (
+                      <li key={item.id}>
+                        {/* 键盘可达（R110）：真按钮（点它 = 选中这一章 ⇒ 章纲表与右栏跟着换） */}
+                        <button
+                          type="button"
+                          className={"outline-tree-btn" + (item.id === expandedChapterId ? " is-on" : "")}
+                          aria-pressed={item.id === expandedChapterId}
+                          data-outline-chapter-id={item.id}
+                          onClick={() => {
+                            setExpandedChapterId(item.id);
+                            setSelectedVolumeId(item.volumeId);
+                          }}
+                        >
+                          第 {item.idx} 章 {item.title}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </aside>
+
+      {/* 中栏 = 大纲表（R164）：这一页「我正在改哪一章」 */}
+      <div className="outline-col-work">
         <section className="panel">
           <h3>
             模板生成 <span className="muted">T1-11</span>
@@ -432,9 +529,6 @@ export function OutlineView() {
             </button>
           </section>
         )}
-      </aside>
-
-      <section>
         {!doc && (
           <div className="panel">
             <StateNote kind="empty" title="尚无大纲">
@@ -720,9 +814,47 @@ export function OutlineView() {
         )}
 
         {!doc && error && <div className="error-bar">{error}</div>}
-      </section>
-    </div>
-  );
+      </div>
+
+      {/* 右栏 = 选中的那章的产物（R164）：这一页「我做出了什么」 */}
+      <aside className="outline-col-outputs">
+        <section
+          className="panel outline-chapter-summary"
+          data-outline-chapter={chapterSummary.chapterId ?? ""}
+          data-outline-words={String(chapterSummary.words)}
+          data-outline-status={chapterSummary.status}
+        >
+          <div className="panel-title">
+            选中的那章的产物 <span className="muted">章纲要素 / 状态 / 字数</span>
+          </div>
+          {chapterSummary.note !== "" ? (
+            <div className="muted">{chapterSummary.note}</div>
+          ) : (
+            <>
+              <div className="outline-summary-title">{chapterSummary.title}</div>
+              <div className="muted">
+                {chapterSummary.status} · {chapterSummary.words} 字
+              </div>
+              {chapterSummary.path !== "" && (
+                <div className="muted">草稿：{chapterSummary.path}</div>
+              )}
+              {chapterSummary.elements.length === 0 ? (
+                <div className="muted">这一章还没写章纲要素（brief 是空的）</div>
+              ) : (
+                <ul className="outline-summary-elements">
+                  {chapterSummary.elements.map((item) => (
+                    <li key={item.label}>
+                      <span className="muted">{item.label}</span>
+                      <span>{item.value}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </section>
+      </aside>
+    </div>  );
 
   async function generateEmpty() {
     if (

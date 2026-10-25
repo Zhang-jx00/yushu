@@ -6127,6 +6127,8 @@ const STEPS: StepDef[] = [
         '码字统计': '.stats-three-col',
         // R163：AI 副驾页也走三栏骨架 ⇒ 排版巡检把它算进来（不许有分栏页面漏在巡检外）
         'AI 副驾': '.ai-three-col',
+        // R164：三级大纲页也走三栏骨架 ⇒ 排版巡检把它算进来
+        '三级大纲': '.outline-three-col',
       };
       const problems = [];
       const seen = [];
@@ -8553,6 +8555,8 @@ const STEPS: StepDef[] = [
         { tab: '码字统计', root: '.stats-three-col' },
         // R163：AI 副驾页也是分栏页面 ⇒ 取证那一步也得逐页量它
         { tab: 'AI 副驾', root: '.ai-three-col' },
+        // R164：三级大纲页也是分栏页面 ⇒ 取证那一步也得逐页量它
+        { tab: '三级大纲', root: '.outline-three-col' },
       ];
       const seen = [];
       const problems = [];
@@ -8904,6 +8908,105 @@ const STEPS: StepDef[] = [
           String(adopted === -1 ? '（没变）' : String(adopted)) +
           ' vs 标了已采纳的卡 ' + String(adoptedCards) + '）' +
           '；右栏没有采纳入口=' + String(rightClean) + '；中栏还有整段采纳=' + String(midHasAdopt),
+      };
+    `,
+  },
+  {
+    step: 125,
+    title: '三级大纲页三栏：左=卷章树 / 中=大纲表 / 右=选中的那章的产物（R164）',
+    file: 'step125-outline-three-col.png',
+    body: String.raw`
+      // 这一步证 R164 的四件事：
+      // ① **三栏并排**（量左边界依次右移，不是只认类名）；
+      // ② 左栏的卷章树与「稿件总览」那棵**是同一棵树**（同一份章清单 + 同一个算法 ⇒ 逐字对上）；
+      // ③ 树与表选中的是**同一个 id**（点树 ⇒ 章纲表展开那一章、右栏摆那一章）；
+      // ④ 右栏的**字数**与总览页那一行对得上（同一份清单 ⇒ 同一份数）。
+      const readTree = () => {
+        const rows = [...document.querySelectorAll('.outline-col-tree .outline-tree-btn')];
+        return rows.map((b) => ({
+          id: String(b.getAttribute('data-outline-chapter-id') || ''),
+          text: String(b.textContent || '').replace(/\s+/g, ' ').trim(),
+        }));
+      };
+      await tab('三级大纲');
+      // 树要等那份章清单读回来才有（面板只在挂载时取数）
+      const outlineTree = await waitFor(() => {
+        const rows = readTree();
+        return rows.length > 0 ? rows : null;
+      }, 15000);
+      if (!outlineTree) return { ok: false, note: '左栏的卷章树没渲染出来（章清单还没读回来）' };
+      const cols = await waitFor(() => {
+        const list = [...document.querySelectorAll('.outline-three-col > *')].filter((el) => {
+          const b = el.getBoundingClientRect();
+          return b.width > 0 && b.height > 0;
+        });
+        return list.length === 3 ? list : null;
+      }, 8000);
+      if (!cols) return { ok: false, note: '三级大纲页没有三栏（卷章树 / 大纲表 / 选中的那章）' };
+      const rects = cols.map((el) => el.getBoundingClientRect());
+      const sideBySide = rects[0].left < rects[1].left && rects[1].left < rects[2].left;
+      // ② 同一棵树：去总览页读一遍，逐字比
+      await tab('稿件总览');
+      const libraryTree = await waitFor(() => {
+        const rows = [...document.querySelectorAll('.library-col-tree .library-tree-btn')];
+        return rows.length > 0 ? rows.map((b) => String(b.textContent || '').replace(/\s+/g, ' ').trim()) : null;
+      }, 15000);
+      if (!libraryTree) return { ok: false, note: '总览页的卷章树没渲染出来' };
+      const outlineTexts = outlineTree.map((row) => row.text);
+      const sameTree = outlineTexts.length === libraryTree.length && outlineTexts.every((text, index) => text === libraryTree[index]);
+      // ③ 点树里的一章 ⇒ 右栏摆的就是那一章（同一个 id），章纲表也展开那一章
+      await tab('三级大纲');
+      const treeAgain = await waitFor(() => {
+        const rows = readTree();
+        return rows.length > 0 ? rows : null;
+      }, 15000);
+      if (!treeAgain) return { ok: false, note: '回到大纲页后卷章树没了' };
+      const pick = treeAgain[Math.min(1, treeAgain.length - 1)];
+      const pickedTitle = pick.text.replace(/^第\s*\d+\s*章\s*/, '').trim();
+      const btn = document.querySelector('.outline-col-tree .outline-tree-btn[data-outline-chapter-id="' + pick.id + '"]');
+      if (!btn) return { ok: false, note: '树里找不到那一章的按钮' };
+      btn.click();
+      await sleep(500);
+      const summary = document.querySelector('.outline-col-outputs .outline-chapter-summary');
+      if (!summary) return { ok: false, note: '右栏没有「选中的那章的产物」那一块' };
+      const shownId = String(summary.getAttribute('data-outline-chapter') || '');
+      const words = Number(summary.getAttribute('data-outline-words') || '0');
+      const status = String(summary.getAttribute('data-outline-status') || '');
+      const sameId = shownId === pick.id;
+      // 章纲表里展开的也是那一章（中栏那条「on」的行）
+      // **章名在那个 input 里 ⇒ 不在 textContent 里**（R121 那条教训：读 input 的 value，不读文本）
+      const expanded = document.querySelector('.outline-col-work .chapter-list li.on');
+      const expandedInput = expanded === null ? null : expanded.querySelector('input');
+      const expandedTitle = expandedInput === null ? '' : String(expandedInput.value || '').trim();
+      const tableSame = expandedTitle === pickedTitle;
+      // ④ 字数与总览页那一行对得上（同一份清单 ⇒ 同一份数）
+      await tab('稿件总览');
+      const libraryRow = await waitFor(() => {
+        const rows = [...document.querySelectorAll('.library-list .library-window .library-row')];
+        const hit = rows.find((tr) => {
+          const titleBtn = tr.querySelector('.library-title-btn');
+          return titleBtn !== null && String(titleBtn.textContent || '').trim() === pickedTitle;
+        });
+        return hit || null;
+      }, 15000);
+      const wordsCell = libraryRow === null ? null : libraryRow.querySelector('.library-words');
+      const wordsText = wordsCell === null ? '' : String(wordsCell.textContent || '').trim();
+      // 未建草稿那一行写的是「未建草稿」而不是「0 字」——两件事不是一件（0 字 ⇒ 建了但是空的）
+      const libraryWords = wordsText === '未建草稿' ? 0 : Number(/(\d+)\s*字/.exec(wordsText)?.[1] ?? '-1');
+      const wordsOk = words === libraryWords;
+      const root = document.querySelector('.outline-three-col');
+      if (root) root.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: sideBySide && sameTree && sameId && tableSame && wordsOk,
+        note: '三栏并排=' + String(sideBySide) + '（左 ' + String(Math.round(rects[0].left)) + ' / 中 ' +
+          String(Math.round(rects[1].left)) + ' / 右 ' + String(Math.round(rects[2].left)) + '）' +
+          '；两页的树逐字对上=' + String(sameTree) + '（大纲页 ' + String(outlineTexts.length) +
+          ' 条 vs 总览页 ' + String(libraryTree.length) + ' 条）' +
+          '；同一个 id=' + String(sameId) + '（点的=' + pick.id + '，右栏摆的=' + shownId + '）' +
+          '；章纲表展开的也是那一章=' + String(tableSame) +
+          '；字数对账（右栏 ' + String(words) + ' vs 总览页 ' + String(libraryWords) + '）' +
+          '；状态=' + status,
       };
     `,
   },];
