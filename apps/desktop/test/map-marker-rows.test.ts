@@ -8,8 +8,8 @@ import {
   markerFilterActive,
   markerRowEntities,
   markerRowLayers,
-} from "../renderer/src/components/map-marker-rows";
-import type { WorldMapMarkerRow } from "../src/shared/ipc";
+} from "../renderer/src/components/map-marker-rows.js";
+import type { WorldMapMarkerRow } from "../src/shared/ipc.js";
 
 /**
  * 标注清单的**筛选**（R171）+ 界面上那一块的**契约**。
