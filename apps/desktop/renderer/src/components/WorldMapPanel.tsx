@@ -5,6 +5,14 @@ import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../..
 import { api } from "../api";
 import { StateNote } from "./StateNote";
 import { SummaryRows } from "./SummaryRows";
+import {
+  EMPTY_MARKER_FILTER,
+  filterMapMarkerRows,
+  markerFilterActive,
+  markerRowEntities,
+  markerRowLayers,
+  type MapMarkerFilter,
+} from "./map-marker-rows";
 import { ZOOM_MAX, ZOOM_MIN, clampPan, computeViewBox, panStep, shapePathData, zoomAtPoint, zoomFromViewBox, zoomLabel, zoomStep, zoomVisiblePercent } from "./map-view";
 
 /**
@@ -81,6 +89,23 @@ export function WorldMapPanel(props: {
   const [entered, setEntered] = useState(false);
   /** 底图（R123）：作者登记的那张图，读成 data URL 铺在坐标空间上 */
   const [base, setBase] = useState<WorldMapBasePayload | null>(null);
+  /**
+   * R171 **标注清单**的筛选（按实体 / 按图层 / 是不是孤儿）。
+   *
+   * 口径回源 K08 §3.7（标注即地点卡 ⇒ 标注的身份是「绑的是谁」）与 §3.9（分层可控 ⇒ 另一个身份是「在哪一层」）。
+   * 筛选是"看"的动作 ⇒ 不进真源；清单本身由主进程从真源直算（`map.markerRows`）⇒ 界面不自己造数。
+   */
+  const [markerFilter, setMarkerFilter] = useState<MapMarkerFilter>(EMPTY_MARKER_FILTER);
+  /** 清单里**勾选**的标注 id（批量操作的对象；与"点开地点卡"的那个选中是两件事） */
+  const [checkedMarkers, setCheckedMarkers] = useState<string[]>([]);
+  /** 批量改图层的目标图层（空 = 用清单里第一个） */
+  const [batchLayer, setBatchLayer] = useState("");
+  /** 批量改图层的回执（**点名**：改了哪些、其中哪些是孤儿标注） */
+  const [batchNote, setBatchNote] = useState<{
+    text: string;
+    changed: string[];
+    orphan: string[];
+  } | null>(null);
 
   useEffect(() => {
     // 下一帧再切到已入场，浏览器才认得出这是一次**状态变化**，过渡才会跑
@@ -887,6 +912,81 @@ export function WorldMapPanel(props: {
     () => (map?.markers ?? []).find((marker) => marker.id === selected) ?? null,
     [map, selected],
   );
+
+  /* ------------------------------------------------------------------ *
+   * R171：标注清单（一批一起管）
+   *
+   * 清单本身由**主进程从真源直算**（`map.markerRows` = 文件里的每一条标注，含孤儿标注）
+   * ⇒ 界面不自己造数；这里只做"看"的动作：筛选、勾选。
+   * ------------------------------------------------------------------ */
+  const markerRows = useMemo(() => map?.markerRows ?? [], [map]);
+  /** 筛出来的那些（三个维度是"与"的关系） */
+  const filteredMarkers = useMemo(
+    () => filterMapMarkerRows(markerRows, markerFilter),
+    [markerRows, markerFilter],
+  );
+  /** 清单里的孤儿标注（指向的实体不存在 ⇒ 画不出来，但**仍在作者的文件里**） */
+  const orphanMarkerCount = useMemo(
+    () => markerRows.filter((row) => row.orphan).length,
+    [markerRows],
+  );
+  /** 清单里出现过的实体（名字取自清单本身 ⇒ 界面不自己查实体） */
+  const markerEntities = useMemo(() => markerRowEntities(markerRows), [markerRows]);
+  /** 批量改图层的可选图层：**地图文件声明的那些**（图层的真源在 map.yaml 的 layers 段） */
+  const batchLayerOptions = useMemo(() => {
+    const declared = map?.layers.map((layer) => layer.kind) ?? [];
+    const fromRows = markerRowLayers(markerRows);
+    return [...new Set([...declared, ...fromRows])];
+  }, [map, markerRows]);
+  /** 目标图层（没选就用清单里第一个） */
+  const batchTargetLayer = batchLayer !== "" ? batchLayer : (batchLayerOptions[0] ?? "place");
+
+  /** 改筛选 ⇒ 之前的勾选作废（勾选的是"当前筛出来的那一批"） */
+  const changeMarkerFilter = useCallback((next: MapMarkerFilter) => {
+    setMarkerFilter(next);
+    setCheckedMarkers([]);
+    setBatchNote(null);
+  }, []);
+
+  /** 勾一个 / 取消勾一个 */
+  const toggleMarkerChecked = useCallback((id: string) => {
+    setCheckedMarkers((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  }, []);
+
+  /** 全选当前筛出来的那些 */
+  const checkAllFiltered = useCallback(() => {
+    setCheckedMarkers(filteredMarkers.map((row) => row.id));
+  }, [filteredMarkers]);
+
+  /**
+   * 批量改图层（**写盘**：只改被点名的那几行；孤儿标注**点名**不静默）。
+   *
+   * 回执写在**清单自己下面**（动作在这儿发生 ⇒ 回执也在这儿）；
+   * 画布上那些动作的回执仍在上面那条状态行 —— 一个区域里只有一条状态行，不跨区域抢话。
+   */
+  const applyBatchLayer = useCallback(async () => {
+    if (checkedMarkers.length === 0) {
+      setBatchNote({ text: "先勾几个标注，再点「改成这个图层」", changed: [], orphan: [] });
+      return;
+    }
+    try {
+      const result = await api().map.batchSetMarkerLayer({
+        markerIds: checkedMarkers,
+        layer: batchTargetLayer,
+      });
+      setBatchNote({ text: result.note, changed: result.changed, orphan: result.orphanChanged });
+      if (result.ok) {
+        setCheckedMarkers([]);
+        reloadMap();
+      }
+    } catch (err: unknown) {
+      setBatchNote({
+        text: err instanceof Error ? err.message : String(err),
+        changed: [],
+        orphan: [],
+      });
+    }
+  }, [checkedMarkers, batchTargetLayer, reloadMap]);
 
   /**
    * R132 时空联动：把锚点清单**上报**给父组件（同一页的时间线要知道哪个事件在地图上）。
@@ -1774,6 +1874,146 @@ export function WorldMapPanel(props: {
             </ul>
           )}
         </div>
+      </div>
+
+      {/* R171 **标注清单**：一批一起管（筛选 / 批量选中 / 批量改图层）。
+          清单来自主进程从真源直算的 `markerRows`（**每一条**标注，含孤儿标注）⇒ 界面不自己造数。
+          回执写在**清单自己下面**（动作在这儿发生 ⇒ 回执也在这儿）；
+          画布上那些动作的回执仍在上面那条状态行 —— 一个区域里只有一条状态行，不跨区域抢话。
+          **孤儿标注**（指向的实体不存在 ⇒ 画不出来，但**仍在作者的文件里**）在这里**点名**，
+          不静默、不被悄悄丢掉。 */}
+      <div className="map-marker-manage" data-marker-manage="1">
+        <div className="panel-title">
+          标注清单（{markerRows.length}）
+          <span className="muted">
+            图上画得出来 {markerRows.length - orphanMarkerCount} · 孤儿 {orphanMarkerCount}
+          </span>
+        </div>
+        <div className="map-hole-bar">
+          <select
+            className="map-place-select"
+            value={markerFilter.entityRef ?? ""}
+            onChange={(event) =>
+              changeMarkerFilter({
+                ...markerFilter,
+                entityRef: event.target.value === "" ? null : event.target.value,
+              })
+            }
+            aria-label="按实体筛选标注"
+          >
+            <option value="">全部实体</option>
+            {markerEntities.map((entity) => (
+              <option key={entity.id} value={entity.id}>
+                {entity.name ?? `${entity.id}（实体不存在）`}
+              </option>
+            ))}
+          </select>
+          <select
+            className="map-place-select"
+            value={markerFilter.layer ?? ""}
+            onChange={(event) =>
+              changeMarkerFilter({
+                ...markerFilter,
+                layer: event.target.value === "" ? null : event.target.value,
+              })
+            }
+            aria-label="按图层筛选标注"
+          >
+            <option value="">全部图层</option>
+            {batchLayerOptions.map((kind) => (
+              <option key={kind} value={kind}>
+                {LAYER_LABEL[kind] ?? kind}
+              </option>
+            ))}
+          </select>
+          <label className="map-marker-orphan-toggle">
+            <input
+              type="checkbox"
+              checked={markerFilter.orphanOnly}
+              onChange={(event) =>
+                changeMarkerFilter({ ...markerFilter, orphanOnly: event.target.checked })
+              }
+            />
+            只看孤儿标注
+          </label>
+          <button
+            type="button"
+            className="map-upload-btn"
+            onClick={() => changeMarkerFilter(EMPTY_MARKER_FILTER)}
+            disabled={!markerFilterActive(markerFilter)}
+          >
+            清空筛选
+          </button>
+        </div>
+        <div
+          className="map-status"
+          data-marker-total={String(markerRows.length)}
+          data-marker-filtered={String(filteredMarkers.length)}
+          data-marker-orphan={String(orphanMarkerCount)}
+          data-marker-checked={String(checkedMarkers.length)}
+        >
+          筛出 {filteredMarkers.length} 个（清单共 {markerRows.length} 个 · 孤儿 {orphanMarkerCount} 个）· 已勾{" "}
+          {checkedMarkers.length} 个
+        </div>
+        <ul className="map-anchors">
+          {filteredMarkers.length === 0 && <li className="muted">这个筛选下没有标注</li>}
+          {filteredMarkers.map((row) => (
+            <li key={row.id} data-marker-row={row.id} data-marker-orphan={row.orphan ? "1" : "0"}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={checkedMarkers.includes(row.id)}
+                  onChange={() => toggleMarkerChecked(row.id)}
+                />
+                <span className="map-finding-code">{row.id}</span>
+                <span>{row.entityName ?? `绑定的实体不存在（${row.entityRef}）`}</span>
+                <span className="muted">{LAYER_LABEL[row.layer] ?? row.layer}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <div className="map-hole-bar">
+          <button type="button" className="map-upload-btn" onClick={checkAllFiltered}>
+            全选筛出的
+          </button>
+          <button
+            type="button"
+            className="map-upload-btn"
+            onClick={() => setCheckedMarkers([])}
+            disabled={checkedMarkers.length === 0}
+          >
+            清空勾选
+          </button>
+          <select
+            className="map-place-select"
+            value={batchTargetLayer}
+            onChange={(event) => setBatchLayer(event.target.value)}
+            aria-label="批量改到哪个图层"
+          >
+            {batchLayerOptions.map((kind) => (
+              <option key={kind} value={kind}>
+                {LAYER_LABEL[kind] ?? kind}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="map-upload-btn"
+            onClick={() => void applyBatchLayer()}
+            disabled={checkedMarkers.length === 0}
+          >
+            改成这个图层
+          </button>
+        </div>
+        {batchNote !== null && (
+          <div
+            className="map-status"
+            data-batch-changed={batchNote.changed.join(",")}
+            data-batch-orphan={batchNote.orphan.join(",")}
+          >
+            {batchNote.text}
+          </div>
+        )}
       </div>
     </section>
   );

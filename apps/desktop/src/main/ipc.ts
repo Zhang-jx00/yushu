@@ -33,6 +33,8 @@ import {
   type GraphViewPayload,
   type GraphViewRequestPayload,
   type WorldMapBasePayload,
+  type WorldMapBatchMarkerLayerRequestPayload,
+  type WorldMapBatchMarkerLayerResult,
   type WorldMapAddHoleRequestPayload,
   type WorldMapAddHoleResult,
   type WorldMapCreateAnchorRequestPayload,
@@ -191,7 +193,7 @@ import { applyProposal, decideProposal, listProposals, previewPropagation, propo
 import { foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
-import { addMapHole, createMapAnchor, createMapMarker, createMapShape, removeMapHole, setAnchorPosition, setMapBounds, setMarkerPosition, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
+import { addMapHole, batchSetMarkerLayer, createMapAnchor, createMapMarker, createMapShape, removeMapHole, setAnchorPosition, setMapBounds, setMarkerPosition, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
 import {
@@ -699,6 +701,10 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(CHANNELS.worldMapRemoveHole, (_event, payload: WorldMapRemoveHoleRequestPayload) =>
     wrapWrite<WorldMapRemoveHoleResult>(() => removeMapHole(requireGateway(), payload)),
+  );
+  // 世界地图·**批量改图层**（R171）：**写盘**（只改被点名的那几行；孤儿标注点名不静默）⇒ wrapWrite
+  ipcMain.handle(CHANNELS.worldMapBatchMarkerLayer, (_event, payload: WorldMapBatchMarkerLayerRequestPayload) =>
+    wrapWrite<WorldMapBatchMarkerLayerResult>(() => batchSetMarkerLayer(requireGateway(), payload)),
   );
   // 编年史（T4-8）：复用时间线刻度，只读 ⇒ wrap
   ipcMain.handle(CHANNELS.chronicleBook, (_event, payload: ChronicleBookRequestPayload) =>

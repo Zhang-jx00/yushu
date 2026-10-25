@@ -26,6 +26,8 @@ import type {
   GraphViewPayload,
   GraphViewRequestPayload,
   WorldMapBasePayload,
+  WorldMapBatchMarkerLayerRequestPayload,
+  WorldMapBatchMarkerLayerResult,
   WorldMapAddHoleRequestPayload,
   WorldMapAddHoleResult,
   WorldMapCreateAnchorRequestPayload,
@@ -314,6 +316,15 @@ export interface YushuApi {
     addHole: (payload: WorldMapAddHoleRequestPayload) => Promise<WorldMapAddHoleResult>;
     /** **删洞**（R151）：把某个区域的某一个洞去掉 */
     removeHole: (payload: WorldMapRemoveHoleRequestPayload) => Promise<WorldMapRemoveHoleResult>;
+    /**
+     * **批量改图层**（R171）：作者挑一批标注 ⇒ 把它们挪到同一个图层（**只改那些行**）。
+     *
+     * 图层名要过主进程那份名单（拼错的图层名会让地图文件下一次**读不出来**）；
+     * 孤儿标注（指向不存在的实体）改完之后会被**逐条点名**，不静默。
+     */
+    batchSetMarkerLayer: (
+      payload: WorldMapBatchMarkerLayerRequestPayload,
+    ) => Promise<WorldMapBatchMarkerLayerResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

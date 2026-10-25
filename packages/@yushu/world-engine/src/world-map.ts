@@ -211,6 +211,59 @@ export interface MapMarker {
 }
 
 /**
+ * **标注清单的一行**（R171）。
+ *
+ * 为什么要有这张清单：投影（`projectWorldMap`）会把**指向不存在实体的标注**剔掉
+ * （`map-marker-orphan` 是 error ⇒ 那条标注不画）⇒ 于是"图上有几个标注"与
+ * "地图文件里写了几条标注"是**两个数**。作者要管标注时，看的必须是后者
+ * （那一条孤儿标注也在他的文件里，只是画不出来）。
+ *
+ * ⇒ 这张清单**一张表装下两种标注**（画得出来的 / 孤儿），并且每一行都带
+ * `orphan` 标记 ⇒ 界面能**点名**它们，而不是把它们悄悄藏起来。
+ *
+ * 口径回源 K08 §3.7（标注即地点卡 ⇒ 标注必绑一个地点实体）与 §3.9（分层可控）：
+ * 一行标注的三个身份是**实体 / 图层 / 坐标**，筛选也只按这三样。
+ */
+export interface MapMarkerRow {
+  id: string;
+  /** 图层（K08 §3.9 的分层：图层可独立显隐） */
+  layer: MapLayerKind;
+  /** 绑定的地点实体 id */
+  entityRef: string;
+  /** 地点实体的名字；**孤儿标注没有**（实体不存在 ⇒ 没有名字） */
+  entityName: string | null;
+  /** 指向的实体不存在 ⇒ true（K08 的 `map-marker-orphan`） */
+  orphan: boolean;
+  /** 底图像素坐标 */
+  x: number;
+  y: number;
+}
+
+/**
+ * 标注清单（R171）：从**地图文件**的标注 + **真源行表**的实体直算。
+ *
+ * 纯函数、零 fs ⇒ 读盘（主进程）与写盘（批量改图层）用的是同一份判定。
+ * 按 id 排序 ⇒ 同输入同输出（界面上的清单不会因为文件里的顺序抖动）。
+ */
+export function buildMapMarkerRows(def: WorldMapDef, entities: IndexEntityRow[]): MapMarkerRow[] {
+  const byId = new Map(entities.map((entity) => [entity.id, entity]));
+  return [...(def.markers ?? [])]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((marker) => {
+      const entity = byId.get(marker.entityRef);
+      return {
+        id: marker.id,
+        layer: marker.layer,
+        entityRef: marker.entityRef,
+        entityName: entity === undefined ? null : entity.name,
+        orphan: entity === undefined,
+        x: marker.x,
+        y: marker.y,
+      };
+    });
+}
+
+/**
  * 事件锚点（K08 §3.8：**事件挂坐标** ⇒ 时空联动）。
  *
  * 与标注的差别：标注绑**地点实体**（点开是地点卡），锚点绑**事件**（选事件能定位到地图上）。
@@ -320,6 +373,15 @@ export interface WorldMapOptions {
 }
 
 const LAYER_ORDER: MapLayerKind[] = ["base", "place", "political", "event", "route", "other"];
+
+/**
+ * 全部合法的图层名（R171 批量改图层时**主进程也要认一遍**）。
+ *
+ * 为什么解析器认过一遍还不够：解析认的是**文件里已经有的**图层名，
+ * 而"把一批标注挪到某个图层"是**作者新指定的**图层 ⇒ 那一条路也要有同一份名单
+ * （否则界面能写出 `layer: politcal` 这种拼错的图层 ⇒ 地图文件下一次就**读不出来**）。
+ */
+export const MAP_LAYER_KINDS: readonly MapLayerKind[] = LAYER_ORDER;
 
 function layerRank(kind: MapLayerKind): number {
   const index = LAYER_ORDER.indexOf(kind);
@@ -860,6 +922,60 @@ export function setMapMarkerPosition(
   }
   lines[index] = next;
   return { content: lines.join("\n"), reason: null, previous: [line] };
+}
+
+/**
+ * 把**一批标注**挪到另一个图层（R171）：只改**那些行**的 `layer:`，别的**一个字都不动**。
+ *
+ * 与 R139（挪一个标注的坐标）同一条纪律，只是**一次改一批**：
+ * - **只动被点名的那几行**（底图登记、bounds、图层、事件锚点、区域、作者自己的注释**原样留着**）；
+ * - **认不出就整批不动**：某一行的 `layer` 认不出来 ⇒ 整批拒绝并点名那个标注
+ *   （半个改是最坏的结果：作者看到一半标注换了层，另一半没换，却不知道哪一半没换）。
+ *
+ * 为什么"批量改图层"值得做：R139 之前标注只能**一个一个挪** ⇒ 地图上几十个标注
+ * 要重新归类时，作者得挨个改 ⇒ 于是他不改（宁可有几十个标注堆在一层）。
+ * 口径回源 K08 §3.9「分层可控」：图层是作者组织地图的手段 ⇒ 组织手段要能成批用。
+ */
+export function setMapMarkerLayers(
+  text: string,
+  markerIds: string[],
+  layer: MapLayerKind,
+): { content: string | null; reason: string | null; previous: string[]; changed: string[] } {
+  const ids = [...new Set(markerIds)].sort();
+  if (ids.length === 0) {
+    return { content: null, reason: "没有选中任何标注", previous: [], changed: [] };
+  }
+  const lines = text.split("\n");
+  const previous: string[] = [];
+  for (const id of ids) {
+    const index = markerLineIndex(lines, id);
+    if (index < 0) {
+      return {
+        content: null,
+        reason: `地图文件里找不到标注 ${id}（它也许是多行写法 ⇒ 请手动改那一行）`,
+        previous: [],
+        changed: [],
+      };
+    }
+    const line = lines[index] as string;
+    const next = rewriteLayerInLine(line, layer);
+    if (next === line) {
+      return {
+        content: null,
+        reason: `标注 ${id} 那一行里认不出 layer（请手动改那一行）`,
+        previous: [],
+        changed: [],
+      };
+    }
+    previous.push(line);
+    lines[index] = next;
+  }
+  return { content: lines.join("\n"), reason: null, previous, changed: ids };
+}
+
+/** 把一行里的 `layer` 改成新值（其余部分原样保留；认不出就原样返回 ⇒ 上层据此拒绝） */
+function rewriteLayerInLine(line: string, layer: MapLayerKind): string {
+  return line.replace(/\blayer\s*:\s*[A-Za-z_][A-Za-z0-9_]*/, `layer: ${layer}`);
 }
 
 /**

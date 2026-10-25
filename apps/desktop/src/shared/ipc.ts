@@ -113,6 +113,11 @@ export const CHANNELS = {
    * 世界地图·**删洞**（R151）：**写盘**（把某个区域的某一个洞去掉 ⇒ 改那一个区域的 `holes:`）。
    */
   worldMapRemoveHole: "map:removeHole",
+  /**
+   * 世界地图·**批量改图层**（R171）：**写盘**（作者挑一批标注 ⇒ 把它们挪到同一个图层）。
+   * 口径回源 K08 §3.9「分层可控」：图层是作者组织地图的手段 ⇒ 组织手段要能成批用。
+   */
+  worldMapBatchMarkerLayer: "map:batchSetMarkerLayer",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -1894,6 +1899,57 @@ export interface PublishReminderRow {
   wordCount: number;
 }
 
+/**
+ * 存稿池里一章的处境（R174；**本文件保持零依赖**，所以这里本地写一份）。
+ *
+ * 它必须与引擎 `@yushu/world-engine` 的 `STOCK_DUE_STATES` 逐字一致——
+ * 漂移由 `apps/desktop/test/publish-stock-ids.test.ts` 盯住（少一处对账就红）。
+ *
+ * 注意它**不是**发布状态：`publishStatus` 只有 draft / revised / published 三态
+ * （docs/03 §5.3），而"到期 / 临期 / 已定时 / 存稿"是**同一批草稿的不同处境**，
+ * 不是第四个状态（I01 §3.2 的 stock / scheduled 投影到三态就是 draft）。
+ */
+export const PUBLISH_STOCK_DUE_STATES = ["due", "soon", "scheduled", "stock"] as const;
+export type PublishStockDueState = (typeof PUBLISH_STOCK_DUE_STATES)[number];
+
+/** 存稿池里的一章（写完还没发出去的稿） */
+export interface PublishStockRow {
+  id: string;
+  title: string;
+  wordCount: number;
+  /** 计划发布时刻；空串 = 没定时 */
+  publishAt: string;
+  dueState: PublishStockDueState;
+  /** 到期时长（毫秒）：正 = 已过点；soon / scheduled 为负（还差这么多） */
+  dueMs: number;
+  /** 项目内相对路径（写入点要靠它定位文件） */
+  path: string;
+  /** 文件当前 hash（写入点做 baseHash 并发检测要用） */
+  hash: string;
+}
+
+/** 续航（I01 §3.5：存稿章数 ÷ 日更章数 = 可支撑天数） */
+export interface PublishStockEndurance {
+  /** 待发稿池章数 */
+  poolCount: number;
+  /** 其中没定时的（纯存稿） */
+  stockCount: number;
+  /** 其中定了时的（待发布） */
+  scheduledCount: number;
+  dueCount: number;
+  soonCount: number;
+  /** 观察窗天数（算日更速率用的） */
+  windowDays: number;
+  /** 实测日更章数；样本不足为 null（不拿 0 充数） */
+  dailyChapters: number | null;
+  /** 可支撑天数；样本不足为 null */
+  days: number | null;
+  /** 断更预警；空串 = 不预警 */
+  warning: string;
+  /** 这几个数是怎么来的 */
+  note: string;
+}
+
 /** 发布看板（只读通道的载荷） */
 export interface PublishBoardPayload {
   /** 当前口径包（番茄等）；没有可用包时为空串 */
@@ -1908,11 +1964,21 @@ export interface PublishBoardPayload {
    *
    * 面板把它们写出来，作者才能核"这是按哪条规则判的"——与体检表的 `origin` 同一口径。
    */
-  origins: { status: string; reminder: string; word: string };
+  origins: { status: string; reminder: string; word: string; stock: string };
   /** 口径包读不了时的原因（空串 = 没问题）；读不了就不判，不降级成"没问题" */
   rulesError: string;
   chapters: PublishChapterRow[];
   reminders: PublishReminderRow[];
+  /**
+   * 存稿池与续航（R174；I01 §3.5 / §5）。
+   *
+   * **它是 `chapters` 的一个子集**（还没发出去且已经写完的那些），不是另一份章清单——
+   * 同一个数只在一个地方有一个出处。
+   */
+  stock: {
+    rows: PublishStockRow[];
+    endurance: PublishStockEndurance;
+  };
   groups: { draft: number; revised: number; published: number };
   word: {
     count: number;
@@ -3183,6 +3249,43 @@ export interface WorldMapViewMarker {
   card: WorldMapPlaceCard | null;
 }
 
+/**
+ * 标注清单的一行（R171）：**图上画出来的**与**孤儿标注**装在**同一张清单**里。
+ *
+ * 为什么不在 `markers` 里就完事：投影会把孤儿标注剔掉（`map-marker-orphan` 是 error）
+ * ⇒ `markers` 的条数是"画得出来的条数"，而作者要管的是"文件里写了几条" ⇒ 两个数。
+ * 界面把两个数摆成两个名字会让人以为是两回事（"标注 5" vs "清单 7"）⇒
+ * 这张清单用 `orphan` 标记区分，**总数只有一个出处**。
+ */
+export interface WorldMapMarkerRow {
+  id: string;
+  layer: string;
+  entityRef: string;
+  /** 地点实体的名字；孤儿标注为 null（实体不存在 ⇒ 没有名字） */
+  entityName: string | null;
+  /** 指向的实体不存在 ⇒ true */
+  orphan: boolean;
+  x: number;
+  y: number;
+}
+
+/** 批量改图层（R171）：把选中的那几个标注挪到同一个图层 */
+export interface WorldMapBatchMarkerLayerRequestPayload {
+  /** 要改的标注 id（逐条点名，不认"全部"） */
+  markerIds: string[];
+  /** 目标图层名（主进程照引擎那份名单认一遍） */
+  layer: string;
+}
+
+export interface WorldMapBatchMarkerLayerResult {
+  ok: boolean;
+  note: string;
+  /** 实际改了的标注 id */
+  changed: string[];
+  /** 这次改动里**指向不存在实体**的标注（孤儿标注）——点名，不静默 */
+  orphanChanged: string[];
+}
+
 /** 世界地图底图（R123）：把作者登记的底图读成 data URL 交给渲染层铺在坐标空间上 */
 export interface WorldMapBasePayload {
   /** 真源里登记的底图路径（相对项目根）；没有登记底图 = null */
@@ -3213,6 +3316,11 @@ export interface WorldMapViewPayload {
    */
   baseSize: { width: number; height: number } | null;
   markers: WorldMapViewMarker[];
+  /**
+   * **标注清单**（R171）：文件里写了的**每一条**标注（含孤儿标注）⇒ 界面据此做筛选与批量操作。
+   * 与 `markers` 的差别：`markers` 是**画在图上的**（孤儿被剔掉），`markerRows` 是**清单**。
+   */
+  markerRows: WorldMapMarkerRow[];
   /**
    * **项目里可放的地点**（R140：放标注时作者要选一个）。
    * 放标注 = 选一个地点实体 ⇒ 在图上点一下落一个标注（K08 §3.7：标注即地点卡 ⇒ 必须绑真实地点）。

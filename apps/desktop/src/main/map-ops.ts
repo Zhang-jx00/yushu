@@ -3,10 +3,12 @@ import { readFile } from "node:fs/promises";
 import {
   MAP_PATH,
   TIMELINE_PATH,
+  MAP_LAYER_KINDS,
   appendMapAnchor,
   appendMapShape,
   appendMapBase,
   appendMapMarker,
+  buildMapMarkerRows,
   checkStructureFromSources,
   normalizeBounds,
   parseMapFile,
@@ -14,14 +16,18 @@ import {
   projectWorldMap,
   replaceMapShapeEntry,
   setMapAnchorPosition,
+  setMapMarkerLayers,
   setMapMarkerPosition,
   validateRegionHoles,
+  type MapLayerKind,
   type WorldMapDef,
 } from "@yushu/world-engine";
 import type {
   WorldMapAddHoleRequestPayload,
   WorldMapAddHoleResult,
   WorldMapBasePayload,
+  WorldMapBatchMarkerLayerRequestPayload,
+  WorldMapBatchMarkerLayerResult,
   WorldMapCreateAnchorRequestPayload,
   WorldMapCreateAnchorResult,
   WorldMapCreateShapeRequestPayload,
@@ -79,6 +85,7 @@ export async function worldMapView(
       canvas: null,
       baseSize: null,
       markers: [],
+      markerRows: [],
       places: [],
       events: [],
       shapes: [],
@@ -105,6 +112,7 @@ export async function worldMapView(
       canvas: null,
       baseSize: null,
       markers: [],
+      markerRows: [],
       places: [],
       events: [],
       shapes: [],
@@ -193,6 +201,8 @@ export async function worldMapView(
     canvas,
     baseSize,
     markers,
+    // 标注清单（R171）：**每一条**标注（含孤儿标注）⇒ 界面据此筛选与批量操作
+    markerRows: buildMapMarkerRows(def, structure.entities),
     places,
     events,
     shapes: projection.shapes.map((shape) => ({
@@ -914,6 +924,75 @@ export async function createMapShape(
     ok: true,
     note: `已放${request.kind === "region" ? "区域" : "行程线"} ${id}（${String(points.length)} 个点）`,
     shape: { id, kind: request.kind, points },
+  };
+}
+
+/**
+ * **批量改图层**（R171）：**写盘**——作者在标注清单里挑一批标注 ⇒ 把它们挪到同一个图层。
+ *
+ * 口径回源 K08 §3.9「分层可控：底图/地名/政治/事件/行程线分层，图层独立显隐」：
+ * 图层是作者组织地图的手段 ⇒ 组织手段要能**成批**用（一个个挪 = 作者干脆不整理）。
+ *
+ * 四条不静默 / 不越权（与前几轮同一条纪律）：
+ * ① **只改被点名的那几行**（别的标注、底图、bounds、事件锚点、区域、作者自己的注释**原样留着**）；
+ * ② **图层名要认**（照引擎那份名单；拼错的图层名会让地图文件下一次**读不出来**）；
+ * ③ **孤儿标注点名**：改完之后逐条点名哪些是**指向不存在实体**的标注
+ *    （K08 §3.7：标注即地点卡 ⇒ 绑一个不存在的地方 = 孤儿标注）⇒ 作者看得见自己动过它们；
+ * ④ 写盘带 baseHash ⇒ 作者在别处改过 map.yaml 时**报冲突**、不覆盖。
+ *
+ * **孤儿标注为什么还能批量改图层**：图层只决定"画在哪一层、怎么归类"，
+ * 与它绑的是谁无关 ⇒ 改图层不会把孤儿变成孤儿，也不会把孤儿**悄悄丢掉**
+ * （丢掉了作者还以为那个地方不见了 ⇒ 他会重新画一个）。
+ */
+export async function batchSetMarkerLayer(
+  gateway: ProjectGateway,
+  request: WorldMapBatchMarkerLayerRequestPayload,
+): Promise<WorldMapBatchMarkerLayerResult> {
+  const fail = (note: string): WorldMapBatchMarkerLayerResult => ({
+    ok: false,
+    note,
+    changed: [],
+    orphanChanged: [],
+  });
+  if (!MAP_LAYER_KINDS.includes(request.layer as MapLayerKind)) {
+    return fail(`图层名认不出：${request.layer}（可选：${MAP_LAYER_KINDS.join(" / ")}）`);
+  }
+  const ids = [...new Set(request.markerIds)].sort();
+  if (ids.length === 0) return fail("没有选中任何标注");
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) return fail("项目还没有世界地图（先登记底图）");
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return fail(`地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`);
+  }
+  const markers = def.markers ?? [];
+  const missing = ids.filter((id) => !markers.some((marker) => marker.id === id));
+  if (missing.length > 0) {
+    return fail(`地图里没有这些标注：${missing.join(" / ")}（一个都没改）`);
+  }
+  // 孤儿标注：绑的实体在真源里不存在（从**真源行表**直算，不碰 SQLite 索引）
+  const structure = await checkStructureFromSources(gatewayReader(gateway));
+  const entityIds = new Set(structure.entities.map((entity) => entity.id));
+  const orphanChanged = ids.filter((id) => {
+    const marker = markers.find((item) => item.id === id);
+    return marker !== undefined && !entityIds.has(marker.entityRef);
+  });
+  const changed = setMapMarkerLayers(snapshot.content, ids, request.layer as MapLayerKind);
+  if (changed.content === null) {
+    return fail(changed.reason ?? "没改成");
+  }
+  await gateway.writeDoc(MAP_PATH, changed.content, snapshot.hash);
+  const orphanPart =
+    orphanChanged.length > 0
+      ? `；其中 ${String(orphanChanged.length)} 个是孤儿标注（指向的实体不存在）：${orphanChanged.join(" / ")}`
+      : "";
+  return {
+    ok: true,
+    note: `已把 ${String(ids.length)} 个标注挪到图层「${request.layer}」${orphanPart}`,
+    changed: ids,
+    orphanChanged,
   };
 }
 

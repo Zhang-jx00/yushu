@@ -133,6 +133,8 @@ contextBridge.exposeInMainWorld("yushu", {
     addHole: (payload) => invoke("map:addHole", payload),
     /** 删洞（R151）：把某个区域的某一个洞去掉 */
     removeHole: (payload) => invoke("map:removeHole", payload),
+    /** 批量改图层（R171）：把一批标注挪到同一个图层 ⇒ 只改那些行；孤儿标注点名不静默 */
+    batchSetMarkerLayer: (payload) => invoke("map:batchSetMarkerLayer", payload),
   },
   chronicle: {
     book: (payload) => invoke("chronicle:book", payload),
