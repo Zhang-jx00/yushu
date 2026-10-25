@@ -20,6 +20,7 @@ import {
   setMapMarkerPosition,
   validateRegionHoles,
   type MapLayerKind,
+  type MapMarker,
   type WorldMapDef,
 } from "@yushu/world-engine";
 import type {
@@ -975,18 +976,23 @@ export async function batchSetMarkerLayer(
   // 孤儿标注：绑的实体在真源里不存在（从**真源行表**直算，不碰 SQLite 索引）
   const structure = await checkStructureFromSources(gatewayReader(gateway));
   const entityIds = new Set(structure.entities.map((entity) => entity.id));
-  const orphanChanged = ids.filter((id) => {
-    const marker = markers.find((item) => item.id === id);
-    return marker !== undefined && !entityIds.has(marker.entityRef);
-  });
+  const markerById = new Map(markers.map((marker) => [marker.id, marker]));
+  const orphanPairs = ids
+    .map((id) => markerById.get(id))
+    .filter((marker): marker is MapMarker => marker !== undefined && !entityIds.has(marker.entityRef))
+    .map((marker) => ({ id: marker.id, entityRef: marker.entityRef }));
+  const orphanChanged = orphanPairs.map((pair) => pair.id);
   const changed = setMapMarkerLayers(snapshot.content, ids, request.layer as MapLayerKind);
   if (changed.content === null) {
     return fail(changed.reason ?? "没改成");
   }
   await gateway.writeDoc(MAP_PATH, changed.content, snapshot.hash);
+  // 孤儿标注**点到那一对**（是哪一条 + 它指向哪个不存在的实体）⇒ 作者能照着去改
   const orphanPart =
-    orphanChanged.length > 0
-      ? `；其中 ${String(orphanChanged.length)} 个是孤儿标注（指向的实体不存在）：${orphanChanged.join(" / ")}`
+    orphanPairs.length > 0
+      ? `；其中 ${String(orphanPairs.length)} 个是孤儿标注（指向的实体不存在）：${orphanPairs
+          .map((pair) => `${pair.id} → ${pair.entityRef}`)
+          .join(" / ")}`
       : "";
   return {
     ok: true,

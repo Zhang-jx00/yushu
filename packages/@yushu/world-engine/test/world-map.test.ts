@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendMapAnchor, appendMapMarker, appendMapShape, normalizeBounds, parseMapFile, projectWorldMap, replaceMapShapeEntry, setMapAnchorPosition, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
+import { appendMapAnchor, appendMapMarker, appendMapShape, buildMapMarkerRows, normalizeBounds, parseMapFile, projectWorldMap, replaceMapShapeEntry, setMapAnchorPosition, setMapMarkerLayers, setMapMarkerPosition, type WorldMapDef } from "../src/world-map.js";
 import type { IndexEntityRow } from "../src/index-input.js";
 
 /**
@@ -802,5 +802,89 @@ describe("区域的洞（R151）：外环 + 挖掉的一块", () => {
     expect(holes).toHaveLength(1);
     expect(holes?.[0]?.[0]?.[0]).toBeCloseTo(0.2);
     expect(holes?.[0]?.[0]?.[1]).toBeCloseTo(0.2 / 0.7);
+  });
+});
+
+describe("标注的批量管理（R171）：清单 + 批量改图层", () => {
+  /** 四条标注里有一条绑着**不存在的实体**（⇒ 孤儿标注，K08 的 map-marker-orphan） */
+  const DEF: WorldMapDef = {
+    id: "map-world",
+    crs: "simple",
+    bounds: [
+      [0, 0],
+      [1000, 700],
+    ],
+    markers: [
+      { id: "m-2", layer: "place", entityRef: "loc-b", x: 300, y: 200 },
+      { id: "m-1", layer: "place", entityRef: "loc-a", x: 250, y: 175 },
+      { id: "m-3", layer: "political", entityRef: "loc-gone", x: 400, y: 300 },
+    ],
+  };
+  const ENTITIES: IndexEntityRow[] = [
+    {
+      id: "loc-a",
+      type: "location",
+      layer: "world",
+      name: "玄天城",
+      aliases: [],
+      visibility: "hidden",
+      filePath: "world/cards/location/loc-a.md",
+    },
+    {
+      id: "loc-b",
+      type: "location",
+      layer: "world",
+      name: "断桥",
+      aliases: [],
+      visibility: "hidden",
+      filePath: "world/cards/location/loc-b.md",
+    },
+  ];
+
+  it("清单 = 每一条标注（含孤儿），按 id 排序 ⇒ 同输入同输出", () => {
+    const rows = buildMapMarkerRows(DEF, ENTITIES);
+    expect(rows.map((row) => row.id)).toEqual(["m-1", "m-2", "m-3"]);
+    expect(rows[0]?.entityName).toBe("玄天城");
+    expect(rows[0]?.orphan).toBe(false);
+    // 孤儿标注：**点着名**（没有名字，但要说清它指向谁）
+    expect(rows[2]?.orphan).toBe(true);
+    expect(rows[2]?.entityName).toBeNull();
+    expect(rows[2]?.entityRef).toBe("loc-gone");
+  });
+
+  it("批量改图层 ⇒ **只改被点名的那一行**，其余行逐字原样", () => {
+    const text = [
+      "# 作者自己写的注释",
+      "markers:",
+      "  - {id: m-1, layer: place, entity_ref: loc-a, x: 250, y: 175}",
+      "  - {id: m-2, layer: place, entity_ref: loc-b, x: 300, y: 200}",
+      "",
+    ].join("\n");
+    const result = setMapMarkerLayers(text, ["m-2"], "political");
+    expect(result.content).not.toBeNull();
+    const lines = (result.content ?? "").split("\n");
+    expect(lines[0]).toBe("# 作者自己写的注释");
+    expect(lines[1]).toBe("markers:");
+    expect(lines[2]).toBe("  - {id: m-1, layer: place, entity_ref: loc-a, x: 250, y: 175}");
+    expect(lines[3]).toBe("  - {id: m-2, layer: political, entity_ref: loc-b, x: 300, y: 200}");
+    expect(result.changed).toEqual(["m-2"]);
+    expect(result.previous).toHaveLength(1);
+  });
+
+  it("认不出 / 找不到 ⇒ **整批不动**（半个改最坏），并点名", () => {
+    const text = "markers:\n  - {id: m-1, layer: place, entity_ref: loc-a, x: 1, y: 1}\n";
+    const missing = setMapMarkerLayers(text, ["m-9"], "political");
+    expect(missing.content).toBeNull();
+    expect(missing.reason).toContain("m-9");
+    const noLayer = setMapMarkerLayers(
+      "markers:\n  - {id: m-1, entity_ref: loc-a, x: 1, y: 1}\n",
+      ["m-1"],
+      "political",
+    );
+    expect(noLayer.content).toBeNull();
+    expect(noLayer.reason).toContain("m-1");
+    const empty = setMapMarkerLayers(text, [], "political");
+    expect(empty.content).toBeNull();
+    expect(empty.reason).toContain("没有选中");
   });
 });
