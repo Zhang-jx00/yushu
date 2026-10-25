@@ -195,6 +195,25 @@ export interface PublishReminder {
 }
 
 /**
+ * **到期判定的唯一出处**（R174）：`publish_at` 设了、可解析、且已到点 ⇒ 返回「已过点多少毫秒」；
+ * 没设 / 读不出来 / 还没到点 ⇒ `null`。
+ *
+ * **为什么单独拎出来**：R174 的存稿池要判"到期 / 临期"，而定时提醒队列已经判过一次"到期"。
+ * 两处各写一遍比较式（`atMs > nowMs`）⇒ 哪天改了一边，另一边就成了另一个数
+ * （面板上"到期 3 条"而提醒条数 2 条，作者按哪个核对都会以为对方错了）。
+ * ⇒ **判定函数只有这一个**，两处都调它；判据里也钉住"两边用的是同一个函数"。
+ *
+ * 口径同 I01 §3.7：**离线补发**——过点很久的也要算到期（"到点且还没处理"，不是"刚好在那一秒"）。
+ */
+export function publishAtDueMs(publishAt: string | undefined, nowMs: number): number | null {
+  if (publishAt === undefined || publishAt.trim() === "") return null;
+  const atMs = Date.parse(publishAt);
+  if (Number.isNaN(atMs) || Number.isNaN(nowMs)) return null;
+  if (atMs > nowMs) return null;
+  return nowMs - atMs;
+}
+
+/**
  * 定时发布：**本地提醒队列**（I01 §3.7）。
  *
  * 三条口径：
@@ -210,17 +229,15 @@ export function planPublishReminders(
   const nowMs = Date.parse(now);
   const reminders: PublishReminder[] = [];
   for (const row of rows) {
-    if (row.publishAt === undefined || row.publishAt.trim() === "") continue;
     if (row.status === "published") continue;
-    const atMs = Date.parse(row.publishAt);
-    if (Number.isNaN(atMs) || Number.isNaN(nowMs)) continue;
-    if (atMs > nowMs) continue;
+    const dueMs = publishAtDueMs(row.publishAt, nowMs);
+    if (dueMs === null) continue;
     reminders.push({
       id: row.id,
       title: row.title,
-      publishAt: row.publishAt,
+      publishAt: row.publishAt as string,
       wordCount: row.wordCount,
-      dueMs: nowMs - atMs,
+      dueMs,
     });
   }
   return reminders.sort((a, b) => {
