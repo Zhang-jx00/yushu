@@ -3856,3 +3856,77 @@ describe("三级大纲页三栏（R164）：左=卷章树 / 中=大纲表 / 右=
     expect(body, "没有比同一个 id").toContain("shownId === pick.id");
   });
 });
+
+/**
+ * **编辑器页右栏**（R165）：写作版面一个字不动 + 选中段的出处 / 这条卡的原文 / 相关实体。
+ *
+ * 判据盯五件事：
+ * ① **写作版面的行宽仍是 44em**（R64 的契约 —— 加一栏不许把写作面挤窄）；
+ * ② 右栏在（第三栏），且**三块东西都在**（出处 / 原文 / 相关实体）；
+ * ③ 原文的**截断规则在纯函数里**（截断了要说截断了，不许把片段当全文）；
+ * ④ **预演真的跑了**（认回执：step126 量了行宽、对了账）；
+ * ⑤ 预演那一步**真的在量行宽**（量实际渲染宽度，不是只认类名）。
+ */
+describe("编辑器页右栏（R165）：写作版面不动 + 出处 / 原文 / 相关实体", () => {
+  const view = readFileSync(join(VIEW_ROOT, "views", "ChapterEditorView.tsx"), "utf8");
+  const mod = readFileSync(join(VIEW_ROOT, "components", "card-context.ts"), "utf8");
+  const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");
+  const walk = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "walkthrough.ts"), "utf8");
+  const report = JSON.parse(
+    readFileSync(join(ROOT, "docs", "assets", "m1-preview", "walkthrough-report.json"), "utf8"),
+  ) as { steps: Array<{ step: number; detail: string }> };
+
+  it("**写作版面的行宽仍是 44em**（R64 的契约，加右栏不许动它）", () => {
+    expect(css, "写作版面的行宽令牌不在了").toMatch(/--prose-measure:\s*44em/);
+    // 写作版面**凡是有 max-width 的规则，都必须走那个令牌**（一条都不许另写）
+    // 先剥注释再扫规则（注释里写着 .cm-host 与别的 max-width ⇒ 不剥会把它们当一条规则）
+    const bareCss = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const writingRules = [...bareCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => (m[1] ?? "").includes("cm-host") && (m[2] ?? "").includes("max-width"))
+      .map((m) => m[2] ?? "");
+    expect(writingRules.length, "写作版面一条限宽规则都没有（44em 那条不见了？）").toBeGreaterThan(0);
+    for (const body of writingRules) {
+      expect(body, "写作版面的限宽没有走 --prose-measure").toContain("var(--prose-measure)");
+    }
+  });
+
+  it("右栏在（第三栏），且**三块东西都在**（出处 / 原文 / 相关实体）", () => {
+    expect(view, "编辑器页没有右栏").toContain('className="chapter-editor-col-context"');
+    expect(css, "编辑器页的栅格没加第三栏").toMatch(
+      /\.chapter-editor\s*\{[^}]*grid-template-columns:[^;]*22%/,
+    );
+    const right = view.slice(view.indexOf('className="chapter-editor-col-context"'));
+    expect(right, "右栏里没有出处").toContain("出处");
+    expect(right, "右栏里没有原文").toContain("原文");
+    expect(right, "右栏里没有相关实体").toContain("相关实体");
+  });
+
+  it("原文的**截断规则在纯函数里**（截断了要说截断了）", () => {
+    // 认的是**调用**（认调用，不认「文件里出现过这个名字」—— import 行里也有它）
+    expect(view, "右栏没走那个纯函数").toMatch(/summarizeCardContext\(/);
+    expect(mod, "纯函数模块没导出那个函数").toContain("export function summarizeCardContext");
+    // 纯函数：只读入参 ⇒ 可单测
+    expect(mod, "纯函数模块不许碰 fs").not.toContain("node:fs");
+    expect(mod, "纯函数模块不许读墙钟").not.toContain("Date.now");
+    expect(mod, "截断了没有说").toContain("truncated");
+    expect(view, "截断了没有在界面上说明").toContain("contextCard.truncated");
+  });
+
+  it("**预演真的跑了**（认回执：step126 量了行宽、对了账）", () => {
+    const step = report.steps.find((row) => row.step === 126);
+    expect(step, "报告里没有 step126（编辑器页右栏）那一步").toBeTruthy();
+    const detail = (step as { detail: string }).detail;
+    expect(detail, "step126 的回执里没有「写作版面行宽=」").toContain("写作版面行宽=");
+    expect(detail, "step126 的回执里没有「相关实体对账」").toContain("相关实体对账");
+  });
+
+  it("预演那一步**真的在量行宽**（量实际渲染宽度，不是只认类名）", () => {
+    const start = walk.indexOf("step: 126,");
+    const end = walk.indexOf("step: 127,", start);
+    const body = walk.slice(start, end < 0 ? walk.length : end);
+    expect(body, "没找到 step126 的脚本").not.toBe("");
+    expect(body, "没有量实际渲染宽度").toContain("host.clientWidth / fontSize");
+    expect(body, "没有钉住 44em 这条契约").toContain("Math.abs(contractEm - 44) <= 0.5");
+    expect(body, "没有对账相关实体").toContain("diskRefs === shownRefs");
+  });
+});

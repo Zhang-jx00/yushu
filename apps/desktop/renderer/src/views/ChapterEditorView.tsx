@@ -21,6 +21,7 @@ import { createActivityPing, type ActivityPing } from "../activity-ping";
 import { takePendingRecovery } from "../recovery-inbox";
 import { ProofreadPanel } from "./ProofreadPanel";
 import { cardTypeLabel, layerLabel } from "../card-labels";
+import { summarizeCardContext, type CardContextSummary } from "../components/card-context";
 
 /**
  * 浮层进场的**兜底延迟**（R116）：窗口被遮挡 / 最小化时浏览器会暂停 `requestAnimationFrame`，
@@ -175,6 +176,15 @@ export function ChapterEditorView({
   /** 双栏对照开关（T2-3 切片 B）与本章设定卡数据 */
   const [splitView, setSplitView] = useState(false);
   const [mentionCards, setMentionCards] = useState<MentionCardData[]>([]);
+  /**
+   * R165：右栏「选中段的出处 · 这条卡的原文 · 相关实体」——**选中的那张卡**。
+   *
+   * 为什么是"选中的那张卡"而不是"光标所在段"：编辑器这一版**没有段落级的出处追踪**
+   * （`@提及` 是按**章**收集的）⇒ 这一栏认的是「本章提到的那张卡里，作者正在看的那一张」。
+   * 真要做段落级，得先给编辑器加一层"光标所在段 ⇒ 段里的提及"的追踪（**明写没做的**）。
+   */
+  const [contextCard, setContextCard] = useState<CardContextSummary | null>(null);
+  const [contextError, setContextError] = useState("");
   /** 富文本 @ 候选菜单（T2-2 富文本形态） */
   const [mentionMenu, setMentionMenu] = useState<MentionMenuState | null>(null);
   /**
@@ -869,6 +879,33 @@ export function ChapterEditorView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splitView, mentionedKey]);
 
+  /**
+   * R165：右栏读那张卡的**全文**（原文 + 关系）。
+   *
+   * 正文可能有几百字 ⇒ 截断规则放在**纯函数**里（`summarizeCardContext`），
+   * 界面只负责摆 ⇒ 截断多少字这件事只有一个出处。
+   */
+  const openContextCard = useCallback(async (filePath: string) => {
+    try {
+      setContextError("");
+      const card = await api().card.read(filePath);
+      setContextCard(
+        summarizeCardContext({
+          path: filePath,
+          card: {
+            name: card.card.name,
+            type: card.card.type,
+            body: card.body,
+            refs: card.card.refs ?? [],
+          },
+        }),
+      );
+    } catch (err) {
+      setContextError((err as Error).message);
+      setContextCard(null);
+    }
+  }, []);
+
   // UI 预演调试句柄（--ui-walkthrough；仅 __yushuDebug 时暴露）：reload 精确等待重载完成，避免预演竞态
   useEffect(() => {
     const debugWindow = window as DebugWindow;
@@ -1288,6 +1325,69 @@ export function ChapterEditorView({
           {error ? <span className="error-text">{error}</span> : <span className="muted">{status}</span>}
         </div>
       </section>
+
+      {/* R165：右栏 —— 选中段的出处 / 这条卡的原文 / 相关实体（**写作版面一个字不动**） */}
+      <aside className="chapter-editor-col-context">
+        <section className="panel chapter-context">
+          <div className="panel-title">选中段的出处 · 这条卡的原文 · 相关实体</div>
+          {mentioned.length === 0 ? (
+            <div className="muted">
+              本章还没有提到设定卡（正文里用 @名称 引用；建档在「世界观档案」）。
+            </div>
+          ) : (
+            <>
+              <div className="muted">本章提到 {mentioned.length} 张卡（点一条看它的原文）</div>
+              <ul className="chapter-context-list">
+                {mentioned.map((entity) => (
+                  <li key={entity.id}>
+                    <button
+                      type="button"
+                      className={"chapter-context-btn" + (contextCard?.path === entity.filePath ? " is-on" : "")}
+                      aria-pressed={contextCard?.path === entity.filePath}
+                      onClick={() => void openContextCard(entity.filePath)}
+                    >
+                      {entity.name}
+                    </button>
+                    <span className="muted">{entity.filePath}</span>
+                  </li>
+                ))}
+              </ul>
+              {contextError !== "" && <div className="error-text">{contextError}</div>}
+              {contextCard !== null && (
+                <div
+                  className="chapter-context-detail"
+                  data-context-path={contextCard.path}
+                  data-context-refs={String(contextCard.refs.length)}
+                  data-context-chars={String(contextCard.totalChars)}
+                >
+                  <div className="muted">
+                    出处：{contextCard.path}（{cardTypeLabel(contextCard.type)}）
+                  </div>
+                  <pre className="chapter-context-body">{contextCard.body}</pre>
+                  {contextCard.truncated && (
+                    <div className="muted">
+                      原文共 {contextCard.totalChars} 字，这里只列前 {contextCard.body.length} 字（全文在「世界观档案」）
+                    </div>
+                  )}
+                  <div className="muted">相关实体 {contextCard.refs.length} 条</div>
+                  {contextCard.refs.length === 0 ? (
+                    <div className="muted">这张卡没有登记关系</div>
+                  ) : (
+                    <ul className="chapter-context-refs">
+                      {contextCard.refs.map((ref) => (
+                        <li key={ref.relation + ":" + ref.target}>
+                          <span className="muted">{ref.relation}</span>
+                          <span>{ref.target}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </aside>
       {focusMode && (
         <div className="focus-hint">
           专注模式 · {mode === "source" ? "打字机滚动已开启" : "打字机滚动仅源码形态"} · 按 Esc 退出

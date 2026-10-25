@@ -2502,8 +2502,12 @@ const STEPS: StepDef[] = [
       }, 15000);
       // 坏豁免清单：必须外显错误，且结论不得被清空（不静默放行）
       const before = findings;
-      await window.yushu.doc.write('config/consistency.yaml',
-        'apiVersion: yushu.consistency-allow/v1\nentries:\n  - rule: ref-dangling\n    subject: char-x\n');
+      // R165：**重试要幂等** ⇒ 写之前先读盘、带 baseHash 写
+      // （原先不带 baseHash 盲写 ⇒ 第一次成功、重试时文件已存在 ⇒ 被拒 ⇒ 这一步永远过不去）
+      const allowYaml = 'apiVersion: yushu.consistency-allow/v1\nentries:\n  - rule: ref-dangling\n    subject: char-x\n';
+      const allowNow = await window.yushu.doc.read('config/consistency.yaml').catch(() => null);
+      if (allowNow === null) await window.yushu.doc.write('config/consistency.yaml', allowYaml);
+      else await window.yushu.doc.write('config/consistency.yaml', allowYaml, allowNow.hash);
       document.querySelector('.consistency-manual').click();
       const allowErrorLine = await waitFor(() => {
         const el = document.querySelector('.consistency-allow-error');
@@ -4429,7 +4433,12 @@ const STEPS: StepDef[] = [
       // 只拍到页首的"表里没有"不算证据）。这条登记是合法的作者动作，末步保留它、不再回滚。
       await tab('世界观档案');
       const archive3 = await waitFor(() => document.querySelector('.archive'), 20000);
-      const row3 = archive3 === null ? null : [...archive3.querySelectorAll('li')].find((li) => String(li.textContent).indexOf(target.id) >= 0);
+      // **等清单读回来再找那张卡**（R121 那条教训：卡片是 IPC 读回来的 ⇒ 查得太早就是"还没到"）
+      const row3 = await waitFor(() => {
+        if (archive3 === null) return null;
+        const rows = [...archive3.querySelectorAll('li')];
+        return rows.find((li) => String(li.textContent).indexOf(target.id) >= 0) || null;
+      }, 20000);
       if (!row3) return { ok: false, note: '第三次回不到那张卡' };
       (row3.querySelector('button') ?? row3).click();
       if ((await loadedInto(target.path)) === null) return { ok: false, note: '第三次没载入这张卡' };
@@ -5305,6 +5314,9 @@ const STEPS: StepDef[] = [
 
       // ② 键盘可达：设定卡清单行是真按钮（能聚焦）
       await tab('世界观档案');
+      // **等它渲染出来再查**（R121 那条教训）：设定卡清单与关系图都是 IPC 读回来的 ⇒ 查得太早就是"还没到"
+      await waitFor(() => document.querySelector('.card-list li > button') || null, 15000);
+      await waitFor(() => document.querySelector('g.graph-node') || null, 15000);
       const cardButtons = [...document.querySelectorAll('.card-list li > button')];
       let focusable = 0;
       for (const b of cardButtons) {
@@ -9007,6 +9019,98 @@ const STEPS: StepDef[] = [
           '；章纲表展开的也是那一章=' + String(tableSame) +
           '；字数对账（右栏 ' + String(words) + ' vs 总览页 ' + String(libraryWords) + '）' +
           '；状态=' + status,
+      };
+    `,
+  },
+  {
+    step: 126,
+    title: '编辑器页右栏：选中段的出处 / 这条卡的原文 / 相关实体；写作版面行宽仍是 44em（R165）',
+    file: 'step126-editor-context.png',
+    body: String.raw`
+      // 这一步证 R165 的四件事：
+      // ① **写作版面行宽仍是 44em**（量**实际渲染宽度** —— 加了右栏不许把写作面挤窄；
+      //    44em 是 R64 刻意定的契约，docs/10 的写作版面行长）；
+      // ② 右栏在（第三栏），且**三块东西都在**（出处 / 原文 / 相关实体）；
+      // ③ 点一条提及 ⇒ 右栏摆的是**那张卡**（路径与卡名对得上）；
+      // ④ 右栏的**相关实体条数与真源那张卡的 refs 对得上**（同一个数，不许自己数一遍）。
+      await tab('规则');
+      // 先在**别的页上**把 @提及补进去（编辑器开着的时候改盘 ⇒ 编辑器会用旧内容把它盖回去）；
+      // 这一章的提及在中间那几步被改正文改掉了 ⇒ 这一步自己造一个可核的样本。
+      const outline = await window.yushu.outline.read();
+      const vol = outline.doc.volumes[0];
+      const chap = vol.chapters[0];
+      await window.yushu.ai.adopt({
+        usageId: 'walkthrough-context',
+        volumeId: vol.id,
+        chapterId: chap.id,
+        text: '\n\n@测试设定1 走进了夜色里。',
+        mode: 'append',
+      });
+      const drafts = await window.yushu.ai.drafts();
+      const target = drafts.find((d) => d.chapterId === chap.id) || null;
+      if (target === null) return { ok: false, note: '找不到那一章的草稿' };
+      await tab('编辑器');
+      const itemBtn = await waitFor(() => {
+        const buttons = [...document.querySelectorAll('.draft-list li button')];
+        const hit = buttons.find((b) => String(b.textContent || '').indexOf(target.title) >= 0);
+        return hit || null;
+      }, 15000);
+      if (!itemBtn) return { ok: false, note: '草稿章节列表里找不到那一章' };
+      itemBtn.click();
+      // ① 写作面版的行宽：契约是 44em ⇒ 量实际渲染宽度（em = 渲染宽度 ÷ 字号）
+      const host = await waitFor(() => {
+        const list = [...document.querySelectorAll('.chapter-editor .cm-host, .chapter-editor .tiptap-host')];
+        const el = list.find((node) => node.getBoundingClientRect().width > 0);
+        return el || null;
+      }, 15000);
+      if (!host) return { ok: false, note: '编辑器页没有找到写作版面（cm-host / tiptap-host）' };
+      const hostStyle = getComputedStyle(host);
+      const fontSize = parseFloat(hostStyle.fontSize) || 0;
+      const renderedEm = fontSize > 0 ? host.clientWidth / fontSize : -1;
+      const contractEm = fontSize > 0 ? (parseFloat(hostStyle.maxWidth) || 0) / fontSize : -1;
+      const measureOk = renderedEm >= 43.5 && Math.abs(contractEm - 44) <= 0.5;
+      // ② 右栏在，且三块东西都在
+      const right = document.querySelector('.chapter-editor-col-context');
+      if (!right) return { ok: false, note: '编辑器页没有右栏（选中段的出处 / 这条卡的原文 / 相关实体）' };
+      const rightText = String(right.textContent || '').replace(/\s+/g, ' ');
+      const threeThings = rightText.indexOf('出处') >= 0 && rightText.indexOf('原文') >= 0 && rightText.indexOf('相关实体') >= 0;
+      // ③ 点一条提及 ⇒ 右栏摆的是那张卡
+      const btn = await waitFor(() => document.querySelector('.chapter-editor-col-context .chapter-context-btn') || null, 15000);
+      if (!btn) {
+        return {
+          ok: false,
+          note: '右栏里没有可点的提及（这一章没提到设定卡 ⇒ 原文那一段没验到）',
+        };
+      }
+      const cardName = String(btn.textContent || '').trim();
+      btn.click();
+      const detail = await waitFor(() => document.querySelector('.chapter-context-detail') || null, 15000);
+      if (!detail) return { ok: false, note: '点了提及，右栏没有摆出那张卡的原文' };
+      const shownPath = String(detail.getAttribute('data-context-path') || '');
+      const shownRefs = Number(detail.getAttribute('data-context-refs') || '0');
+      const shownChars = Number(detail.getAttribute('data-context-chars') || '0');
+      const bodyText = String(detail.querySelector('.chapter-context-body')?.textContent || '').trim();
+      const originOk = shownPath !== '' && rightText.indexOf(shownPath) >= 0;
+      // ④ 相关实体条数与真源那张卡的 refs 对得上（读盘核对，不是看界面自己说什么）
+      let diskRefs = -1;
+      try {
+        const card = await window.yushu.card.read(shownPath);
+        diskRefs = ((card.card && card.card.refs) || []).length;
+      } catch (err) {
+        diskRefs = -1;
+      }
+      const refsOk = diskRefs >= 0 && diskRefs === shownRefs;
+      const panel = document.querySelector('.chapter-editor-col-context');
+      if (panel) panel.scrollIntoView({ block: 'start' });
+      await sleep(300);
+      return {
+        ok: measureOk && threeThings && originOk && refsOk && bodyText !== '',
+        note: '写作版面行宽=' + renderedEm.toFixed(1) + 'em（契约 ' + contractEm.toFixed(1) + 'em，≥44em=' +
+          String(measureOk) + '）' +
+          '；右栏三块都在=' + String(threeThings) +
+          '；点的那条=' + cardName + '，右栏摆的出处=' + shownPath + '（对得上=' + String(originOk) + '）' +
+          '；原文非空=' + String(bodyText !== '') + '（共 ' + String(shownChars) + ' 字）' +
+          '；相关实体对账（界面 ' + String(shownRefs) + ' vs 盘上 ' + String(diskRefs) + '）',
       };
     `,
   },];

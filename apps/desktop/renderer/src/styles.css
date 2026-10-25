@@ -2757,7 +2757,10 @@ select {
 .chapter-editor {
   flex: 1;
   display: grid;
-  grid-template-columns: 300px 1fr;
+  /* R165：右边加一栏（选中段的出处 / 这条卡的原文 / 相关实体）。
+     **写作版面一个字不动** —— 44em 那条契约（R64）不在这里，也不许在这里被挤窄：
+     中间那栏是 1fr，写作区自己还有 `max-width: var(--prose-measure)`（44em）⇒ 行宽不变。 */
+  grid-template-columns: 300px 1fr 22%;
   min-height: 0;
 }
 
@@ -2766,6 +2769,66 @@ select {
   padding: 12px;
   overflow: auto;
   min-height: 0;
+}
+
+/* R165：右栏那一块（出处 / 原文 / 相关实体） */
+.chapter-editor-col-context {
+  border-right: none;
+  padding: var(--space-4) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.chapter-context-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chapter-context-list li {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-sm);
+}
+
+.chapter-context-btn {
+  text-align: left;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-4);
+  cursor: pointer;
+}
+
+.chapter-context-btn:hover {
+  background: var(--panel-2);
+}
+
+.chapter-context-btn.is-on {
+  background: var(--accent-soft);
+}
+
+.chapter-context-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-3);
+}
+
+.chapter-context-refs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chapter-context-refs li {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
 }
 
 .chapter-editor .editor {
