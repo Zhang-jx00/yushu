@@ -8,6 +8,7 @@ import {
   PUBLISH_LEDGER_PATH,
   PUBLISH_ORIGIN,
   PUBLISH_REMINDER_ORIGIN,
+  PUBLISH_STOCK_ORIGIN,
   PUBLISH_WORD_ORIGIN,
   buildPublishEvent,
   canTransition,
@@ -17,6 +18,7 @@ import {
   parsePublishLedger,
   parsePublishRules,
   planPublishReminders,
+  planStockPool,
   publishTransitionGuide,
   readChapterFile,
   serializeChapterFile,
@@ -32,6 +34,7 @@ import type {
   PublishScheduleResult,
   PublishSetStatusPayload,
   PublishSetStatusResult,
+  PublishStockRow,
 } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
 import { packsRoot } from "./paths.js";
@@ -223,6 +226,30 @@ export async function readPublishBoard(gateway: ProjectGateway, now = localIsoNo
       )
     : emptyWord;
 
+  // 存稿池与续航（R174）：**判定全在引擎**（`planStockPool`），这里只把路径与 hash 贴回去。
+  // 为什么路径/hash 要在这儿贴：引擎是纯函数、不知道文件在哪；而面板的写入点
+  // （一键进发布状态机 / 撤下提醒）要拿路径与 baseHash —— **写入点只有这一处出处**。
+  const stockPlan = planStockPool({
+    rows: rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      status: row.status,
+      wordCount: row.wordCount,
+      ...(row.publishAt === "" ? {} : { publishAt: row.publishAt }),
+    })),
+    events: ledger.events,
+    now,
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const stockRows: PublishStockRow[] = stockPlan.rows.map((row) => {
+    const source = byId.get(row.id);
+    return {
+      ...row,
+      path: source?.path ?? "",
+      hash: source?.hash ?? "",
+    };
+  });
+
   return {
     platform: bundle.rules?.platform ?? "",
     platformVersion: bundle.rules?.version ?? "",
@@ -233,6 +260,7 @@ export async function readPublishBoard(gateway: ProjectGateway, now = localIsoNo
       status: PUBLISH_ORIGIN,
       reminder: PUBLISH_REMINDER_ORIGIN,
       word: PUBLISH_WORD_ORIGIN,
+      stock: PUBLISH_STOCK_ORIGIN,
     },
     rulesError: bundle.error,
     chapters,
@@ -245,6 +273,7 @@ export async function readPublishBoard(gateway: ProjectGateway, now = localIsoNo
     })),
     groups,
     word,
+    stock: { rows: stockRows, endurance: stockPlan.endurance },
     ledgerEvents: ledger.events.length,
     ledgerError: ledger.error,
     transitionGuide: publishTransitionGuide(),

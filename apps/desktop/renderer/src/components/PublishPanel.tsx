@@ -1,21 +1,29 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { PublishBoardPayload, PublishStatus } from "../../../src/shared/ipc";
+import type {
+  PublishBoardPayload,
+  PublishStatus,
+  PublishStockDueState,
+  PublishStockRow,
+} from "../../../src/shared/ipc";
 import { api } from "../api";
 
 /**
- * 发布状态面板（M5 / T5-6，R105）。
+ * 发布状态面板（M5 / T5-6，R105；R174 起加「存稿池」）。
  *
- * 这一屏只做四件事：**看清状态 → 改状态 → 设定定时 → 看清提醒与字数**。
- * 判定全在引擎（`@yushu/world-engine/publish.ts`，出处 I01 §5 状态机与 I07 平台规则包），
- * 这里一律不重算——两处各算一次，作者就会照一句假话核对。
+ * 这一屏只做五件事：**看清状态 → 改状态 → 设定定时 → 看清提醒与字数 → 看清存稿池**。
+ * 判定全在引擎（`@yushu/world-engine/publish.ts` 与 `publish-stock.ts`，
+ * 出处 I01 §5 状态机与 I07 平台规则包），这里一律不重算——两处各算一次，作者就会照一句假话核对。
  *
- * 四条展示口径：
+ * 五条展示口径：
  * ① **定时发布只是本地提醒，不代替平台发布**（I01 §3.7）：面板里必须把这句话写出来，
  *    不然"到点了"会被读成"御书替我发了"；
  * ② **本地字数 ≠ 平台有效字数**：平台口径名要单列（番茄是"后台打卡口径"，本地算不了）；
  * ③ **没声明就不判**：包里没声明单章下限 ⇒ 面板不显示"低于下限"的结论，也不显示"全部达标"；
- * ④ **读不动就说读不动**：口径包或台账读不动时把原因摊开，不降级成"没问题"。
+ * ④ **读不动就说读不动**：口径包或台账读不动时把原因摊开，不降级成"没问题"；
+ * ⑤ **存稿池是 draft 的子集，不是第四个状态**（R174）：面板上的「处境」是同一批草稿的不同处境，
+ *    **写入口仍然只有那两个**（改状态 / 设定定时）——池子里每行的动作直接调同一条通道，
+ *    不另造第三套写入点（另造一套就会漂，漂出来的按钮点下去只会被引擎拒）。
  *
  * 零新增 CSS：复用 `.panel` / `.slot-table` / `.field` / `.muted` / `.warn` / `.error-text` / `.chip`
  * （契约 §7：先复用再新建）。按钮一律用真 `<button>`（键盘可达，键盘债不新增）。
@@ -25,6 +33,14 @@ const STATUS_LABEL: Record<PublishStatus, string> = {
   draft: "草稿",
   revised: "修订中",
   published: "已发布",
+};
+
+/** 存稿池里一章的处境（引擎 `STOCK_DUE_STATES` 的逐字副本；漂移由 publish-stock-ids.test.ts 盯住） */
+const DUE_STATE_LABEL: Record<PublishStockDueState, string> = {
+  due: "到期",
+  soon: "临期",
+  scheduled: "已定时",
+  stock: "存稿",
 };
 
 /** ISO → `<input type="datetime-local">` 认的本地格式 */
@@ -134,6 +150,49 @@ export function PublishPanel() {
         ? "（未达任何档位）"
         : daily.reached.join(" / ");
 
+  /**
+   * 存稿池里的一行：两个动作，**都走既有通道**（写入点只有那一处）。
+   *
+   * - 「标记为已发布」= 一键进发布状态机（`publish:setStatus`，draft → published 合法）；
+   * - 「撤下提醒」= 把这一章的定时撤掉（`publish:schedule` 传空串）⇒ 它不再到期，
+   *   但**仍然留在存稿池里**（稿子还在手上，续航天数不变）。
+   *
+   * 两条口径：① **撤下提醒不写发布台账**——台账只记状态迁移（I01 §5），
+   * 撤下定时是一次"改计划"，不是一次状态迁移；② 动作**带 baseHash**，外部改过就拒。
+   */
+  const publishRow = async (row: PublishStockRow) => {
+    setBusy(true);
+    setError(null);
+    setReceipt(null);
+    try {
+      const result = await api().publish.setStatus({ path: row.path, to: "published", baseHash: row.hash });
+      setReceipt(`${row.title}：${STATUS_LABEL[result.from]} → ${STATUS_LABEL[result.to]}；台账第 ${String(result.ledgerEvents)} 条`);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const undoReminder = async (row: PublishStockRow) => {
+    setBusy(true);
+    setError(null);
+    setReceipt(null);
+    try {
+      await api().publish.schedule({ path: row.path, publishAt: "", baseHash: row.hash });
+      setReceipt(`${row.title}：已撤下提醒（定时清空，稿子仍在存稿池里）`);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stock = board?.stock;
+  const endurance = stock?.endurance;
+
   return (
     <div className="publish-panel">
       <div className="muted">
@@ -182,6 +241,80 @@ export function PublishPanel() {
               .map((item) => `${item.title}（${new Date(item.publishAt).toLocaleString("zh-CN")}）`)
               .join("、")}`
           : ""}
+      </div>
+
+      {/* 存稿池与续航（R174，I01 §3.5 / §5）：写完还没发出去的稿 + 还能撑几天。
+          它是 `chapters` 的一个子集——同一个数只有一个出处，这里不另抄一份章清单。 */}
+      <div
+        className="field"
+        data-stock-pool="1"
+        data-stock-count={String(endurance?.poolCount ?? 0)}
+        data-stock-days={endurance?.days === null || endurance === undefined ? "" : String(endurance.days)}
+      >
+        <span>存稿池（写完还没发出去的稿）</span>
+        <div className="muted">
+          池子 {String(endurance?.poolCount ?? 0)} 章（到期 {String(endurance?.dueCount ?? 0)} · 临期{" "}
+          {String(endurance?.soonCount ?? 0)} · 已定时 {String(endurance?.scheduledCount ?? 0)} · 存稿{" "}
+          {String(endurance?.stockCount ?? 0)}）｜ 可撑{" "}
+          {endurance === undefined || endurance.days === null ? "（算不出）" : `${String(endurance.days)} 天`}
+          {endurance !== undefined && endurance.dailyChapters !== null
+            ? ` ｜ 日更 ${String(endurance.dailyChapters)} 章（台账实测）`
+            : ""}
+        </div>
+        {endurance !== undefined && endurance.note !== "" ? (
+          <div className="muted">{endurance.note}</div>
+        ) : null}
+        {endurance !== undefined && endurance.warning !== "" ? (
+          <div className="warn">{endurance.warning}</div>
+        ) : null}
+        {stock !== undefined && stock.rows.length === 0 ? (
+          <div className="muted">存稿池是空的：没有"写完还没发"的稿子（草稿箱里还没写完的章不算）。</div>
+        ) : null}
+        {stock !== undefined && stock.rows.length > 0 ? (
+          <table className="slot-table">
+            <thead>
+              <tr>
+                <th>章</th>
+                <th className="num">字数</th>
+                <th>处境</th>
+                <th>定时</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stock.rows.map((row) => (
+                <tr key={row.id} data-stock-id={row.id} data-due-state={row.dueState}>
+                  <td>{row.title}</td>
+                  <td className="num">{String(row.wordCount)}</td>
+                  <td>{DUE_STATE_LABEL[row.dueState]}</td>
+                  <td>
+                    {row.publishAt === "" ? "—" : new Date(row.publishAt).toLocaleString("zh-CN")}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      data-stock-action="publish"
+                      onClick={() => void publishRow(row)}
+                    >
+                      标记为已发布
+                    </button>
+                    {row.publishAt !== "" ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        data-stock-action="undo-reminder"
+                        onClick={() => void undoReminder(row)}
+                      >
+                        撤下提醒
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : null}
       </div>
 
       <div className="field">

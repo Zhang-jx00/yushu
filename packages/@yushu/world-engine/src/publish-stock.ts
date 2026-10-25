@@ -49,6 +49,14 @@ export type StockDueState =
   /** 存稿：没定什么时候发 */
   | "stock";
 
+/**
+ * 四种处境的**逐字清单**（R174）。
+ *
+ * 共享层（`apps/desktop/src/shared/ipc.ts`）是零依赖文件，只能本地抄一份 ⇒ 抄了就必须钉：
+ * `apps/desktop/test/publish-stock-ids.test.ts` 比对引擎 / 共享层 / 面板三处。
+ */
+export const STOCK_DUE_STATES = ["due", "soon", "scheduled", "stock"] as const;
+
 export interface StockInputRow {
   id: string;
   title: string;
@@ -206,7 +214,9 @@ export function planStockPool(input: {
   const dueCount = rows.filter((row) => row.dueState === "due").length;
   const soonCount = rows.filter((row) => row.dueState === "soon").length;
   const stockCount = rows.filter((row) => row.dueState === "stock").length;
-  const scheduledCount = rows.length - stockCount;
+  // 「已定时」= 定了时刻但还没进临期窗口的那一批（**与面板上的标签同名**，
+  // 不许拿"有定时的"那种含糊口径混进来——到期与临期也是定了时的，但它们各有各的标签）
+  const scheduledCount = rows.filter((row) => row.dueState === "scheduled").length;
 
   // 日更速率：只数台账里"发出去过"的留痕（to: published），同一章发多次只算一章
   const windowStartDay = nowDay - (STOCK_RATE_WINDOW_DAYS - 1);

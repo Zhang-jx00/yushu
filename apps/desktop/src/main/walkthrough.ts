@@ -9162,6 +9162,154 @@ const STEPS: StepDef[] = [
           '（' + (samples.length > 0 ? samples[0].head : '无') + '）',
       };
     `,
+  {
+    step: 127,
+    title: '存稿池：写完还没发的稿列出来、一键进发布状态机、到期提醒可撤销（M5/T5-6，R174）',
+    file: 'step127-stock-pool.png',
+    body: String.raw`
+      // 这一步证 R174 的四件事（全部**盘上核对**，不信界面自己说的数）：
+      // ① **存稿池列的是「写完还没发」的稿**，条数与盘上逐字一致；
+      // ② **一键进发布状态机**：池子里点「标记为已发布」⇒ 盘上那章的 status 真的变了，台账多一条留痕；
+      // ③ **到期提醒可撤销**：给一章定了已过的时刻 ⇒ 它进「到期」并出现「撤下提醒」；
+      //    点一下 ⇒ 盘上 publish_at 没了、不再到期，而**稿子仍在池子里**（撤的是提醒，不是稿子）；
+      // ④ **到期判定与 publish_at 一致**：到期的那一条也在「定时提醒」里（同一个口径，两个数不会打架）。
+      // 先给两章各追加一段正文 ⇒ 它们从「草稿箱」变成「攒下的稿」（写完的才算存稿）
+      const outline = await window.yushu.outline.read();
+      const vol = outline.doc.volumes[0];
+      const targets = vol.chapters.slice(0, 2);
+      for (const chap of targets) {
+        await window.yushu.ai.adopt({
+          usageId: 'walkthrough-stock',
+          volumeId: vol.id,
+          chapterId: chap.id,
+          text: '\n\n他伸手推开门，夜色涌了进来。',
+          mode: 'append',
+        });
+      }
+      // 换标签页会卸载视图 ⇒ 回到总览页时发布面板重新挂载、重新取数（面板本身没有刷新按钮）
+      await tab('规则');
+      await sleep(400);
+      await tab('稿件总览');
+      const toggle = await waitFor(() => {
+        const t = [...document.querySelectorAll('.disclosure-toggle')].find((x) => String(x.textContent).indexOf('发布状态') >= 0);
+        return t || null;
+      }, 10000);
+      if (toggle === null) return { ok: false, note: '总览页没有「发布状态」折叠区：' + pageText().slice(0, 140) };
+      if (String(toggle.closest('.disclosure').className).indexOf('open') < 0) {
+        toggle.click();
+        await sleep(400);
+      }
+      const panel = await waitFor(() => document.querySelector('.publish-panel'), 20000);
+      if (panel === null) return { ok: false, note: '展开后没有发布状态面板' };
+      const pool = await waitFor(() => panel.querySelector('[data-stock-pool="1"]'), 10000);
+      if (pool === null) return { ok: false, note: '发布面板里没有「存稿池」这一块' };
+
+      // ① 真源条数：**直接数盘上的章**（draft 且 word_count > 0），不信界面自己说的数
+      const tree = await window.yushu.project.tree();
+      const pathOf = (chapterId) => {
+        const entry = tree.find((item) => item.type === 'file' && String(item.path).endsWith('/' + chapterId + '.md'));
+        return entry === undefined ? '' : String(entry.path);
+      };
+      let truth = 0;
+      for (const volume of outline.doc.volumes) {
+        for (const chap of volume.chapters) {
+          const p = pathOf(String(chap.chapter_id || ''));
+          if (p === '') continue;
+          const raw = await window.yushu.doc.read(p).catch(() => null);
+          if (raw === null) continue;
+          const wc = /^word_count:\s*(\d+)/m.exec(String(raw.content));
+          const st = /^status:\s*(\S+)/m.exec(String(raw.content));
+          if (wc !== null && st !== null && Number(wc[1]) > 0 && st[1] === 'draft') truth += 1;
+        }
+      }
+      const rows = () => [...panel.querySelectorAll('tr[data-stock-id]')];
+      const shown = rows().length;
+      const countOk = shown === truth;
+
+      // ③ 定时到点 ⇒ 进「到期」，且那一章也出现在「定时提醒」里
+      const first = rows()[0];
+      if (first === undefined) return { ok: false, note: '存稿池是空的（盘上应有 ' + String(truth) + ' 章）' };
+      const rowId = String(first.getAttribute('data-stock-id') || '');
+      const picker = panel.querySelector('select');
+      if (picker === null) return { ok: false, note: '发布面板里没有选章的下拉框' };
+      const pickSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(picker), 'value').set;
+      pickSetter.call(picker, rowId);
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(360);
+      const atBox = panel.querySelector('input[type="datetime-local"]');
+      if (atBox === null) return { ok: false, note: '发布面板里没有定时发布输入框' };
+      const past = new Date(Date.now() - 3600000);
+      const pad = (v) => String(v).padStart(2, '0');
+      const localValue = String(past.getFullYear()) + '-' + pad(past.getMonth() + 1) + '-' + pad(past.getDate()) +
+        'T' + pad(past.getHours()) + ':' + pad(past.getMinutes());
+      const atSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(atBox), 'value').set;
+      atSetter.call(atBox, localValue);
+      atBox.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(240);
+      const setBtn = [...panel.querySelectorAll('button')].find((b) => String(b.textContent).indexOf('设定定时') >= 0);
+      if (setBtn === undefined) return { ok: false, note: '面板里没有「设定定时」按钮' };
+      setBtn.click();
+      await waitFor(() => (panel.innerText.indexOf('定时发布设为') >= 0 ? true : null), 20000);
+      const dueRow = await waitFor(() => panel.querySelector('tr[data-due-state="due"]'), 20000);
+      if (dueRow === null) return { ok: false, note: '定了已过的时刻，池子里没有出现「到期」的行' };
+      const dueId = String(dueRow.getAttribute('data-stock-id') || '');
+      const duePath = pathOf(dueId);
+      const dueRaw = await window.yushu.doc.read(duePath).catch(() => null);
+      const publishAtOnDisk = dueRaw !== null && String(dueRaw.content).indexOf('publish_at') >= 0;
+      const reminderLine = [...panel.querySelectorAll('div')]
+        .filter((d) => String(d.textContent).indexOf('定时提醒') >= 0)
+        .map((d) => String(d.textContent))
+        .join(' ');
+      const outline2 = await window.yushu.outline.read();
+      let dueTitle = '';
+      for (const volume of outline2.doc.volumes) {
+        for (const chap of volume.chapters) {
+          if (String(chap.chapter_id || '') === dueId) dueTitle = String(chap.title || '');
+        }
+      }
+      const inReminder = dueTitle !== '' && reminderLine.indexOf(dueTitle) >= 0;
+
+      // ③ 撤下提醒：publish_at 清空、不再到期，**稿子仍在池子里**
+      const undoBtn = dueRow.querySelector('button[data-stock-action="undo-reminder"]');
+      if (undoBtn === null) return { ok: false, note: '到期的行上没有「撤下提醒」按钮' };
+      undoBtn.click();
+      await waitFor(() => (panel.innerText.indexOf('已撤下提醒') >= 0 ? true : null), 20000);
+      const afterUndoRaw = await window.yushu.doc.read(duePath).catch(() => null);
+      const publishAtCleared = afterUndoRaw !== null && String(afterUndoRaw.content).indexOf('publish_at') < 0;
+      const stillInPool = rows().length === shown;
+      const noLongerDue = panel.querySelector('tr[data-due-state="due"]') === null;
+
+      // ② 一键进发布状态机：盘上 status 真的变了，台账多一条留痕
+      const other = rows().find((row) => String(row.getAttribute('data-stock-id') || '') !== dueId);
+      if (other === undefined) return { ok: false, note: '池子里没有第二行可发' };
+      const otherId = String(other.getAttribute('data-stock-id') || '');
+      const pubBtn = other.querySelector('button[data-stock-action="publish"]');
+      if (pubBtn === null) return { ok: false, note: '池子那一行上没有「标记为已发布」按钮' };
+      pubBtn.click();
+      await waitFor(() => (panel.innerText.indexOf('草稿 → 已发布') >= 0 ? true : null), 20000);
+      const otherPath = pathOf(otherId);
+      const otherRaw = await window.yushu.doc.read(otherPath).catch(() => null);
+      const publishedOnDisk = otherRaw !== null && /^status:\s*published/m.test(String(otherRaw.content));
+      const ledgerRaw = await window.yushu.doc.read('config/publish.yaml').catch(() => null);
+      const ledgerKept = ledgerRaw !== null && String(ledgerRaw.content).indexOf('to: published') >= 0;
+
+      const days = String(pool.getAttribute('data-stock-days') || '');
+      const container = panel.querySelector('[data-stock-pool="1"]');
+      if (container) container.scrollIntoView({ block: 'center' });
+      await sleep(300);
+      return {
+        ok: countOk && publishAtOnDisk && inReminder && publishAtCleared && stillInPool && noLongerDue &&
+          publishedOnDisk && ledgerKept,
+        note: '盘上「写完还没发」的章=' + String(truth) + '，池子里列出来=' + String(shown) + '（对得上=' + String(countOk) + '）' +
+          '；定了已过的时刻→该章进「到期」=' + String(dueRow !== null) + '，盘上写了 publish_at=' + String(publishAtOnDisk) +
+          '；到期那条也在「定时提醒」里=' + String(inReminder) +
+          '；撤下提醒→盘上 publish_at 已清=' + String(publishAtCleared) + '，不再到期=' + String(noLongerDue) +
+          '，稿子仍在池子里=' + String(stillInPool) +
+          '；一键进发布状态机→盘上 status=published=' + String(publishedOnDisk) + '，台账留痕=' + String(ledgerKept) +
+          '；面板摆的可撑天数=' + (days === '' ? '（算不出）' : days),
+      };
+    `,
+  },
   },];
 
 /**
