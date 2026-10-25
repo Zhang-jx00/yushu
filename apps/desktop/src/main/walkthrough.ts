@@ -9162,6 +9162,7 @@ const STEPS: StepDef[] = [
           '（' + (samples.length > 0 ? samples[0].head : '无') + '）',
       };
     `,
+  },
   {
     step: 127,
     title: '存稿池：写完还没发的稿列出来、一键进发布状态机、到期提醒可撤销（M5/T5-6，R174）',
@@ -9310,7 +9311,148 @@ const STEPS: StepDef[] = [
       };
     `,
   },
-  },];
+  {
+    step: 150,
+    title: '标注的批量管理：筛选 / 批量选中 / 批量改图层 ⇒ 只改那些行，孤儿点名（R171）',
+    file: 'step150-map-marker-batch.png',
+    body: String.raw`
+      // 这一步证 R171 的四件事（口径回源 K08 §3.7 标注即地点卡 / §3.9 分层可控）：
+      // ① **清单的条数与真源逐字一致**（界面上写的条数 = 地图文件里写的条数，一个不多一个不少）；
+      // ② **筛选真的在筛**（只看孤儿 ⇒ 清单里只剩那一条，而且写清它指向哪个不存在的实体）；
+      // ③ **批量改图层只改那些行**（盘上：被点名的那几行换了图层，其余行逐字原样）；
+      // ④ **孤儿标注点名而不是静默**（回执点出是哪一条、它指向谁；而且它没被悄悄丢掉）。
+      const cardA = 'loc-r171-a';
+      const cardB = 'loc-r171-b';
+      const orphanRef = 'loc-r171-gone';
+      const cardBody = '临时地点卡：只为 R171 的标注清单有一批可管的标注。';
+      const mkCard = async (id, name) => {
+        const path = 'world/cards/location/' + id + '.md';
+        const card = { id: id, type: 'location', name: name, layer: 'geography' };
+        const existing = await window.yushu.card.read(path).catch(() => null);
+        if (existing === null) await window.yushu.card.write({ path: path, card: card, body: cardBody });
+        else await window.yushu.card.write({ path: path, card: card, body: cardBody, baseHash: existing.hash });
+      };
+      await mkCard(cardA, '天启_probe甲');
+      await mkCard(cardB, '天启_probe乙');
+      const yaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        '# 作者自己写的注释（批量改图层之后应当原样留着）',
+        'base_size: {width: 1000, height: 700}',
+        'bounds: [[0, 0], [1000, 700]]',
+        'layers: [place, political]',
+        'markers:',
+        '  - {id: m-r1, layer: place, entity_ref: ' + cardA + ', x: 250, y: 175}',
+        '  - {id: m-r2, layer: place, entity_ref: ' + cardB + ', x: 320, y: 220}',
+        '  - {id: m-r3, layer: place, entity_ref: ' + orphanRef + ', x: 400, y: 300}',
+        '  - {id: m-r4, layer: place, entity_ref: ' + cardA + ', x: 500, y: 400}',
+        '',
+      ].join('\n');
+      const before = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+      const beforeLines = (before === null ? '' : before.content).split('\n');
+      await window.yushu.doc.write('world/map.yaml', yaml, before === null ? undefined : before.hash);
+
+      // 面板只在挂载时取数 ⇒ 先去别的页再回来，强制重挂载（R68 的教训）
+      await tab('规则');
+      await tab('世界观档案');
+      const manage = await waitFor(() => document.querySelector('.map-panel .map-marker-manage') || null, 10000);
+      if (!manage) return { ok: false, note: '地图面板里没有「标注清单」这一块（R171 的面板没渲染）' };
+      const countEl = manage.querySelector('.map-status[data-marker-total]');
+      if (!countEl) return { ok: false, note: '清单上没有那个条数行（界面上没有可对账的数）' };
+      const total = Number(countEl.getAttribute('data-marker-total'));
+      const orphan = Number(countEl.getAttribute('data-marker-orphan'));
+      const filtered0 = Number(countEl.getAttribute('data-marker-filtered'));
+      // ① 与**真源**逐字对账：地图文件里写了四条标注 ⇒ 清单就是四条
+      const onDisk = beforeLines.filter((line) => /^\s*-\s*\{id: m-r/.test(line)).length;
+      const countsOk = total === onDisk && orphan === 1 && filtered0 === onDisk;
+
+      // ② 只看孤儿 ⇒ 清单里只剩那一条，而且写清它指向谁
+      const orphanBox = manage.querySelector('.map-marker-orphan-toggle input');
+      if (!orphanBox) return { ok: false, note: '清单里没有「只看孤儿标注」这个开关' };
+      orphanBox.click();
+      const afterFilter = await waitFor(() => {
+        const el = manage.querySelector('.map-status[data-marker-filtered]');
+        return el !== null && Number(el.getAttribute('data-marker-filtered')) === 1 ? el : null;
+      }, 5000);
+      if (!afterFilter) return { ok: false, note: '勾了「只看孤儿标注」之后清单没有筛到那一条' };
+      const rows = [...manage.querySelectorAll('[data-marker-row]')];
+      const onlyRow = rows[0];
+      const rowText = onlyRow === undefined ? '' : String(onlyRow.textContent || '');
+      const orphanNamed =
+        onlyRow !== undefined &&
+        onlyRow.getAttribute('data-marker-orphan') === '1' &&
+        rowText.indexOf(orphanRef) >= 0;
+      const filteredAfter = Number(afterFilter.getAttribute('data-marker-filtered'));
+      orphanBox.click();
+      await waitFor(() => {
+        const el = manage.querySelector('.map-status[data-marker-filtered]');
+        return el !== null && Number(el.getAttribute('data-marker-filtered')) === onDisk ? el : null;
+      }, 5000);
+
+      // ③ 全选筛出来的那些 ⇒ 勾选数与清单条数一致
+      const allBtn = [...manage.querySelectorAll('button')]
+        .find((b) => String(b.textContent || '').trim() === '全选筛出的');
+      if (!allBtn) return { ok: false, note: '清单里没有「全选筛出的」这个按钮' };
+      allBtn.click();
+      const checkedEl = await waitFor(() => {
+        const el = manage.querySelector('.map-status[data-marker-checked]');
+        return el !== null && Number(el.getAttribute('data-marker-checked')) === onDisk ? el : null;
+      }, 5000);
+      if (!checkedEl) return { ok: false, note: '点了「全选筛出的」但勾选数对不上清单条数' };
+      const checked = Number(checkedEl.getAttribute('data-marker-checked'));
+
+      // 改图层：目标图层选「政治」
+      const layerSel = manage.querySelector('select[aria-label="批量改到哪个图层"]');
+      if (!layerSel) return { ok: false, note: '清单里没有「批量改到哪个图层」那个下拉' };
+      layerSel.value = 'political';
+      layerSel.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(250);
+      const batchBtn = [...manage.querySelectorAll('button')]
+        .find((b) => String(b.textContent || '').trim() === '改成这个图层');
+      if (!batchBtn) return { ok: false, note: '清单里没有「改成这个图层」这个按钮' };
+      batchBtn.click();
+      const noteEl = await waitFor(() => manage.querySelector('[data-batch-changed]'), 8000);
+      if (!noteEl) return { ok: false, note: '点了「改成这个图层」但没有回执（那一声「改好了」不算数）' };
+      const changedIds = String(noteEl.getAttribute('data-batch-changed') || '');
+      const orphanIds = String(noteEl.getAttribute('data-batch-orphan') || '');
+      const noteText = String(noteEl.textContent || '');
+
+      // ③ 盘上核对：**只改了被点名的那几行**，其余行逐字原样
+      const after = await window.yushu.doc.read('world/map.yaml');
+      const afterLines = after.content.split('\n');
+      const targetIds = changedIds.split(',').filter((id) => id !== '');
+      let onlyTargetsChanged = afterLines.length === beforeLines.length;
+      for (let i = 0; i < beforeLines.length; i += 1) {
+        const line = beforeLines[i];
+        if (/^\s*-\s*\{id: m-r/.test(line)) {
+          const hit = /id: (m-r[0-9])/.exec(line);
+          const id = hit === null ? '' : hit[1];
+          const expected = targetIds.indexOf(id) >= 0 ? line.replace('layer: place', 'layer: political') : line;
+          if (afterLines[i] !== expected) onlyTargetsChanged = false;
+        } else if (afterLines[i] !== line) {
+          onlyTargetsChanged = false;
+        }
+      }
+      // ④ 孤儿标注：点名了、而且**仍在盘上**（没被悄悄丢掉）
+      const orphanStill = after.content.indexOf('id: m-r3') >= 0;
+      const orphanReported = orphanIds.indexOf('m-r3') >= 0;
+      const orphanNamedInNote = noteText.indexOf('m-r3') >= 0 && noteText.indexOf(orphanRef) >= 0;
+
+      const panelEl = document.querySelector('.map-marker-manage');
+      if (panelEl) panelEl.scrollIntoView({ block: 'center' });
+      await sleep(300);
+      return {
+        ok: countsOk && filteredAfter === 1 && orphanNamed && checked === onDisk &&
+          onlyTargetsChanged && orphanStill && orphanReported && orphanNamedInNote,
+        note: '清单条数=' + String(total) + '（盘上 ' + String(onDisk) + ' 条 · 孤儿 ' + String(orphan) + '）' +
+          '；只看孤儿筛出 ' + String(filteredAfter) + ' 条并写清了指向谁=' + String(orphanNamed) +
+          '；全选=' + String(checked) + ' 个；改图层=' + changedIds + '（孤儿点名=' + orphanIds + '）' +
+          '；盘上只改了那些行=' + String(onlyTargetsChanged) +
+          '；孤儿仍在盘上=' + String(orphanStill) + '；回执点了它指向谁=' + String(orphanNamedInNote),
+      };
+        `,
+  },  },];
 
 /**
  * 步骤截图（验收证据，复核修复 2026-09-29）：
