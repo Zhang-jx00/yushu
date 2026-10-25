@@ -3430,3 +3430,50 @@ describe("十轮总复核（R160）：判据都在、口径成文", () => {
     }
   });
 });
+
+/**
+ * **口径拉回现状**（R161）：「明写没做的」不许指着已经做完的事。
+ *
+ * `docs/11` §8 以前写的还是 R114–R121 那批"还没做"的事 ⇒ 那些事**后来都做完了**
+ * ⇒ 照着旧清单做事会做无用功。R161 把它逐条重核，并给每条加一个**可核的状态标记**。
+ *
+ * 判据盯三件事：
+ * ① §8 的每一条都带**白名单里的状态标记**（不许含糊、不许留"⇒ R121"那种过期指针）；
+ * ② 标了**「已做」**的那一轮，**台账里必须查得到**（钉住"不许写着已做却查不到"）；
+ * ③ **docs/09 的待做行指向当前的十轮**（不许再指"未来五轮见 §二之末"那个已做完的规划）。
+ */
+describe("口径拉回现状（R161）：「明写没做的」不许指着已经做完的事", () => {
+  const doc11 = readFileSync(join(ROOT, "docs", "11-UI重构调研与设计规范.md"), "utf8");
+  const doc09 = readFileSync(join(ROOT, "docs", "09-进度与待做清单.md"), "utf8");
+  const ledgers = [
+    doc09,
+    readFileSync(join(ROOT, "docs", "08-交接文档-给QoderCN.md"), "utf8"),
+    readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"),
+    readFileSync(join(ROOT, "docs", "04-开发计划.md"), "utf8"),
+  ].join("\n");
+  const from = doc11.indexOf("### 8. 明确还没做的");
+  const sec8 = doc11.slice(from, doc11.indexOf("\n---\n", from));
+  const items = sec8.split("\n").filter((row) => row.startsWith("- **"));
+
+  it("§8 里的每一条都带**可核的状态标记**（不许含糊）", () => {
+    expect(items.length, "§8 一条都没有（这一节被掏空了？）").toBeGreaterThan(0);
+    for (const row of items) {
+      expect(row, `这条没有状态标记：${row.slice(0, 40)}`).toMatch(/\[(已做·R\d+|没做·|停牌·|已定·)/);
+    }
+  });
+
+  it("标了**「已做」**的那一轮，**台账里必须查得到**（不许写着已做却查不到）", () => {
+    const done = [...sec8.matchAll(/\[已做·(R\d+)\]/g)].map((m) => m[1] as string);
+    expect(done.length, "没有一条标了「已做」").toBeGreaterThan(0);
+    for (const round of done) {
+      expect(ledgers, `台账里查不到 ${round}`).toContain(round);
+    }
+  });
+
+  it("**docs/09 的待做行指向当前的十轮**（不许再指已做完的规划）", () => {
+    const todoRow = doc09.split("\n").find((row) => row.startsWith("| R") && row.includes("起 |")) ?? "";
+    expect(todoRow, "找不到待做行").not.toBe("");
+    expect(todoRow, "待做行没指向当前十轮").toContain("§五之二");
+    expect(todoRow, "待做行还指着已做完的旧规划").not.toContain("未来五轮见 §二之末");
+  });
+});
