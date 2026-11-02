@@ -6267,54 +6267,11 @@ const STEPS: StepDef[] = [
             columnPages.push(name + '(' + String(cols.length) + ' 栏，左边界 ' + lefts.join('/') + ')');
           }
         }
-        // ⑦ R166：**字号与行高**（层级不塌）
-        //    口径回源 R112 已有的判据：「面板标题条（.panel-title）与块内区块标题（h3）**同档**」
-        //    ⇒ 块内 h3 比标题条**小**就是层级塌了；另外标题的行高不得小于字号（行与行会压在一起）。
-        const fontIssues = [];
-        for (const panel of panels) {
-          const titleEl = panel.querySelector('.panel-title');
-          const headEl = panel.querySelector('h3');
-          if (titleEl !== null && headEl !== null) {
-            const tSize = parseFloat(getComputedStyle(titleEl).fontSize) || 0;
-            const hSize = parseFloat(getComputedStyle(headEl).fontSize) || 0;
-            if (hSize > 0 && tSize > 0 && hSize < tSize - 0.5) {
-              fontIssues.push(name + '：面板「' + String(headEl.textContent || '').trim().slice(0, 10) +
-                '」的区块标题 ' + hSize.toFixed(1) + 'px 比标题条 ' + tSize.toFixed(1) + 'px 小（层级塌了）');
-            }
-          }
-          for (const el of [...panel.querySelectorAll('h1, h2, h3, h4, .panel-title')]) {
-            const box = el.getBoundingClientRect();
-            if (box.width <= 0 || box.height <= 0) continue;
-            const cs = getComputedStyle(el);
-            const size = parseFloat(cs.fontSize) || 0;
-            const lh = parseFloat(cs.lineHeight) || 0;
-            if (size > 0 && lh > 0 && lh < size - 0.5) {
-              fontIssues.push(name + '：标题「' + String(el.textContent || '').trim().slice(0, 10) +
-                '」行高 ' + lh.toFixed(1) + 'px 小于字号 ' + size.toFixed(1) + 'px（行压着行）');
-            }
-          }
-        }
-        // ⑧ R166：**命中区**（可点的控件的最小边长）
-        //    口径：本项目自定 **32px**（键盘可点控件的最小边长，R110 那轮实测 14 个入口只有 28.67px ⇒ 定的下限）。
-        //    这一项**先量出分布**：达标与否由数据说话，不靠印象。
-        const hitSamples = [];
-        for (const el of [...document.querySelectorAll('button, [role="button"], a, summary, input[type="checkbox"], input[type="radio"]')]) {
-          const box = el.getBoundingClientRect();
-          if (box.width <= 0 || box.height <= 0) continue;
-          const cs = getComputedStyle(el);
-          if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) < 0.15) continue;
-          hitSamples.push({
-            label: String(el.textContent || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 12),
-            min: Math.min(box.width, box.height),
-          });
-        }
-        const hitTooSmall = hitSamples.filter((s) => s.min < HIT_MIN);
-        const hitWorst = hitSamples.length === 0 ? null : hitSamples.reduce((a, b) => (b.min < a.min ? b : a));
-        for (const panel of panels) {
-          for (const el of [...panel.querySelectorAll('h1, h2, h3, h4, .panel-title')]) {
-            void el;
-          }
-        }
+        // ⑦⑧ 「字号行高 / 命中区」两项巡检**尚未做**（R166 留给另一条线）——
+        //    这里**只留下口径与量法**，不接进判定：宁可没有，也不要"采到了却不报"（那等于假装查过）。
+        //    口径：字号行高 = 面板标题条（.panel-title）与块内区块标题（h3）**同档**（回源 R112），
+        //          且标题行高不得小于字号；命中区 = 可点控件的最小边长（本项目自定 32px）。
+        //    阈值常量在 buildScript 的**共享前置段**（CONTRAST_FLOOR / HIT_MIN / FONT_MIN_PX）。
         seen.push(name + '(' + panels.length + ' 面板)');
       }
       await tab('世界观档案');
