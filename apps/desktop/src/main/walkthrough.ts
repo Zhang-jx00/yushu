@@ -4821,8 +4821,18 @@ const STEPS: StepDef[] = [
         const m = /^status:\s*(\S+)/m.exec(String(raw.content));
         return { status: m === null ? '(读不到)' : String(m[1]), content: String(raw.content) };
       };
+      // R174 起面板里多了一张**存稿池表格**，它自己也有一个「标记为已发布」按钮（data-stock-action="publish"）。
+      // 原来的写法取"第一个文本匹配的 button" ⇒ 会点到**存稿池那一行**（**另一章**），
+      // 于是"当前选中的那一章"仍是草稿 ⇒ 迁移区不给「退回草稿」入口 ⇒ 本步必然红，**而且写错了对象**。
+      // ⇒ 两个句柄各认各的：
+      //    · chip()：只认**迁移区**的 button.chip（那一组是"当前选中章"的迁移入口，面板里唯一）；
+      //    · plainBtn()：只认**全文相等**的普通按钮（定时区的「设定定时 / 清除定时」不是 chip）。
       const chip = (label) => {
-        const list = [...panel.querySelectorAll('button')].filter((b) => String(b.textContent).indexOf(label) >= 0);
+        const list = [...panel.querySelectorAll('button.chip')].filter((b) => String(b.textContent).indexOf(label) >= 0);
+        return list.length > 0 ? list[0] : null;
+      };
+      const plainBtn = (label) => {
+        const list = [...panel.querySelectorAll('button')].filter((b) => String(b.textContent).trim() === label);
         return list.length > 0 ? list[0] : null;
       };
       const reminderLine = () => {
@@ -4877,7 +4887,7 @@ const STEPS: StepDef[] = [
       setter.call(atBox, localValue);
       atBox.dispatchEvent(new Event('input', { bubbles: true }));
       await sleep(200);
-      const setBtn = chip('设定定时');
+      const setBtn = plainBtn('设定定时');
       if (setBtn === null) return { ok: false, note: '面板里没有「设定定时」按钮' };
       setBtn.click();
       const scheduled = await waitFor(() => (reminderCount() >= 1 ? true : null), 20000);
@@ -4885,7 +4895,7 @@ const STEPS: StepDef[] = [
       const reminderText = reminderLine();
       const reminderOk = reminderText.indexOf('只是本地提醒，不代替平台发布') >= 0;
       const scheduledOnDisk = (await readStatus()).content.indexOf('publish_at') >= 0;
-      const clearBtn = chip('清除定时');
+      const clearBtn = plainBtn('清除定时');
       if (clearBtn === null) return { ok: false, note: '面板里没有「清除定时」按钮' };
       clearBtn.click();
       const cleared = await waitFor(() => (reminderCount() === 0 ? true : null), 20000);
@@ -9324,7 +9334,7 @@ const STEPS: StepDef[] = [
       };
     `,
   },
-  },];
+];
 
 /**
  * 步骤截图（验收证据，复核修复 2026-09-29）：
