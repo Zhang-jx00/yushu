@@ -153,12 +153,15 @@ export function PublishPanel() {
   /**
    * 存稿池里的一行：两个动作，**都走既有通道**（写入点只有那一处）。
    *
-   * - 「标记为已发布」= 一键进发布状态机（`publish:setStatus`，draft → published 合法）；
+   * - 「标记本章已发布」= 一键进发布状态机（`publish:setStatus`，draft → published 合法）；
    * - 「撤下提醒」= 把这一章的定时撤掉（`publish:schedule` 传空串）⇒ 它不再到期，
    *   但**仍然留在存稿池里**（稿子还在手上，续航天数不变）。
    *
-   * 两条口径：① **撤下提醒不写发布台账**——台账只记状态迁移（I01 §5），
-   * 撤下定时是一次"改计划"，不是一次状态迁移；② 动作**带 baseHash**，外部改过就拒。
+   * 三条口径：① **撤下提醒不写发布台账**——台账只记状态迁移（I01 §5），
+   * 撤下定时是一次"改计划"，不是一次状态迁移；② 动作**带 baseHash**，外部改过就拒；
+   * ③ **按钮文案不与上面的迁移按钮重名**——两个同名按钮做的是两件事（一个动"选中那一章"，
+   * 一个动"这一行"），作者分不清就点错了（R174 的预演当场撞到：按文案找按钮的脚本
+   * 找成了池子里那一个，把另一章发了出去 ⇒ step67 当场红）。
    */
   const publishRow = async (row: PublishStockRow) => {
     setBusy(true);
@@ -295,15 +298,17 @@ export function PublishPanel() {
                       type="button"
                       disabled={busy}
                       data-stock-action="publish"
+                      title={`把《${row.title}》标记为已发布（台账会留痕）`}
                       onClick={() => void publishRow(row)}
                     >
-                      标记为已发布
+                      标记本章已发布
                     </button>
                     {row.publishAt !== "" ? (
                       <button
                         type="button"
                         disabled={busy}
                         data-stock-action="undo-reminder"
+                        title="撤掉这一章的定时（稿子仍在存稿池里）"
                         onClick={() => void undoReminder(row)}
                       >
                         撤下提醒

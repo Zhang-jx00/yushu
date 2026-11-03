@@ -103,10 +103,13 @@ describe("存稿池不另造写入点（R174）", () => {
   });
 
   it("池子里每行的两个动作走既有通道，并且是真 <button>（键盘可达）", () => {
-    expect(panel).toContain("api().publish.setStatus(");
-    expect(panel).toContain("api().publish.schedule(");
     expect(panel).toContain('data-stock-action="publish"');
     expect(panel).toContain('data-stock-action="undo-reminder"');
     expect(panel).toContain("<button");
+    // **数调用点，不只数"出现过"**：写入口只有既有那两处
+    // （选章那一组的改状态 / 定时，与池子里每一行的标记已发布 / 撤下提醒）。
+    // 只查"出现过"的话，别的调用点会冒充这一处 ⇒ 恒绿的锁。
+    expect((panel.match(/api\(\)\.publish\.setStatus\(/g) ?? []).length).toBe(2);
+    expect((panel.match(/api\(\)\.publish\.schedule\(/g) ?? []).length).toBe(2);
   });
 });
