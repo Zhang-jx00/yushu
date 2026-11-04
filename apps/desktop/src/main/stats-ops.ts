@@ -4,8 +4,10 @@ import { dirname, join } from "node:path";
 import { YushuError } from "@yushu/core";
 import type { StatsDailyEntryPayload, StatsStatePayload } from "../shared/ipc.js";
 import { ProjectGateway } from "./file-gateway.js";
+import { readLibrary } from "./library-ops.js";
 import { diffDays, localDateKey, shiftDateKey } from "./stats-days.js";
 import { buildStatsPace } from "./stats-pace.js";
+import { buildChapterDist } from "./stats-chapters.js";
 
 /**
  * 日期算术（R158 搬到了 `stats-days.ts`，这里原样转出去 ⇒ 旧引用路径不变）。
@@ -354,6 +356,9 @@ export async function readStatsState(gateway: ProjectGateway, now?: Date): Promi
     speed: buildSpeedSeries(entries, todayKey),
     // R158：右栏那一列的结构（逐日序列 + 完成比例 + 三项节奏数）——**主进程算好**，界面只渲染
     pace: buildStatsPace(entries, todayKey, file.goal.daily),
+    // R167：逐章字数分布（T5-6 剩余片）——章清单与稿件总览读**同一个真源**（library），
+    // 结构在这里算好（按书序；未建草稿不冒充 0；空项目不画假图），界面只渲染
+    chapterDist: buildChapterDist((await readLibrary(gateway)).chapters),
     tiers: { ...EFFECTIVE_TIERS },
     summary: { week, month, total, monthEffective, activeDays, avgActiveDay, bestDay },
     daysSinceLastWriting,

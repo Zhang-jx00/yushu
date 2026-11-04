@@ -2532,6 +2532,52 @@ select {
   margin-top: 6px;
 }
 
+/* R167：逐章字数分布——按书序的行式条形（标签 / 条 / 字数三段）；
+   章多的时候这一块**自己竖向滚**（docs/11 §7.34：滚的是这一块，不是整页）。
+   长度全部走令牌与 calc，不给长度字面量棘轮添新账。 */
+.stats-chapter-bars {
+  margin-top: 6px;
+  max-height: calc(var(--text-base) * 22);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.stats-chapter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.stats-chapter-label {
+  flex: none;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.stats-chapter-bar {
+  flex: 1 1 auto;
+  height: calc(var(--text-base) * 1.2);
+  min-width: 0;
+  background: var(--accent);
+  border-radius: var(--radius-1);
+}
+
+.stats-chapter-bar.nodraft {
+  background: var(--border);
+}
+
+.stats-chapter-words {
+  flex: none;
+  min-width: calc(var(--text-base) * 6);
+  text-align: right;
+  font-size: var(--text-sm);
+}
+
 .speed-line {
   fill: none;
   stroke: var(--accent);

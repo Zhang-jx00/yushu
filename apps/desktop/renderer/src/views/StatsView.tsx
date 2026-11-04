@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  StatsChapterDistPayload,
   StatsDailyEntryPayload,
   StatsSpeedPointPayload,
   StatsStatePayload,
@@ -163,6 +164,12 @@ export function StatsView() {
     return "l1";
   };
 
+  /** R167：逐章字数分布——**结构由后端给**（按书序；未建草稿不冒充 0；空项目不画假图）；
+     bar 宽按有稿章的最大字数归一（全 0 时归一分母取 1，不出 NaN）。 */
+  const dist: StatsChapterDistPayload =
+    state?.chapterDist ?? { totalChapters: 0, withDraft: 0, noDraft: 0, avgWords: null, shortest: null, chapters: [] };
+  const maxWords = dist.chapters.reduce((max, row) => Math.max(max, row.words ?? 0), 0);
+
   return (
     <div className="stats">
       <div className="panel-title stats-head">
@@ -316,6 +323,54 @@ export function StatsView() {
                 节奏曲线 <span className="muted">最近 30 天 7 日滑动平均</span>
               </h3>
               <SpeedChart points={state.speed} goal={goal} />
+            </section>
+            {/* R167：逐章字数分布（T5-6 剩余片）——结构由后端给（按书序；未建草稿不冒充 0） */}
+            <section className="panel stats-chapters-panel">
+              <h3>
+                逐章字数分布{" "}
+                <span className="muted">
+                  {dist.totalChapters > 0
+                    ? `有稿 ${dist.withDraft} / 共 ${dist.totalChapters} 章 · 平均 ${formatNumber(dist.avgWords ?? 0)} 字`
+                    : "还没有卷章"}
+                </span>
+              </h3>
+              {dist.chapters.length === 0 ? (
+                <p className="muted" data-chapter-empty="1">
+                  还没有卷章——建了卷章之后，这里按书序摆每一章的字数（未建草稿的章点名，不冒充 0）。
+                </p>
+              ) : (
+                <div className="stats-chapter-bars">
+                  {dist.chapters.map((row) => {
+                    const width = row.words === null ? 0 : Math.round((row.words / Math.max(maxWords, 1)) * 100);
+                    return (
+                      <div
+                        className="stats-chapter-row"
+                        key={row.chapterId}
+                        data-chapter-id={row.chapterId}
+                        data-chapter-draft={row.words === null ? "0" : "1"}
+                        data-chapter-words={row.words === null ? "" : String(row.words)}
+                      >
+                        <span className="stats-chapter-label">
+                          {row.volumeTitle} · 第{row.idx}章 {row.title}
+                        </span>
+                        <div
+                          className={row.words === null ? "stats-chapter-bar nodraft" : "stats-chapter-bar"}
+                          style={{ width: `${width}%` }}
+                        />
+                        <span className="stats-chapter-words muted">
+                          {row.words === null ? "未建草稿" : formatNumber(row.words)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {dist.shortest !== null && (
+                <p className="muted" data-chapter-shortest="1">
+                  拖后腿：第{dist.shortest.idx}章《{dist.shortest.title}》{formatNumber(dist.shortest.words ?? 0)} 字（有稿平均{" "}
+                  {formatNumber(dist.avgWords ?? 0)} 字）
+                </p>
+              )}
             </section>
           </div>
 

@@ -2246,6 +2246,37 @@ export interface StatsPacePayload {
   bestDay: StatsPaceDayPayload | null;
 }
 
+/**
+ * 逐章字数分布（R167，T5-6 剩余片）：**结构由后端给**（R158 的口径）——
+ * 按书序排列，未建草稿的章 `words` 为 null（不冒充 0）；
+ * 空项目时 `chapters` 为空数组、`avgWords` 为 null（界面渲染空态，不画假图）。
+ */
+export interface StatsChapterRowPayload {
+  /** 唯一对账锚点（章纲 id，co-*）——同名卷 / 同卷同序号都不会撞 */
+  chapterId: string;
+  volumeTitle: string;
+  /** 章序（卷内） */
+  idx: number;
+  title: string;
+  /** 已建草稿为字数；未建草稿为 null（不冒充 0） */
+  words: number | null;
+}
+
+export interface StatsChapterDistPayload {
+  /** 全部章数（含未建草稿） */
+  totalChapters: number;
+  /** 已建草稿的章数 */
+  withDraft: number;
+  /** 未建草稿的章数 */
+  noDraft: number;
+  /** 有稿章的平均字数（四舍五入；一个有稿章都没有时为 null，不是 0） */
+  avgWords: number | null;
+  /** 有稿章里字数最少的那章（"拖后腿"在哪一目了然；没有有稿章时为 null） */
+  shortest: StatsChapterRowPayload | null;
+  /** 全部章（**按书序**：清单给的顺序，不按字数排序；未建草稿的 words 为 null） */
+  chapters: StatsChapterRowPayload[];
+}
+
 export interface StatsStatePayload {
   /** 每日目标（0 = 未设目标） */
   goal: { daily: number };
@@ -2259,6 +2290,8 @@ export interface StatsStatePayload {
   speed: StatsSpeedPointPayload[];
   /** 近 30 天的节奏（R158 右栏用；逐日序列与各项比例都在这里算好） */
   pace: StatsPacePayload;
+  /** 逐章字数分布（R167）：按书序；未建草稿的 words 为 null；空项目 totalChapters=0 */
+  chapterDist: StatsChapterDistPayload;
   /** 平台档位参考（番茄全勤口径：basic=4,000 / advanced=6,000；I08 §3） */
   tiers: { basic: number; advanced: number };
   summary: {

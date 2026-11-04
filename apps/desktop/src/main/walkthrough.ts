@@ -9578,6 +9578,105 @@ const STEPS: StepDef[] = [
       };
         `,
   },
+  {
+    step: 151,
+    title: '逐章字数分布：条数与清单逐字对账 + 平均/最短与有稿章对得上 + 未建草稿不冒充 0（R167）',
+    file: 'step151-chapter-dist.png',
+    body: String.raw`
+      // 这一步证 R167 的四件事（口径：结构由后端给，按书序；未建草稿不冒充 0；空项目不画假图）：
+      // ① 图在：码字统计页有「逐章字数分布」面板，行数与 library 清单（同一个真源）逐字一致；
+      // ② 平均与「有稿章」对得上（分母不含未建草稿——混进来会把平均摊薄成假象）；
+      // ③ 未建草稿的章摆「未建草稿」且 data-chapter-words 为空（不冒充 0，bar 不画）；
+      // ④ 「拖后腿」点名的那章与清单里字数最少的**有稿**章逐字一致。
+      // （空项目不画假图由纯函数单测钉住：buildChapterDist([]) 的 avgWords 为 null 不是 0——
+      //   预演夹具项目有章，界面空态走不了，这一条在单测里证。）
+      await tab('码字统计');
+      const panel = await waitFor(() => document.querySelector('.stats-chapters-panel') || null, 20000);
+      if (!panel) return { ok: false, note: '码字统计页没有「逐章字数分布」面板（R167）' };
+      // 面板的数据在**挂载时**取一次（常驻视图不卸载 ⇒ 本轮前面的步骤写过章之后数字会陈旧，
+      // 实测 v429：界面 24 vs 清单 31，差值就是前面步骤写入的那 7 字）
+      // ⇒ 走产品自己的「刷新」入口取最新（刷新是幂等的；重取现在要连 library 一起读）。
+      const refreshBtn = await waitFor(() => {
+        const list = [...document.querySelectorAll('.stats .stats-head button')];
+        return list.find((b) => String(b.textContent).trim() === '刷新') || null;
+      }, 10000);
+      if (!refreshBtn) return { ok: false, note: '码字统计页没有「刷新」按钮（取不到最新载荷）' };
+      refreshBtn.click();
+      // 等重取**落定**（readStatsState 现在要连 library 一起读——74 章的字数回算不是瞬时的，
+      // 固定 sleep 实测等不到）⇒ 以清单第一章的有稿字数出现在 DOM 上为观察点；
+      // 若产品真的一致性坏了，这里超时红——等的就是它本身。
+      const lib = await window.yushu.library.list();
+      const firstDraftLib = lib.chapters.find((c) => c.chapterPath !== null) ?? null;
+      const firstKey = firstDraftLib === null ? '' : firstDraftLib.chapterId;
+      if (firstDraftLib !== null) {
+        await waitFor(() => {
+          const row = document.querySelector('.stats-chapters-panel [data-chapter-id="' + firstKey + '"]');
+          return row !== null && row.getAttribute('data-chapter-words') === String(firstDraftLib.wordCount) ? true : null;
+        }, 15000);
+      }
+      const chapters = lib.chapters;
+      const rows = [...panel.querySelectorAll('[data-chapter-id]')];
+      const draftRows = rows.filter((row) => row.getAttribute('data-chapter-draft') === '1');
+      const draftLib = chapters.filter((c) => c.chapterPath !== null);
+      const noDraftRows = rows.filter((row) => row.getAttribute('data-chapter-draft') === '0');
+      const noDraftLib = chapters.filter((c) => c.chapterPath === null);
+      const countOk = rows.length === chapters.length && draftRows.length === draftLib.length && noDraftRows.length === noDraftLib.length;
+      // 平均对账（有稿分母；界面四舍五入，本地 toLocaleString 带千分位）
+      const totalWords = draftLib.reduce((sum, c) => sum + (c.wordCount || 0), 0);
+      const avgLib = draftLib.length > 0 ? Math.round(totalWords / draftLib.length) : null;
+      const headEl = panel.querySelector('h3');
+      const avgShown = /平均 ([\d,]+) 字/.exec(String(headEl ? headEl.textContent : ''));
+      const avgOk = avgLib === null
+        ? avgShown === null
+        : avgShown !== null && Number(avgShown[1].replace(/,/g, '')) === avgLib;
+      // 未建草稿不冒充 0
+      const noDraftOk = noDraftRows.every((row) => row.getAttribute('data-chapter-words') === '' && String(row.textContent).indexOf('未建草稿') >= 0);
+      // 最短点名对账（有稿章里字数最少；并列取先出现——与引擎 reduce 同一口径）
+      let shortestLib = null;
+      for (const c of draftLib) { if (shortestLib === null || c.wordCount < shortestLib.wordCount) shortestLib = c; }
+      const shortestText = shortestLib === null ? '' : '第' + shortestLib.idx + '章《' + shortestLib.title + '》';
+      const shortestShown = panel.querySelector('[data-chapter-shortest]');
+      const shortestOk = shortestLib === null
+        ? shortestShown === null
+        : shortestShown !== null && String(shortestShown.textContent).indexOf(shortestText) >= 0;
+      // 有稿行的字数与清单逐字一致（抽前 5 行逐行对 + 全部合计对）；
+      // 失配时把**该章 id 的全部 DOM 行与全部清单条目**点名进回执
+      // （同名卷 / 重复 key / 时序竞态，三种病在回执里一眼分清——排查不用再猜）。
+      let wordsOk = true;
+      let wordsMismatch = '';
+      for (const row of draftRows.slice(0, 5)) {
+        const key = String(row.getAttribute('data-chapter-id'));
+        const found = draftLib.find((c) => c.chapterId === key);
+        if (!found) { wordsOk = false; wordsMismatch = '章 ' + key + ' 在清单里找不到（有稿分桶里）'; break; }
+        if (row.getAttribute('data-chapter-words') !== String(found.wordCount)) {
+          wordsOk = false;
+          const domRows = rows.filter((r) => r.getAttribute('data-chapter-id') === key);
+          const libRows = chapters.filter((c) => c.chapterId === key);
+          wordsMismatch = key + '：本行界面=' + String(row.getAttribute('data-chapter-words')) +
+            ' vs 清单=' + String(found.wordCount) +
+            '；同 id 的 DOM 行=' + domRows.length + ' 个（' + domRows.map((r) => r.getAttribute('data-chapter-words')).join('/') + '）' +
+            '；同 id 的清单条目=' + libRows.length + ' 个（' + libRows.map((c) => String(c.wordCount)).join('/') + '）' +
+            '（chapterPath=' + String(found.chapterPath) + '）';
+          break;
+        }
+      }
+      const sumShown = draftRows.reduce((sum, row) => sum + Number(row.getAttribute('data-chapter-words') || 0), 0);
+      const sumLib = draftLib.reduce((sum, c) => sum + (c.wordCount || 0), 0);
+      const sumOk = sumShown === sumLib;
+      panel.scrollIntoView({ block: 'center' });
+      await sleep(300);
+      return {
+        ok: countOk && avgOk && noDraftOk && shortestOk && wordsOk && sumOk,
+        note: '面板在=true；行数=' + rows.length + ' vs 清单=' + chapters.length +
+          '（有稿 ' + draftRows.length + '/' + draftLib.length + '，无稿 ' + noDraftRows.length + '/' + noDraftLib.length + '，对上=' + countOk + '）' +
+          '；平均对账（有稿分母）=' + avgOk + (avgLib === null ? '（清单无有稿章，界面也不摆）' : '（界面=' + (avgShown ? avgShown[1] : '?') + ' vs 清单=' + avgLib + '）') +
+          '；未建草稿不冒充 0=' + noDraftOk +
+          '；最短点名对上=' + shortestOk + (shortestLib === null ? '（清单无有稿章）' : '（点名=' + shortestText + ' ' + shortestLib.wordCount + ' 字）') +
+          '；前 5 行字数逐字一致=' + wordsOk + (wordsMismatch === '' ? '' : '（失配：' + wordsMismatch + '）') +
+          '；有稿合计一致=' + sumOk + '（' + sumShown + ' vs ' + sumLib + '）',
+      };
+    `,
+  },
 ];
 
 /**
