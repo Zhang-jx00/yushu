@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
@@ -287,6 +287,18 @@ export function WorldMapPanel(props: {
   const [view, setView] = useState({ zoom: 1, pan: { x: 0, y: 0 } });
   /** 画布元素（R148 滚轮缩放要用：React 的 onWheel 是**被动**监听器 ⇒ preventDefault 无效） */
   const canvasRef = useRef<SVGSVGElement | null>(null);
+  /** R166：画布的 **CSS 实际尺寸**（热区圆的半径要按屏幕像素给——画布坐标 ≠ 屏幕像素，
+     CSS 会把整块画布按容器缩放渲染（实例测得 ~0.36）⇒ ResizeObserver 实测再换算）。 */
+  const [cssBox, setCssBox] = useState({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    const el = canvasRef.current;
+    if (el === null) return;
+    const update = () => setCssBox({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const canvas = map?.canvas ?? FALLBACK_CANVAS;
   // R138：画布 = **作者框定的那一块**（bounds 那一块）；底图按它裁切显示
@@ -323,6 +335,18 @@ export function WorldMapPanel(props: {
     : computeViewBox(width, height, view.zoom, view.pan.x, view.pan.y);
   /** 当前倍率（从 viewBox 反推，不是另存一份状态） */
   const zoomFactor = zoomFromViewBox(width, viewBoxText);
+  /** R166：命中区热区圆的半径（画布单位）——按**屏幕像素**给：viewBox 有缩放，
+     且 preserveAspectRatio="none" 的横纵是**两套**比例 ⇒ 取较小的那套（min-side 才算得准）。
+     直径给 28px 屏幕像素（底线 24px 留出余量）；实测不到 CSS 盒时按实例 ~0.36 的缩放兜底。 */
+  const hitR = (() => {
+    const parts = viewBoxText.trim().split(/\s+/).map(Number);
+    if (parts.length !== 4 || !(parts[2] as number > 0) || !(parts[3] as number > 0) || !(cssBox.w > 0) || !(cssBox.h > 0)) {
+      return 40;
+    }
+    const sx = cssBox.w / (parts[2] as number);
+    const sy = cssBox.h / (parts[3] as number);
+    return 14 / Math.min(sx, sy);
+  })();
 
   /** 缩放（±1 步）：看得见的范围变了 ⇒ 平移要重新钳一遍 */
   const changeZoom = useCallback(
@@ -1463,6 +1487,10 @@ export function WorldMapPanel(props: {
                   }}
                 >
                   <title>{`${marker.label}（${LAYER_LABEL[marker.layer] ?? marker.layer}）`}</title>
+                  {/* R166：**命中区热区圆**（屏幕上恒 28px，半径见组件顶部的 hitR）——可见形状只有几个像素，
+                     键盘可达了（R110）但鼠标点不中照样是坏的。fillOpacity 0.15 而不是更淡：
+                     Chrome 的 getBoundingClientRect 按**绘制**范围算，太淡会被当"未绘制"剔除（0.01 实测不计入）。 */}
+                  <circle className="map-hit" cx={cx} cy={cy} r={hitR} fill="white" fillOpacity={0.15} />
                   <MarkerShape layer={marker.layer} cx={cx} cy={cy} />
                 </g>
                 </g>
@@ -1530,6 +1558,8 @@ export function WorldMapPanel(props: {
                   }}
                 >
                   <title>{`事件锚点 ${anchor.label}（${anchor.eventRef}）`}</title>
+                  {/* R166：命中区热区圆（同标注那一条：屏幕上恒 28px） */}
+                  <circle className="map-hit" cx={cx} cy={cy} r={hitR} fill="white" fillOpacity={0.15} />
                   <circle cx={cx} cy={cy} r={9} />
                   <circle cx={cx} cy={cy} r={2.5} className="map-anchor-core" />
                 </g>

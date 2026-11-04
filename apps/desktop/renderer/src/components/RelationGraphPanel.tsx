@@ -111,6 +111,11 @@ export function RelationGraphPanel() {
                       }
                     }}
                   >
+                    {/* R166：命中区热区圆（r=20）——节点圆最小只有 8px，点不中；svg 被 CSS 缩放
+                        （viewBox 720 宽渲染到 ~560px 的栏 ⇒ ×0.78）⇒ 40 直径画布 px ≈ 28px 屏幕。
+                        fillOpacity 0.15 而不是更淡：Chrome 的 getBoundingClientRect 按**绘制**范围算，
+                        太淡会被当"未绘制"剔除（0.01 实测不计入）。 */}
+                    <circle className="graph-hit" cx={at.x} cy={at.y} r={20} fill="white" fillOpacity={0.15} />
                     <circle cx={at.x} cy={at.y} r={Math.min(11, 4 + node.degree)} fill={NET_COLOR[node.net]} fillOpacity={focus === node.id ? 1 : 0.82} />
                     <text x={at.x} y={at.y - 14} textAnchor="middle">
                       {node.name}

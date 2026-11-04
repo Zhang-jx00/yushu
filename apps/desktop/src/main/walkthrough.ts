@@ -424,6 +424,11 @@ export function buildScript(body: string): string {
     // R166：**全预演一份**的颜色算法与阈值（原先对比度只写在 step99 里一份 ⇒ 巡检要算就得写第二份
     // ⇒ 两份会漂）。现在提到这里，step99 与排版巡检**共用同一份**。
     const CONTRAST_FLOOR = 4.5;
+    // 命中区**两层口径**（R166 实测后定的）：底线 24px 是 **WCAG 2.5.8（AA）**，接进判定——
+    // 低于它就是真缺陷（v417 实测：图形节点 5.8px）。目标 32px 是本项目自定的治理目标
+    // （R110 的键盘入口语境），**现状未达**（v417 实测 467 个 button 在 24~32px 区间，是整套
+    // 按钮基调的事）⇒ 不接判定、只在回执里**持续报数**，治理另开轮次照着数修。
+    const HIT_FLOOR = 24;
     const HIT_MIN = 32;
     const FONT_MIN_PX = 11;
     const relativeLuminance = (rgb) => {
@@ -6184,6 +6189,16 @@ const STEPS: StepDef[] = [
       const problems = [];
       const seen = [];
       const columnPages = [];
+      // R166：两项新巡检各记各的账（回执里要出现**这两项自己的数**，不是只并进"问题=N"三个字）
+      const fontIssues = [];
+      const hitFloorIssues = [];
+      let hitTotal = 0;
+      let hitWorst = Infinity;
+      let hitBelowTarget = 0;
+      let hitExempt = 0;
+      const hitByTag = {};
+      const hitBySize = {};
+      const hitByPage = {};
       for (const name of TABS) {
         await tab(name);
         await sleep(450);
@@ -6277,21 +6292,108 @@ const STEPS: StepDef[] = [
             columnPages.push(name + '(' + String(cols.length) + ' 栏，左边界 ' + lefts.join('/') + ')');
           }
         }
-        // ⑦⑧ 「字号行高 / 命中区」两项巡检**尚未做**（R166 留给另一条线）——
-        //    这里**只留下口径与量法**，不接进判定：宁可没有，也不要"采到了却不报"（那等于假装查过）。
-        //    口径：字号行高 = 面板标题条（.panel-title）与块内区块标题（h3）**同档**（回源 R112），
-        //          且标题行高不得小于字号；命中区 = 可点控件的最小边长（本项目自定 32px）。
-        //    阈值常量在 buildScript 的**共享前置段**（CONTRAST_FLOOR / HIT_MIN / FONT_MIN_PX）。
+        // ⑦ R166：**字号与行高**（层级不塌）
+        //    口径回源 R112（step76 也在量，这里逐面板全量铺开）：面板标题条（.panel-title）
+        //    与块内区块标题（h3，不在标题条里的）**同档** —— 往哪个方向偏都是塌
+        //    （改版前是块内 h3 14px 比标题条 12.5px 还大 ⇒ 层级反了）；另外每个标题的
+        //    行高不得小于字号（行高小于字号 = 行与行压在一起）。
+        for (const panel of panels) {
+          const titleEl = panel.querySelector('.panel-title');
+          const tSize = titleEl === null ? 0 : parseFloat(getComputedStyle(titleEl).fontSize) || 0;
+          for (const headEl of [...panel.querySelectorAll('h3')].filter((el) => el.closest('.panel-title') === null)) {
+            const hSize = parseFloat(getComputedStyle(headEl).fontSize) || 0;
+            if (tSize > 0 && hSize > 0 && Math.abs(hSize - tSize) > 0.5) {
+              fontIssues.push(name + '：面板「' + String(titleEl.textContent || '').trim().slice(0, 10) +
+                '」的块内标题 ' + hSize.toFixed(1) + 'px 与标题条 ' + tSize.toFixed(1) + 'px 不是同档（R112）');
+            }
+          }
+          for (const el of [...panel.querySelectorAll('h1, h2, h3, h4, .panel-title')]) {
+            const box = el.getBoundingClientRect();
+            if (box.width <= 0 || box.height <= 0) continue;
+            const cs = getComputedStyle(el);
+            const size = parseFloat(cs.fontSize) || 0;
+            const lh = parseFloat(cs.lineHeight) || 0;
+            if (size > 0 && lh > 0 && lh < size - 0.5) {
+              fontIssues.push(name + '：标题「' + String(el.textContent || '').trim().slice(0, 10) +
+                '」行高 ' + lh.toFixed(1) + 'px 小于字号 ' + size.toFixed(1) + 'px（行压着行）');
+            }
+          }
+        }
+        // ⑧ R166：**命中区**（两层口径：底线 HIT_FLOOR=24px 接判定，目标 HIT_MIN=32px 报数 —— 见共享前置段的注释）。
+        //    量的是**作者真能点中的那块**：label 包着的 checkbox/radio 量 label（点标签 = 点控件）；
+        //    隐藏 / 几乎透明的不算（看不见的东西谈不上命中区）。
+        //    本轮只量**点击型**控件（按钮 / chip / 标签页 / 下拉 / 开关 / 图形节点 / 链接）；
+        //    文本输入框的点中区是它自己，量法不同（键盘焦点为主），另立口径，不混在这条里。
+        const pageHit = [...document.querySelectorAll(
+          'button, [role="button"], a, summary, select, input[type="checkbox"], input[type="radio"], label:has(input[type="checkbox"]), label:has(input[type="radio"])'
+        )].filter((el) => {
+          if (el.tagName === 'INPUT' && el.closest('label') !== null) return false; // label 包着 ⇒ 量 label
+          const box = el.getBoundingClientRect();
+          if (box.width <= 0 || box.height <= 0) return false;
+          const cs = getComputedStyle(el);
+          return cs.visibility !== 'hidden' && cs.display !== 'none' && Number(cs.opacity) >= 0.15;
+        });
+        for (const el of pageHit) {
+          const box = el.getBoundingClientRect();
+          const minSide = Math.min(box.width, box.height);
+          hitTotal += 1;
+          if (minSide < hitWorst) hitWorst = minSide;
+          if (minSide < HIT_MIN) hitBelowTarget += 1;
+          if (minSide < HIT_FLOOR) {
+            // R166：**豁免族**（WCAG 2.5.8 的 essential 例外）——格子尺寸本身就是信息的密集数据 UI：
+            // 日历热力图的日期格（.stats-heat-grid / .stats-day-grid）、树/列表里以行高呈现数据的行按钮
+            // （.tree / .library-tree / .outline-tree）。加大它们 = 重做那块数据 UI ⇒ 不接判定，
+            // 但**单独报数**（不隐藏；治理随"行高 ≥24"专项，回执里看得见还剩多少）。
+            if (el.closest('.stats-heat-grid, .stats-day-grid, .tree, .library-tree, .outline-tree') !== null) {
+              hitExempt += 1;
+              continue;
+            }
+            const kind = el.tagName === 'INPUT' ? 'input:' + el.type : String(el.tagName).toLowerCase();
+            hitByTag[kind] = (hitByTag[kind] || 0) + 1;
+            const bucket = minSide < 12 ? '<12' : minSide < 16 ? '12-16' : minSide < 20 ? '16-20' : '20-24';
+            hitBySize[bucket] = (hitBySize[bucket] || 0) + 1;
+            hitByPage[name] = (hitByPage[name] || 0) + 1;
+            // 点名带**元素自己的 rect** 与所属 svg 的 viewBox——SVG 画布元素的实际屏幕尺寸
+            // 受 viewBox 缩放影响（R166 排查热区圆时撞了三次才明白），把这两个数摆进回执，
+            // 下一次排查不用再猜。
+            const ownerSvg = el.closest('svg');
+            const svgVb = ownerSvg === null ? '' : '，svg viewBox=' + String(ownerSvg.getAttribute('viewBox') || '?');
+            const b = el.getBoundingClientRect();
+            hitFloorIssues.push(name + '：可点控件「' + String(el.textContent || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 12) +
+              '」(' + kind + ') 命中区 ' + b.width.toFixed(1) + 'x' + b.height.toFixed(1) + 'px，min=' + minSide.toFixed(1) +
+              'px' + svgVb + '（底线 ' + HIT_FLOOR + 'px，WCAG 2.5.8）');
+          }
+        }
         seen.push(name + '(' + panels.length + ' 面板)');
       }
       await tab('世界观档案');
       await sleep(300);
+      // R166：两项新巡检**接进判定**（问题数组）也**各自报数**（回执里出现两项的数，
+      // 不是只并进"问题=N"三个字 —— 撤掉的那版就是"采到了却不报"，等于假装查过）。
+      problems.push(...fontIssues, ...hitFloorIssues);
+      const hitWorstStr = hitTotal === 0 ? '无控件' : hitWorst.toFixed(1) + 'px';
+      const hitBreakdown = Object.keys(hitByTag).length === 0
+        ? ''
+        : '；违规分布 ' + Object.keys(hitByTag).sort().map((k) => k + '=' + hitByTag[k]).join('、') +
+          '；尺寸分布 ' + ['<12', '12-16', '16-20', '20-24'].filter((b) => hitBySize[b]).map((b) => b + '=' + hitBySize[b]).join('、') +
+          '；逐页 ' + Object.keys(hitByPage).map((p) => p + '=' + hitByPage[p]).join('、');
+      // 点名取**最小的 6 个**（比"前 6 个"更有诊断价值：先修最坏的那批）
+      const hitNamed = hitFloorIssues.slice().sort((a, b) => {
+        const pa = /只有 ([\d.]+)px/.exec(a), pb = /只有 ([\d.]+)px/.exec(b);
+        return (pa ? Number(pa[1]) : 999) - (pb ? Number(pb[1]) : 999);
+      }).slice(0, 6);
       return {
         ok: problems.length === 0,
         note: '巡检 ' + seen.length + ' 个页面：' + seen.join('、') +
           '；问题=' + problems.length + '（' + problems.slice(0, 6).join(' | ') + '）' +
           '；分栏并排=' + String(columnPages.length) + '/' + String(Object.keys(COLUMN_ROOTS).length) + ' 页（' +
-          columnPages.join('、') + '）',
+          columnPages.join('、') + '）' +
+          '；字号行高违规=' + fontIssues.length + ' 处（' + fontIssues.slice(0, 2).join(' | ') + '）' +
+          '；命中区底线违规=' + hitFloorIssues.length + ' 处（<' + HIT_FLOOR + 'px，WCAG 2.5.8' + hitBreakdown +
+          '；' + hitNamed.join(' | ') + '）' +
+          '；豁免族（essential，报数治理）=' + hitExempt + ' 处' +
+          '；命中区距 32px 目标=' + hitBelowTarget + ' 处（量了 ' + hitTotal + ' 个控件，最差 ' + hitWorstStr +
+          '；治理另开轮次照着数修）',
       };
     `,
   },

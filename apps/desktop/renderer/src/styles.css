@@ -400,6 +400,10 @@ button.link {
   background: none;
   color: var(--accent);
   padding: var(--space-1) var(--space-2);
+  /* R166：命中区底线（WCAG 2.5.8 = 24px）——文字按钮行高只有 ~21px（章纲的 ↑↓✕ 实测 13.9px），
+     单字符按钮的**宽度**也是短板 ⇒ 高与宽都撑到两倍正文字号（26px），纯加高加宽不换挡。 */
+  min-height: calc(var(--text-base) * 2);
+  min-width: calc(var(--text-base) * 2);
 }
 
 input,
@@ -610,6 +614,22 @@ h3 {
   font-size: var(--text-base);
   font-weight: 600;
   line-height: var(--leading-tight);
+}
+
+/* R166：命中区底线（WCAG 2.5.8 = 24px）——折叠摘要是可点的开关，正文行高只有 ~20px；
+   两倍正文字号 = 26px，与 step-item 的那条同源。 */
+summary {
+  min-height: calc(var(--text-base) * 2);
+}
+
+/* R166：命中区底线——包着开关的**标签**才是作者点的那块（点标签 = 点开关），
+   行高只有 ~20px ⇒ 撑到 26px。display 换成 inline-flex 是为了让 min-height 生效
+   （纯 inline 的 min-height 不生效）。 */
+label:has(input[type="checkbox"]),
+label:has(input[type="radio"]) {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(var(--text-base) * 2);
 }
 
 h4 {
@@ -2719,6 +2739,9 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* R166：命中区底线（WCAG 2.5.8 = 24px）——步进器的入口原来只有 21.4px 高；
+     两倍正文字号 = 26px，纯撑高不换挡，视觉只有行距的差别。 */
+  min-height: calc(var(--text-base) * 2);
 }
 
 /* pill 里的按钮是"文字本身"（pill 的边框在 li 上）⇒ 不要撑满 */
@@ -3136,6 +3159,9 @@ select {
   border: none;
   background: none;
   padding: 0;
+  /* R166：命中区底线（WCAG 2.5.8 = 24px）——行高有 56px，按钮原来只有文字行高（~21px）；
+     给上下各一档内边距（4px）⇒ 命中区 ~29px；虚拟滚动的固定行高（56px）不动。 */
+  padding-block: var(--space-2);
   color: var(--ink);
   font: inherit;
   font-size: var(--text-base);
@@ -4906,6 +4932,9 @@ table,
   color: var(--accent);
   font-size: var(--text-sm);
   cursor: pointer;
+  /* R166：命中区底线（WCAG 2.5.8 = 24px）——文字行高只有 ~20px（实测 22.6px），撑到 26px */
+  min-height: calc(var(--text-base) * 2);
+  vertical-align: middle;
 }
 
 /* R171：标注清单（筛选 / 批量选中 / 批量改图层）——
