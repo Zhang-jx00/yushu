@@ -1,0 +1,193 @@
+{
+  "kind": "yushu-perf-probe/v1",
+  "date": "2026-11-05T15:42:39.690Z",
+  "fixture": {
+    "dir": "D:\\Temp\\yushu-perf-synth1m",
+    "reused": true,
+    "volumes": 17,
+    "chapters": 335,
+    "totalChars": 1111061,
+    "megaPath": "chapters/vol-178b2a13/ch-1hm87nj.md"
+  },
+  "env": {
+    "electron": "44.4.5",
+    "node": "24.21.0",
+    "chrome": "152.0.7977.130",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7840HS with Radeon 780M Graphics",
+    "totalMemMb": 28484
+  },
+  "metrics": {
+    "cold_to_editable_ms": 1268,
+    "module_exec_ms": 126,
+    "fcp_ms": 196,
+    "hot_to_editable_ms": 681,
+    "project_open_ms": 229,
+    "keystroke_p95_ms": 1.8,
+    "keystroke_frame_p95_ms": 19.4,
+    "keystroke_mega_p95_ms": 3.7,
+    "keystroke_mega_frame_p95_ms": 18.5,
+    "save_to_indexed_ms": 370,
+    "chapter_write_ms": 12,
+    "query_p95_ms": 8.4,
+    "index_rebuild_ms": 1630,
+    "rebuild_cpm": 40902970,
+    "idle_rss_mb": 527,
+    "million_chars_rss_mb": 1018
+  },
+  "budgets": {
+    "cold_to_editable_ms": 2000,
+    "hot_to_editable_ms": 800,
+    "project_open_ms": 3000,
+    "keystroke_p95_ms": 16,
+    "keystroke_mega_p95_ms": 16,
+    "save_to_indexed_ms": 500,
+    "query_p95_ms": 80,
+    "rebuild_cpm_min": 20000,
+    "idle_rss_mb": 600,
+    "million_chars_rss_mb": 1200
+  },
+  "checks": {
+    "cold_to_editable": true,
+    "hot_to_editable": true,
+    "project_open": true,
+    "keystroke_p95": true,
+    "keystroke_mega_p95": true,
+    "save_to_indexed": true,
+    "query_p95": true,
+    "rebuild_cpm": true,
+    "idle_rss": true,
+    "million_chars_rss": true
+  },
+  "boot_notes": [],
+  "gate": {
+    "ok": true,
+    "failedBudgets": [],
+    "regressions": [],
+    "excluded": []
+  },
+  "comparison": {
+    "ok": true,
+    "thresholdRatio": 0.2,
+    "baselineDate": "2026-10-25T14:42:43.252Z",
+    "rows": [
+      {
+        "metric": "cold_to_editable_ms",
+        "previous": 7836,
+        "current": 1268,
+        "deltaPct": -83.8,
+        "status": "improved"
+      },
+      {
+        "metric": "module_exec_ms",
+        "previous": 198,
+        "current": 126,
+        "deltaPct": -36.4,
+        "status": "improved"
+      },
+      {
+        "metric": "fcp_ms",
+        "previous": 6200,
+        "current": 196,
+        "deltaPct": -96.8,
+        "status": "improved"
+      },
+      {
+        "metric": "hot_to_editable_ms",
+        "previous": 1344,
+        "current": 681,
+        "deltaPct": -49.3,
+        "status": "improved"
+      },
+      {
+        "metric": "project_open_ms",
+        "previous": 394,
+        "current": 229,
+        "deltaPct": -41.9,
+        "status": "improved"
+      },
+      {
+        "metric": "keystroke_p95_ms",
+        "previous": 2.2,
+        "current": 1.8,
+        "deltaPct": -18.2,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_frame_p95_ms",
+        "previous": 24.9,
+        "current": 19.4,
+        "deltaPct": -22.1,
+        "status": "improved"
+      },
+      {
+        "metric": "keystroke_mega_p95_ms",
+        "previous": 6,
+        "current": 3.7,
+        "deltaPct": -38.3,
+        "status": "improved"
+      },
+      {
+        "metric": "keystroke_mega_frame_p95_ms",
+        "previous": 27.6,
+        "current": 18.5,
+        "deltaPct": -33,
+        "status": "improved"
+      },
+      {
+        "metric": "save_to_indexed_ms",
+        "previous": 551,
+        "current": 370,
+        "deltaPct": -32.8,
+        "status": "improved"
+      },
+      {
+        "metric": "chapter_write_ms",
+        "previous": 21,
+        "current": 12,
+        "deltaPct": -42.9,
+        "status": "improved"
+      },
+      {
+        "metric": "query_p95_ms",
+        "previous": 11,
+        "current": 8.4,
+        "deltaPct": -23.6,
+        "status": "improved"
+      },
+      {
+        "metric": "index_rebuild_ms",
+        "previous": 2010,
+        "current": 1630,
+        "deltaPct": -18.9,
+        "status": "stable"
+      },
+      {
+        "metric": "rebuild_cpm",
+        "previous": 33151992,
+        "current": 40902970,
+        "deltaPct": -23.4,
+        "status": "improved"
+      },
+      {
+        "metric": "idle_rss_mb",
+        "previous": 524,
+        "current": 527,
+        "deltaPct": 0.6,
+        "status": "stable"
+      },
+      {
+        "metric": "million_chars_rss_mb",
+        "previous": 1003,
+        "current": 1018,
+        "deltaPct": 1.5,
+        "status": "stable"
+      }
+    ],
+    "regressions": []
+  },
+  "indexFiles": 341,
+  "indexChunks": 3302,
+  "incrementalUpdatedFiles": 1
+}
