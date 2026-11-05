@@ -12,7 +12,7 @@
 #   - *_rss_mb：Electron 全部进程 working set 合计
 version: 1
 budgets:
-  startup:      {cold_to_editable_ms: 2000, hot_to_editable_ms: 800}
+  startup:      {cold_to_editable_ms: 2000, hot_to_editable_ms: 800, module_exec_ms: 200, fcp_ms: 400}
   project_open: {million_chars_ms: 3000}
   edit:         {keystroke_p95_ms: 16, keystroke_mega_p95_ms: 16, save_to_indexed_ms: 500}
   search:       {query_p95_ms: 80, rebuild_cpm: 20000}
@@ -198,3 +198,23 @@ measurements:
     report: docs/assets/perf/perf-report-local-dev-20261014-r83-perf-gate.json
     # 对照 R36 同夹具同机（1,885ms）：本轮热盘 1,445ms ⇒ 冷启动没有回退。
     # "包体长到 1.5 MB 所以启动变慢"这个开场假设被实测否证，拆包这件事据此取消。
+  - date: 2026-11-05
+    runner: local-dev          # 第 169 轮：探针修复（R97 起选章点击在内层 button 上，探针还点外层 li ⇒ perf-test 自 R83 后断了没人跑——R169 预演卫生抓的病）+ module_exec / fcp **设预算进门禁**
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,110,854 字 + 100k 大章靶子（夹具已就位，reused=true）
+    result: pass_12_of_12      # 门禁 ok=true；module_exec / fcp 自本轮起参与门禁（预算 = 实测 ×1.6 / ×2.0，多机样本后再收紧）
+    metrics:
+      cold_to_editable_ms: 1268        # ≤2000（热盘口径）
+      module_exec_ms: 126              # ≤200（R83 实测 136 ⇒ 无回退；占 cold 的 ≈10%）
+      fcp_ms: 196                      # ≤400（R83 实测 200 ⇒ 无回退）
+      hot_to_editable_ms: 681          # ≤800
+      project_open_ms: 229             # ≤3000
+      keystroke_p95_ms: 1.8            # ≤16
+      keystroke_mega_p95_ms: 3.7       # ≤16
+      save_to_indexed_ms: 370          # ≤500
+      query_p95_ms: 8.4                # ≤80
+      rebuild_cpm: 40902970            # ≥20000
+      idle_rss_mb: 527                 # ≤600
+      million_chars_rss_mb: 1018       # ≤1200
+    report: docs/assets/perf/perf-report-local-dev-20261105-r169-perf-gate.json
+    # 对照 R83 同夹具同机：cold 1268 vs 1445、module_exec 126 vs 136、fcp 196 vs 200 —— 无回退；
+    # 首次对比基线（夹具目录里存的是 2026-10-25 的无主报告）⇒ 回归对比功能自本轮起也真的在工作。

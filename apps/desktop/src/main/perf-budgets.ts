@@ -15,6 +15,8 @@
 export const BUDGETS = {
   cold_to_editable_ms: 2000,
   hot_to_editable_ms: 800,
+  module_exec_ms: 200,
+  fcp_ms: 400,
   project_open_ms: 3000,
   keystroke_p95_ms: 16,
   keystroke_mega_p95_ms: 16,
@@ -36,6 +38,8 @@ export const BUDGETS = {
 export const BUDGET_YAML_MAP: Record<keyof typeof BUDGETS, string> = {
   cold_to_editable_ms: "startup.cold_to_editable_ms",
   hot_to_editable_ms: "startup.hot_to_editable_ms",
+  module_exec_ms: "startup.module_exec_ms",
+  fcp_ms: "startup.fcp_ms",
   project_open_ms: "project_open.million_chars_ms",
   keystroke_p95_ms: "edit.keystroke_p95_ms",
   keystroke_mega_p95_ms: "edit.keystroke_mega_p95_ms",

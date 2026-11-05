@@ -233,9 +233,13 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
       const items = [...document.querySelectorAll('.draft-list li')];
       const item = items.find((node) => node.textContent.includes('大章靶子'));
       if (!item) return { found: false, count: items.length };
-      item.click();
-      return { found: true, count: items.length };
-    })()`)) as { found: boolean; count: number };
+      // R97 起选章的点击处理在**内层 button** 上（键盘可达改造）——程序化点击外层 li
+      // 不会触发子按钮（事件不从父级往下走）⇒ 必须点 button 本身。
+      // 此前探针点 li，perf-test 自 R83 后无人复跑 ⇒ 断了没人知道（R169 预演卫生抓的病）。
+      const btn = item.querySelector('button');
+      (btn ?? item).click();
+      return { found: true, count: items.length, viaButton: btn !== null };
+    })()`)) as { found: boolean; count: number; viaButton?: boolean };
     if (!clicked.found) throw new Error(`草稿列表找不到大章（共 ${clicked.count} 项）`);
     try {
       await waitForJs(win, "window.__yushuCmView && window.__yushuCmView.state.doc.length > 20000", 30_000);
@@ -260,9 +264,8 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
   // ⑦ 结果组装（对照预算）
   const metrics = {
     cold_to_editable_ms: coldToEditableMs,
-    // R83 新增（**先记录、暂不进门禁**）：首屏脚本执行与首次内容绘制。
-    // 本轮就是要用这两个数回答"1.5 MB 单包要不要拆"，所以它们进报告、进台账；
-    // 预算值等这两个数在多台机器上有几个样本之后再定——现在就定，等于拿一次实测当契约。
+    // R83 新增时先记录不进门禁（预算等样本）；R169 起设预算进门口
+    // （module_exec ≤200 / fcp ≤400：两轮实测 136→126、200→196 ⇒ ×1.6 / ×2.0 余量，多机样本后再收紧）。
     module_exec_ms: boot.module_exec_ms,
     fcp_ms: boot.fcp_ms,
     hot_to_editable_ms: hotToEditableMs,
@@ -355,8 +358,8 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
   console.log(`[perf] 报告已写入：${reportPath}`);
   console.log(`[perf] 达标情况：${Object.entries(checks).map(([k, v]) => `${k}=${v ? "✅" : "❌"}`).join("  ")}`);
   console.log(
-    `[perf] 首屏（只记录，暂不进门禁）：module_exec=${String(boot.module_exec_ms ?? "未测")}ms ` +
-      `fcp=${String(boot.fcp_ms ?? "未测")}ms${boot.notes.length > 0 ? `（${boot.notes.join("；")}）` : ""}`,
+    `[perf] 首屏（R169 起参与门禁）：module_exec=${String(boot.module_exec_ms ?? "未测")}ms/≤200 ` +
+      `fcp=${String(boot.fcp_ms ?? "未测")}ms/≤400${boot.notes.length > 0 ? `（${boot.notes.join("；")}）` : ""}`,
   );
   if (comparison.baselineDate) {
     const summary = comparison.rows
