@@ -9080,15 +9080,27 @@ const STEPS: StepDef[] = [
       if (!cols) return { ok: false, note: '三级大纲页没有三栏（卷章树 / 大纲表 / 选中的那章）' };
       const rects = cols.map((el) => el.getBoundingClientRect());
       const sideBySide = rects[0].left < rects[1].left && rects[1].left < rects[2].left;
-      // ② 同一棵树：去总览页读一遍，逐字比
+      // ② 同一棵树：去总览页读一遍。R168 起总览的树**虚拟滚动**——DOM 只挂窗口内的行
+      //    ⇒ 对两件事：① 容器上的**总数对账**（data-tree-chapters = 大纲页那棵的按钮数）；
+      //    ② 回到顶部后**可见前缀逐字**比（同一份清单同一顺序 ⇒ 前缀必然一致）。
       await tab('稿件总览');
       const libraryTree = await waitFor(() => {
-        const rows = [...document.querySelectorAll('.library-col-tree .library-tree-btn')];
-        return rows.length > 0 ? rows.map((b) => String(b.textContent || '').replace(/\s+/g, ' ').trim()) : null;
+        const box = document.querySelector('.library-col-tree .library-tree-scroll');
+        if (box === null) return null;
+        const btns = [...box.querySelectorAll('.library-tree-btn')];
+        return btns.length > 0 ? { box: box, btns: btns } : null;
       }, 15000);
       if (!libraryTree) return { ok: false, note: '总览页的卷章树没渲染出来' };
+      libraryTree.box.scrollTop = 0;
+      await sleep(300);
+      const libBtns = [...libraryTree.box.querySelectorAll('.library-tree-btn')];
+      const prefixCount = Math.min(outlineTree.length, 10);
+      const libTexts = libBtns.slice(0, prefixCount).map((b) => String(b.textContent || '').replace(/\s+/g, ' ').trim());
       const outlineTexts = outlineTree.map((row) => row.text);
-      const sameTree = outlineTexts.length === libraryTree.length && outlineTexts.every((text, index) => text === libraryTree[index]);
+      const prefixSame = libTexts.every((text, index) => text === outlineTexts[index]);
+      const treeTotal = Number(libraryTree.box.getAttribute('data-tree-chapters') || '-1');
+      const countSame = treeTotal === outlineTree.length;
+      const sameTree = prefixSame && countSame;
       // ③ 点树里的一章 ⇒ 右栏摆的就是那一章（同一个 id），章纲表也展开那一章
       await tab('三级大纲');
       const treeAgain = await waitFor(() => {
@@ -9136,8 +9148,9 @@ const STEPS: StepDef[] = [
         ok: sideBySide && sameTree && sameId && tableSame && wordsOk,
         note: '三栏并排=' + String(sideBySide) + '（左 ' + String(Math.round(rects[0].left)) + ' / 中 ' +
           String(Math.round(rects[1].left)) + ' / 右 ' + String(Math.round(rects[2].left)) + '）' +
-          '；两页的树逐字对上=' + String(sameTree) + '（大纲页 ' + String(outlineTexts.length) +
-          ' 条 vs 总览页 ' + String(libraryTree.length) + ' 条）' +
+          '；两页的树逐字对上=' + String(sameTree) + '（可见前缀 ' + String(prefixCount) + ' 条逐字同=' + String(prefixSame) +
+          '；总览树总数对账=' + String(treeTotal) + ' vs 大纲页 ' + String(outlineTexts.length) + '，对上=' + String(countSame) +
+          '；总览树为虚拟滚动，DOM 只挂窗口行——R168）' +
           '；同一个 id=' + String(sameId) + '（点的=' + pick.id + '，右栏摆的=' + shownId + '）' +
           '；章纲表展开的也是那一章=' + String(tableSame) +
           '；字数对账（右栏 ' + String(words) + ' vs 总览页 ' + String(libraryWords) + '）' +
@@ -9674,6 +9687,89 @@ const STEPS: StepDef[] = [
           '；最短点名对上=' + shortestOk + (shortestLib === null ? '（清单无有稿章）' : '（点名=' + shortestText + ' ' + shortestLib.wordCount + ' 字）') +
           '；前 5 行字数逐字一致=' + wordsOk + (wordsMismatch === '' ? '' : '（失配：' + wordsMismatch + '）') +
           '；有稿合计一致=' + sumOk + '（' + sumShown + ' vs ' + sumLib + '）',
+      };
+    `,
+  },
+  {
+    step: 152,
+    title: '卷章树虚拟滚动：数据行远多于窗口行时 DOM 只挂几十行 + 滚到底仍对账 + 点选仍生效（R168）',
+    file: 'step152-tree-virtual.png',
+    body: String.raw`
+      // 这一步证 R168 的三件事：
+      // ① 造大数据：往第一卷追加大批章（只写大纲、不建草稿——树的行数与草稿无关；
+      //    克隆现有章条目 ⇒ brief/scene_ids 齐全 schema 不会红；normalize 会按数组序重编 idx）；
+      // ② 数据行几百个时，树的 DOM 只挂**窗口内的几十行**（渲染行数 ≤ 视窗行 + 过扫描余量）；
+      // ③ 滚到底：最后一章仍能到达（占位高度撑起的滚动条是真的）；点一个可见章仍能选中。
+      await tab('稿件总览');
+      const st = await window.yushu.outline.read();
+      if (!st || st.exists !== true || !st.doc) return { ok: false, note: '大纲读不出来（exists=false）' };
+      const vol0 = st.doc.volumes[0];
+      if (!vol0) return { ok: false, note: '大纲没有卷' };
+      const sample = vol0.chapters[0];
+      if (!sample) return { ok: false, note: '第一卷没有章可克隆' };
+      const beforeChapters = vol0.chapters.length;
+      const ADD = 250;
+      // **重试要幂等**（R117 的教训）：重跑时上一轮可能已经追加过 ⇒ 已存在的 id 跳过，
+      // 追加 0 个也一样能走完后续对账（写回同内容不破坏 baseHash 链）。
+      const existingIds = new Set(vol0.chapters.map((c) => String(c.id)));
+      let added = 0;
+      for (let i = 1; i <= ADD; i += 1) {
+        const newId = 'co-r168-' + String(i);
+        if (existingIds.has(newId)) continue;
+        const clone = JSON.parse(JSON.stringify(sample));
+        delete clone.chapter_id; // 回填映射用不了（克隆章没有自己的草稿文件），留着会语义错乱
+        clone.id = newId;
+        clone.title = 'R168 填压章 ' + String(i);
+        vol0.chapters.push(clone);
+        added += 1;
+      }
+      const written = await window.yushu.outline.write({ doc: st.doc, baseHash: st.hash });
+      if (!written || !written.hash) return { ok: false, note: '大纲写回失败（baseHash/校验）' };
+      // 树在挂载时取数 ⇒ 切走再切回强制重挂载（R68 的教训）
+      await tab('规则');
+      await tab('稿件总览');
+      const tree = await waitFor(() => document.querySelector('.library-tree-scroll') || null, 15000);
+      if (!tree) return { ok: false, note: '总览页没有卷章树容器（.library-tree-scroll）' };
+      const lastLib = await window.yushu.library.list();
+      const chaptersTotal = lastLib.chapters.length;
+      const total = Number(tree.getAttribute('data-tree-total') || '-1');
+      const treeChapters = Number(tree.getAttribute('data-tree-chapters') || '-1');
+      // 视窗行数：容器高 ÷ 行高（行高内联在行元素上，读真实值，不抄常量）
+      const firstRow = tree.querySelector('.library-tree-row, .library-tree-row-volume');
+      const rowH = firstRow ? firstRow.getBoundingClientRect().height : 0;
+      const viewportRows = rowH > 0 ? Math.ceil(tree.clientHeight / rowH) : 0;
+      const domRows = tree.querySelectorAll('.library-tree-row, .library-tree-row-volume').length;
+      // 渲染行数 ≤ 视窗行 + 上下过扫描（各 4 行）+ 余量；且远小于数据行（虚拟化真的在发生）。
+      // 计数口径：chaptersTotal 是**全库**章数（所有卷），beforeChapters 只是第一卷的 ⇒
+      // 对账认三件：追加确实落了（全库 ≥ 第一卷原数 + 追加数）、树的锚点与清单一致、卷头行不少于章数
+      const countOk = chaptersTotal >= beforeChapters + added && treeChapters === chaptersTotal && total >= chaptersTotal;
+      const virtualOk = viewportRows > 0 && domRows <= viewportRows + 12 && domRows < chaptersTotal;
+      // 滚到底：清单最后一章到达（不是窗口里的固定那几行）
+      tree.scrollTop = tree.scrollHeight;
+      await sleep(400);
+      const btns = [...tree.querySelectorAll('.library-tree-btn')];
+      const lastBtn = btns[btns.length - 1] || null;
+      const lastCh = chaptersTotal > 0 ? lastLib.chapters[chaptersTotal - 1] ?? null : null;
+      const lastOk = lastBtn !== null && lastCh !== null &&
+        String(lastBtn.textContent || '').indexOf('第 ' + String(lastCh.idx) + ' 章') >= 0 &&
+        String(lastBtn.textContent || '').indexOf(lastCh.title) >= 0;
+      // 点一个可见章仍能选中（aria-pressed 跟着换）
+      const pickBtn = btns[Math.max(0, btns.length - 3)] || null;
+      let pickOk = false;
+      if (pickBtn !== null) {
+        pickBtn.click();
+        await sleep(300);
+        const picked = tree.querySelector('.library-tree-btn.is-on');
+        pickOk = picked !== null && picked === pickBtn;
+      }
+      tree.scrollIntoView({ block: 'center' });
+      await sleep(300);
+      return {
+        ok: countOk && virtualOk && lastOk && pickOk,
+        note: '追加=' + String(added) + '/' + String(ADD) + ' 章（第一卷原 ' + String(beforeChapters) + '，全库清单=' + String(chaptersTotal) + '，对上=' + String(countOk) + '）' +
+          '；数据行（含卷头）=' + total + '，DOM 只挂=' + domRows + ' 行（视窗≈' + viewportRows + ' 行，渲染 ≤ 视窗+12=' + virtualOk + '）' +
+          '；滚到底最后一章到达=' + lastOk + (lastCh === null ? '' : '（第 ' + lastCh.idx + ' 章 ' + lastCh.title + '）') +
+          '；点选仍生效=' + pickOk,
       };
     `,
   },

@@ -3171,6 +3171,30 @@ select {
   padding: 0;
 }
 
+/* R168：卷章树**虚拟滚动**——扁平行按固定行高渲染（行高由 LibraryView 的 TREE_ROW_HEIGHT
+   内联给出，CSS 不另写一遍）；章多时这块**自己竖向滚**（滚的是这一块，不是整页）；
+   窗口外的行以占位高度撑起滚动条。max-height 走令牌，不给长度字面量棘轮添新账。 */
+.library-tree-scroll {
+  max-height: calc(var(--text-base) * 26);
+  overflow-y: auto;
+}
+
+.library-tree-row,
+.library-tree-row-volume {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.library-tree-row-volume {
+  font-weight: 600;
+}
+
+.library-tree-row .library-tree-btn {
+  display: block;
+  width: 100%;
+}
+
 .library-tree-volume {
   margin-top: var(--space-3);
 }

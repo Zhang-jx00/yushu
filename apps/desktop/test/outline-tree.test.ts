@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildOutlineTree,
+  flattenOutlineRows,
   summarizeOutlineChapter,
   type OutlineTreeChapter,
 } from "../renderer/src/components/outline-tree.js";
@@ -130,5 +131,44 @@ describe("卷章树与选中那章的产物摘要（R164）：两页共用同一
     const summary = summarizeOutlineChapter({ chapterId: "co-x", outline: null, entry: null });
     expect(summary.note).not.toBe("");
     expect(summary.words).toBe(0);
+  });
+});
+
+describe("卷章树的扁平行（R168：虚拟滚动渲染的行）", () => {
+  it("**按书序摊平**：卷头行在前、章行跟后；顺序与 buildOutlineTree 完全一致", () => {
+    const rows = flattenOutlineRows(
+      buildOutlineTree([
+        chapter("co-a", "vol-a", { idx: 1 }),
+        chapter("co-b", "vol-a", { idx: 2 }),
+        chapter("co-c", "vol-b", { idx: 1 }),
+      ]),
+    );
+    expect(rows.map((row) => row.kind)).toEqual(["volume", "chapter", "chapter", "volume", "chapter"]);
+    const volumeRow = rows[0];
+    expect(volumeRow?.kind === "volume" && volumeRow.title).toBe("卷 vol-a");
+    expect(volumeRow?.kind === "volume" && volumeRow.chapterCount).toBe(2);
+    const chapterRow = rows[1];
+    expect(chapterRow?.kind === "chapter" && chapterRow.id).toBe("co-a");
+    const lastRow = rows[4];
+    expect(lastRow?.kind === "chapter" && lastRow.id).toBe("co-c");
+  });
+
+  it("**数据不丢**：章行条数与章清单一致；行带上对账用的 id / 字数 / 草稿路径", () => {
+    const rows = flattenOutlineRows(
+      buildOutlineTree([
+        chapter("co-a", "vol-a", { idx: 1, wordCount: 500, chapterPath: "chapters/a.md", status: "draft" }),
+        chapter("co-b", "vol-a", { idx: 2 }),
+      ]),
+    );
+    const chapterRows = rows.filter((row) => row.kind === "chapter");
+    expect(chapterRows.length).toBe(2);
+    const first = chapterRows[0];
+    expect(first?.kind === "chapter" && first.chapterPath).toBe("chapters/a.md");
+    expect(first?.kind === "chapter" && first.wordCount).toBe(500);
+    expect(first?.kind === "chapter" && first.status).toBe("draft");
+  });
+
+  it("**空清单摊平为空行**（不造卷头）", () => {
+    expect(flattenOutlineRows(buildOutlineTree([]))).toEqual([]);
   });
 });

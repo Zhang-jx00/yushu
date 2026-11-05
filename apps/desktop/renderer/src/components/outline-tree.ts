@@ -52,6 +52,50 @@ export function buildOutlineTree(chapters: OutlineTreeChapter[]): OutlineTreeVol
   return groups;
 }
 
+/** R168：卷章树的**扁平行**（虚拟滚动按行渲染；卷头与章行**同高** ⇒ 窗口算术用固定行高） */
+export type OutlineTreeRow =
+  | { kind: "volume"; volumeId: string; title: string; chapterCount: number }
+  | {
+      kind: "chapter";
+      id: string;
+      idx: number;
+      title: string;
+      chapterPath: string | null;
+      wordCount: number;
+      status: string;
+    };
+
+/**
+ * 把树**按书序摊平成行**（卷头行 + 章行交替）——虚拟滚动渲染的是这些行。
+ *
+ * 为什么摊平也进共用模块：窗口算术（computeVirtualWindow）只认固定行高的**一维行**，
+ * 摊平顺序必须与 buildOutlineTree 完全一致（同一份清单 ⇒ 同一摊平结果），
+ * 两页将来都走它，谁也不许自己再写一遍。
+ */
+export function flattenOutlineRows(volumes: OutlineTreeVolume[]): OutlineTreeRow[] {
+  const rows: OutlineTreeRow[] = [];
+  for (const volume of volumes) {
+    rows.push({
+      kind: "volume",
+      volumeId: volume.volumeId,
+      title: volume.title,
+      chapterCount: volume.chapters.length,
+    });
+    for (const item of volume.chapters) {
+      rows.push({
+        kind: "chapter",
+        id: item.id,
+        idx: item.idx,
+        title: item.title,
+        chapterPath: item.chapterPath,
+        wordCount: item.wordCount,
+        status: item.status,
+      });
+    }
+  }
+  return rows;
+}
+
 /** 章纲要素（大纲真源里那一章的 brief） */
 export interface OutlineChapterBriefInput {
   who: string;

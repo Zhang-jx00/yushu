@@ -6,7 +6,7 @@ import { Disclosure } from "../components/Disclosure";
 import { ImportPanel } from "../components/ImportPanel";
 import { PublishPanel } from "../components/PublishPanel";
 import { computeVirtualWindow } from "../virtual-list";
-import { buildOutlineTree } from "../components/outline-tree";
+import { buildOutlineTree, flattenOutlineRows } from "../components/outline-tree";
 
 /**
  * 稿件总览（M2 / T2-4 切片 A「全库视图 + 虚拟滚动」）：
@@ -28,12 +28,20 @@ import { buildOutlineTree } from "../components/outline-tree";
 /** 行高（px；固定行高是虚拟滚动的前提） */
 const ROW_HEIGHT = 56;
 
+/** R168：卷章树的行高（px）——卷头行与章行**同高**（固定行高是虚拟窗口算术的前提）；
+   高度由 JS 内联到每一行（CSS 不另写一遍 ⇒ 一处定义，两处必然一致） */
+const TREE_ROW_HEIGHT = 26;
+
 export function LibraryView({ onOpen }: { onOpen: (path: string) => void }) {
   const [data, setData] = useState<LibraryViewPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(360);
+  /** R168：卷章树的虚拟滚动（几百卷/几百章时只挂窗口内的几十行） */
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  const [treeScrollTop, setTreeScrollTop] = useState(0);
+  const [treeViewport, setTreeViewport] = useState(360);
   const listRef = useRef<HTMLDivElement | null>(null);
   /** R155：右栏正在摆**哪一章**（空 = 还没选） */
   const [selectedId, setSelectedId] = useState("");
@@ -56,6 +64,17 @@ export function LibraryView({ onOpen }: { onOpen: (path: string) => void }) {
     const el = listRef.current;
     if (el === null) return;
     const update = () => setViewportHeight(el.clientHeight || 360);
+    update();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    observer?.observe(el);
+    return () => observer?.disconnect();
+  }, [data]);
+
+  // R168：卷章树视口高度测量（同全库列表一套做法）
+  useEffect(() => {
+    const el = treeRef.current;
+    if (el === null) return;
+    const update = () => setTreeViewport(el.clientHeight || 360);
     update();
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
     observer?.observe(el);
@@ -112,6 +131,16 @@ export function LibraryView({ onOpen }: { onOpen: (path: string) => void }) {
   });
   const visible = filtered.slice(vw.start, vw.end);
 
+  /** R168：卷章树的**扁平行**（共用模块摊平 ⇒ 与大纲页那棵同一顺序）+ 虚拟窗口（同全库列表一套算术） */
+  const treeRows = useMemo(() => flattenOutlineRows(volumes), [volumes]);
+  const treeVw = computeVirtualWindow({
+    itemCount: treeRows.length,
+    itemHeight: TREE_ROW_HEIGHT,
+    scrollTop: treeScrollTop,
+    viewportHeight: treeViewport,
+  });
+  const treeVisible = treeRows.slice(treeVw.start, treeVw.end);
+
   return (
     <div className="library">
       <div className="panel-title">
@@ -143,27 +172,44 @@ export function LibraryView({ onOpen }: { onOpen: (path: string) => void }) {
             {volumes.length === 0 ? (
               <p className="muted">还没有卷章（先在「三级大纲」建卷建章）。</p>
             ) : (
-              <ul className="library-tree">
-                {volumes.map((volume) => (
-                  <li key={volume.volumeId}>
-                    <div className="muted library-tree-volume">{volume.title}</div>
-                    <ul>
-                      {volume.chapters.map((item) => (
-                        <li key={item.id}>
+              /* R168：**虚拟滚动**——几百卷/几百章时只挂窗口内的几十行
+                 （扁平行由共用模块摊平 ⇒ 与大纲页那棵同一顺序；
+                   容器上摆 data-tree-* 总数对账锚点，预演按它对账） */
+              <div
+                className="library-tree-scroll"
+                ref={treeRef}
+                onScroll={(event) => setTreeScrollTop((event.target as HTMLDivElement).scrollTop)}
+                data-tree-total={String(treeRows.length)}
+                data-tree-chapters={String(data?.chapters.length ?? 0)}
+              >
+                <div className="library-tree-spacer" style={{ height: treeVw.totalHeight }}>
+                  <div style={{ transform: `translateY(${treeVw.padTop}px)` }}>
+                    {treeVisible.map((row) =>
+                      row.kind === "volume" ? (
+                        <div
+                          className="library-tree-row-volume muted"
+                          key={"v-" + row.volumeId}
+                          style={{ height: TREE_ROW_HEIGHT }}
+                        >
+                          {row.title}（{row.chapterCount} 章）
+                        </div>
+                      ) : (
+                        <div className="library-tree-row" key={"c-" + row.id} style={{ height: TREE_ROW_HEIGHT }}>
                           <button
                             type="button"
-                            className={"library-tree-btn" + (item.id === selectedId ? " is-on" : "")}
-                            aria-pressed={item.id === selectedId}
-                            onClick={() => setSelectedId(item.id)}
+                            className={"library-tree-btn" + (row.id === selectedId ? " is-on" : "")}
+                            aria-pressed={row.id === selectedId}
+                            data-tree-chapter-id={row.id}
+                            onClick={() => setSelectedId(row.id)}
                           >
-                            第 {item.idx} 章 {item.title}
+                            第 {row.idx} 章 {row.title}
                           </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
           </section>
         </aside>

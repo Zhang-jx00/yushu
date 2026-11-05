@@ -3846,13 +3846,19 @@ describe("三级大纲页三栏（R164）：左=卷章树 / 中=大纲表 / 右=
     expect(detail, "step125 的回执里没有同一个 id 的对比").toContain("同一个 id=");
   });
 
-  it("预演那一步**真的在对账**（认量法：两页的树逐字比 + 同一个 id）", () => {
+  it("预演那一步**真的在对账**（认量法：可见前缀逐字比 + 总数对账 + 同一个 id）", () => {
     const start = walk.indexOf("step: 125,");
     const end = walk.indexOf("step: 126,", start);
     const body = walk.slice(start, end < 0 ? walk.length : end);
     expect(body, "没找到 step125 的脚本").not.toBe("");
     expect(body, "并排那条没有量左边界").toContain("rects[0].left < rects[1].left");
-    expect(body, "没有逐字比两页的树").toContain("outlineTexts.every((text, index) => text === libraryTree[index])");
+    // R168：总览的树改为虚拟滚动 ⇒ 整树逐条数在 DOM 上不存在了，
+    // 对账改成「可见前缀逐字 + 容器上的总数锚点（data-tree-chapters）」两条腿；
+    // 判据跟着量法走，认的还是比对本身，不是措辞。
+    expect(body, "没有逐字比两页的树（可见前缀）").toContain(
+      "libTexts.every((text, index) => text === outlineTexts[index])",
+    );
+    expect(body, "没有对账总览树的总数锚点").toContain("treeTotal === outlineTree.length");
     expect(body, "没有比同一个 id").toContain("shownId === pick.id");
   });
 });
