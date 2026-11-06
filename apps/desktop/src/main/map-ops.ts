@@ -10,17 +10,23 @@ import {
   appendMapMarker,
   buildMapMarkerRows,
   checkStructureFromSources,
+  computeRegionNeighbors,
   normalizeBounds,
   parseMapFile,
   parseTimelineFile,
+  mergeRegionRings,
   projectWorldMap,
+  removeMapShapeEntry,
   replaceMapShapeEntry,
+  splitMapShapeEntry,
+  splitRegionRing,
   setMapAnchorPosition,
   setMapMarkerLayers,
   setMapMarkerPosition,
   validateRegionHoles,
   type MapLayerKind,
   type MapMarker,
+  type MapShape,
   type WorldMapDef,
 } from "@yushu/world-engine";
 import type {
@@ -30,6 +36,10 @@ import type {
   WorldMapBatchMarkerLayerRequestPayload,
   WorldMapBatchMarkerLayerResult,
   WorldMapCreateAnchorRequestPayload,
+  WorldMapMergeRegionsRequestPayload,
+  WorldMapMergeRegionsResult,
+  WorldMapSplitRegionRequestPayload,
+  WorldMapSplitRegionResult,
   WorldMapCreateAnchorResult,
   WorldMapCreateShapeRequestPayload,
   WorldMapCreateShapeResult,
@@ -187,6 +197,13 @@ export async function worldMapView(
     }
   }
 
+  // 相邻的区域（R172）：区域之间挨着哪些 ⇒ 界面据此说"这两个能合"
+  const regionNeighbors = computeRegionNeighbors(
+    projection.shapes
+      .filter((shape) => shape.kind === "region")
+      .map((shape) => ({ id: shape.id, points: shape.points })),
+  );
+
   const note = [
     `${markers.length} 个标注 · ${projection.layers.length} 个图层`,
     projection.anchors.length > 0 ? `${projection.anchors.length} 个事件锚点` : "没有事件锚点",
@@ -210,6 +227,8 @@ export async function worldMapView(
       id: shape.id,
       kind: shape.kind,
       layer: shape.layer,
+      // 相邻的区域（R172；与写盘时"能不能合并"同一个判定 ⇒ 说的与做的是同一件事）
+      ...(shape.kind === "region" ? { neighbors: regionNeighbors.get(shape.id) ?? [] } : {}),
       ...(shape.name === undefined ? {} : { name: shape.name }),
       points: shape.points.map(([nx, ny]) => ({ x: nx, y: ny })),
       // 洞（R151）：一起归一化给渲染层 ⇒ 渲染层不用再算一遍
@@ -999,6 +1018,174 @@ export async function batchSetMarkerLayer(
     note: `已把 ${String(ids.length)} 个标注挪到图层「${request.layer}」${orphanPart}`,
     changed: ids,
     orphanChanged,
+  };
+}
+
+/**
+ * **合并区域**（R172）：**写盘**——作者挑两个挨着的区域 ⇒ 并成一块。
+ *
+ * 口径回源 K08 §5 的图层类型（`type: region`）与本项目 docs/11 §7.53 的口径：
+ * 两块挨着的地其实是同一块 ⇒ 工具把它们并成一块（**沿它们共享的那条边**）。
+ *
+ * 五条不静默 / 不越权（与前几轮同一条纪律）：
+ * ① **只动那两行**（一条改成合并后的样子、另一条删掉；底图、bounds、标注、事件锚点、作者的注释**原样留着**）；
+ * ② **重叠的拒绝并点名**（重叠的两块地并不成一个简单的圈 ⇒ 硬拼会造出作者没画过的形状）；
+ * ③ **不相邻的拒绝并点名**（中间隔着一条缝 ⇒ 合并不是作者的意思）；
+ * ④ **带洞的拒绝并点名**（合并带洞的区域这一段**还没做** ⇒ 不假装能做）；
+ * ⑤ 写盘带 baseHash ⇒ 作者在别处改过 map.yaml 时**报冲突**、不覆盖。
+ *
+ * **几何规则只有一份**：合并用的是引擎 `map-geometry.ts` 里的 `mergeRegionRings`
+ * —— 与界面上那句「这两个区域相邻」用的是**同一个判定**（`regionsAdjacent`）。
+ */
+export async function mergeMapRegions(
+  gateway: ProjectGateway,
+  request: WorldMapMergeRegionsRequestPayload,
+): Promise<WorldMapMergeRegionsResult> {
+  const fail = (note: string): WorldMapMergeRegionsResult => ({
+    ok: false,
+    note,
+    merged: null,
+    removed: null,
+    points: [],
+  });
+  const ids = [...new Set(request.regionIds)].sort();
+  if (ids.length !== 2) {
+    return fail(`合并要两个区域（现在给了 ${String(ids.length)} 个）`);
+  }
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) return fail("项目还没有世界地图（先登记底图）");
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return fail(`地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`);
+  }
+  const regions = (def.shapes ?? []).filter((shape) => shape.kind === "region");
+  const missing = ids.filter((id) => !regions.some((region) => region.id === id));
+  if (missing.length > 0) {
+    return fail(`地图里没有这些区域：${missing.join(" / ")}（一个都没改）`);
+  }
+  const first = regions.find((region) => region.id === ids[0]) as MapShape;
+  const second = regions.find((region) => region.id === ids[1]) as MapShape;
+  if ((first.holes ?? []).length > 0 || (second.holes ?? []).length > 0) {
+    return fail(`区域 ${first.id} / ${second.id} 里有洞（合并带洞的区域还没做 ⇒ 请先删掉洞）`);
+  }
+  const merged = mergeRegionRings(
+    first.points,
+    second.points,
+    `区域 ${first.id}`,
+    `区域 ${second.id}`,
+  );
+  if (!merged.ok) return fail(merged.reason);
+  // 写盘：一条改成合并后的样子、另一条删掉；其余行原样
+  const replaced = replaceMapShapeEntry(snapshot.content, {
+    id: first.id,
+    kind: "region",
+    layer: first.layer,
+    ...(first.name === undefined ? {} : { name: first.name }),
+    points: merged.ring,
+  });
+  if (replaced.content === null) return fail(replaced.reason ?? "没改成");
+  const removed = removeMapShapeEntry(replaced.content, second.id);
+  if (removed.content === null) return fail(removed.reason ?? "没删成");
+  await gateway.writeDoc(MAP_PATH, removed.content, snapshot.hash);
+  return {
+    ok: true,
+    note: `已把区域 ${second.id} 并进 ${first.id}（名字沿用 ${first.id}；${second.id} 那一行已删）`,
+    merged: first.id,
+    removed: second.id,
+    points: merged.ring.map(([x, y]) => ({ x, y })),
+  };
+}
+
+/**
+ * **拆分区域**（R172）：**写盘**——作者在区域里画一条切开线 ⇒ 那块地分成两块。
+ *
+ * 口径：沿一条**割线**切（割线与边界交叉两次：进一次、出一次 ⇒ 切法唯一）。
+ * 切出来的两块的**面积之和 == 原来那块的面积**（引擎里量好才写盘 ⇒ 不对就拒绝）。
+ *
+ * 四条不静默 / 不越权：
+ * ① **只动那一行**（那一行换成两行；别的行**原样留着**）；
+ * ② **切法不唯一的拒绝并点名**（割线与边界交叉多于两次 / 割线没把区域切开 ⇒ 拒绝）；
+ * ③ **带洞的拒绝并点名**（拆分带洞的区域这一段**还没做**）；
+ * ④ 写盘带 baseHash ⇒ 冲突时报冲突、不覆盖。
+ *
+ * **几何规则只有一份**：拆分用的是引擎 `map-geometry.ts` 里的 `splitRegionRing`。
+ */
+export async function splitMapRegion(
+  gateway: ProjectGateway,
+  request: WorldMapSplitRegionRequestPayload,
+): Promise<WorldMapSplitRegionResult> {
+  const fail = (note: string): WorldMapSplitRegionResult => ({
+    ok: false,
+    note,
+    parts: [],
+  });
+  const snapshot = await gateway.readDoc(MAP_PATH).catch(() => null);
+  if (snapshot === null) return fail("项目还没有世界地图（先登记底图）");
+  let def: WorldMapDef;
+  try {
+    def = parseMapFile(snapshot.content);
+  } catch (err) {
+    return fail(`地图文件现在读不了：${err instanceof Error ? err.message : String(err)}`);
+  }
+  const region = (def.shapes ?? []).find(
+    (shape) => shape.id === request.regionId && shape.kind === "region",
+  );
+  if (region === undefined) {
+    return fail(`地图里没有区域 ${request.regionId}`);
+  }
+  if ((region.holes ?? []).length > 0) {
+    return fail(`区域 ${region.id} 里有洞（拆分带洞的区域还没做 ⇒ 请先删掉洞）`);
+  }
+  const bounds = normalizeBounds(def.bounds).bounds;
+  if (bounds === null) return fail("地图没有有效边界（框不出范围）");
+  const x0 = Math.round(request.cut.x0);
+  const y0 = Math.round(request.cut.y0);
+  const x1 = Math.round(request.cut.x1);
+  const y1 = Math.round(request.cut.y1);
+  for (const [x, y] of [
+    [x0, y0],
+    [x1, y1],
+  ] as const) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return fail("割线坐标里有非数字");
+    if (x < bounds.x0 || x > bounds.x1 || y < bounds.y0 || y > bounds.y1) {
+      return fail(
+        `割线有个端点落在框定的那一块之外（${String(bounds.x0)},${String(bounds.y0)} → ` +
+          `${String(bounds.x1)},${String(bounds.y1)}）`,
+      );
+    }
+  }
+  const split = splitRegionRing(
+    region.points,
+    [
+      [x0, y0],
+      [x1, y1],
+    ],
+    `区域 ${region.id}`,
+  );
+  if (!split.ok) return fail(split.reason);
+  // 新 id：r-<n>（跳过已占用的）⇒ 撞 id 的话地图文件下一次就**读不出来**
+  const used = new Set((def.shapes ?? []).map((shape) => shape.id));
+  let index = 1;
+  while (used.has(`r-${String(index)}`)) index += 1;
+  const newId = `r-${String(index)}`;
+  const replaced = splitMapShapeEntry(snapshot.content, region.id, [
+    {
+      id: region.id,
+      kind: "region",
+      layer: region.layer,
+      ...(region.name === undefined ? {} : { name: region.name }),
+      points: split.a,
+    },
+    { id: newId, kind: "region", layer: region.layer, points: split.b },
+  ]);
+  if (replaced.content === null) return fail(replaced.reason ?? "没切开");
+  await gateway.writeDoc(MAP_PATH, replaced.content, snapshot.hash);
+  return {
+    ok: true,
+    note: `已把区域 ${region.id} 拆成 ${region.id} 与 ${newId}（名字沿用 ${region.id}）`,
+    parts: [region.id, newId],
   };
 }
 

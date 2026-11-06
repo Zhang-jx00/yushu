@@ -9773,6 +9773,49 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 153,
+    title: '第二个十轮总复核：R161–R169 各自在屏上留的痕迹都还在（R170）',
+    file: 'step153-group-review.png',
+    body: String.raw`
+      // 这一步是 R170 的**总复核取证**（同 R160 的 step122 形制）：这一组各自在屏上留了痕迹
+      // ⇒ 逐页点一遍，确认这一组改动**没有互相踩坏**（每一项都要**在屏上**，不是"代码里写着"）。
+      // R161（口径拉回）/ R166（巡检两项）/ R169（perf 预算）不在屏上——
+      // 它们在回执与 docs/11 里，由判据文件与 step88/151 的回执钉住（note 里明写，不冒充）。
+      const found = [];
+      const miss = [];
+      const need = (id, ok) => { if (ok) found.push(id); else miss.push(id); };
+      // ① R162：世界观档案三栏（数子元素，不是认类名）
+      await tab('规则');
+      await tab('世界观档案');
+      need('R162 档案页三栏', document.querySelectorAll('.archive > *').length === 3);
+      // ② R163：AI 副驾三栏
+      await tab('AI 副驾');
+      need('R163 AI 副驾三栏', document.querySelectorAll('.ai-three-col > *').length === 3);
+      // ③ R164：三级大纲三栏
+      await tab('三级大纲');
+      need('R164 大纲页三栏', document.querySelectorAll('.outline-three-col > *').length === 3);
+      // ④ R165：编辑器页右栏（草稿章节 aside + 右栏产物 aside）
+      await tab('编辑器');
+      need('R165 编辑器右栏', document.querySelector('.chapter-editor-col-context') !== null);
+      // ⑤ R167：逐章字数分布面板在（码字统计；等它读回来）
+      await tab('码字统计');
+      const distPanel = await waitFor(() => document.querySelector('.stats-chapters-panel') || null, 10000);
+      need('R167 逐章分布面板', distPanel !== null && distPanel.querySelectorAll('[data-chapter-id]').length > 0);
+      // ⑥ R168：虚拟树锚点在（总览；等它读回来）
+      await tab('稿件总览');
+      const treeBox = await waitFor(() => document.querySelector('.library-tree-scroll') || null, 10000);
+      need('R168 虚拟树锚点', treeBox !== null && Number(treeBox.getAttribute('data-tree-total') || '0') > 0 && treeBox.querySelectorAll('.library-tree-row').length > 0);
+      treeBox.scrollIntoView({ block: 'center' });
+      await sleep(300);
+      return {
+        ok: miss.length === 0,
+        note: 'R161–R169 屏上痕迹：在=' + found.length + '（' + found.join('、') + '）' +
+          (miss.length > 0 ? '；缺=' + miss.join('、') : '') +
+          '；R161/R166/R169 不在屏上（口径在 docs/11 §8、巡检在 step88 回执、预算在 perf 门禁——判据与回执钉住）',
+      };
+    `,
+  },
 ];
 
 /**

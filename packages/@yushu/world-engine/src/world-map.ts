@@ -2,6 +2,7 @@
 import { YushuError } from "@yushu/core";
 import { parseDocument } from "yaml";
 import type { IndexEntityRow } from "./index-input.js";
+import { pointInRing, pointOnRing, ringsCross } from "./map-geometry.js";
 
 /**
  * 世界地图（T5-1 第一段·**引擎侧**，R114）。
@@ -79,81 +80,12 @@ export interface MapShape {
  * 一套规则写两遍 ⇒ 两遍会漂 ⇒ 这里只写一遍。
  * ------------------------------------------------------------------ */
 
-/** 点是否落在某条边**（含端点） */
-function pointOnSegment(
-  px: number,
-  py: number,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-): boolean {
-  const cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
-  if (Math.abs(cross) > 1e-9) return false;
-  const minX = Math.min(x1, x2) - 1e-9;
-  const maxX = Math.max(x1, x2) + 1e-9;
-  const minY = Math.min(y1, y2) - 1e-9;
-  const maxY = Math.max(y1, y2) + 1e-9;
-  return px >= minX && px <= maxX && py >= minY && py <= maxY;
-}
-
-/** 点是否落在这圈顶点的**边界**上 */
-export function pointOnRing(point: [number, number], ring: [number, number][]): boolean {
-  const [px, py] = point;
-  for (let i = 0; i < ring.length; i += 1) {
-    const a = ring[i] as [number, number];
-    const b = ring[(i + 1) % ring.length] as [number, number];
-    if (pointOnSegment(px, py, a[0], a[1], b[0], b[1])) return true;
-  }
-  return false;
-}
-
 /**
- * 点是否**严格在**多边形内部（射线法）。
- *
- * 边界上的点算**不在**里面 ⇒ 洞的顶点压在外环边界上会被拒（挖出来的形状不唯一）。
+ * 几何判定住在 `map-geometry.ts`（R172）：**读盘与写盘共用同一份**
+ * （R151 的洞校验、R172 的相邻/合并/拆分，都走那一个模块 ⇒ 两遍不会漂）。
+ * 这里再导出一次，别的模块按 `world-map.js` 引这三个函数的地方不用改。
  */
-export function pointInRing(point: [number, number], ring: [number, number][]): boolean {
-  const [px, py] = point;
-  if (pointOnRing(point, ring)) return false;
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
-    const xi = (ring[i] as [number, number])[0];
-    const yi = (ring[i] as [number, number])[1];
-    const xj = (ring[j] as [number, number])[0];
-    const yj = (ring[j] as [number, number])[1];
-    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
-
-/** 两条线段是否**真正**相交（只碰个端点不算） */
-function segmentsCross(
-  a1: [number, number],
-  a2: [number, number],
-  b1: [number, number],
-  b2: [number, number],
-): boolean {
-  const d = (a2[0] - a1[0]) * (b2[1] - b1[1]) - (a2[1] - a1[1]) * (b2[0] - b1[0]);
-  if (Math.abs(d) < 1e-9) return false;
-  const t = ((b1[0] - a1[0]) * (b2[1] - b1[1]) - (b1[1] - a1[1]) * (b2[0] - b1[0])) / d;
-  const u = ((b1[0] - a1[0]) * (a2[1] - a1[1]) - (b1[1] - a1[1]) * (a2[0] - a1[0])) / d;
-  return t > 1e-9 && t < 1 - 1e-9 && u > 1e-9 && u < 1 - 1e-9;
-}
-
-/** 两圈顶点的边是否相交 */
-export function ringsCross(a: [number, number][], b: [number, number][]): boolean {
-  for (let i = 0; i < a.length; i += 1) {
-    const a1 = a[i] as [number, number];
-    const a2 = a[(i + 1) % a.length] as [number, number];
-    for (let j = 0; j < b.length; j += 1) {
-      const b1 = b[j] as [number, number];
-      const b2 = b[(j + 1) % b.length] as [number, number];
-      if (segmentsCross(a1, a2, b1, b2)) return true;
-    }
-  }
-  return false;
-}
+export { pointInRing, pointOnRing, ringsCross };
 
 /**
  * 校验**一组洞**能不能长在**这个外环**里面（R151）。
@@ -860,6 +792,61 @@ export function replaceMapShapeEntry(
   const previous = [lines[target] as string];
   const replaced = [...lines];
   replaced[target] = formatMapShapeEntry(shape);
+  return { content: replaced.join("\n"), reason: null, previous };
+}
+
+/**
+ * **删掉某一个形状**（R172 合并时用）：只动**那一行**（把整行去掉），别的行**原样留着**。
+ *
+ * 与 replaceMapShapeEntry 同一个道理，只是**删**而不是改
+ * ⇒ 合并两个区域时：一条改成合并后的样子、另一条删掉 ⇒ 其余行一个字不动。
+ *
+ * 找不到那个形状 ⇒ 如实说认不出（**不静默新增一行** ⇒ 那会变成"复制了一个区域"）。
+ */
+export function removeMapShapeEntry(
+  text: string,
+  shapeId: string,
+): { content: string | null; reason: string | null; previous: string[] } {
+  const lines = text.split("\n");
+  const idPattern = new RegExp(`^\\s*-\\s*\\{\\s*id:\\s*${escapeRegExp(shapeId)}\\s*,`);
+  const target = lines.findIndex((line) => idPattern.test(line));
+  if (target < 0) {
+    return { content: null, reason: `地图文件里没有形状 ${shapeId}`, previous: [] };
+  }
+  const previous = [lines[target] as string];
+  const kept = [...lines.slice(0, target), ...lines.slice(target + 1)];
+  return { content: kept.join("\n"), reason: null, previous };
+}
+
+/**
+ * **把一个区域拆成两半**（R172）：把**那一行**换成**两行**（两半），别的行**原样留着**。
+ *
+ * 写盘纪律与前几轮同一条：**只动被点名的那一行**（拆出来的那两行都写在它原来的位置上
+ * ⇒ 作者自己写的顺序不变；合并与拆分都由作者显式触发）。
+ */
+export function splitMapShapeEntry(
+  text: string,
+  shapeId: string,
+  parts: {
+    id: string;
+    kind: MapShapeKind;
+    layer: MapLayerKind;
+    name?: string;
+    points: [number, number][];
+  }[],
+): { content: string | null; reason: string | null; previous: string[] } {
+  if (parts.length < 2) {
+    return { content: null, reason: "拆分要给出两半", previous: [] };
+  }
+  const lines = text.split("\n");
+  const idPattern = new RegExp(`^\\s*-\\s*\\{\\s*id:\\s*${escapeRegExp(shapeId)}\\s*,`);
+  const target = lines.findIndex((line) => idPattern.test(line));
+  if (target < 0) {
+    return { content: null, reason: `地图文件里没有形状 ${shapeId}`, previous: [] };
+  }
+  const previous = [lines[target] as string];
+  const entries = parts.map((part) => formatMapShapeEntry(part));
+  const replaced = [...lines.slice(0, target), ...entries, ...lines.slice(target + 1)];
   return { content: replaced.join("\n"), reason: null, previous };
 }
 

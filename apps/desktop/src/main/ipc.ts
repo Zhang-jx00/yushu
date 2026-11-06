@@ -35,6 +35,10 @@ import {
   type WorldMapBasePayload,
   type WorldMapBatchMarkerLayerRequestPayload,
   type WorldMapBatchMarkerLayerResult,
+  type WorldMapMergeRegionsRequestPayload,
+  type WorldMapMergeRegionsResult,
+  type WorldMapSplitRegionRequestPayload,
+  type WorldMapSplitRegionResult,
   type WorldMapAddHoleRequestPayload,
   type WorldMapAddHoleResult,
   type WorldMapCreateAnchorRequestPayload,
@@ -193,7 +197,7 @@ import { applyProposal, decideProposal, listProposals, previewPropagation, propo
 import { foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
-import { addMapHole, batchSetMarkerLayer, createMapAnchor, createMapMarker, createMapShape, removeMapHole, setAnchorPosition, setMapBounds, setMarkerPosition, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
+import { addMapHole, batchSetMarkerLayer, createMapAnchor, createMapMarker, createMapShape, mergeMapRegions, removeMapHole, setAnchorPosition, setMapBounds, setMarkerPosition, splitMapRegion, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
 import { chronicleBook } from "./chronicle-ops.js";
 import { satisfactionBoard } from "./satisfaction-ops.js";
 import {
@@ -705,6 +709,13 @@ export function registerIpcHandlers(): void {
   // 世界地图·**批量改图层**（R171）：**写盘**（只改被点名的那几行；孤儿标注点名不静默）⇒ wrapWrite
   ipcMain.handle(CHANNELS.worldMapBatchMarkerLayer, (_event, payload: WorldMapBatchMarkerLayerRequestPayload) =>
     wrapWrite<WorldMapBatchMarkerLayerResult>(() => batchSetMarkerLayer(requireGateway(), payload)),
+  );
+  // 世界地图·**合并 / 拆分区域**（R172）：**写盘**（几何规则只有一份 ⇒ 读与写共用引擎那一个模块）⇒ wrapWrite
+  ipcMain.handle(CHANNELS.worldMapMergeRegions, (_event, payload: WorldMapMergeRegionsRequestPayload) =>
+    wrapWrite<WorldMapMergeRegionsResult>(() => mergeMapRegions(requireGateway(), payload)),
+  );
+  ipcMain.handle(CHANNELS.worldMapSplitRegion, (_event, payload: WorldMapSplitRegionRequestPayload) =>
+    wrapWrite<WorldMapSplitRegionResult>(() => splitMapRegion(requireGateway(), payload)),
   );
   // 编年史（T4-8）：复用时间线刻度，只读 ⇒ wrap
   ipcMain.handle(CHANNELS.chronicleBook, (_event, payload: ChronicleBookRequestPayload) =>

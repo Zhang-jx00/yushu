@@ -28,6 +28,10 @@ import type {
   WorldMapBasePayload,
   WorldMapBatchMarkerLayerRequestPayload,
   WorldMapBatchMarkerLayerResult,
+  WorldMapMergeRegionsRequestPayload,
+  WorldMapMergeRegionsResult,
+  WorldMapSplitRegionRequestPayload,
+  WorldMapSplitRegionResult,
   WorldMapAddHoleRequestPayload,
   WorldMapAddHoleResult,
   WorldMapCreateAnchorRequestPayload,
@@ -325,6 +329,14 @@ export interface YushuApi {
     batchSetMarkerLayer: (
       payload: WorldMapBatchMarkerLayerRequestPayload,
     ) => Promise<WorldMapBatchMarkerLayerResult>;
+    /**
+     * **合并区域**（R172）：两个挨着的区域并成一块（**只动那两行**；重叠 / 不相邻 ⇒ 拒绝并点名）。
+     */
+    mergeRegions: (payload: WorldMapMergeRegionsRequestPayload) => Promise<WorldMapMergeRegionsResult>;
+    /**
+     * **拆分区域**（R172）：沿一条割线切成两块（**那一行换成两行**；切法不唯一 ⇒ 拒绝并点名）。
+     */
+    splitRegion: (payload: WorldMapSplitRegionRequestPayload) => Promise<WorldMapSplitRegionResult>;
   };
   /** 编年史（M4/T4-8，R71）：只读；复用时间线刻度与历法，不另建年表 */
   chronicle: {

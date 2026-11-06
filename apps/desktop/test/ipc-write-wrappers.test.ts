@@ -67,6 +67,12 @@ const WRITE_CHANNELS = [
   "worldMapCreateAnchor",
   // R143 放区域 / 放行程线：往 `world/map.yaml` 的 regions / routes 段追加一行 ⇒ 同样是真源写
   "worldMapCreateShape",
+  // R171 标注批量管理：批量改 `world/map.yaml` 里那些标注的图层 ⇒ 同样是真源写（R172 收口补登）
+  "worldMapBatchMarkerLayer",
+  // R172 合并区域：两块并成一块（只动那两行）⇒ 同样是真源写（R172 收口补登）
+  "worldMapMergeRegions",
+  // R172 拆分区域：一块沿割线切成两块（那一行换成两行）⇒ 同样是真源写（R172 收口补登）
+  "worldMapSplitRegion",
 ] as const;
 
 /** 写盘但不写真源（派生物 / 索引器排除文件 / .git 内部）——走只读包装器是有意的 */

@@ -135,6 +135,10 @@ contextBridge.exposeInMainWorld("yushu", {
     removeHole: (payload) => invoke("map:removeHole", payload),
     /** 批量改图层（R171）：把一批标注挪到同一个图层 ⇒ 只改那些行；孤儿标注点名不静默 */
     batchSetMarkerLayer: (payload) => invoke("map:batchSetMarkerLayer", payload),
+    /** 合并区域（R172）：两个挨着的区域并成一块 ⇒ 只动那两行 */
+    mergeRegions: (payload) => invoke("map:mergeRegions", payload),
+    /** 拆分区域（R172）：沿一条割线切成两块 ⇒ 那一行换成两行 */
+    splitRegion: (payload) => invoke("map:splitRegion", payload),
   },
   chronicle: {
     book: (payload) => invoke("chronicle:book", payload),

@@ -31,3 +31,4 @@ export * from "./import-split.js";
 export * from "./publish.js";
 export * from "./publish-stock.js";
 export * from "./world-map.js";
+export * from "./map-geometry.js";

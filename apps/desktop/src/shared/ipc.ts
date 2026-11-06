@@ -118,6 +118,14 @@ export const CHANNELS = {
    * 口径回源 K08 §3.9「分层可控」：图层是作者组织地图的手段 ⇒ 组织手段要能成批用。
    */
   worldMapBatchMarkerLayer: "map:batchSetMarkerLayer",
+  /**
+   * 世界地图·**合并区域**（R172）：**写盘**（两个挨着的区域并成一块 ⇒ 只动那两行）。
+   */
+  worldMapMergeRegions: "map:mergeRegions",
+  /**
+   * 世界地图·**拆分区域**（R172）：**写盘**（沿一条割线切成两块 ⇒ 那一行换成两行）。
+   */
+  worldMapSplitRegion: "map:splitRegion",
   /** 编年史（M4/T4-8，R71）：**只读**；复用时间线的刻度与历法，不另建年表 */
   chronicleBook: "chronicle:book",
   /** 爽点与期待感看板（M4/T4-10，R73）：**只读**；阈值不传就不判定，判定全在引擎 */
@@ -3303,6 +3311,37 @@ export interface WorldMapMarkerRow {
 }
 
 /** 批量改图层（R171）：把选中的那几个标注挪到同一个图层 */
+/** 合并区域（R172）：把两个挨着的区域并成一块 */
+export interface WorldMapMergeRegionsRequestPayload {
+  /** 要合并的两个区域 id（逐条点名，不认"全部"） */
+  regionIds: string[];
+}
+
+export interface WorldMapMergeRegionsResult {
+  ok: boolean;
+  note: string;
+  /** 合并后保留的那个区域 id */
+  merged: string | null;
+  /** 被并进去、那一行已删的区域 id */
+  removed: string | null;
+  /** 合并后的顶点（底图像素） */
+  points: { x: number; y: number }[];
+}
+
+/** 拆分区域（R172）：沿一条割线把一个区域切成两块 */
+export interface WorldMapSplitRegionRequestPayload {
+  regionId: string;
+  /** 割线（底图像素坐标的两个端点） */
+  cut: { x0: number; y0: number; x1: number; y1: number };
+}
+
+export interface WorldMapSplitRegionResult {
+  ok: boolean;
+  note: string;
+  /** 切出来的两个区域 id */
+  parts: string[];
+}
+
 export interface WorldMapBatchMarkerLayerRequestPayload {
   /** 要改的标注 id（逐条点名，不认"全部"） */
   markerIds: string[];
@@ -3349,6 +3388,11 @@ export interface WorldMapViewPayload {
    */
   baseSize: { width: number; height: number } | null;
   markers: WorldMapViewMarker[];
+  /**
+   * **区域相邻表**（R172）：哪些区域挨着哪些（引擎按外环算：共享边或环重叠）。
+   * 相邻是"看"的口径 ⇒ 只读载荷；合并/拆分的**写盘**走各自的通道。
+   */
+  neighbors?: { id: string; neighbors: string[] }[];
   /**
    * **标注清单**（R171）：文件里写了的**每一条**标注（含孤儿标注）⇒ 界面据此做筛选与批量操作。
    * 与 `markers` 的差别：`markers` 是**画在图上的**（孤儿被剔掉），`markerRows` 是**清单**。
