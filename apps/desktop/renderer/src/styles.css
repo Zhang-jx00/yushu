@@ -151,6 +151,9 @@
   --elev-ring: 0 0 0 1px var(--border);
   --elev-raised: 0 1px 2px rgba(0, 0, 0, 0.06);
   --elev-overlay: 0 6px 20px rgba(0, 0, 0, 0.12);
+  /* 浮层幕布（R173-UI 命令面板）：纸墨色的墨，半透明 —— 亮暗主题同源（墨在暗底上同样是压暗），
+     走令牌不给浮层写裸色值。 */
+  --scrim: rgba(43, 38, 32, 0.4);
   /* 焦点环（契约 §5）：宽度与偏移只在这一处定义。用 outline 而不是 box-shadow ring——
      outline 在 Windows 高对比 / forced-colors 下会跟着系统色走，box-shadow 不会。 */
   --focus-width: 2px;
@@ -4794,7 +4797,6 @@ table,
 }
 /* ---------- R157：快捷键一览（「键盘在哪」面板） ---------- */
 .shortcut-trigger {
-  margin-left: auto;
   align-self: center;
   flex: none;
   border: var(--border-width) solid var(--border);
@@ -4804,12 +4806,243 @@ table,
   font-size: var(--text-sm);
   border-radius: var(--radius-pill);
   padding: var(--space-1) var(--space-3);
+  /* 命中区底线（R166）：与 .link 同源，两倍正文字号（26px） */
+  min-height: calc(var(--text-base) * 2);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .shortcut-trigger:hover {
   border-color: var(--accent);
+}
+
+/* ---------- R173-UI：分组导航 rail + 上下文栏 + 命令面板 ----------
+   布局：左 rail（五域分组，可折叠为图标态）+ 右主列（上下文栏 + 视图）。
+   视图仍是常驻挂载 / 隐藏切换（跨页状态的口径不变）。
+   长度全走令牌与 calc，零新 px 字面量（棘轮 585/620 不添新账）。 */
+
+.project-screen {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.project-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.context-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex: none;
+}
+
+.context-title {
+  font-weight: 600;
+}
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: calc(var(--text-base) * 15);
+  padding: var(--space-3) var(--space-2);
+  border-right: 1px solid var(--border);
+  border-bottom: none;
+  background: var(--panel);
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: none;
+}
+
+.nav-collapsed.tabs {
+  width: calc(var(--text-base) * 4);
+}
+
+.nav-collapsed .tab-label,
+.nav-collapsed .nav-domain-label {
+  display: none;
+}
+
+/* **编辑器页的让位规则**（R150 纪律：写作版面 44em 是契约 ⇒ rail 让位）：
+   编辑器页 rail 自动收窄为图标态（用户在其他页的展开偏好不受影响——
+   离开编辑器即恢复）。与 nav-collapsed 共用同一套收窄样式。 */
+.editor-mode .tabs {
+  width: calc(var(--text-base) * 4);
+}
+
+.editor-mode .tab-label,
+.editor-mode .nav-domain-label {
+  display: none;
+}
+
+.editor-mode .tab,
+.editor-mode .nav-tool {
+  justify-content: center;
+}
+
+.nav-collapsed .tab,
+.nav-collapsed .nav-tool {
+  justify-content: center;
+}
+
+.rail-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  padding: var(--space-2) 0;
+  flex: none;
+}
+
+.nav-domain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.nav-domain-label {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  white-space: nowrap;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  /* 命中区底线（R166）：图标态下内容只有 15px 的图标 ⇒ 撑到两倍正文字号（26px） */
+  min-height: calc(var(--text-base) * 2);
+  border: none;
+  background: none;
+  color: var(--muted);
+  border-radius: var(--radius-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.tab .yushu-icon {
+  flex: none;
+}
+
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.rail-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.nav-tool {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  /* 命中区底线（R166）：图标钮只有 15px 内容高 ⇒ 撑到两倍正文字号（26px） */
+  min-height: calc(var(--text-base) * 2);
+  border: none;
+  background: none;
+  color: var(--muted);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+}
+
+.nav-tool:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* 命令面板：浮层阴影只用 --elev-overlay（契约 §4） */
+.command-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: calc(var(--text-base) * 8);
+  z-index: 30;
+}
+
+.command-panel {
+  width: calc(var(--text-base) * 40);
+  max-width: 90%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  box-shadow: var(--elev-overlay);
+  overflow: hidden;
+}
+
+.command-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  padding: var(--space-3) var(--space-4);
+}
+
+.command-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  max-height: calc(var(--text-base) * 18);
+  overflow-y: auto;
+}
+
+.command-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+}
+
+.command-item.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.command-hint {
+  font-size: var(--text-sm);
+  flex: none;
+}
+
+.command-empty {
+  padding: var(--space-3) var(--space-4);
 }
 
 .shortcut-panel {

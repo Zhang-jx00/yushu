@@ -39,7 +39,12 @@ export type YushuIconName =
   // 只有**行内提示**（全局错误条）还用图标 —— 区块级空/错态改由自绘插画承担状态表达，
   // 同一件事不说两遍。原先的空态图标 `inbox` 因此失去落点，R119 一并回收
   // （死图标比缺图标更糟 —— 这是 R115 自己写下的口径）。
-  | "circle-x";
+  | "circle-x"
+  // 导航 IA（R173-UI）：命令面板 / 分组导航 rail 的操作图标（Lucide 原件，docs/12 已登记）
+  | "command"
+  | "search"
+  | "panel-left-close"
+  | "panel-left-open";
 
 const ICONS: Record<YushuIconName, ReactNode> = {
   // 起源工作台：世界是分层建起来的（创世起源→法则→地理→生态→历史→文明→社会现状）
@@ -151,6 +156,32 @@ const ICONS: Record<YushuIconName, ReactNode> = {
       <circle cx="12" cy="12" r="10" />
       <path d="m15 9-6 6" />
       <path d="m9 9 6 6" />
+    </>
+  ),
+  // R173-UI 导航 IA：命令面板（⌘ 形）——Lucide `command`
+  command: (
+    <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
+  ),
+  // 命令面板搜索
+  search: (
+    <>
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
+    </>
+  ),
+  // 导航 rail 折叠 / 展开（panel-left 族，箭头方向区分两态）
+  "panel-left-close": (
+    <>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+      <path d="m16 15-3-3 3-3" />
+    </>
+  ),
+  "panel-left-open": (
+    <>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+      <path d="m14 9-3 3 3 3" />
     </>
   ),
 };

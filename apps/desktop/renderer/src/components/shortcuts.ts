@@ -50,13 +50,22 @@ const MAP = "apps/desktop/renderer/src/components/WorldMapPanel.tsx";
 
 export const SHORTCUTS: ShortcutEntry[] = [
   {
+    id: "command-palette",
+    scope: "global",
+    keys: ["k"],
+    when: "项目界面里任何时候（按住 Ctrl / ⌘）",
+    action: "打开命令面板（跳转与高频动作的统一入口；再按一次关闭）",
+    file: "apps/desktop/renderer/src/views/ProjectScreen.tsx",
+    probe: 'if (event.key === "k") {',
+  },
+  {
     id: "focus-mode-escape",
     scope: "global",
     keys: ["Escape"],
     when: "专注模式里（顶栏与标签栏都藏起来的那一段）",
     action: "退出专注模式，回到平时的界面",
     file: "apps/desktop/renderer/src/views/ProjectScreen.tsx",
-    probe: "const onKeyDown = (event: KeyboardEvent) => {",
+    probe: 'if (event.key === "Escape") setFocusMode(false);',
   },
   {
     id: "map-canvas-view",

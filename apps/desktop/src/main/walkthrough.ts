@@ -9816,6 +9816,62 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 154,
+    title: '导航信息架构：五域分组 rail + 11 项一个不丢 + 命令面板打开/过滤/跳转/Esc 关闭（R173-UI）',
+    file: 'step154-nav-ia.png',
+    body: String.raw`
+      // 这一步证 R173-UI Phase 1 的四件事：
+      // ① 五域分组 rail 在（五个域、11 个 .tab 导航项——一个都不丢）；
+      // ② 点导航项跳页照常（预演 131 步的助跳不破——.tab 类名与文字未换）；
+      // ③ 命令面板 Ctrl+K 打开、输入过滤、Enter 跳转；
+      // ④ Esc 关闭面板。
+      const panel5 = await waitFor(() => document.querySelector('.tabs') || null, 10000);
+      if (!panel5) return { ok: false, note: '导航 rail（.tabs）不在了' };
+      const domains = panel5.querySelectorAll('.nav-domain').length;
+      const tabs = panel5.querySelectorAll('.tab').length;
+      const groupsOk = domains === 5 && tabs === 11;
+      // ② 点一个导航项跳页（编辑器）：.tab 文字匹配的助跳口径不变
+      const editorTab = [...panel5.querySelectorAll('.tab')].find((b) => String(b.textContent).includes('编辑器'));
+      if (!editorTab) return { ok: false, note: 'rail 里没有「编辑器」导航项' };
+      editorTab.click();
+      await sleep(400);
+      const jumped = document.querySelector('.chapter-editor') !== null;
+      // ③ 命令面板：Ctrl+K 打开（对 window 派发真实 KeyboardEvent）
+      await window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+      const overlay = await waitFor(() => document.querySelector('.command-overlay') || null, 8000);
+      if (!overlay) return { ok: false, note: 'Ctrl+K 没有打开命令面板' };
+      const input = overlay.querySelector('.command-input');
+      if (!input) return { ok: false, note: '命令面板没有输入框' };
+      // 过滤：输入「记忆」⇒ 列表只剩匹配项
+      const setV = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setV.call(input, '记忆');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(200);
+      const itemsAfter = overlay.querySelectorAll('.command-item').length;
+      const filterOk = itemsAfter >= 1 && itemsAfter < 13;
+      // Enter 跳转到第一个匹配（记忆页）
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await sleep(400);
+      const jumpedMemory = document.querySelector('.memory') !== null;
+      // ④ 再开一次，Esc 关闭
+      await window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+      await sleep(200);
+      const reopened = document.querySelector('.command-overlay') !== null;
+      document.querySelector('.command-input')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(200);
+      const escOk = document.querySelector('.command-overlay') === null;
+      panel5.scrollIntoView({ block: 'center' });
+      await sleep(300);
+      return {
+        ok: groupsOk && jumped && filterOk && jumpedMemory && reopened && escOk,
+        note: '五域分组=' + String(domains) + ' 域 / 导航项=' + String(tabs) + ' 个（对上=' + String(groupsOk) + '）' +
+          '；点「编辑器」跳页=' + String(jumped) +
+          '；命令面板打开=' + String(overlay !== null) + '；过滤「记忆」后=' + String(itemsAfter) + ' 项（对上=' + String(filterOk) + '）' +
+          '；Enter 跳转记忆页=' + String(jumpedMemory) + '；重开=' + String(reopened) + '；Esc 关闭=' + String(escOk),
+      };
+    `,
+  },
 ];
 
 /**

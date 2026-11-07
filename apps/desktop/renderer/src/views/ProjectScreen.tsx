@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ProjectSnapshot, RecoveryEntry, SessionStatusPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { YushuIcon, type YushuIconName } from "../icons";
@@ -16,22 +16,56 @@ import { ProjectView } from "./ProjectView";
 import { RulesView } from "./RulesView";
 import { StatsView } from "./StatsView";
 import { ShortcutPanel } from "../components/ShortcutPanel";
+import { CommandPalette } from "../components/CommandPalette";
 
 type Tab = "workbench" | "outline" | "editor" | "library" | "ai" | "memory" | "rules" | "export" | "archive" | "files" | "stats";
 
-const TABS: { key: Tab; label: string; icon: YushuIconName }[] = [
-  { key: "workbench", label: "起源工作台", icon: "layers" },
-  { key: "outline", label: "三级大纲", icon: "list-ordered" },
-  { key: "editor", label: "编辑器", icon: "pen-line" },
-  { key: "library", label: "稿件总览", icon: "library" },
-  { key: "ai", label: "AI 副驾", icon: "sparkles" },
-  { key: "memory", label: "记忆", icon: "brain" },
-  { key: "rules", label: "规则", icon: "scale" },
-  { key: "export", label: "导出与自查", icon: "download" },
-  { key: "archive", label: "世界观档案", icon: "book-open" },
-  { key: "stats", label: "码字统计", icon: "chart-column" },
-  { key: "files", label: "项目文件", icon: "folder-tree" },
+/** R173-UI：导航**按任务域分组**（五域：创作 / 世界 / AI / 质检与发布 / 文件）——
+ *  项的 key/label/icon 与旧 TABS 逐字一致（预演 131 步按文字找 `.tab` ⇒ 改名即翻红）。 */
+const DOMAINS: { id: string; label: string; items: { key: Tab; label: string; icon: YushuIconName }[] }[] = [
+  {
+    id: "create",
+    label: "创作域",
+    items: [
+      { key: "editor", label: "编辑器", icon: "pen-line" },
+      { key: "outline", label: "三级大纲", icon: "list-ordered" },
+      { key: "library", label: "稿件总览", icon: "library" },
+    ],
+  },
+  {
+    id: "world",
+    label: "世界域",
+    items: [
+      { key: "workbench", label: "起源工作台", icon: "layers" },
+      { key: "archive", label: "世界观档案", icon: "book-open" },
+    ],
+  },
+  {
+    id: "ai",
+    label: "AI 域",
+    items: [
+      { key: "ai", label: "AI 副驾", icon: "sparkles" },
+      { key: "memory", label: "记忆", icon: "brain" },
+    ],
+  },
+  {
+    id: "review",
+    label: "质检与发布",
+    items: [
+      { key: "rules", label: "规则", icon: "scale" },
+      { key: "export", label: "导出与自查", icon: "download" },
+      { key: "stats", label: "码字统计", icon: "chart-column" },
+    ],
+  },
+  {
+    id: "files",
+    label: "文件域",
+    items: [{ key: "files", label: "项目文件", icon: "folder-tree" }],
+  },
 ];
+
+/** 扁平导航项（命令面板的动作集与"当前页名"都从这里取 ⇒ 同一份清单不出两处） */
+const NAV_ITEMS = DOMAINS.flatMap((domain) => domain.items);
 
 /** 项目主容器：十一个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A）；稿件总览全库视图（T2-4 切片 A）；记忆页（T3-5） */
 export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
@@ -48,6 +82,59 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [session, setSession] = useState<SessionStatusPayload | null>(null);
   /** 「键盘在哪」面板（R157）：作者记不住哪个键在哪儿能按 ⇒ 给一个入口 */
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  /** R173-UI：导航 rail **折叠**（图标态）——用户级偏好，localStorage 记忆（与密度/主题同族） */
+  const [navCollapsed, setNavCollapsed] = useState(
+    () => localStorage.getItem("yushu.ui.rail") === "collapsed",
+  );
+  /** R173-UI：**命令面板**（Ctrl/Cmd+K）——跳转与高频动作的统一入口 */
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const toggleNav = () => {
+    setNavCollapsed((prev) => {
+      const collapsed = !prev;
+      localStorage.setItem("yushu.ui.rail", collapsed ? "collapsed" : "expanded");
+      return collapsed;
+    });
+  };
+
+  // 命令面板的全局键（Ctrl/Cmd+K）：登记见 shortcuts.ts（判据按 probe 对账；
+  // 判定写成 `.key === "k"` 的形态——快捷键登记表的扫描器按这个口径对账）
+  useEffect(() => {
+    const onPaletteKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        if (event.key === "k") {
+          event.preventDefault();
+          setPaletteOpen((open) => !open);
+        }
+      }
+    };
+    window.addEventListener("keydown", onPaletteKey);
+    return () => window.removeEventListener("keydown", onPaletteKey);
+  }, []);
+
+  const currentNav = NAV_ITEMS.find((item) => item.key === tab) ?? NAV_ITEMS[0]!;
+
+  const paletteActions = useMemo(
+    () => [
+      ...NAV_ITEMS.map((item) => ({
+        id: `nav-${item.key}`,
+        label: item.label,
+        hint: "跳转",
+        run: () => setTab(item.key),
+      })),
+      {
+        id: "focus-mode",
+        label: focusMode ? "退出专注模式" : "进入专注模式",
+        hint: "编辑器",
+        run: () => {
+          setTab("editor");
+          setFocusMode((prev) => !prev);
+        },
+      },
+      { id: "shortcuts", label: "快捷键一览", hint: "帮助", run: () => setShortcutsOpen(true) },
+    ],
+    [focusMode],
+  );
 
   useEffect(() => {
     // snapshot.root 变化 = 打开了另一个项目：重新检测该项目的编辑日志
@@ -115,30 +202,82 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
   }, [tab]);
 
   return (
-    <div className={focusMode ? "project-screen focus-mode" : "project-screen"}>
-      <div className="tabs">
-        {TABS.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            className={tab === item.key ? "tab on" : "tab"}
-            onClick={() => setTab(item.key)}
-          >
-            <YushuIcon name={item.icon} />
-            {item.label}
-          </button>
+    <div
+      className={
+        (focusMode ? "project-screen focus-mode" : "project-screen") +
+        (tab === "editor" ? " editor-mode" : "")
+      }
+    >
+      {/* R173-UI：**分组导航 rail**——五域分组，可折叠为图标态（用户级记忆）。
+          `.tab` 类名与文字保留：预演 131 步按文字找 `.tab` ⇒ DOM 重构不换名，助跳零改动。 */}
+      <nav className={"tabs" + (navCollapsed ? " nav-collapsed" : "")} aria-label="页面导航">
+        <div className="rail-brand" aria-hidden="true">
+          <YushuIcon name="book-open" size={18} />
+        </div>
+        {DOMAINS.map((domain) => (
+          <div className="nav-domain" key={domain.id}>
+            <div className="nav-domain-label">{domain.label}</div>
+            {domain.items.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={tab === item.key ? "tab on" : "tab"}
+                data-nav-key={item.key}
+                title={item.label}
+                aria-current={tab === item.key ? "page" : undefined}
+                onClick={() => setTab(item.key)}
+              >
+                <YushuIcon name={item.icon} />
+                <span className="tab-label">{item.label}</span>
+              </button>
+            ))}
+          </div>
         ))}
-        {/* R157：键盘在哪 —— 真按钮（键盘也能到 ⇒ 键盘债 0） */}
-        <button
-          type="button"
-          className="shortcut-trigger"
-          aria-expanded={shortcutsOpen}
-          onClick={() => setShortcutsOpen((open) => !open)}
-        >
-          键盘在哪
-        </button>
-      </div>
-      <div className="tab-body">
+        <div className="rail-foot">
+          <button
+            type="button"
+            className="nav-tool"
+            aria-label="打开命令面板（Ctrl+K）"
+            title="命令面板（Ctrl+K）"
+            onClick={() => setPaletteOpen(true)}
+          >
+            <YushuIcon name="command" />
+          </button>
+          <button
+            type="button"
+            className="nav-tool"
+            aria-expanded={!navCollapsed}
+            aria-label={navCollapsed ? "展开导航" : "折叠导航"}
+            title={navCollapsed ? "展开导航" : "折叠导航"}
+            onClick={toggleNav}
+          >
+            <YushuIcon name={navCollapsed ? "panel-left-open" : "panel-left-close"} />
+          </button>
+        </div>
+      </nav>
+      <div className="project-main">
+        <div className="context-bar">
+          <span className="context-title">{currentNav.label}</span>
+          <span className="spacer" />
+          <button
+            type="button"
+            className="link"
+            aria-label="打开命令面板（Ctrl+K）"
+            onClick={() => setPaletteOpen(true)}
+          >
+            <YushuIcon name="search" /> 命令面板
+          </button>
+          {/* R157：键盘在哪 —— 真按钮（键盘也能到 ⇒ 键盘债 0） */}
+          <button
+            type="button"
+            className="shortcut-trigger"
+            aria-expanded={shortcutsOpen}
+            onClick={() => setShortcutsOpen((open) => !open)}
+          >
+            键盘在哪
+          </button>
+        </div>
+        <div className="tab-body">
         {shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
         {session?.abnormalExit && (
           <div className="session-banner">
@@ -202,7 +341,13 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
         {tab === "archive" && <ArchiveView focusCardPath={archiveFocus} />}
         {tab === "stats" && <StatsView />}
         {tab === "files" && <ProjectView snapshot={snapshot} />}
+        </div>
       </div>
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        actions={paletteActions}
+      />
     </div>
   );
 }
