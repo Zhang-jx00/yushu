@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GraphViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { Disclosure } from "./Disclosure";
@@ -56,6 +56,23 @@ export function RelationGraphPanel() {
   const width = 720;
   const height = 300;
   const radius = Math.min(width, height) / 2 - 34;
+  // R172 收口补检：svg 被 CSS 缩放渲染（viewBox 720 宽 ⇒ 栏里实际 ~430px）⇒
+  // 热区圆的半径要按**屏幕像素**给：实测 CSS 宽 ÷ viewBox 宽 = 缩放比，
+  // 半径 = 14px 屏幕 ÷ 比例（直径 28px ≥ 底线 24px）。ResizeObserver 实测（同地图热区一套做法）。
+  const graphRef = useRef<SVGSVGElement | null>(null);
+  const [graphCssW, setGraphCssW] = useState(width);
+  // 依赖 [graph]：svg 在 graph 数据到达后才渲染（此前 ref 为 null）——
+  // 数据一到 ⇒ 重跑 effect ⇒ 观察器接上（空依赖会让它永远接不上，R110 的教训同型）。
+  useEffect(() => {
+    const el = graphRef.current;
+    if (el === null) return;
+    const update = () => setGraphCssW(el.clientWidth || width);
+    update();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    observer?.observe(el);
+    return () => observer?.disconnect();
+  }, [graph]);
+  const hitR = 14 / Math.max(graphCssW / width, 0.01);
   const position = (index: number, total: number) => {
     const angle = total <= 1 ? -Math.PI / 2 : (index / total) * Math.PI * 2 - Math.PI / 2;
     return { x: width / 2 + radius * Math.cos(angle), y: height / 2 + radius * Math.sin(angle) };
@@ -81,7 +98,7 @@ export function RelationGraphPanel() {
           <SummaryRows rows={graph.summary} />
           {graph.focusMissing && <div className="error-text">聚焦的节点已不存在（可能刚被删或改名），当前画的是空图</div>}
           {drawn.length > 0 && (
-            <svg className="graph-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`关系图谱：${drawn.length} 个节点、${drawnEdges.length} 条边`}>
+            <svg ref={graphRef} className="graph-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`关系图谱：${drawn.length} 个节点、${drawnEdges.length} 条边`}>
               {drawnEdges.map((edge, index) => {
                 const from = places.get(edge.from);
                 const to = places.get(edge.to);
@@ -111,11 +128,9 @@ export function RelationGraphPanel() {
                       }
                     }}
                   >
-                    {/* R166：命中区热区圆（r=20）——节点圆最小只有 8px，点不中；svg 被 CSS 缩放
-                        （viewBox 720 宽渲染到 ~560px 的栏 ⇒ ×0.78）⇒ 40 直径画布 px ≈ 28px 屏幕。
-                        fillOpacity 0.15 而不是更淡：Chrome 的 getBoundingClientRect 按**绘制**范围算，
-                        太淡会被当"未绘制"剔除（0.01 实测不计入）。 */}
-                    <circle className="graph-hit" cx={at.x} cy={at.y} r={20} fill="white" fillOpacity={0.15} />
+                    {/* R172 收口补检：热区圆半径按**实测 CSS 宽**换算（viewBox 缩放补偿），
+                        屏幕上恒 28px 直径；fillOpacity 0.15 才会计入 Chrome 的绘制范围。 */}
+                    <circle className="graph-hit" cx={at.x} cy={at.y} r={hitR} fill="white" fillOpacity={0.15} />
                     <circle cx={at.x} cy={at.y} r={Math.min(11, 4 + node.degree)} fill={NET_COLOR[node.net]} fillOpacity={focus === node.id ? 1 : 0.82} />
                     <text x={at.x} y={at.y - 14} textAnchor="middle">
                       {node.name}
