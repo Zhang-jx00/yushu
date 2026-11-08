@@ -9872,6 +9872,105 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 155,
+    title: '区域内容查询：点区域 ⇒ 列出里面的标注与实体，空结果如实说（R173）',
+    file: 'step155-region-contents.png',
+    body: String.raw`
+      // 这一步证 R173 的三件事：
+      // ① 自建夹具：一个区域 + 两个里面的标注 + 一个外面的标注 ⇒ 点区域，清单条数与几何包含逐字一致；
+      // ② 里面的标注摆**绑定的实体名**（不是 id —— 作者看的是名字）；
+      // ③ 外面的标注不出现在清单里。
+      try {
+      const cardA = 'loc-r173-a';
+      const cardB = 'loc-r173-b';
+      const cardC = 'loc-r173-c';
+      const mkCard = async (id, name) => {
+        const path = 'world/cards/location/' + id + '.md';
+        const card = { id: id, type: 'location', name: name, layer: 'geography' };
+        const existing = await window.yushu.card.read(path).catch(() => null);
+        if (existing === null) await window.yushu.card.write({ path: path, card: card, body: 'R173 测试地点' });
+        else await window.yushu.card.write({ path: path, card: card, body: 'R173 测试地点', baseHash: existing.hash });
+      };
+      try { await mkCard(cardA, '天启_R173甲'); } catch (e) { return { ok: false, note: 'mkCard(A) 失败：' + String(e).slice(0, 160) }; }
+      try { await mkCard(cardB, '天启_R173乙'); } catch (e) { return { ok: false, note: 'mkCard(B) 失败：' + String(e).slice(0, 160) }; }
+      try { await mkCard(cardC, '天启_R173丙'); } catch (e) { return { ok: false, note: 'mkCard(C) 失败：' + String(e).slice(0, 160) }; }
+      // 写 map.yaml：沿用 step113 的正典格式（bounds 两点半数组 + 真底图），
+      // 加一个区域 + 三个标注（两个在区域里、一个在外面）
+      const mapYaml = [
+        'apiVersion: map-v1',
+        'id: map-world',
+        'crs: simple',
+        'base_image: world/assets/map/base.png',
+        'base_size: {width: 1000, height: 700}',
+        'bounds: [[0, 0], [1000, 700]]',
+        'layers: [place, political]',
+        'markers:',
+        '  - {id: m-r173-a, layer: place, entity_ref: ' + cardA + ', x: 50, y: 50}',
+        '  - {id: m-r173-b, layer: place, entity_ref: ' + cardB + ', x: 80, y: 80}',
+        '  - {id: m-r173-c, layer: place, entity_ref: ' + cardC + ', x: 350, y: 250}',
+        'regions:',
+        '  - {id: r-r173, layer: political, name: "R173 测试区域", points: [[10, 10], [150, 10], [150, 150], [10, 150]]}',
+        'event_anchors:',
+        '  - {id: a-r173, event_ref: ev-r173, label: "R173 测试事件", x: 60, y: 60}',
+      ].join('\n') + '\n';
+      try {
+        const mapRead = await window.yushu.doc.read('world/map.yaml').catch(() => null);
+        if (mapRead !== null && mapRead.hash) {
+          await window.yushu.doc.write('world/map.yaml', mapYaml, mapRead.hash);
+        } else {
+          await window.yushu.doc.write('world/map.yaml', mapYaml);
+        }
+      } catch (e) { return { ok: false, note: 'map.yaml 写入失败：' + String(e).slice(0, 160) }; }
+      } catch (setupErr) {
+        return { ok: false, note: '夹具创建失败：' + String(setupErr).slice(0, 200) };
+      }
+      // 强制重挂载（面板只在挂载时取数）
+      await tab('规则');
+      await tab('世界观档案');
+      await sleep(1000);
+      // 调试：看有几个 .map-region 元素和几个 .map-marker
+      const dbgRegions = document.querySelectorAll('.map-region').length;
+      const dbgMarkers = document.querySelectorAll('.map-marker').length;
+      const dbgShapes = document.querySelectorAll('[data-shape]').length;
+      if (dbgRegions === 0 && dbgShapes === 0) {
+        return { ok: false, note: '地图上没有任何 .map-region 或 [data-shape] 元素（regions=' + dbgRegions + ' shapes=' + dbgShapes + ' markers=' + dbgMarkers + '）——map.yaml 可能没被地图面板读到' };
+      }
+      // ① 点区域
+      try {
+      const regionPath = await waitFor(
+        () => document.querySelector('.map-panel .map-region[data-shape="r-r173"]') || null,
+        15000,
+      );
+      if (!regionPath) return { ok: false, note: '地图上没有 R173 测试区域' };
+      // SVG 元素没有 .click() 方法（那是 HTMLElement 的）⇒ 派发 MouseEvent
+      regionPath.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await sleep(500);
+      // ② 内容清单出现
+      const contents = await waitFor(
+        () => document.querySelector('.map-region-contents') || null,
+        8000,
+      );
+      if (!contents) return { ok: false, note: '点了区域但没有出现内容清单' };
+      const items = [...contents.querySelectorAll('[data-rc-marker]')];
+      const countOk = items.length === 2;
+      const namesOk = items.every((li) => String(li.textContent).includes('天启_R173'));
+      const outsideOk = !String(contents.textContent).includes('天启_R173丙');
+      // ④ 事件锚点也在里面（同载荷、同几何判定）：区域里的那个锚点带 label 出现
+      const anchorItem = contents.querySelector('[data-rc-anchor="a-r173"]');
+      const anchorOk = anchorItem !== null && String(anchorItem.textContent).indexOf('R173 测试事件') >= 0;
+      return {
+        ok: countOk && namesOk && outsideOk && anchorOk,
+        note: '点区域 ⇒ 清单出现=true；标注条数=' + items.length + '（期望 2，对上=' + String(countOk) + '）' +
+          '；实体名摆的是名字=' + String(namesOk) +
+          '；外面的标注不在清单里=' + String(outsideOk) +
+          '；区域里的事件锚点带名字出现=' + String(anchorOk),
+      };
+      } catch (clickErr) {
+        return { ok: false, note: '区域点击/内容查询失败：' + String(clickErr).slice(0, 200) };
+      }
+    `,
+  },
 ];
 
 /**

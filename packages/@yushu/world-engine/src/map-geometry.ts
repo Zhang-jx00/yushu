@@ -391,3 +391,36 @@ export function computeRegionNeighbors(
   }
   return out;
 }
+
+/**
+ * **区域内容查询**（R173）：给一个区域的外环 + 全部标注的坐标，
+ * 返回**几何上落在这个区域里面**的标注 id 清单（按标注在原清单里的顺序，不排序）。
+ *
+ * 坐标口径（两个空间，别混）：
+ * - 不带 `bounds` ⇒ 环与标注**同一空间**，直接判包含；
+ * - 带 `bounds` ⇒ 环是**归一化**（0..1，`projectWorldMap` 投影后的 `shapes`）、
+ *   标注是**底图像素**（`markerRows` 直出的文件坐标）——先按投影同一套公式
+ *   把标注归一再判。归一化在**这里**做而不是调用方：几何规则只写一次（R151 的教训）。
+ *
+ * 口径：**pointInRing 射线法**（边界上的点不算在里面 ⇒ 与挖洞的口径一致）；
+ * 纯函数：给同样的环和标注，永远返回同样的结果。
+ *
+ * 为什么放这里而不是 ops 层：这是**纯几何**判定（一个点在不在一个多边形里），
+ * 和合并 / 拆分 / 相邻共用同一个 `pointInRing` ⇒ 几何规则只有一份。
+ */
+export function markersInRegion(
+  ring: GeoRing,
+  markers: { id: string; x: number; y: number }[],
+  bounds?: { x0: number; y0: number; x1: number; y1: number },
+): string[] {
+  const projected = bounds
+    ? markers.map((m) => ({
+        id: m.id,
+        x: (m.x - bounds.x0) / (bounds.x1 - bounds.x0),
+        y: (m.y - bounds.y0) / (bounds.y1 - bounds.y0),
+      }))
+    : markers;
+  return projected
+    .filter((m) => pointInRing([m.x, m.y], ring))
+    .map((m) => m.id);
+}

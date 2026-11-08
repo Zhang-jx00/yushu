@@ -113,6 +113,15 @@ export const SHORTCUTS: ShortcutEntry[] = [
     probe: 'onPointerDown={(event) => onItemPointerDown(event, "anchor", anchor.id)}',
   },
   {
+    id: "map-region-contents",
+    scope: "contextual",
+    keys: ["Enter", " "],
+    when: "焦点在地图的某个区域（面）上",
+    action: "回车 / 空格查看这个区域里有什么（再按一次收起清单）",
+    file: MAP,
+    probe: 'aria-label={`区域 ${shape.name ?? shape.id}（点按查看里面有什么）`}',
+  },
+  {
     id: "map-hole",
     scope: "contextual",
     keys: ["Enter", "Backspace"],

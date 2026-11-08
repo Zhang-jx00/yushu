@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { markersInRegion } from "@yushu/world-engine";
 import { StateNote } from "./StateNote";
 import { SummaryRows } from "./SummaryRows";
 import {
@@ -76,6 +77,8 @@ export function WorldMapPanel(props: {
   /** 地图上的地点实体清单上报给父组件 */
   onPlaces: (entityRefs: string[]) => void;
 }) {
+  /** R173：点区域 ⇒ 查看里面的标注与实体（几何包含：pointInRing） */
+  const [contentRegionId, setContentRegionId] = useState<string | null>(null);
   const [map, setMap] = useState<WorldMapViewPayload | null>(null);
   const [error, setError] = useState("");
   /** 被隐藏的图层（空 = 全显） */
@@ -1609,6 +1612,21 @@ export function WorldMapPanel(props: {
                     data-holes={String(holes.length)}
                     fillRule="evenodd"
                     d={shapePathData(outer, holes)}
+                    style={{ cursor: "pointer" }}
+                    /* R173：点区域 ⇒ 查里面有什么。SVG 里放不了 HTML 按钮 ⇒ 与标注同一条
+                       键盘可达的路（role + tabIndex + 回车/空格切换清单）。 */
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`区域 ${shape.name ?? shape.id}（点按查看里面有什么）`}
+                    onClick={() =>
+                      setContentRegionId((prev) => (prev === shape.id ? null : shape.id))
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setContentRegionId((prev) => (prev === shape.id ? null : shape.id));
+                      }
+                    }}
                   >
                     <title>{shape.name ?? shape.id}</title>
                   </path>
@@ -1815,6 +1833,58 @@ export function WorldMapPanel(props: {
         </div>
 
         <div className="map-side">
+          {/* R173：**区域内容查询**——点一个区域 ⇒ 列出几何上落在里面的标注与实体、事件锚点。
+              数据从已有的 markerRows（真源直算）+ shapes / anchors（同一载荷）现算 ⇒ 不另取数、不造数。
+              空结果如实说"里面没有标注"。 */}
+          {contentRegionId !== null && (() => {
+            const region = map?.shapes.find((s) => s.id === contentRegionId && s.kind === "region");
+            if (!region) return null;
+            const ring = region.points.map((p) => [p.x, p.y] as [number, number]);
+            // 环是归一化坐标、标注是底图像素 ⇒ bounds 传进去，归一在几何层做（口径只写一次）
+            const inside = markersInRegion(
+              ring,
+              (markerRows).map((r) => ({ id: r.id, x: r.x, y: r.y })),
+              map?.bounds ?? undefined,
+            );
+            const insideSet = new Set(inside);
+            const insideRows = markerRows.filter((r) => insideSet.has(r.id));
+            // 锚点在载荷里已归一化（nx / ny）⇒ 与环同一空间，不用 bounds 再换算
+            const anchorSet = new Set(
+              markersInRegion(
+                ring,
+                map.anchors.map((a) => ({ id: a.id, x: a.nx, y: a.ny })),
+              ),
+            );
+            const anchorRows = map.anchors.filter((a) => anchorSet.has(a.id));
+            return (
+              <div className="map-region-contents" data-region-contents={contentRegionId}>
+                <div className="map-region-contents-title">
+                  {region.name ?? contentRegionId}（{insideRows.length} 个标注
+                  {anchorRows.length > 0 ? `、${String(anchorRows.length)} 个事件锚点` : ""}）
+                </div>
+                {insideRows.length === 0 ? (
+                  <p className="muted">这个区域里没有标注。</p>
+                ) : (
+                  <ul className="map-region-contents-list">
+                    {insideRows.map((row) => (
+                      <li key={row.id} data-rc-marker={row.id}>
+                        {row.entityName ?? `未绑定实体（${row.entityRef}）`}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {anchorRows.length > 0 && (
+                  <ul className="map-region-contents-list">
+                    {anchorRows.map((anchor) => (
+                      <li key={anchor.id} data-rc-anchor={anchor.id}>
+                        ⚑ {anchor.label ?? anchor.eventRef}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })()}
           {/* R152 **图例**：作者看的是**形状**，不是术语 ⇒ 四样东西各是什么形状，写在画布旁边。
               **图例不摆计数**（计数在图层开关与摘要里，各有各的真源；图例再摆一份就会有两个数）——
               这里只回答"这个形状是什么"与"我现在看的是多大"。 */}

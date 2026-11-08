@@ -5,6 +5,7 @@ import {
   splitRegionRing,
   regionsAdjacent,
   computeRegionNeighbors,
+  markersInRegion,
   type GeoPoint,
   type GeoRing,
 } from "../src/map-geometry.js";
@@ -201,5 +202,81 @@ describe("相邻（R172）：与合并用同一套判定", () => {
     expect(neighbors.get("r-far")).toEqual([]);
     expect(regionsAdjacent(LEFT, right)).toBe(true);
     expect(regionsAdjacent(LEFT, far)).toBe(false);
+  });
+});
+
+describe("区域内容查询（R173）：markersInRegion", () => {
+  const square: GeoRing = [
+    [0, 0],
+    [100, 0],
+    [100, 100],
+    [0, 100],
+  ];
+
+  it("**几何包含**：在区域里的标注返回 id，外面的不返回", () => {
+    const markers = [
+      { id: "m-in-1", x: 30, y: 30 },
+      { id: "m-in-2", x: 80, y: 80 },
+      { id: "m-out", x: 150, y: 50 },
+    ];
+    const inside = markersInRegion(square, markers);
+    expect(inside).toEqual(["m-in-1", "m-in-2"]);
+  });
+
+  it("**边界上的点不算在里面**（与 pointInRing 口径一致）", () => {
+    const markers = [
+      { id: "m-edge", x: 0, y: 50 },
+      { id: "m-vertex", x: 0, y: 0 },
+      { id: "m-in", x: 50, y: 50 },
+    ];
+    expect(markersInRegion(square, markers)).toEqual(["m-in"]);
+  });
+
+  it("**空标注清单返回空**（不造数）", () => {
+    expect(markersInRegion(square, [])).toEqual([]);
+  });
+
+  it("**单元素区域也能查**（最小合法多边形 = 3 点三角形）", () => {
+    const tri: GeoRing = [
+      [0, 0],
+      [100, 0],
+      [50, 80],
+    ];
+    const markers = [
+      { id: "m-in", x: 50, y: 30 },
+      { id: "m-out", x: 90, y: 70 },
+    ];
+    expect(markersInRegion(tri, markers)).toEqual(["m-in"]);
+  });
+
+  it("**带 bounds 换算**：环是归一化、标注是底图像素 ⇒ 先归一再判（与投影同一套公式）", () => {
+    // 真实口径：shapes 投影后是 0..1，markerRows 直出是像素（如 x: 250, y: 175）——
+    // 直接判包含永远是空（R173 收口踩过的坑：0..1 的环套 250 的点）。
+    const normRing: GeoRing = [
+      [0.1, 0.1],
+      [0.15, 0.1],
+      [0.15, 0.15],
+      [0.1, 0.15],
+    ];
+    const bounds = { x0: 0, y0: 0, x1: 1000, y1: 700 };
+    const markers = [
+      { id: "m-in", x: 120, y: 84 }, // 归一 (0.12, 0.12) ⇒ 在环里
+      { id: "m-out", x: 500, y: 350 }, // 归一 (0.5, 0.5) ⇒ 在环外
+    ];
+    expect(markersInRegion(normRing, markers, bounds)).toEqual(["m-in"]);
+  });
+
+  it("**bounds 原点不为零**：作者框定的那一块不从 (0,0) 起 ⇒ 归一要先减原点", () => {
+    const normRing: GeoRing = [
+      [0, 0],
+      [0.5, 0],
+      [0.5, 0.5],
+      [0, 0.5],
+    ];
+    const bounds = { x0: 100, y0: 200, x1: 1100, y1: 1200 };
+    // (350, 450) → ((350−100)/1000, (450−200)/1000) = (0.25, 0.25) ⇒ 在环里
+    expect(markersInRegion(normRing, [{ id: "m-in", x: 350, y: 450 }], bounds)).toEqual(["m-in"]);
+    // (100, 200) → (0, 0) 恰在环边界上 ⇒ 与主口径一致，不算在里面
+    expect(markersInRegion(normRing, [{ id: "m-edge", x: 100, y: 200 }], bounds)).toEqual([]);
   });
 });

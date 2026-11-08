@@ -4975,6 +4975,30 @@ table,
   background: var(--accent-soft);
 }
 
+/* R173：区域内容查询——点区域后在画布旁摆内容清单 */
+.map-region-contents {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  background: var(--panel);
+}
+
+.map-region-contents-title {
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+
+.map-region-contents-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  font-size: var(--text-sm);
+}
+
+.map-region-contents-list li {
+  padding: var(--space-1) 0;
+}
+
 /* 命令面板：浮层阴影只用 --elev-overlay（契约 §4） */
 .command-overlay {
   position: fixed;
