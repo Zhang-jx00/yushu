@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ClipboardResult, ExportPreviewPayload, ExportRunResult } from "../../../src/shared/ipc";
 import { BiblePanel } from "../components/BiblePanel";
 import { ProjectExportPanel } from "../components/ProjectExportPanel";
+import { PublishPanel } from "../components/PublishPanel";
 import { summarizeExportArtifacts } from "../components/export-artifacts";
 import { api } from "../api";
 
@@ -375,6 +376,11 @@ export function ExportView() {
               )}
             </section>
           )}
+
+          {/* 发布状态机与存稿池（R105/R174；R183 起从稿件总览归位到这一页——
+              「质检与发布」域从此名实相符：发布跟着平台包走，作者在一个页里
+              核对章头、改发布状态、看出海存稿） */}
+          <PublishPanel />
 
           {/* 项目迁移包（R101 / T3-14 后半）：把真源打给人，密钥与派生物留在原地 */}
           <ProjectExportPanel />

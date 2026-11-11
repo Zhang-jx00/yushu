@@ -3,10 +3,11 @@ import { useEffect, useState } from "react";
 import type { AppFlushDonePayload, ProjectSnapshot } from "../../src/shared/ipc";
 import { api } from "./api";
 import { BrandMark, BrandWordmark } from "./brand";
-import { DENSITIES, loadDensityPref, saveDensityPref, type DensityId } from "./density-prefs";
-import { THEMES, loadThemePref, saveThemePref, type ThemeId } from "./theme-prefs";
+import { loadDensityPref, saveDensityPref, type DensityId } from "./density-prefs";
+import { loadThemePref, saveThemePref, type ThemeId } from "./theme-prefs";
 import { YushuIcon } from "./icons";
 import { flushEditorIfAny } from "./editor-flush";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { ProjectScreen } from "./views/ProjectScreen";
 import { WizardView } from "./views/WizardView";
 
@@ -91,6 +92,8 @@ export function App() {
   const [density, setDensity] = useState<DensityId>(() => loadDensityPref(window.localStorage));
   /** 主题档（浅色 / 深色，R121）：和密度档一样是**用户级偏好**，不进项目真源 */
   const [theme, setTheme] = useState<ThemeId>(() => loadThemePref(window.localStorage));
+  /** R183：设置浮层开合（主题 / 密度的唯一入口；顶栏那两个 select 已退场） */
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset["theme"] = theme;
@@ -170,34 +173,7 @@ export function App() {
         <span className="sub">M1 世界基座</span>
         <span className="spacer" />
         {screen.kind === "project" && <span className="muted path">{screen.snapshot.root}</span>}
-        <label className="density-picker">
-          <span className="density-label">界面密度</span>
-          <select
-            value={density}
-            aria-label="界面密度"
-            onChange={(event) => setDensity(event.target.value as DensityId)}
-          >
-            {DENSITIES.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="theme-picker">
-          <span className="theme-label">主题</span>
-          <select
-            value={theme}
-            aria-label="主题"
-            onChange={(event) => setTheme(event.target.value as ThemeId)}
-          >
-            {THEMES.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {/* R183：主题 / 密度两个 select 退场（归位到设置浮层）——顶栏回归「项目」语义 */}
         <button onClick={() => setScreen({ kind: "wizard" })}>新建项目</button>
         <button onClick={openExisting}>打开项目</button>
       </header>
@@ -234,7 +210,18 @@ export function App() {
         />
       )}
 
-      {screen.kind === "project" && <ProjectScreen snapshot={screen.snapshot} />}
+      {screen.kind === "project" && (
+        <ProjectScreen snapshot={screen.snapshot} onOpenSettings={() => setSettingsOpen(true)} />
+      )}
+      {/* R183：设置浮层（主题 / 密度归位后的唯一入口；挂在 App 层——偏好状态就在这儿） */}
+      <SettingsPanel
+        open={settingsOpen}
+        theme={theme}
+        density={density}
+        onTheme={setTheme}
+        onDensity={setDensity}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
   );
 }

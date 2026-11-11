@@ -5069,6 +5069,51 @@ table,
   padding: var(--space-3) var(--space-4);
 }
 
+/* R183 设置浮层：主题 / 密度归位后的唯一入口。与命令面板同一套浮层交互
+   （遮罩点击关闭 / Esc / 打开即聚焦），样式全令牌——阴影只允许 overlay 级。 */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: calc(var(--text-base) * 12);
+  z-index: 30;
+}
+
+.settings-panel {
+  width: calc(var(--text-base) * 26);
+  max-width: 90%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  box-shadow: var(--elev-overlay);
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.settings-title {
+  font-weight: 600;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.settings-row select {
+  width: 100%;
+}
+
+.settings-note {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
 .shortcut-panel {
   flex: none;
   margin: var(--space-3) var(--space-8);

@@ -44,7 +44,9 @@ export type YushuIconName =
   | "command"
   | "search"
   | "panel-left-close"
-  | "panel-left-open";
+  | "panel-left-open"
+  // UI Phase 2（R183）：设置浮层入口（Lucide 原件，docs/12 已登记）
+  | "settings";
 
 const ICONS: Record<YushuIconName, ReactNode> = {
   // 起源工作台：世界是分层建起来的（创世起源→法则→地理→生态→历史→文明→社会现状）
@@ -167,6 +169,13 @@ const ICONS: Record<YushuIconName, ReactNode> = {
     <>
       <circle cx="11" cy="11" r="8" />
       <path d="m21 21-4.3-4.3" />
+    </>
+  ),
+  // R183 设置浮层入口——Lucide `settings`（齿轮）
+  settings: (
+    <>
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
     </>
   ),
   // 导航 rail 折叠 / 展开（panel-left 族，箭头方向区分两态）

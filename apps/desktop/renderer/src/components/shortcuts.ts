@@ -59,6 +59,15 @@ export const SHORTCUTS: ShortcutEntry[] = [
     probe: 'if (event.key === "k") {',
   },
   {
+    id: "settings-escape",
+    scope: "contextual",
+    keys: ["Escape"],
+    when: "设置浮层开着",
+    action: "关闭设置浮层（点遮罩也可以）",
+    file: "apps/desktop/renderer/src/components/SettingsPanel.tsx",
+    probe: 'if (event.key === "Escape") {',
+  },
+  {
     id: "focus-mode-escape",
     scope: "global",
     keys: ["Escape"],

@@ -2989,7 +2989,7 @@ describe("稿件总览页三栏（R155）：左=卷章树 / 中=全库 / 右=选
 });
 
 /**
- * **导出与自查页三栏**（R156）：左=能力矩阵 / 中=导出表单 / 右=最近一次导出与产物清单。
+ * **发布与导出页三栏**（R156）：左=能力矩阵 / 中=导出表单 / 右=最近一次导出与产物清单。
  *
  * 判据盯七件事：
  * ① 页面用的是**共用的三栏骨架**（R154 立的 `.three-col` ⇒ 不是每页另写一套网格）；
@@ -3000,7 +3000,7 @@ describe("稿件总览页三栏（R155）：左=卷章树 / 中=全库 / 右=选
  * ⑥ **导出路径只有一个出处**（中栏不许再摆一遍）；
  * ⑦ 右栏的**名字不与中栏撞**（同名不同义会误导 —— R154「豁免率 / 豁免占比」那一条）。
  */
-describe("导出与自查页三栏（R156）：左=能力矩阵 / 中=导出表单 / 右=最近一次导出与产物清单", () => {
+describe("发布与导出页三栏（R156）：左=能力矩阵 / 中=导出表单 / 右=最近一次导出与产物清单", () => {
   const view = readFileSync(join(VIEW_ROOT, "views", "ExportView.tsx"), "utf8");
   const mod = readFileSync(join(VIEW_ROOT, "components", "export-artifacts.ts"), "utf8");
   const css = readFileSync(join(VIEW_ROOT, "styles.css"), "utf8");

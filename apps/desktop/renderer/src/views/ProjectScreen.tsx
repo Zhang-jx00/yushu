@@ -53,7 +53,7 @@ const DOMAINS: { id: string; label: string; items: { key: Tab; label: string; ic
     label: "质检与发布",
     items: [
       { key: "rules", label: "规则", icon: "scale" },
-      { key: "export", label: "导出与自查", icon: "download" },
+      { key: "export", label: "发布与导出", icon: "download" },
       { key: "stats", label: "码字统计", icon: "chart-column" },
     ],
   },
@@ -67,8 +67,15 @@ const DOMAINS: { id: string; label: string; items: { key: Tab; label: string; ic
 /** 扁平导航项（命令面板的动作集与"当前页名"都从这里取 ⇒ 同一份清单不出两处） */
 const NAV_ITEMS = DOMAINS.flatMap((domain) => domain.items);
 
-/** 项目主容器：十一个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A）；稿件总览全库视图（T2-4 切片 A）；记忆页（T3-5） */
-export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
+/** 项目主容器：十一个标签页，跨页保留状态；实体提及可跨页跳转到档案（T2-2）；无干扰专注模式（T2-3 切片 A）；稿件总览全库视图（T2-4 切片 A）；记忆页（T3-5）；设置浮层入口在上下文栏（R183） */
+export function ProjectScreen({
+  snapshot,
+  onOpenSettings,
+}: {
+  snapshot: ProjectSnapshot;
+  /** R183：打开设置浮层（状态与偏好数据都在 App 层，这里只举手表） */
+  onOpenSettings: () => void;
+}) {
   const [tab, setTab] = useState<Tab>("workbench");
   const [archiveFocus, setArchiveFocus] = useState<{ path: string; tick: number } | null>(null);
   /** 无干扰（专注）模式：隐藏顶栏 / 标签栏 / 侧栏与提及面板，只留正文；Esc 退出 */
@@ -275,6 +282,10 @@ export function ProjectScreen({ snapshot }: { snapshot: ProjectSnapshot }) {
             onClick={() => setShortcutsOpen((open) => !open)}
           >
             键盘在哪
+          </button>
+          {/* R183：设置 —— 主题 / 密度偏好归位后的唯一入口（状态在 App 层，这里只举手） */}
+          <button type="button" className="shortcut-trigger" aria-label="打开设置" onClick={onOpenSettings}>
+            <YushuIcon name="settings" /> 设置
           </button>
         </div>
         <div className="tab-body">

@@ -421,6 +421,28 @@ export function buildScript(body: string): string {
     };
     const lines = (el) => (el ? el.innerText.split(String.fromCharCode(10)).join(' | ') : '');
     const pageText = () => document.body.innerText.slice(0, 500);
+    // R183：设置浮层里的偏好 select（顶栏 select 退场后的夹具入口）——
+    // 开浮层 → 原生 setter 改值 → Esc 关浮层（浮层开着有遮罩，会挡排版断言与截图）。
+    // 全预演一份（step1 归零 / 密度 / 主题 / 对比度扫档共用）。
+    const setPref = async (label, value) => {
+      let sel = document.querySelector('.settings-panel select[aria-label="' + label + '"]');
+      if (!sel) {
+        const btn = [...document.querySelectorAll('.context-bar button')].find((b) => String(b.textContent || '').indexOf('设置') >= 0);
+        if (!btn) return false;
+        btn.click();
+        await sleep(250);
+        sel = document.querySelector('.settings-panel select[aria-label="' + label + '"]');
+      }
+      if (!sel) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(sel, value);
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(250);
+      const panel = document.querySelector('.settings-panel');
+      if (panel) panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await sleep(200);
+      return true;
+    };
     // R166：**全预演一份**的颜色算法与阈值（原先对比度只写在 step99 里一份 ⇒ 巡检要算就得写第二份
     // ⇒ 两份会漂）。现在提到这里，step99 与排版巡检**共用同一份**。
     const CONTRAST_FLOOR = 4.5;
@@ -681,13 +703,8 @@ const STEPS: StepDef[] = [
       if (!el) return { ok: false, note: '未自动进入项目页：' + pageText() };
       // 预演必须跑在**已知状态**里：主题偏好是用户级的（存在 localStorage，会跨轮留下），
       // 不归零的话这一轮可能整轮都是暗色的 ⇒ 截图不可复现、下一轮的『改前底色』也说不清。
-      const themeSel = document.querySelector('.theme-picker select');
-      if (themeSel !== null) {
-        const themeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-        themeSetter.call(themeSel, 'light');
-        themeSel.dispatchEvent(new Event('change', { bubbles: true }));
-        await sleep(350);
-      }
+      // R183：主题归位到设置浮层（顶栏 select 退场）——归零也走浮层
+      await setPref('主题', 'light');
       const path = document.querySelector('.topbar .path');
       return { ok: true, note: '项目页已就绪，标签 ' + document.querySelectorAll('.tab').length + ' 个；root=' + (path ? path.textContent : '(未显示)') + '；主题归零为 ' + String(document.documentElement.dataset.theme || '') };
     `,
@@ -829,10 +846,10 @@ const STEPS: StepDef[] = [
   },
   {
     step: 7,
-    title: "导出与自查：确认导出 TXT + 字数对账（摘要未回前不许勾确认）",
+    title: "发布与导出：确认导出 TXT + 字数对账（摘要未回前不许勾确认）",
     file: "step7-export.png",
     body: String.raw`
-      await tab('导出与自查');
+      await tab('发布与导出');
       // 防手滑这条承诺要在 UI 上立得住：**没看见数字之前勾不了**。
       // 所以顺序是"先等摘要（预览已回）→ 再要求确认框可用"；反过来写就会撞上
       // "勾了之后预览才回来、把勾选冲掉"的竞态（v188 的 step7 就是这么抖了一次）。
@@ -862,7 +879,7 @@ const STEPS: StepDef[] = [
     title: "敏感词自查（追加含敏感词正文 → 重新核对 → 命中定位）",
     file: "step8-sensitive.png",
     body: String.raw`
-      await tab('导出与自查');
+      await tab('发布与导出');
       const st = await window.yushu.outline.read();
       const vol = st.doc.volumes[0];
       const chap = vol.chapters.find((c) => c.chapter_id) || vol.chapters[0];
@@ -3823,13 +3840,13 @@ const STEPS: StepDef[] = [
   },
   {
     step: 57,
-    title: "导出与自查：本机能力矩阵按实测说话（M5/T5-4，R87）",
+    title: "发布与导出：本机能力矩阵按实测说话（M5/T5-4，R87）",
     file: "step57-export-capabilities.png",
     body: String.raw`
       // 这一步不写盘，也不猜机器：面板上的每一格都必须是"现场探测 + 判定"的结果。
       // 断言刻意只钉**与机器无关**的口径（顺序、每条都有原因、TXT 必可用、措辞不许含糊），
       // 换台机器 EPUB/PDF 的结论会变，但"给了结论且给了依据"这件事不会变。
-      await tab('导出与自查');
+      await tab('发布与导出');
       const panel = await waitFor(() => document.querySelector('.export-capabilities'), 10000);
       if (panel === null) return { ok: false, note: '导出页没有能力矩阵面板：' + pageText() };
       const text = () => String(panel.innerText).replace(/\s+/g, ' ');
@@ -3862,7 +3879,7 @@ const STEPS: StepDef[] = [
   },
   {
     step: 58,
-    title: "导出与自查：格式选择 + 真出一份 EPUB，门禁说「未校验」（M5/T5-4，R90）",
+    title: "发布与导出：格式选择 + 真出一份 EPUB，门禁说「未校验」（M5/T5-4，R90）",
     file: "step58-export-formats.png",
     body: String.raw`
       // 这一轮第一次让产品真的产出非 TXT 格式。三条要紧的断言：
@@ -3870,7 +3887,7 @@ const STEPS: StepDef[] = [
       // ② 选中的格式要一路带到按钮与回执里（"点了 EPUB 结果拿到 TXT"是最坏的那种错）；
       // ③ EPUBCheck 不在 ⇒ 回执写「未校验」，不许写「通过」。
       await tab('规则');
-      await tab('导出与自查'); // 强制重挂载：重试时不能继承上一轮选中的格式（v192 第二次 attempt 就带着 EPUB 选中态进来）
+      await tab('发布与导出'); // 强制重挂载：重试时不能继承上一轮选中的格式（v192 第二次 attempt 就带着 EPUB 选中态进来）
       const chips = await waitFor(() => {
         const c = [...document.querySelectorAll('.export-formats .chip')];
         return c.length >= 4 ? c : null;
@@ -3947,7 +3964,7 @@ const STEPS: StepDef[] = [
   },
   {
     step: 59,
-    title: '导出与自查：平台章节格式从包读，样例与盘上产物一致（M5/T5-4·K11，R94）',
+    title: '发布与导出：平台章节格式从包读，样例与盘上产物一致（M5/T5-4·K11，R94）',
     file: 'step59-platform-format.png',
     body: String.raw`
       // K11 的验收点是"参数从包读，而且真的落到产物上"。这一步管四件事：
@@ -3958,7 +3975,7 @@ const STEPS: StepDef[] = [
       // ④ 按平台格式导出 TXT：回执要点名平台，且**盘上文件的章头必须等于 UI 展示的那条样例**
       //    ——UI 与磁盘不许有第二个结论。
       await tab('规则');
-      await tab('导出与自查'); // 强制重挂载：不继承上一轮的格式 / 平台选中态
+      await tab('发布与导出'); // 强制重挂载：不继承上一轮的格式 / 平台选中态
       const chips = await waitFor(() => {
         const c = [...document.querySelectorAll('.export-platforms .chip')];
         return c.length >= 2 ? c : null;
@@ -4119,7 +4136,7 @@ const STEPS: StepDef[] = [
       // 这时先当场验"导出按钮不可点"（空设定集不许落盘），再退回不脱敏导出，
       // 并要求那些名字**确实出现在产物里**、回执点名泄露数 > 0。
       await tab('规则');
-      await tab('导出与自查');
+      await tab('发布与导出');
       const panel = await waitFor(() => document.querySelector('.bible-panel'), 20000);
       if (panel === null) return { ok: false, note: '没有设定集面板：' + pageText().slice(0, 160) };
       if ((await waitFor(() => panel.querySelector('.bible-summary'), 30000)) === null) {
@@ -4234,7 +4251,7 @@ const STEPS: StepDef[] = [
       // ③ 回执里的文件数 == 预览报的真源数 + 1（+1 是 MANIFEST 自己），两个口径必须能互相算平；
       // ④ 回执里"复扫命中 N 条"必须为 0——不是"没写这行"，是写了且为 0。
       await tab('规则');
-      await tab('导出与自查');
+      await tab('发布与导出');
       const panel = await waitFor(() => document.querySelector('.project-export-panel'), 20000);
       if (panel === null) return { ok: false, note: '没有迁移包面板：' + pageText().slice(0, 160) };
       const summary = await waitFor(() => panel.querySelector('.export-summary'), 30000);
@@ -4790,19 +4807,11 @@ const STEPS: StepDef[] = [
       //    （渲染层不自己抄一份迁移表——抄一份就会漂移，漂出来的按钮点下去只会被引擎拒）；
       // ④ 定时发布：设一个已过的时刻 ⇒ 进提醒队列，且面板上必须写明"只是本地提醒，不代替平台发布"；
       //    清除定时 ⇒ 提醒消失。
-      await tab('稿件总览');
-      const toggle = await waitFor(() => {
-        const t = [...document.querySelectorAll('.disclosure-toggle')].find((x) => String(x.textContent).indexOf('发布状态') >= 0);
-        return t || null;
-      }, 10000);
-      if (toggle === null) return { ok: false, note: '总览页没有「发布状态」折叠区：' + pageText().slice(0, 140) };
-      // 折叠区点击要幂等：重试时上一轮可能已经展开了（再点一次会把它关掉）
-      if (String(toggle.closest('.disclosure').className).indexOf('open') < 0) {
-        toggle.click();
-        await sleep(320);
-      }
+      // R183 起发布面板归位到「发布与导出」页（质检与发布域名实符相符）——
+      // 面板直挢在中栏，不再套折叠区 ⇒ 直接等面板本体。
+      await tab('发布与导出');
       const panel = await waitFor(() => document.querySelector('.publish-panel'), 20000);
-      if (panel === null) return { ok: false, note: '展开后没有发布状态面板' };
+      if (panel === null) return { ok: false, note: '没有发布状态面板：' + pageText().slice(0, 140) };
       const picker = await waitFor(() => {
         const sel = panel.querySelector('select');
         return sel !== null && sel.options.length > 0 ? sel : null;
@@ -5296,15 +5305,14 @@ const STEPS: StepDef[] = [
         return { top: cs.paddingTop, left: cs.paddingLeft };
       };
       const padCozy = padOf(cell);
-      const picker = topbar.querySelector('.density-picker select');
-      if (picker === null) return { ok: false, note: '顶栏里没有密度档选择器' };
+      // R183：密度归位到设置浮层（顶栏 select 退场）
       const setDensity = async (value) => {
-        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-        setter.call(picker, value);
-        picker.dispatchEvent(new Event('change', { bubbles: true }));
+        if (!(await setPref('界面密度', value))) return { ok: false, note: '设置浮层里没有密度选择（或入口不在）' };
         await sleep(180);
+        return null;
       };
-      await setDensity('compact');
+      const densityErr = await setDensity('compact');
+      if (densityErr) return densityErr;
       const padCompact = padOf(document.querySelector('.slot-table tbody td') ?? cell);
       const compactOk = parseFloat(padCompact.top) < parseFloat(padCozy.top) && parseFloat(padCompact.left) < parseFloat(padCozy.left);
       // 切回默认档：必须**逐字恢复**（默认档 = 改版前的取值）
@@ -5691,19 +5699,15 @@ const STEPS: StepDef[] = [
       // 关掉应用再打开还在；而导出 / 迁移时，界面偏好不会被混进作者的作品里。
       const key = 'yushu.ui.density';
       const before = window.localStorage.getItem(key);
-      const picker = document.querySelector('.density-picker select');
-      if (picker === null) return { ok: false, note: '顶栏里没有密度档选择器' };
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-      setter.call(picker, 'compact');
-      picker.dispatchEvent(new Event('change', { bubbles: true }));
+      // R183：密度归位到设置浮层（顶栏 select 退场）
+      if (!(await setPref('界面密度', 'compact'))) return { ok: false, note: '设置浮层里没有密度选择（或入口不在）' };
       await sleep(300);
       const stored = window.localStorage.getItem(key);
       const applied = document.documentElement.dataset['density'];
-      const label = String(picker.options[picker.selectedIndex] ? picker.options[picker.selectedIndex].textContent : '');
       return {
         ok: stored === 'compact' && applied === 'compact',
         note: '切到紧凑：偏好里存的是=' + String(stored) + '；界面生效的是=' + String(applied) +
-          '（下拉显示「' + label + '」）；本步之前偏好里是=' + String(before),
+          '；本步之前偏好里是=' + String(before),
       };
     `,
   },
@@ -5893,13 +5897,9 @@ const STEPS: StepDef[] = [
       // ① **取值实测**（正文对比度从 computed style 现算，不是抄文档里的数字）；
       // ② **切回浅色逐字恢复**（默认色板一个像素都没动）；
       // ③ **主题是用户级偏好**（存 localStorage，**项目真源一个字节都没动**）。
-      const themeSelect = document.querySelector('.theme-picker select');
-      if (themeSelect === null) return { ok: false, note: '顶栏里没有「主题」下拉' };
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-      // 先把主题**归零为浅色**再取『改前』的底色：主题偏好是用户级的（跨轮留在 localStorage），
-      // 不归零的话『改前』本来就是暗的 ⇒ 『逐字恢复』量的其实是两件事。
-      setter.call(themeSelect, 'light');
-      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      // R183：主题归位到设置浮层（顶栏 select 退场）——先把主题**归零为浅色**再取
+      // 『改前』的底色（偏好跨轮留存，不归零的话『改前』本来就是暗的，量的会是两件事）。
+      if (!(await setPref('主题', 'light'))) return { ok: false, note: '设置浮层里没有「主题」选择（或入口不在）' };
       await sleep(400);
       const body = document.body;
       const beforeBg = getComputedStyle(body).backgroundColor;
@@ -5920,8 +5920,7 @@ const STEPS: StepDef[] = [
         return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
       };
 
-      setter.call(themeSelect, 'dark');
-      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      if (!(await setPref('主题', 'dark'))) return { ok: false, note: '设置浮层里没有「主题」选择' };
       await sleep(400);
       const afterBg = getComputedStyle(body).backgroundColor;
       const afterFg = getComputedStyle(body).color;
@@ -5930,9 +5929,8 @@ const STEPS: StepDef[] = [
       const stored = String(window.localStorage.getItem('yushu.ui.theme') || '');
       const changed = afterBg !== beforeBg;
 
-      // 切回浅色：默认色板必须**逐字**恢复
-      setter.call(themeSelect, 'light');
-      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      // 切回浅色：默认色板必须**逐字**恢复（R183：走设置浮层）
+      if (!(await setPref('主题', 'light'))) return { ok: false, note: '设置浮层里没有「主题」选择' };
       await sleep(400);
       const backBg = getComputedStyle(body).backgroundColor;
       const backFg = getComputedStyle(body).color;
@@ -5942,9 +5940,8 @@ const STEPS: StepDef[] = [
       const hashAfter = diskAfter === null ? '' : String(diskAfter.hash || '');
       const diskUntouched = diskFile === null ? true : hashBefore === hashAfter;
 
-      // 回到深色留一张暗色下的截图（证据）
-      setter.call(themeSelect, 'dark');
-      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      // 回到深色留一张暗色下的截图（证据，R183：走设置浮层）
+      if (!(await setPref('主题', 'dark'))) return { ok: false, note: '设置浮层里没有「主题」选择' };
       await sleep(500);
       const panel = document.querySelector('.app');
       if (panel) panel.scrollIntoView({ block: 'center' });
@@ -5968,11 +5965,8 @@ const STEPS: StepDef[] = [
       // 这一步与 **step84 成对**：同一屏、同一滚动位置，一个浅色一个深色。
       // 这是 docs/13 §5 明写要的「逐页截图对照」——暗色色板落地后必须拿来看，
       // 不能只靠对比度数字自证。
-      const sel = document.querySelector('.theme-picker select');
-      if (sel === null) return { ok: false, note: '顶栏里没有「主题」下拉' };
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-      setter.call(sel, 'light');
-      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      // R183：主题归位到设置浮层（顶栏 select 退场）
+      if (!(await setPref('主题', 'light'))) return { ok: false, note: '设置浮层里没有「主题」选择（或入口不在）' };
       await sleep(400);
       const theme = String(document.documentElement.dataset.theme || '');
       if (theme !== 'light') return { ok: false, note: '切不到浅色（主题=' + theme + '）' };
@@ -5992,11 +5986,8 @@ const STEPS: StepDef[] = [
     title: '明暗对照·深色：同一屏的深色版（R122）',
     file: 'step84-compare-dark.png',
     body: String.raw`
-      const sel = document.querySelector('.theme-picker select');
-      if (sel === null) return { ok: false, note: '顶栏里没有「主题」下拉' };
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-      setter.call(sel, 'dark');
-      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      // R183：主题归位到设置浮层（顶栏 select 退场）
+      if (!(await setPref('主题', 'dark'))) return { ok: false, note: '设置浮层里没有「主题」选择（或入口不在）' };
       await sleep(500);
       const theme = String(document.documentElement.dataset.theme || '');
       const bg = getComputedStyle(document.body).backgroundColor;
@@ -6171,13 +6162,13 @@ const STEPS: StepDef[] = [
       // R159：**分栏页面**再多量三件（三栏特有的毛病，面板那三件量不出来）：
       // ④ 各栏**并排**（量左边界依次右移，不是只认类名）；⑤ 栏与栏**不重叠**；
       // ⑥ 每栏的内容**不越出自己那一栏**（横向；纵向是各栏自己滚，不算越界）。
-      const TABS = ['起源工作台', '三级大纲', '编辑器', '稿件总览', 'AI 副驾', '记忆', '规则', '导出与自查', '世界观档案', '码字统计', '项目文件'];
+      const TABS = ['起源工作台', '三级大纲', '编辑器', '稿件总览', 'AI 副驾', '记忆', '规则', '发布与导出', '世界观档案', '码字统计', '项目文件'];
       // R159：哪些页是分栏排版的（根容器 → 它的直接子元素就是那一页的栏）
       const COLUMN_ROOTS = {
         '起源工作台': '.genesis',
         '记忆': '.memory',
         '规则': '.rules-view',
-        '导出与自查': '.export-three-col',
+        '发布与导出': '.export-three-col',
         '世界观档案': '.archive',
         '稿件总览': '.library-three-col',
         '码字统计': '.stats-three-col',
@@ -6584,9 +6575,6 @@ const STEPS: StepDef[] = [
       // ② 正文对比度仍然很高（⇒ 依然是高对比，不能"柔和"成低对比）；
       // ③ 描边比**默认暗色档**更明显（⇒ 高对比体现在描边上，比的是相对值）；
       // ④ 偏好存的是这一档、切回浅色逐字恢复（⇒ 用户级偏好；默认色板一个像素没动）。
-      const themeSelect = document.querySelector('.theme-picker select');
-      if (themeSelect === null) return { ok: false, note: '顶栏里没有「主题」下拉' };
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
       const lum = (rgb) => {
         const m = String(rgb).match(/(\d+(?:\.\d+)?)/g);
         if (!m) return 0;
@@ -6600,20 +6588,18 @@ const STEPS: StepDef[] = [
       const body = document.body;
       const topbar = document.querySelector('.topbar');
       const lineOf = () => (topbar === null ? '' : getComputedStyle(topbar).borderBottomColor);
+      // R183：主题归位到设置浮层（顶栏 select 退场）——每档都开浮层改、关浮层再量
       // ① 先量**默认暗色档**的描边（后面要跟柔和高对比那档比）
-      setter.call(themeSelect, 'light');
-      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      if (!(await setPref('主题', 'light'))) return { ok: false, note: '设置浮层里没有「主题」选择（或入口不在）' };
       await sleep(300);
       const lightBg = getComputedStyle(body).backgroundColor;
-      setter.call(themeSelect, 'dark');
-      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      if (!(await setPref('主题', 'dark'))) return { ok: false, note: '设置浮层里没有「主题」选择' };
       await sleep(350);
       const darkBg = getComputedStyle(body).backgroundColor;
       const darkLine = lineOf();
       const darkLineRatio = ratio(darkLine, darkBg);
       // ② 切到柔和高对比那一档
-      setter.call(themeSelect, 'dark-soft');
-      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      if (!(await setPref('主题', 'dark-soft'))) return { ok: false, note: '设置浮层里没有「主题」选择' };
       await sleep(400);
       const softBg = getComputedStyle(body).backgroundColor;
       const softFg = getComputedStyle(body).color;
@@ -6625,15 +6611,13 @@ const STEPS: StepDef[] = [
       const pureBlack = /^rgb\(0,\s*0,\s*0\)$/.test(String(softBg).trim());
       const pureWhite = /^rgb\(255,\s*255,\s*255\)$/.test(String(softFg).trim());
       // ③ 切回浅色：默认色板必须**逐字**恢复
-      setter.call(themeSelect, 'light');
-      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      if (!(await setPref('主题', 'light'))) return { ok: false, note: '设置浮层里没有「主题」选择' };
       await sleep(350);
       const backBg = getComputedStyle(body).backgroundColor;
       const restored = backBg === lightBg;
       const backStored = String(window.localStorage.getItem('yushu.ui.theme') || '');
-      // 回到柔和高对比留一张证据截图
-      setter.call(themeSelect, 'dark-soft');
-      themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      // 回到柔和高对比留一张证据截图（R183：走设置浮层）
+      if (!(await setPref('主题', 'dark-soft'))) return { ok: false, note: '设置浮层里没有「主题」选择' };
       await sleep(500);
       const panel = document.querySelector('.app');
       if (panel) panel.scrollIntoView({ block: 'center' });
@@ -6952,15 +6936,12 @@ const STEPS: StepDef[] = [
       // 这一步是**动态**那一半（页面上真正画出来的样子）；
       // 另一半是**静态**那一半：apps/desktop/test/contrast-gate.test.ts
       // 把样式表声明的所有「字色 × 底色」组合逐套主题算一遍。两道门禁各管一半。
-      const TABS = ['起源工作台', '三级大纲', '编辑器', '稿件总览', 'AI 副驾', '记忆', '规则', '导出与自查', '世界观档案', '码字统计', '项目文件'];
+      const TABS = ['起源工作台', '三级大纲', '编辑器', '稿件总览', 'AI 副驾', '记忆', '规则', '发布与导出', '世界观档案', '码字统计', '项目文件'];
       const THEMES = ['light', 'dark', 'dark-soft'];
       // R166：对比度算法与"元素所在背景"已提到 buildScript 的**共享前置段**（全预演一份）⇒ 这里不再写第二份。
+      // R183：主题归位到设置浮层（顶栏 select 退场）——每档都开浮层改、关浮层再量
       const setTheme = async (value) => {
-        const select = document.querySelector('.theme-picker select');
-        if (select === null) return;
-        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-        setter.call(select, value);
-        select.dispatchEvent(new Event('change', { bubbles: true }));
+        if (!(await setPref('主题', value))) throw new Error('设置浮层里没有「主题」选择');
         await sleep(450);
       };
       const worst = [];
@@ -8432,7 +8413,7 @@ const STEPS: StepDef[] = [
   },
   {
     step: 118,
-    title: '导出与自查三栏：能力矩阵 / 导出表单 / 最近一次导出与产物清单（R156）',
+    title: '发布与导出三栏：能力矩阵 / 导出表单 / 最近一次导出与产物清单（R156）',
     file: 'step118-export-three-col.png',
     body: String.raw`
       // 这一步证 R156 的五件事：
@@ -8442,7 +8423,7 @@ const STEPS: StepDef[] = [
       // ④ 右栏的**章节数与盘上文件的章头行数逐字一致**；
       // ⑤ 右栏说的**目录在盘上真的是目录**（树里查得到，且产物是个文件）。
       await tab('稿件总览'); // 切走 ⇒ 卸载导出页
-      await tab('导出与自查'); // 切回 ⇒ 重新挂载 ⇒ 回执归零（**重试也幂等**：上一次的回执不许留在场）
+      await tab('发布与导出'); // 切回 ⇒ 重新挂载 ⇒ 回执归零（**重试也幂等**：上一次的回执不许留在场）
       const matrix = document.querySelector('.export-col-matrix');
       const work = document.querySelector('.export-col-work');
       const outs = document.querySelector('.export-col-outputs');
@@ -8683,7 +8664,7 @@ const STEPS: StepDef[] = [
       const PAGES = [
         { tab: '规则', root: '.rules-view' },
         { tab: '稿件总览', root: '.library-three-col' },
-        { tab: '导出与自查', root: '.export-three-col' },
+        { tab: '发布与导出', root: '.export-three-col' },
         { tab: '起源工作台', root: '.genesis' },
         { tab: '记忆', root: '.memory' },
         { tab: '世界观档案', root: '.archive' },
@@ -8808,7 +8789,7 @@ const STEPS: StepDef[] = [
       need('R154 规则页三栏', threeCol('.rules-view.three-col'));
       await tab('稿件总览');
       need('R155 稿件总览三栏', threeCol('.library-three-col'));
-      await tab('导出与自查');
+      await tab('发布与导出');
       need('R156 导出页三栏', threeCol('.export-three-col'));
       await tab('码字统计');
       need('R158 码字统计三栏', threeCol('.stats-three-col'));
@@ -9252,7 +9233,7 @@ const STEPS: StepDef[] = [
   },
   {
     step: 140,
-    title: '导出与自查：七猫平台包已装上 —— 核对日期与出处条数在界面上看得见（T5-8，R177）',
+    title: '发布与导出：七猫平台包已装上 —— 核对日期与出处条数在界面上看得见（T5-8，R177）',
     file: 'step140-platform-pack.png',
     body: String.raw`
       // 这一步证 R177 的三件事：
@@ -9261,7 +9242,7 @@ const STEPS: StepDef[] = [
       //    而「这份包什么时候核的、核了几处出处」必须让作者看得见；
       // ③ 选七猫时章头样例按它的模板来（第N章 标题），且没有重复前缀。
       await tab('规则');
-      await tab('导出与自查'); // 强制重挂载：不继承上一步选中的平台
+      await tab('发布与导出'); // 强制重挂载：不继承上一步选中的平台
       const chips = await waitFor(() => {
         const c = [...document.querySelectorAll('.export-platforms .chip')];
         return c.length >= 2 ? c : null;
@@ -9331,20 +9312,13 @@ const STEPS: StepDef[] = [
       }
       const outline = await window.yushu.outline.read();
       // 换标签页会卸载视图 ⇒ 回到总览页时发布面板重新挂载、重新取数（面板本身没有刷新按钮）
+      // R183 起发布面板归位到「发布与导出」页（与 step67 同一条路）；换标签页会卸载
+      // 视图 ⇒ 先去别的页再回来强制重挂载、重新取数（面板本身没缓存）。
       await tab('规则');
       await sleep(400);
-      await tab('稿件总览');
-      const toggle = await waitFor(() => {
-        const t = [...document.querySelectorAll('.disclosure-toggle')].find((x) => String(x.textContent).indexOf('发布状态') >= 0);
-        return t || null;
-      }, 10000);
-      if (toggle === null) return { ok: false, note: '总览页没有「发布状态」折叠区：' + pageText().slice(0, 140) };
-      if (String(toggle.closest('.disclosure').className).indexOf('open') < 0) {
-        toggle.click();
-        await sleep(400);
-      }
+      await tab('发布与导出');
       const panel = await waitFor(() => document.querySelector('.publish-panel'), 20000);
-      if (panel === null) return { ok: false, note: '展开后没有发布状态面板' };
+      if (panel === null) return { ok: false, note: '没有发布状态面板：' + pageText().slice(0, 140) };
       const pool = await waitFor(() => panel.querySelector('[data-stock-pool="1"]'), 10000);
       if (pool === null) return { ok: false, note: '发布面板里没有「存稿池」这一块' };
 
@@ -9969,6 +9943,48 @@ const STEPS: StepDef[] = [
       } catch (clickErr) {
         return { ok: false, note: '区域点击/内容查询失败：' + String(clickErr).slice(0, 200) };
       }
+    `,
+  },
+  {
+    step: 156,
+    title: '设置浮层：主题 / 密度归位后的唯一入口——顶栏 select 退场、切换当场生效、Esc 关闭（R183）',
+    file: 'step156-settings.png',
+    body: String.raw`
+      // 这一步证 R183「设置中心归位」的三件事：
+      // ① 顶栏的两个偏好 select 退场了（density-picker / theme-picker 不在顶栏）；
+      // ② 上下文栏「设置」打开浮层 ⇒ 换密度（紧凑）⇒ <html data-density> 当场变；
+      // ③ Esc 关闭浮层（登记表里的 settings-escape 那条是真的）。
+      const topPickers = document.querySelectorAll('.topbar .density-picker, .topbar .theme-picker').length;
+      if (topPickers !== 0) return { ok: false, note: '顶栏还有偏好 select（' + topPickers + ' 处）——归位没做干净' };
+      const btn = await waitFor(
+        () => [...document.querySelectorAll('.context-bar button')].find((b) => String(b.textContent || '').indexOf('设置') >= 0) || null,
+        8000,
+      );
+      if (!btn) return { ok: false, note: '上下文栏没有「设置」入口：' + pageText().slice(0, 140) };
+      btn.click();
+      const overlay = await waitFor(() => document.querySelector('.settings-panel') || null, 8000);
+      if (!overlay) return { ok: false, note: '点了设置但浮层没出现' };
+      const sel = overlay.querySelector('select[aria-label="界面密度"]');
+      if (!sel) return { ok: false, note: '浮层里没有密度选择' };
+      const before = document.documentElement.dataset["density"] || "";
+      sel.value = 'compact';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(200);
+      const after = document.documentElement.dataset["density"] || "";
+      const densityOk = before !== 'compact' && after === 'compact';
+      // 换回默认档（别把后面步骤的界面密度改了）
+      sel.value = 'cozy';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(150);
+      const restored = (document.documentElement.dataset["density"] || "") === 'cozy';
+      // Esc 关闭（事件派发在面板上，冒泡到 React 的 onKeyDown）
+      overlay.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await sleep(200);
+      const closed = document.querySelector('.settings-panel') === null;
+      return {
+        ok: densityOk && restored && closed,
+        note: '顶栏偏好 select 退场=true；浮层打开=true；换密度 ' + before + '→' + after + '（当场生效=' + String(densityOk) + '）；换回 cozy=' + String(restored) + '；Esc 关闭=' + String(closed),
+      };
     `,
   },
 ];
