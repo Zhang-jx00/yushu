@@ -21,6 +21,15 @@ import { api } from "../api";
 import { Disclosure } from "../components/Disclosure";
 import { StateNote } from "../components/StateNote";
 import { summarizeAiSession } from "../components/ai-session";
+import {
+  beginAiCollect,
+  markAiCandidateAdopted,
+  onAiStream,
+  resetAiSession,
+  useAiSessionCandidates,
+  type BusCandidate,
+} from "../components/ai-session-bus";
+import { adoptAiCandidate, confirmReplaceOverwrite, rejectAiCandidate } from "../components/ai-session-actions";
 import { TypewriterBuffer, type TypewriterMode } from "../typewriter-buffer";
 import { diffSentences, mergeSelected, splitSentences } from "../candidate-diff";
 import { REJECT_REASON_PRESETS, type AiFeedbackState } from "../../../src/shared/ipc";
@@ -303,13 +312,14 @@ export function AiView() {
   // 写作 UX（T3-11）：打字机缓冲 / 多候选 / 句级 diff 与局部采纳 / 拒绝原因
   const [typewriterMode, setTypewriterMode] = useState<TypewriterMode>("smooth");
   const [candidateCount, setCandidateCount] = useState(2);
-  const [candidates, setCandidates] = useState<CandidateEntry[]>([]);
+  // R184：候选清单搬进 ai-session-bus（跨页存活 + 抽屉共用同一份真源）——
+  // 订阅挂在 ProjectScreen 挂载期，切页不再丢候选、事件不再全灭
+  const candidates = useAiSessionCandidates();
   const [expandedDiff, setExpandedDiff] = useState<string | null>(null);
   const [selectedSentences, setSelectedSentences] = useState<Record<string, boolean>>({});
   const [feedback, setFeedback] = useState<AiFeedbackState | null>(null);
   const [rejectDraft, setRejectDraft] = useState<{ streamId: string; reason: string; note: string } | null>(null);
   const [draftBody, setDraftBody] = useState("");
-  const runHandlersRef = useRef(new Map<string, (event: AiStreamEvent) => void>());
   const bufferRef = useRef<TypewriterBuffer | null>(null);
   const frameRef = useRef<number | null>(null);
   const modeRef = useRef<TypewriterMode>("smooth");
@@ -448,14 +458,8 @@ export function AiView() {
     })();
   }, [refreshConfig, refreshDrafts, refreshUsage, refreshPreview, refreshCost]);
 
-  // 流式事件分发（ai:event 单向推送；T3-11：按 streamId 路由到各自 runOne 处理器——支持多候选串行）
-  useEffect(() => {
-    const off = api().ai.onEvent((event: AiStreamEvent) => {
-      runHandlersRef.current.get(event.streamId)?.(event);
-    });
-    return off;
-  }, []);
-
+  // 流式事件分发（R184）：ai:event 的订阅移到 ProjectScreen（bus 是唯一订阅点），
+  // 事件经 bus.handleEvent 按 streamId 路由到 runOne 的处理器——切页不再丢事件
   // 打字机模式同步（切换后立即作用于当前缓冲）
   useEffect(() => {
     modeRef.current = typewriterMode;
@@ -521,12 +525,16 @@ export function AiView() {
       setStreamText("");
       setStreamChars(0);
       startFrameLoop();
-      const finish = () => {
-        runHandlersRef.current.delete(streamId);
-        stopFrameLoop();
-        bufferRef.current = null;
-      };
-      runHandlersRef.current.set(streamId, (event) => {
+      // R184：多候选流登记进总线（done 时收进跨页候选清单——单候选不登记，口径不变）
+      if (total > 1) {
+        beginAiCollect(streamId, {
+          index,
+          total,
+          volumeId: selected.volumeId,
+          chapterId: selected.chapterId,
+        });
+      }
+      const offStream = onAiStream(streamId, (event) => {
         if (event.type === "delta") {
           bufferRef.current?.push(event.text);
           setStreamChars(event.chars);
@@ -563,6 +571,11 @@ export function AiView() {
         finish();
         reject(new Error(`[${event.code}] ${event.message}`));
       });
+      const finish = () => {
+        offStream();
+        stopFrameLoop();
+        bufferRef.current = null;
+      };
       void api()
         .ai.start({
           streamId,
@@ -591,7 +604,7 @@ export function AiView() {
     if (!selected) return;
     setRunning(true);
     resetRunState();
-    setCandidates([]);
+    resetAiSession();
     setExpandedDiff(null);
     try {
       const outcome = await runOne(1, 1);
@@ -611,20 +624,21 @@ export function AiView() {
     if (!selected) return;
     setRunning(true);
     resetRunState();
-    setCandidates([]);
+    resetAiSession();
     setExpandedDiff(null);
     setSelectedSentences({});
-    const produced: CandidateEntry[] = [];
+    // R184：候选清单由总线收（done 事件 ⇒ beginAiCollect 登记过的流）——
+    // 生成中途切页，主进程的流照跑、done 照收，不再因 AiView 卸载而清零
+    let producedCount = 0;
     try {
       await ensureDraftBody();
       for (let index = 1; index <= candidateCount; index += 1) {
         setNotice(`多候选生成中：第 ${index}/${candidateCount} 个…`);
         const outcome = await runOne(index, candidateCount);
-        produced.push({ ...outcome, index, total: candidateCount });
-        setCandidates([...produced]);
+        producedCount += 1;
         if (outcome.aborted) break;
       }
-      setNotice(`多候选生成完成：${produced.length} 个候选（句级差异已对照草稿；采纳 / 拒绝均需显式操作）`);
+      setNotice(`多候选生成完成：${producedCount} 个候选（句级差异已对照草稿；采纳 / 拒绝均需显式操作）`);
       void refreshUsage();
       void refreshCost(selected ? { volumeId: selected.volumeId, chapterId: selected.chapterId } : null);
     } catch (err) {
@@ -642,11 +656,8 @@ export function AiView() {
 
   const adopt = async (mode: "replace" | "append") => {
     if (!result || !selected) return;
-    if (
-      mode === "replace" &&
-      selected.hasBody &&
-      !confirm("替换将覆盖该章节现有正文（覆盖前会自动创建「破坏前」快照，可整体回退），确定继续？")
-    ) {
+    // R184：confirm 文案只有一处（写动作模块）——单候选与多候选共用同一条红线
+    if (mode === "replace" && !confirmReplaceOverwrite(selected.hasBody)) {
       return;
     }
     try {
@@ -671,32 +682,17 @@ export function AiView() {
     }
   };
 
-  /** 多候选：整段 / 追加采纳（显式动作才写正文——与单候选同一红线） */
-  const adoptCandidate = async (entry: CandidateEntry, mode: "replace" | "append") => {
+  /** 多候选：整段 / 追加采纳（显式动作才写正文——与单候选同一红线；写入口在总线，抽屉共用） */
+  const adoptCandidate = async (entry: BusCandidate, mode: "replace" | "append") => {
     if (!selected) return;
-    if (
-      mode === "replace" &&
-      selected.hasBody &&
-      !confirm("替换将覆盖该章节现有正文（覆盖前会自动创建「破坏前」快照，可整体回退），确定继续？")
-    ) {
-      return;
-    }
     try {
       setError(null);
-      const adopted = await api().ai.adopt({
-        usageId: entry.usageId,
-        volumeId: selected.volumeId,
-        chapterId: selected.chapterId,
-        text: entry.text,
-        mode,
-      });
+      const adopted = await adoptAiCandidate(entry, mode, { hasBody: selected.hasBody });
+      if (adopted === null) return; // confirm 闸门被作者取消
       setNotice(
         `候选 ${entry.index}/${entry.total} 已${mode === "replace" ? "替换" : "追加"}采纳 → ${adopted.chapterPath}（${adopted.wordCount} 字）`,
       );
       setAdoptAudit(adopted.audit);
-      setCandidates((prev) =>
-        prev.map((item) => (item.streamId === entry.streamId ? { ...item, adopted: mode } : item)),
-      );
       await refreshDrafts();
       await refreshUsage();
       await ensureDraftBody();
@@ -710,7 +706,7 @@ export function AiView() {
   };
 
   /** 局部采纳（J15）：按句勾选合并（缺省全选）→ 追加落盘 */
-  const adoptSelectedSentences = async (entry: CandidateEntry) => {
+  const adoptSelectedSentences = async (entry: BusCandidate) => {
     if (!selected) return;
     const sentences = splitSentences(entry.text);
     const checked = sentences.filter((_, index) => selectedSentences[`${entry.streamId}:${index}`] ?? true);
@@ -730,9 +726,8 @@ export function AiView() {
       });
       setNotice(`局部采纳：已追加 ${checked.length}/${sentences.length} 句 → ${adopted.chapterPath}（${adopted.wordCount} 字）`);
       setAdoptAudit(adopted.audit);
-      setCandidates((prev) =>
-        prev.map((item) => (item.streamId === entry.streamId ? { ...item, adopted: "append" } : item)),
-      );
+      // 局部采纳写的是**合并后的文本**（≠条目原文）⇒ 写盘走本地通道，标记经总线广播（R184）
+      markAiCandidateAdopted(entry.streamId, "append");
       await refreshDrafts();
       await refreshUsage();
       await ensureDraftBody();
@@ -741,21 +736,12 @@ export function AiView() {
     }
   };
 
-  /** 拒绝原因记录（J15）：预置标签 + 备注 → .yushu/ai-feedback.jsonl（统计展示；不写正文） */
-  const rejectCandidate = async (entry: CandidateEntry, reason: string, note: string) => {
+  /** 拒绝原因记录（J15）：写入口在总线（与抽屉共用），反馈统计与提示留本地（R184） */
+  const rejectCandidate = async (entry: BusCandidate, reason: string, note: string) => {
     try {
       setError(null);
-      const state = await api().ai.reject({
-        usageId: entry.usageId,
-        task: "drafting",
-        reason,
-        excerpt: entry.text.slice(0, 200),
-        ...(note.trim() ? { note: note.trim() } : {}),
-      });
+      const state = await rejectAiCandidate(entry, reason, note);
       setFeedback(state);
-      setCandidates((prev) =>
-        prev.map((item) => (item.streamId === entry.streamId ? { ...item, rejected: true } : item)),
-      );
       setRejectDraft(null);
       setNotice(`已记录拒绝原因「${reason}」——沉淀为提示词改进数据（本机 .yushu/ai-feedback.jsonl）`);
     } catch (err) {

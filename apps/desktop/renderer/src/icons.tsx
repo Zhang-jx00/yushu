@@ -45,7 +45,8 @@ export type YushuIconName =
   | "search"
   | "panel-left-close"
   | "panel-left-open"
-  // UI Phase 2（R183）：设置浮层入口（Lucide 原件，docs/12 已登记）
+  // UI Phase 2（R183）：设置浮层入口（Lucide 原件，docs/12 已登记）；
+  // UI Phase 3（R184）的 AI 抽屉入口复用已登记的 sparkles（AI 语义）
   | "settings";
 
 const ICONS: Record<YushuIconName, ReactNode> = {

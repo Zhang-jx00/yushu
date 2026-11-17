@@ -5069,6 +5069,105 @@ table,
   padding: var(--space-3) var(--space-4);
 }
 
+/* R184 AI 抽屉：右侧滑入的候选处置面板（候选与副驾页同一份真源）。
+   遮罩与 z-index 与命令面板 / 设置浮层同一档；无进出场动画（与命令面板同口径）。 */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 30;
+}
+
+.drawer-panel {
+  width: calc(var(--text-base) * 34);
+  max-width: 92%;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--elev-overlay);
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  overflow-y: auto;
+}
+
+.drawer-title {
+  font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.drawer-summary {
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+
+.drawer-note {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.drawer-notice {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+
+.drawer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.drawer-candidate {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.drawer-candidate-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--text-sm);
+}
+
+.drawer-candidate-text {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  max-height: calc(var(--text-base) * 10);
+  overflow-y: auto;
+}
+
+.drawer-candidate-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.drawer-reject {
+  display: grid;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+
+.drawer-reject-row {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--text-sm);
+}
+
 /* R183 设置浮层：主题 / 密度归位后的唯一入口。与命令面板同一套浮层交互
    （遮罩点击关闭 / Esc / 打开即聚焦），样式全令牌——阴影只允许 overlay 级。 */
 .settings-overlay {

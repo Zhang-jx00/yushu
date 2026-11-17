@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ProjectSnapshot, RecoveryEntry, SessionStatusPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { handleAiEvent } from "../components/ai-session-bus";
+import { AiDrawer } from "../components/AiDrawer";
 import { YushuIcon, type YushuIconName } from "../icons";
 import { putPendingRecovery } from "../recovery-inbox";
 import { AiView } from "./AiView";
@@ -95,6 +97,8 @@ export function ProjectScreen({
   );
   /** R173-UI：**命令面板**（Ctrl/Cmd+K）——跳转与高频动作的统一入口 */
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /** R184：AI 抽屉（任何页可唤起；候选清单在 ai-session-bus，与副驾页同一份真源） */
+  const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
 
   const toggleNav = () => {
     setNavCollapsed((prev) => {
@@ -103,6 +107,10 @@ export function ProjectScreen({
       return collapsed;
     });
   };
+
+  // R184：ai:event 的唯一订阅挂在这里（项目页挂载期）——AiView 切走不再丢事件，
+  // 多候选的 done 照样进总线（生成中途切页丢候选的 bug 死在这一刀）
+  useEffect(() => api().ai.onEvent(handleAiEvent), []);
 
   // 命令面板的全局键（Ctrl/Cmd+K）：登记见 shortcuts.ts（判据按 probe 对账；
   // 判定写成 `.key === "k"` 的形态——快捷键登记表的扫描器按这个口径对账）
@@ -117,6 +125,21 @@ export function ProjectScreen({
     };
     window.addEventListener("keydown", onPaletteKey);
     return () => window.removeEventListener("keydown", onPaletteKey);
+  }, []);
+
+  // AI 抽屉的全局键（Ctrl/Cmd+J，R184）：独立监听器（全局条目数与窗口级 keydown
+  // 监听器的数量一一对账——登记见 shortcuts.ts，判定写成 `.key === "j"` 形态）
+  useEffect(() => {
+    const onDrawerKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        if (event.key === "j") {
+          event.preventDefault();
+          setAiDrawerOpen((open) => !open);
+        }
+      }
+    };
+    window.addEventListener("keydown", onDrawerKey);
+    return () => window.removeEventListener("keydown", onDrawerKey);
   }, []);
 
   const currentNav = NAV_ITEMS.find((item) => item.key === tab) ?? NAV_ITEMS[0]!;
@@ -253,6 +276,15 @@ export function ProjectScreen({
           <button
             type="button"
             className="nav-tool"
+            aria-label="打开 AI 抽屉（Ctrl+J）"
+            title="AI 抽屉（Ctrl+J）"
+            onClick={() => setAiDrawerOpen(true)}
+          >
+            <YushuIcon name="sparkles" />
+          </button>
+          <button
+            type="button"
+            className="nav-tool"
             aria-expanded={!navCollapsed}
             aria-label={navCollapsed ? "展开导航" : "折叠导航"}
             title={navCollapsed ? "展开导航" : "折叠导航"}
@@ -358,6 +390,14 @@ export function ProjectScreen({
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         actions={paletteActions}
+      />
+      <AiDrawer
+        open={aiDrawerOpen}
+        onClose={() => setAiDrawerOpen(false)}
+        onGoToAi={() => {
+          setAiDrawerOpen(false);
+          setTab("ai");
+        }}
       />
     </div>
   );

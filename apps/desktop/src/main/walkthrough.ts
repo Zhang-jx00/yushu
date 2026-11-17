@@ -9987,6 +9987,62 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 157,
+    title: 'AI 抽屉：编辑器页 Ctrl+J 唤起 ⇒ 候选跨页存活且四数与副驾页逐字对上，Esc 关闭（R184）',
+    file: 'step157-ai-drawer.png',
+    body: String.raw`
+      // 这一步证 R184「AI 抽屉第一片」的三件事：
+      // ① 编辑器页（非 AI 页）按 Ctrl+J ⇒ 抽屉出现——任何页都能唤起；
+      // ② 抽屉 summary 的四个数与副驾页右栏的四个数**逐字一致**（同一份真源的跨页实证——
+      //    旧实现切走标签页候选就清零，这一步抓得住）；抽屉开着切页也不卸载（挂在项目根级）；
+      // ③ Esc 关闭（登记表 ai-drawer-escape 那条是真的）。
+      await tab('编辑器');
+      if (document.querySelector('.drawer-panel') !== null) {
+        return { ok: false, note: '还没按 Ctrl+J 抽屉就已经开着' };
+      }
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, bubbles: true, cancelable: true }));
+      const drawer = await waitFor(() => document.querySelector('.drawer-panel') || null, 8000);
+      if (!drawer) return { ok: false, note: 'Ctrl+J 没有打开 AI 抽屉：' + pageText().slice(0, 140) };
+      const cards = drawer.querySelectorAll('[data-drawer-candidate]').length;
+      if (cards === 0) return { ok: false, note: '抽屉里没有候选——跨页候选丢了（bus 没兜住？）' };
+      const drawerCounts = {
+        candidates: drawer.querySelector('[data-drawer-candidates]')?.getAttribute('data-drawer-candidates') ?? '',
+        adopted: drawer.querySelector('[data-drawer-adopted]')?.getAttribute('data-drawer-adopted') ?? '',
+        rejected: drawer.querySelector('[data-drawer-rejected]')?.getAttribute('data-drawer-rejected') ?? '',
+        pending: drawer.querySelector('[data-drawer-pending]')?.getAttribute('data-drawer-pending') ?? '',
+      };
+      // 抽屉开着切到副驾页（挂根级 ⇒ 跨页不卸载），读右栏四数比对
+      await tab('AI 副驾');
+      const side = document.querySelector('[data-ai-session-candidates]');
+      if (!side) return { ok: false, note: '副驾页右栏没有对账锚点：' + pageText().slice(0, 140) };
+      const aiCounts = {
+        candidates: side.getAttribute('data-ai-session-candidates') ?? '',
+        adopted: side.getAttribute('data-ai-session-adopted') ?? '',
+        rejected: side.getAttribute('data-ai-session-rejected') ?? '',
+        pending: side.getAttribute('data-ai-session-pending') ?? '',
+      };
+      const sameOk =
+        drawerCounts.candidates === aiCounts.candidates &&
+        drawerCounts.adopted === aiCounts.adopted &&
+        drawerCounts.rejected === aiCounts.rejected &&
+        drawerCounts.pending === aiCounts.pending;
+      if (!sameOk) {
+        return { ok: false, note: '抽屉与副驾页四数没对上：抽屉=' + JSON.stringify(drawerCounts) + ' 副驾=' + JSON.stringify(aiCounts) };
+      }
+      const stillOpen = document.querySelector('.drawer-panel') !== null;
+      // Esc 关闭（事件派发在面板上，冒泡到 React 的 onKeyDown）
+      drawer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await sleep(200);
+      const closed = document.querySelector('.drawer-panel') === null;
+      return {
+        ok: sameOk && stillOpen && closed,
+        note: '编辑器页 Ctrl+J 开抽屉=true；候选卡片=' + cards + '；四数对上=true（候选 ' + aiCounts.candidates +
+          ' / 已采纳 ' + aiCounts.adopted + ' / 已拒绝 ' + aiCounts.rejected + ' / 还没处置 ' + aiCounts.pending +
+          '）；抽屉开着切页仍在=' + String(stillOpen) + '；Esc 关闭=' + String(closed),
+      };
+    `,
+  },
 ];
 
 /**
