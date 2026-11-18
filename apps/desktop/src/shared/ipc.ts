@@ -731,6 +731,12 @@ export interface AiGeneratePayload {
   task: "draft-first" | "continue";
   instruction?: string;
   targetWords?: number;
+  /**
+   * **作者选中的原文**（R185）：编辑器里选中一段 ⇒ 把这段原文带进 prompt，
+   * 让模型「就这段写」而不是凭空起草。
+   * 只进 prompt、**不改采纳的写语义**（范围替换是编辑器内的事，见 R185 §7.58）。
+   */
+  selectionText?: string;
   /** 多候选生成（T3-11，J15）：第 i 个（1 起）与总数（≥2 时主进程注入「独立生成」标记） */
   candidateIndex?: number;
   candidateTotal?: number;

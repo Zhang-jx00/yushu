@@ -77,6 +77,15 @@ export const SHORTCUTS: ShortcutEntry[] = [
     probe: 'if (event.key === "Escape") {',
   },
   {
+    id: "editor-ai-rewrite-escape",
+    scope: "contextual",
+    keys: ["Escape"],
+    when: "编辑器右栏「AI 改写这一段」开着",
+    action: "收起 AI 建议（不采纳，直接收起）",
+    file: "apps/desktop/renderer/src/components/EditorAiRewrite.tsx",
+    probe: 'event.key === "Escape"',
+  },
+  {
     id: "settings-escape",
     scope: "contextual",
     keys: ["Escape"],

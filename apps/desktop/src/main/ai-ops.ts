@@ -500,6 +500,8 @@ export async function runAiGenerate(gateway: ProjectGateway, args: RunGenerateAr
       kind: payload.task,
       ...(payload.instruction ? { instruction: payload.instruction } : {}),
       ...(payload.targetWords ? { targetWords: payload.targetWords } : {}),
+      // R185：作者选中的原文进 prompt（只加上下文，不改采纳的写语义）
+      ...(payload.selectionText ? { selectionText: payload.selectionText } : {}),
     };
     // T3-11（J15）：多候选生成——注入「独立生成、不得互相参照」标记（保证候选多样性而非同质复制）
     if (payload.candidateTotal && payload.candidateTotal > 1 && payload.candidateIndex) {

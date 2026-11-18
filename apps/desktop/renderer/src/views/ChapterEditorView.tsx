@@ -8,6 +8,7 @@ import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import type { AiDraftTarget, ChapterWriteResult } from "../../../src/shared/ipc";
 import { api } from "../api";
+import { EditorAiRewrite } from "../components/EditorAiRewrite";
 import { findUnsupportedSyntax, htmlToMd, mdToHtml } from "../markdown-bridge";
 import { merge3 } from "../chapter-merge";
 import { collectMentionedEntities, type EntityIndexEntry, LARGE_DOC_MENTION_CHARS } from "../entity-mentions";
@@ -700,6 +701,32 @@ export function ChapterEditorView({
    * 候选落地（T2-2 富文本形态）：用 `@名称` 纯文本替换 [@位置, 当前光标] 区间——
    * 与源码形态解析（entity-mentions.findMentions）同口径；插入后 onUpdate 重算提及面板，菜单关闭。
    */
+  /**
+   * R185：**选区读取与局部替换**（只认源码形态）。
+   * 富文本形态下选区坐标与落盘的 Markdown 不是同一套（往返有损）⇒ 不给换算，
+   * 由 `EditorAiRewrite` 把入口禁用并说清原因（宁可不做，也不写错位置）。
+   */
+  const readSelection = useCallback((): { from: number; to: number; text: string } | null => {
+    if (modeRef.current !== "source") return null;
+    const view = viewRef.current;
+    if (!view) return null;
+    const range = view.state.selection.main;
+    if (range.empty) return null;
+    const text = view.state.sliceDoc(range.from, range.to);
+    if (text.trim() === "") return null;
+    return { from: range.from, to: range.to, text };
+  }, []);
+
+  /** 用新文本替换选区（编辑器内局部 dispatch ⇒ 走既有自动保存路径落盘） */
+  const replaceSelection = useCallback((from: number, to: number, text: string): boolean => {
+    if (modeRef.current !== "source") return false;
+    const view = viewRef.current;
+    if (!view) return false;
+    if (from < 0 || to > view.state.doc.length || from >= to) return false;
+    view.dispatch({ changes: { from, to, insert: text } });
+    return true;
+  }, []);
+
   const applyMention = useCallback(
     (entity: EntityIndexEntry) => {
       const menu = mentionMenuRef.current;
@@ -1387,6 +1414,13 @@ export function ChapterEditorView({
             </>
           )}
         </section>
+        <EditorAiRewrite
+          mode={mode}
+          target={selected === null ? null : { volumeId: selected.volumeId, chapterId: selected.chapterId }}
+          readSelection={readSelection}
+          replaceSelection={replaceSelection}
+          readBody={currentMarkdown}
+        />
       </aside>
       {focusMode && (
         <div className="focus-hint">

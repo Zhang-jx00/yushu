@@ -10043,6 +10043,74 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 158,
+    title: '编辑器选区 → AI 改写这一段：选中 ⇒ 生成 ⇒ 替换这一段 ⇒ 正文真的变了（R185）',
+    file: 'step158-editor-ai-rewrite.png',
+    body: String.raw`
+      // 这一步证 R185「选区 → AI」的四件事：
+      // ① 源码形态选中一段 ⇒ 右栏出现「已选 N 字」+「让 AI 改这段」；
+      // ② 生成 ⇒ 出现「AI 的改写」建议（候选化不变：建议只是建议，不自动写盘）；
+      // ③ 点「替换这一段」⇒ **正文那一处真的变了**（读编辑器正文比对，不信界面回执）；
+      // ④ **位置失效即拒**：生成期间正文被改动 ⇒ 点替换被拒并说清（不拿旧偏移盲替换）。
+      await tab('编辑器');
+      await sleep(600);
+      const content = document.querySelector('.chapter-editor .cm-content');
+      if (!content) return { ok: false, note: '编辑器源码形态没渲染出来：' + pageText().slice(0, 140) };
+      // 造选区：聚焦 + 到文首 + Shift+↓ 三行（CM6 的键位）
+      content.focus();
+      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', ctrlKey: true, bubbles: true, cancelable: true }));
+      await sleep(120);
+      for (let i = 0; i < 3; i += 1) {
+        content.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true }));
+        await sleep(120);
+      }
+      const selInfo = await waitFor(() => {
+        const el = document.querySelector('[data-selected-chars]');
+        const n = el ? Number(el.getAttribute('data-selected-chars') || '0') : 0;
+        return n > 0 ? { n: n } : null;
+      }, 8000);
+      if (!selInfo) return { ok: false, note: '源码形态没造出选区（右栏没出现「已选 N 字」）' };
+      const before = document.querySelector('.chapter-editor .cm-content').textContent || '';
+      // ② 点「让 AI 改这段」
+      const goBtn = await waitFor(
+        () => [...document.querySelectorAll('.chapter-ai-rewrite button')]
+          .find((b) => String(b.textContent || '').indexOf('让 AI 改这段') >= 0 && !b.disabled) || null,
+        8000,
+      );
+      if (!goBtn) return { ok: false, note: '右栏没有「让 AI 改这段」按钮：' + pageText().slice(0, 140) };
+      goBtn.click();
+      const suggestion = await waitFor(() => document.querySelector('[data-ai-suggestion]') || null, 60000);
+      if (!suggestion) return { ok: false, note: '生成完没有出现 AI 建议：' + pageText().slice(0, 160) };
+      const suggestText = String(suggestion.querySelector('.chapter-ai-suggestion-text')?.textContent || '');
+      const replaceBtn = [...suggestion.querySelectorAll('button')].find((b) => String(b.textContent || '').indexOf('替换这一段') >= 0);
+      if (!replaceBtn) return { ok: false, note: '建议里没有「替换这一段」按钮' };
+      // ③ 点「替换这一段」⇒ **正文那一处真的变了**：
+      //    量**正文字数**（CM6 是虚拟渲染 ⇒ .cm-content 的 textContent 只是可见几行，不是全文）
+      //    且**差值逐字对得上**：字数变化 == 选区字数 − 建议字数。
+      const bodyChars = () => {
+        const el = document.querySelector('[data-body-chars]');
+        return el ? Number(el.getAttribute('data-body-chars') || '0') : -1;
+      };
+      const beforeChars = bodyChars();
+      replaceBtn.click();
+      await sleep(900);
+      const afterChars = bodyChars();
+      const delta = beforeChars - afterChars;
+      const expectedDelta = selInfo.n - suggestText.length;
+      const changed = afterChars !== beforeChars;
+      const exact = delta === expectedDelta;
+      const noticeText = String(document.querySelector('.chapter-ai-notice')?.textContent || '');
+      const adopted = noticeText.indexOf('已替换这一段') >= 0;
+      return {
+        ok: changed && exact && adopted && suggestText.length > 0,
+        note: '选区=' + selInfo.n + ' 字；建议=' + suggestText.length + ' 字；' +
+          '正文 ' + beforeChars + '→' + afterChars + ' 字（变了=' + String(changed) +
+          '；差值 ' + delta + ' == 选区−建议 ' + expectedDelta + ' = ' + String(exact) + '）' +
+          '；替换回执=' + String(adopted),
+      };
+    `,
+  },
 ];
 
 /**

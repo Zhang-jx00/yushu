@@ -2852,6 +2852,44 @@ select {
   gap: var(--space-4);
 }
 
+/* R185 编辑器右栏「AI 改写这一段」：只认源码形态（富文本形态下入口禁用并说清原因）。 */
+.chapter-ai-rewrite {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.chapter-ai-intent {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.chapter-ai-notice {
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+
+.chapter-ai-suggestion {
+  display: grid;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--space-3);
+}
+
+.chapter-ai-suggestion-text {
+  margin: 0;
+  max-height: calc(var(--text-base) * 12);
+  overflow-y: auto;
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+}
+
+.chapter-ai-suggestion-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
 .chapter-context-list {
   list-style: none;
   margin: 0;

@@ -312,6 +312,11 @@ export interface DraftTask {
   kind: "draft-first" | "continue";
   instruction?: string;
   targetWords?: number;
+  /**
+   * **作者选中的原文**（R185）：编辑器选中一段时带进来 ⇒ prompt 里多一段
+   * 「作者选中的原文」，任务口径改成「就这段写」（而不是凭空起草本章）。
+   */
+  selectionText?: string;
 }
 
 /**
@@ -330,9 +335,15 @@ export function assembleMessages(preview: ContextPreviewPayload, task: DraftTask
   const taskText = [
     `【本章细纲】\n${outline || "（未提供细纲）"}`,
     recent.trim() !== "" ? `【最近正文（供衔接，禁止重复照抄）】\n${recent}` : "",
-    task.kind === "continue"
-      ? `【任务】沿最近正文续写约 ${targetWords} 字，衔接自然，结尾留下追读钩子。`
-      : `【任务】按本章细纲写出本章初稿约 ${targetWords} 字，结尾留下追读钩子。`,
+    task.selectionText?.trim()
+      ? `【作者选中的原文】
+${task.selectionText.trim()}`
+      : "",
+    task.selectionText?.trim()
+      ? `【任务】就上面「作者选中的原文」改写（约 ${targetWords} 字，保留原意与语感，衔接自然）。`
+      : task.kind === "continue"
+        ? `【任务】沿最近正文续写约 ${targetWords} 字，衔接自然，结尾留下追读钩子。`
+        : `【任务】按本章细纲写出本章初稿约 ${targetWords} 字，结尾留下追读钩子。`,
     task.instruction?.trim() ? `【附加要求】${task.instruction.trim()}` : "",
   ]
     .filter(Boolean)
