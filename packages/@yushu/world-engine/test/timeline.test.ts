@@ -6,6 +6,7 @@ import {
   parseTimelineFile,
   serializeTimelineFile,
   checkTimelineConflicts,
+  eventsForEntities,
   type TimelineFile,
 } from "@yushu/world-engine";
 
@@ -229,5 +230,31 @@ describe("checkTimelineConflicts（冲突校验与不判的口径）", () => {
     ].join("\n");
     const out = checkTimelineConflicts(doc(text));
     expect(out.findings.filter((f) => f.severity !== "info")).toEqual([]);
+  });
+});
+
+describe("区域内容查询的事件段（R186）：eventsForEntities", () => {
+  const rows = [
+    { title: "开国之战", year: 0, placeRef: "loc-a", displayYear: "元年", location: "天启城" },
+    { title: "十二城之盟", year: 12, placeRef: "loc-b", displayYear: "十二年", location: "北境" },
+    { title: "无落点的事", year: 5, placeRef: null, displayYear: null, location: null },
+    { title: "别处的事", year: 7, placeRef: "loc-c", displayYear: "七年", location: "南疆" },
+  ];
+
+  it("**placeRef 命中实体集才算**：没落到具体地点的事件不算（不猜）", () => {
+    const out = eventsForEntities(rows, new Set(["loc-a"]));
+    expect(out).toHaveLength(1);
+    expect(out[0]!.title).toBe("开国之战");
+    expect(out[0]!.displayYear).toBe("元年");
+    expect(out[0]!.location).toBe("天启城");
+  });
+
+  it("**多实体命中按 year 升序**（同刻度按标题码点序，稳定）", () => {
+    const out = eventsForEntities(rows, new Set(["loc-a", "loc-b", "loc-c"]));
+    expect(out.map((row) => row.title)).toEqual(["开国之战", "别处的事", "十二城之盟"]);
+  });
+
+  it("**空实体集返回空**（不造数）", () => {
+    expect(eventsForEntities(rows, new Set())).toEqual([]);
   });
 });

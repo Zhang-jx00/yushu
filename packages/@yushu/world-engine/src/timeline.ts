@@ -372,3 +372,29 @@ export function checkTimelineConflicts(doc: TimelineFile): { findings: TimelineF
   notEvaluated.sort((a, b) => byCodePoint(a.rule, b.rule));
   return { findings, notEvaluated };
 }
+
+/**
+ * **区域内容查询的事件段**（R186）：给时间线的行（已投影）+ 一组**地点实体 id**
+ * （区域内标注绑定的实体），返回**发生在这些地点**的事件行——`placeRef` 命中才算
+ * （事件没落到具体地点 ⇒ 不算，不猜）；按 `year` 升序排（同刻度按 id 码点序，稳定）。
+ *
+ * 为什么放这里：**「哪些事件算涉及」是时间线域的口径**，不是地图面板的渲染细节——
+ * 放渲染层就会出现两处各判一遍（右栏一处、内容面板一处）然后漂掉。
+ * 纯函数：给同样的行与实体集，永远返回同样的结果。
+ */
+export function eventsForEntities(
+  rows: readonly { title: string; year: number; placeRef: string | null; displayYear: string | null; location: string | null }[],
+  entityIds: ReadonlySet<string>,
+): { title: string; year: number; displayYear: string | null; location: string | null; placeRef: string | null }[] {
+  return rows
+    .filter((row) => row.placeRef !== null && entityIds.has(row.placeRef))
+    .slice()
+    .sort((a, b) => (a.year !== b.year ? a.year - b.year : a.title < b.title ? -1 : a.title > b.title ? 1 : 0))
+    .map((row) => ({
+      title: row.title,
+      year: row.year,
+      displayYear: row.displayYear,
+      location: row.location,
+      placeRef: row.placeRef,
+    }));
+}

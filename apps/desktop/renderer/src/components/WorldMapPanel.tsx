@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { SummaryRow, WorldMapBasePayload, WorldMapViewPayload } from "../../../src/shared/ipc";
 import { api } from "../api";
-import { markersInRegion } from "@yushu/world-engine";
+import { eventsForEntities, markersInRegion } from "@yushu/world-engine";
 import { StateNote } from "./StateNote";
 import { SummaryRows } from "./SummaryRows";
 import {
@@ -123,6 +123,23 @@ export function WorldMapPanel(props: {
       .map.base()
       .then((payload) => {
         if (alive) setBase(payload);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // R186：时间线行（跨页可读的持久数据）——内容面板的「涉及的事件」段从它现算
+  const [timelineRows, setTimelineRows] = useState<
+    { title: string; year: number; placeRef: string | null; displayYear: string | null; location: string | null }[]
+  >([]);
+  useEffect(() => {
+    let alive = true;
+    api()
+      .timeline.view()
+      .then((payload) => {
+        if (alive) setTimelineRows(payload.rows);
       })
       .catch(() => undefined);
     return () => {
@@ -1882,6 +1899,26 @@ export function WorldMapPanel(props: {
                     ))}
                   </ul>
                 )}
+                {/* R186：**涉及的事件**——发生在区域内这些地点的事件（事件.placeRef ⇔ 标注实体）。
+                    口径在时间线域的纯函数里（eventsForEntities），这里只渲染；空结果如实说。 */}
+                {(() => {
+                  const entityIds = new Set(insideRows.map((row) => row.entityRef));
+                  const events = eventsForEntities(timelineRows, entityIds);
+                  if (events.length === 0) return null;
+                  return (
+                    <div className="map-region-events" data-rc-events={events.length}>
+                      <div className="muted">涉及的事件（{String(events.length)}）</div>
+                      <ul className="map-region-contents-list">
+                        {events.map((event) => (
+                          <li key={event.title + ":" + String(event.year)} data-rc-event={event.title}>
+                            {event.title}
+                            {event.displayYear !== null ? `（${event.displayYear}）` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}

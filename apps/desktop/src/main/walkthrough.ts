@@ -10111,6 +10111,83 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 159,
+    title: '区域内容查询的事件段：点区域 ⇒ 列出发生在这些地点的事件，placeRef 命中才算（R186）',
+    file: 'step159-region-events.png',
+    body: String.raw`
+      // 这一步证 R186「区域内容查询的事件段」的三件事：
+      // ① 自建时间线夹具：两条事件——一条 place_ref 指向区域内的标注实体、一条没落到地点；
+      // ② 点区域 ⇒ 事件段出现且**只出现 placeRef 命中的那条**（没落到地点的不算，不猜）；
+      // ③ 标注段与锚点段仍在（同一份内容面板，三段互补：标注=谁在这里、锚点=钉在图上的事、
+      //    事件=发生在这些地点的全部事）。
+      const tlYaml = [
+        'apiVersion: yushu.timeline/v1',
+        'anchor_event: ev-r186-a',
+        'timelines:',
+        '  - id: tl-r186',
+        '    anchor_event: ev-r186-a',
+        '    calendar: common',
+        '    scale: numeric',
+        '    events: [ev-r186-a, ev-r186-b]',
+        'calendars:',
+        '  - {id: common, label: 公历, offset: 0}',
+        'events:',
+        '  - id: ev-r186-a',
+        '    title: 预演事件甲',
+        '    year: 0',
+        '    timeline: tl-r186',
+        '    participants: []',
+        '    causes: []',
+        '    effects: []',
+        '    place_ref: loc-r173-a',
+        '  - id: ev-r186-b',
+        '    title: 预演事件乙',
+        '    year: 9',
+        '    timeline: tl-r186',
+        '    participants: []',
+        '    causes: []',
+        '    effects: []',
+        '',
+      ].join('\n');
+      const currentTl = await window.yushu.doc.read('world/timeline.yaml').catch(() => null);
+      if (currentTl !== null && currentTl.hash) {
+        await window.yushu.doc.write('world/timeline.yaml', tlYaml, currentTl.hash);
+      } else {
+        await window.yushu.doc.write('world/timeline.yaml', tlYaml);
+      }
+      // 面板只在挂载时取数 ⇒ 先去别的页再回来（地图与时间线都要重取）
+      await tab('规则');
+      await tab('世界观档案');
+      await sleep(1000);
+      const regionPath = await waitFor(
+        () => document.querySelector('.map-panel .map-region[data-shape="r-r173"]') || null,
+        15000,
+      );
+      if (!regionPath) return { ok: false, note: '地图上没有 R173 测试区域（step155 的夹具被顶掉了？）' };
+      regionPath.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await sleep(500);
+      const contents = await waitFor(() => document.querySelector('.map-region-contents') || null, 8000);
+      if (!contents) return { ok: false, note: '点了区域但没有出现内容清单' };
+      const markers = [...contents.querySelectorAll('[data-rc-marker]')];
+      const anchors = [...contents.querySelectorAll('[data-rc-anchor]')];
+      const eventsBlock = contents.querySelector('[data-rc-events]');
+      const eventItems = [...contents.querySelectorAll('[data-rc-event]')];
+      const eventTitles = eventItems.map((li) => String(li.getAttribute('data-rc-event') || ''));
+      const hitOk = eventTitles.length === 1 && eventTitles[0] === '预演事件甲';
+      const missOk = !eventTitles.includes('预演事件乙');
+      const anchorOk = anchors.some((li) => String(li.textContent || '').includes('R173 测试事件'));
+      const markerOk = markers.length === 2;
+      const countText = String((eventsBlock?.querySelector('.muted') || {}).textContent || '');
+      const countOk = countText.indexOf('涉及的事件（1）') >= 0;
+      return {
+        ok: hitOk && missOk && anchorOk && markerOk && countOk,
+        note: '标注段=' + markers.length + ' 条；锚点段在=' + String(anchorOk) +
+          '；事件段=' + eventTitles.length + ' 条（命中=' + String(hitOk) + '；没落到地点的不出现=' + String(missOk) +
+          '；计数行=' + JSON.stringify(countText) + ' 对上=' + String(countOk) + '）',
+      };
+    `,
+  },
 ];
 
 /**
