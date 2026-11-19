@@ -10262,6 +10262,33 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 161,
+    title: '跨包一致性：全部合规规则包喂给引擎校验 ⇒ 结论在导出页如实说（R188）',
+    file: 'step161-spec-consistency.png',
+    body: String.raw`
+      // 这一步证 R188「跨包一致性接线」的三件事（R177 押后时的话：没有消费者就不算做完）：
+      // ① 导出页左栏出现「跨包一致性」面板（载荷由主进程现算——全部合规包一起喂给引擎）；
+      // ② 参与包数如实（当前仓库只有七猫一个规则包 ⇒ 「只有 1 个，无从打架」——不冒充校验过）；
+      // ③ 结论如实（0 冲突 ⇒ 「各包口径不打架」；有冲突会逐条点名——判据单测腿用两份内存 spec 验过）。
+      await tab('发布与导出');
+      const panel = await waitFor(() => document.querySelector('[data-spec-consistency]') || null, 15000);
+      if (!panel) return { ok: false, note: '导出页没有跨包一致性面板：' + pageText().slice(0, 140) };
+      const text = String(panel.textContent || '');
+      const packMatch = /参与校验的包：(\d+) 个/.exec(text);
+      if (!packMatch) return { ok: false, note: '面板没摆参与包数：' + text.slice(0, 160) };
+      const packCount = Number(packMatch[1]);
+      const noFight = text.indexOf('各包口径不打架') >= 0;
+      const conflictCount = panel.querySelectorAll('[data-conflict-kind]').length;
+      // 结论一致：包数 ≥2 且无冲突行 ⇒ 必须说「不打架」；有冲突行 ⇒ 逐条点名（不静默）
+      const verdictOk = conflictCount > 0 ? !noFight : packCount < 2 ? true : noFight;
+      return {
+        ok: verdictOk && packCount >= 1,
+        note: '面板在=true；参与包数=' + String(packCount) + '；冲突行=' + String(conflictCount) +
+          '；结论=' + (conflictCount > 0 ? '逐条点名' : noFight ? '口径不打架' : '（未表态）') + '（如实=' + String(verdictOk) + '）',
+      };
+    `,
+  },
 ];
 
 /**

@@ -174,6 +174,34 @@ export function ExportView() {
               装好引擎或备好 EPUBCheck jar 之后，点一次「重新核对」就会重问本机，不必重启应用。
             </p>
           </section>
+          {preview !== null && (
+            <section className="panel export-spec-consistency" data-spec-consistency="1">
+              <h3>
+                跨包一致性 <span className="muted">R178：口径登记表说了算，同一字段键跨包必须同义</span>
+              </h3>
+              {preview.specPackCount === 0 ? (
+                <p className="muted">仓库里还没有合规的平台规则包——无从校验。</p>
+              ) : (
+                <>
+                  <p className="muted">
+                    参与校验的包：{String(preview.specPackCount)} 个
+                    {preview.specPackCount === 1 ? "（只有 1 个，无从打架）" : ""}
+                  </p>
+                  {preview.specConflicts.length === 0 ? (
+                    <p className="muted">各包口径不打架。</p>
+                  ) : (
+                    <ul className="export-spec-conflicts">
+                      {preview.specConflicts.map((conflict, index) => (
+                        <li key={conflict.kind + ":" + conflict.subject + ":" + String(index)} data-conflict-kind={conflict.kind}>
+                          <span className="warn">{conflict.detail}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </section>
+          )}
 
         </aside>
 

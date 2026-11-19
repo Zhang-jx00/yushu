@@ -1401,10 +1401,29 @@ export interface ExportPreviewPayload {
    * 一项都没有就是没有——界面据此决定平台选择区是否出现，不预设任何平台。
    */
   platforms: PlatformPackSummary[];
+  /**
+   * 跨包一致性结论（R178）：**全部**合规规则包一起喂给引擎的
+   * `checkPlatformSpecConsistency`（漏一个包，这条校验就只剩半个世界）——
+   * 没有冲突就是空数组（「各包口径不打架」由界面如实说，不静默）。
+   */
+  specConflicts: PlatformSpecConflictPayload[];
+  /** 参与一致性校验的合规包数（1 = 无从打架，界面如实说） */
+  specPackCount: number;
   /** 选中的平台包核对结果；未选 / 出问题时为 null */
   platform: PlatformPreviewPayload | null;
   /** 选中了平台包但没能给出结论时的实话（找不到包、包不合规）。null = 正常 */
   platformNote: string | null;
+}
+
+/** 跨包一致性冲突（R178）：引擎 checkPlatformSpecConsistency 的行镜像（只进界面，不写盘） */
+export interface PlatformSpecConflictPayload {
+  kind: "id-collision" | "field-meaning-mismatch" | "platform-collision";
+  /** 冲突涉及的字段键或规则 id */
+  subject: string;
+  /** 涉及的包（码点序，可复现） */
+  packs: string[];
+  /** 人话结论：谁跟谁在什么上对不上 */
+  detail: string;
 }
 
 export interface ExportRunPayload {

@@ -23,6 +23,7 @@ import {
   type PlatformExportPack,
   type PlatformFormatRow,
   type Wordlist,
+  checkPlatformSpecConsistency,
 } from "@yushu/export";
 import {
   OUTLINE_PATH,
@@ -58,6 +59,8 @@ import {
   scanPlatformPacks,
   summaryOf,
   toSummary,
+  scanPlatformSpecs,
+  loadPlatformSpec,
 } from "./platform-ops.js";
 import { repoRoot } from "./paths.js";
 
@@ -273,6 +276,14 @@ export async function previewExport(
   const platformRoot = options.platformRoot ?? platformPacksRoot();
   const scanned = await scanPlatformPacks(platformRoot);
   const platforms: PlatformPackSummary[] = scanned.map(toSummary);
+  // R178：跨包一致性——**全部**合规规则包一起喂给引擎校验（漏一个包就只剩半个世界）；
+  // 坏包不进校验（它们自己在 platforms 清单里带着 parseError 露脸），结论进载荷 ⇒ 界面如实说
+  const scannedSpecs = await scanPlatformSpecs(platformRoot);
+  const specPacks = scannedSpecs
+    .filter((item) => item.spec !== null)
+    .map((item) => ({ packId: item.packId, spec: item.spec as NonNullable<typeof item.spec> }));
+  const specConflicts = checkPlatformSpecConsistency(specPacks);
+  const specPackCount = specPacks.length;
   let platform: PlatformPreviewPayload | null = null;
   let platformNote: string | null = null;
   if (options.platform !== undefined && options.platform !== "") {
@@ -312,6 +323,8 @@ export async function previewExport(
     capabilitiesNote,
     wordlistDirs: dirs,
     platforms,
+    specConflicts,
+    specPackCount,
     platform,
     platformNote,
   };
