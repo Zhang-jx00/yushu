@@ -79,3 +79,29 @@ describe("选区 → AI（R185）：生成侧只加上下文，替换在编辑�
     expect(detail, "step158 的差值对不上").toContain("= true");
   });
 });
+
+describe("选区改写的多候选（R189）：一次两个，挑着用", () => {
+  const panelSrc = readFileSync(join(ROOT, "apps", "desktop", "renderer", "src", "components", "EditorAiRewrite.tsx"), "utf8");
+
+  it("**候选数可选**（1–3；串行跑，复用主进程「独立生成」标记——T3-11 机制不另造）", () => {
+    expect(panelSrc, "面板没有候选数选择").toContain("candidateCount");
+    expect(panelSrc, "没有传 candidateIndex/Total（多候选标记没接）").toContain(
+      "candidateIndex: index, candidateTotal: total",
+    );
+  });
+
+  it("**采纳一个 ⇒ 其余作废**（位置失效即拒在多候选下兑现，不假装还能替换）", () => {
+    expect(panelSrc, "采纳后没有作废其余候选").toContain("setAdoptedId(pending.streamId)");
+    expect(panelSrc, "作废卡没有说明原因").toContain("选区已被其它候选替换");
+  });
+
+  it("**回执腿：step162 取证过**（两张卡 + 差值对账 + 第二张作废 + Esc 收起）", () => {
+    const step = report.steps.find((row) => row.step === 162);
+    expect(step, "报告里没有 step162（多候选取证）那一步").toBeTruthy();
+    expect((step as { ok: boolean }).ok, "step162 没过").toBe(true);
+    const detail = (step as { detail: string }).detail;
+    expect(detail, "step162 没取证两张候选卡").toContain("候选卡=2");
+    expect(detail, "step162 没取证差值对账").toContain("逐字对上=true");
+    expect(detail, "step162 没取证第二张作废").toContain("按钮禁用=true");
+  });
+});

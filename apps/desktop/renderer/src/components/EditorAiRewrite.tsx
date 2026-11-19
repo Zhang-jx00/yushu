@@ -56,12 +56,17 @@ export function EditorAiRewrite({
   readBody: () => string;
 }) {
   const [intent, setIntent] = useState("更紧凑一点，保留原意与语感");
+  /** R189：一次生成几个候选（1–3；采纳一个 ⇒ 其余作废——选区已被替换） */
+  const [candidateCount, setCandidateCount] = useState(1);
   const [selection, setSelection] = useState<{ from: number; to: number; text: string } | null>(null);
   const [running, setRunning] = useState(false);
-  const [pending, setPending] = useState<PendingRewrite | null>(null);
+  // R189：候选清单（一次生成 N 个，作者挑着用；采纳一个 ⇒ 其余因选区已变而作废）
+  const [pending, setPending] = useState<PendingRewrite[]>([]);
+  /** 已采纳的候选（其余卡片据此显示「选区已变，不可再用」） */
+  const [adoptedId, setAdoptedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const pendingRef = useRef<PendingRewrite | null>(null);
+  const pendingRef = useRef<PendingRewrite[]>([]);
   const offRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -99,62 +104,83 @@ export function EditorAiRewrite({
     }
     setError(null);
     setNotice(null);
-    setPending(null);
+    setPending([]);
+    setAdoptedId(null);
     setRunning(true);
-    const streamId = `rw-${Math.random().toString(36).slice(2, 10)}`;
     const beforeBody = readBody();
-    // 流式事件经总线路由（订阅仍只有项目页一处——编辑器只是注册者）
-    offRef.current?.();
-    offRef.current = onAiStream(streamId, (event: AiStreamEvent) => {
-      if (event.type === "done") {
-        setRunning(false);
-        setPending({
-          streamId,
-          from: sel.from,
-          to: sel.to,
-          beforeBody,
-          selectionText: sel.text,
-          text: event.text,
+    const total = candidateCount;
+    let failed = false;
+    // R189：串行跑 N 个候选（各自 streamId + candidateIndex/Total ⇒ 主进程注入
+    // 「独立生成」标记保证候选多样性——T3-11 的既有机制，不另造）；事件经总线路由
+    // （订阅仍只有项目页一处——编辑器只是注册者）
+    for (let index = 1; index <= total && !failed; index += 1) {
+      const streamId = `rw-${Math.random().toString(36).slice(2, 10)}`;
+      await new Promise<void>((resolve) => {
+        const off = onAiStream(streamId, (event: AiStreamEvent) => {
+          if (event.type === "done") {
+            setPending((prev) => [
+              ...prev,
+              {
+                streamId,
+                from: sel.from,
+                to: sel.to,
+                beforeBody,
+                selectionText: sel.text,
+                text: event.text,
+              },
+            ]);
+            setRunning(false);
+            off();
+            resolve();
+          } else if (event.type === "error") {
+            setRunning(false);
+            setError(`[${event.code}] ${event.message}`);
+            failed = true;
+            off();
+            resolve();
+          }
         });
-      } else if (event.type === "error") {
-        setRunning(false);
-        setError(`[${event.code}] ${event.message}`);
-      }
-    });
-    try {
-      await api().ai.start({
-        streamId,
-        volumeId: target.volumeId,
-        chapterId: target.chapterId,
-        task: "draft-first",
-        instruction: intent.trim(),
-        selectionText: sel.text,
-        targetWords: Math.max(60, sel.text.length),
+        offRef.current = off;
+        void api()
+          .ai.start({
+            streamId,
+            volumeId: target.volumeId,
+            chapterId: target.chapterId,
+            task: "draft-first",
+            instruction: intent.trim(),
+            selectionText: sel.text,
+            targetWords: Math.max(60, sel.text.length),
+            ...(total > 1 ? { candidateIndex: index, candidateTotal: total } : {}),
+          })
+          .catch((err: Error) => {
+            setRunning(false);
+            failed = true;
+            off();
+            setError(err.message);
+            resolve();
+          });
       });
-    } catch (err) {
-      setRunning(false);
-      offRef.current?.();
-      offRef.current = null;
-      setError((err as Error).message);
     }
+    setRunning(false);
   };
 
-  const adopt = () => {
-    if (pending === null) return;
+  const adopt = (pending: PendingRewrite) => {
     // ④ 位置失效即拒：正文在这期间被改过 ⇒ 旧偏移不可信 ⇒ 拒绝并说清
     if (!canReplaceSelection(pending.beforeBody, readBody())) {
       setError("正文在这期间被改过了，选区位置可能已失效——请重新选中再生成一次");
-      setPending(null);
+      setPending([]);
       return;
     }
     const ok = replaceSelection(pending.from, pending.to, pending.text);
     if (!ok) {
       setError("替换失败：选区位置已不可用，请重新选中再生成一次");
-      setPending(null);
+      setPending([]);
       return;
     }
     setNotice("已替换这一段（保存走既有自动保存路径）");
-    setPending(null);
+    // R189：**采纳一个 ⇒ 其余作废**——选区已经被这一份替换，旧偏移对其它候选
+    // 全部失效（位置失效即拒的纪律在这里兑现，不假装还能替换）
+    setAdoptedId(pending.streamId);
   };
 
   if (mode !== "source") {
@@ -177,7 +203,8 @@ export function EditorAiRewrite({
         // Esc 收起建议（登记见 shortcuts.ts）——不采纳，直接收起
         if (event.key === "Escape") {
           event.preventDefault();
-          setPending(null);
+          setPending([]);
+          setAdoptedId(null);
           setError(null);
         }
       }}
@@ -197,6 +224,14 @@ export function EditorAiRewrite({
             想怎么改
             <input value={intent} onChange={(event) => setIntent(event.target.value)} />
           </label>
+          <label className="chapter-ai-intent">
+            生成几个候选
+            <select value={candidateCount} onChange={(event) => setCandidateCount(Number(event.target.value))}>
+              <option value={1}>1 个</option>
+              <option value={2}>2 个</option>
+              <option value={3}>3 个</option>
+            </select>
+          </label>
           <button type="button" className="link" disabled={running} onClick={() => void start()}>
             {running ? "生成中…" : "让 AI 改这段"}
           </button>
@@ -204,20 +239,38 @@ export function EditorAiRewrite({
       )}
       {notice !== null && <div className="chapter-ai-notice">{notice}</div>}
       {error !== null && <div className="error-text">{error}</div>}
-      {pending !== null && (
-        <div className="chapter-ai-suggestion" data-ai-suggestion={pending.streamId}>
-          <div className="muted">AI 的改写（{pending.text.length} 字）</div>
-          <pre className="chapter-ai-suggestion-text">{pending.text}</pre>
-          <div className="chapter-ai-suggestion-actions">
-            <button type="button" className="link" onClick={adopt}>
-              替换这一段
-            </button>
-            <button type="button" className="link" onClick={() => setPending(null)}>
-              不用了
-            </button>
-          </div>
-        </div>
+      {pending.length > 1 && (
+        <div className="muted">生成 {pending.length} 个候选（挑一个替换；采纳后其余作废——选区已被替换）</div>
       )}
+      {pending.map((item, index) => {
+        const isAdopted = adoptedId === item.streamId;
+        const isStale = adoptedId !== null && !isAdopted;
+        return (
+          <div className="chapter-ai-suggestion" data-ai-suggestion={item.streamId} key={item.streamId}>
+            <div className="muted">
+              AI 的改写（{item.text.length} 字）
+              {pending.length > 1 ? ` · 候选 ${index + 1}` : ""}
+            </div>
+            <pre className="chapter-ai-suggestion-text">{item.text}</pre>
+            <div className="chapter-ai-suggestion-actions">
+              <button
+                type="button"
+                className="link"
+                disabled={isStale}
+                onClick={() => adopt(item)}
+              >
+                {isAdopted ? "已替换" : "替换这一段"}
+              </button>
+              <button type="button" className="link" onClick={() => setPending([])}>
+                不用了
+              </button>
+            </div>
+            {isStale && (
+              <div className="muted">选区已被其它候选替换——要再用这一份，重新选中后生成。</div>
+            )}
+          </div>
+        );
+      })}
     </section>
   );
 }

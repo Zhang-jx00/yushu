@@ -10289,6 +10289,84 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 162,
+    title: '选区改写的多候选：一次两个 ⇒ 挑一个替换 ⇒ 其余作废并说明（R189）',
+    file: 'step162-rewrite-candidates.png',
+    body: String.raw`
+      // 这一步证 R189「选区改写多候选」的四件事：
+      // ① 选 2 个候选 ⇒ 生成出两张建议卡（主进程注入「独立生成」标记——T3-11 既有机制）；
+      // ② 替换第一张 ⇒ **正文变了且差值逐字对上**（字数差 == 选区 − 该候选字数）；
+      // ③ **采纳一个 ⇒ 其余作废**：第二张的替换按钮禁用并说明「选区已被其它候选替换」
+      //    （位置失效即拒的纪律在多候选下兑现——不假装还能替换）；
+      // ④ Esc 收起。
+      await tab('编辑器');
+      await sleep(600);
+      const content = document.querySelector('.chapter-editor .cm-content');
+      if (!content) return { ok: false, note: '编辑器源码形态没渲染出来：' + pageText().slice(0, 140) };
+      content.focus();
+      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', ctrlKey: true, bubbles: true, cancelable: true }));
+      await sleep(120);
+      for (let i = 0; i < 3; i += 1) {
+        content.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true }));
+        await sleep(120);
+      }
+      const selInfo = await waitFor(() => {
+        const el = document.querySelector('[data-selected-chars]');
+        const n = el ? Number(el.getAttribute('data-selected-chars') || '0') : 0;
+        return n > 0 ? { n: n } : null;
+      }, 8000);
+      if (!selInfo) return { ok: false, note: '没造出选区（右栏没出现「已选 N 字」）' };
+      const countSel = document.querySelector('.chapter-ai-rewrite select');
+      if (!countSel) return { ok: false, note: '面板没有候选数选择' };
+      countSel.value = '2';
+      countSel.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(150);
+      const goBtn = await waitFor(
+        () => [...document.querySelectorAll('.chapter-ai-rewrite button')]
+          .find((b) => String(b.textContent || '').indexOf('让 AI 改这段') >= 0 && !b.disabled) || null,
+        8000,
+      );
+      if (!goBtn) return { ok: false, note: '没有「让 AI 改这段」按钮：' + pageText().slice(0, 140) };
+      goBtn.click();
+      const cards = await waitFor(() => {
+        const found = document.querySelectorAll('[data-ai-suggestion]');
+        return found.length >= 2 ? found : null;
+      }, 90000);
+      if (!cards) return { ok: false, note: '没生成出两张候选卡：' + pageText().slice(0, 160) };
+      const first = cards[0];
+      const firstText = String(first.querySelector('.chapter-ai-suggestion-text')?.textContent || '');
+      const bodyChars = () => {
+        const el = document.querySelector('[data-body-chars]');
+        return el ? Number(el.getAttribute('data-body-chars') || '0') : -1;
+      };
+      const beforeChars = bodyChars();
+      const replaceBtn = [...first.querySelectorAll('button')].find((b) => String(b.textContent || '').indexOf('替换这一段') >= 0);
+      if (!replaceBtn) return { ok: false, note: '第一张卡没有「替换这一段」按钮' };
+      replaceBtn.click();
+      await sleep(900);
+      const afterChars = bodyChars();
+      const delta = beforeChars - afterChars;
+      const exact = delta === selInfo.n - firstText.length;
+      const second = cards[1];
+      const secondBtn = [...second.querySelectorAll('button')].find((b) => String(b.textContent || '').indexOf('替换这一段') >= 0);
+      const staleDisabled = secondBtn !== undefined && secondBtn.disabled;
+      const staleNote = String(second.textContent || '').indexOf('选区已被其它候选替换') >= 0;
+      const escOk = (() => {
+        const section = document.querySelector('.chapter-ai-rewrite');
+        if (!section) return false;
+        section.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        return true;
+      })();
+      await sleep(200);
+      const cleared = document.querySelectorAll('[data-ai-suggestion]').length === 0;
+      return {
+        ok: cards.length === 2 && exact && staleDisabled && staleNote && cleared,
+        note: '候选卡=2；替换第一张后正文差值=' + String(delta) + '（== 选区−候选 ' + String(selInfo.n - firstText.length) + '，逐字对上=' + String(exact) + '）；' +
+          '第二张作废（按钮禁用=' + String(staleDisabled) + '；说明在=' + String(staleNote) + '）；Esc 收起=' + String(cleared),
+      };
+    `,
+  },
 ];
 
 /**
