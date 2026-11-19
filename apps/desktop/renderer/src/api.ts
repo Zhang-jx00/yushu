@@ -20,6 +20,7 @@ import type {
   ConsistencyReportPayload,
   PropagatePreviewPayload,
   ProposalDecidePayload,
+  ForeshadowAnnotatePayload,
   ForeshadowBoardPayload,
   TimelineViewPayload,
   TimelineViewRequestPayload,
@@ -257,6 +258,8 @@ export interface YushuApi {
   /** 伏笔台账看板（M4/T4-6，R66）：只读，判定在引擎 */
   foreshadow: {
     board: () => Promise<ForeshadowBoardPayload>;
+    /** R187：钩子标注——把某章标进 plant_chapters / payoff_chapters（或撤销）；返回重算的看板 */
+    annotate: (payload: ForeshadowAnnotatePayload) => Promise<ForeshadowBoardPayload>;
   };
   /** 时间线视图（M4/T4-7，R68）：只读；历法切换只影响显示，不写任何文件 */
   timeline: {

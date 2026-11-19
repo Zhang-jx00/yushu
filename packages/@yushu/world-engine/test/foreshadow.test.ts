@@ -7,6 +7,7 @@ import {
   parseForeshadowLedger,
   serializeForeshadowLedger,
   type ForeshadowLedger,
+  annotateForeshadowEntry,
 } from "@yushu/world-engine";
 
 /**
@@ -219,5 +220,45 @@ describe("规则 id 清单与代码同源（R75：并入全书体检后要能被
   it("清单里没有凭空调出来的 id（每条都在源码中出现）", () => {
     const source = readFileSync(new URL("../src/foreshadow.ts", import.meta.url), "utf8");
     for (const id of FORESHADOW_RULE_IDS) expect(source.includes(`"${id}"`)).toBe(true);
+  });
+});
+
+describe("钩子标注（R187）：annotateForeshadowEntry", () => {
+  const base: Parameters<typeof annotateForeshadowEntry>[0] = {
+    id: "fs-1",
+    name: "玄铁令",
+    promise: "令牌合而为一",
+    plant_chapters: ["ch-001"],
+    carrier: "道具",
+    visibility: "显写",
+    expected_payoff_chapter: "ch-030",
+    payoff_type: "实证",
+    is_red_herring: false,
+    state: "planted",
+    recheck_after: 5,
+  };
+
+  it("**埋设去重**：章号已在清单里 ⇒ 原样返回同一引用（重复点不会写两遍）", () => {
+    const out = annotateForeshadowEntry(base, "plant", "ch-001");
+    expect(out).toBe(base);
+  });
+
+  it("**埋设追加**：新章号进 plant_chapters，其余字段逐字不动", () => {
+    const out = annotateForeshadowEntry(base, "plant", "ch-002");
+    expect(out.plant_chapters).toEqual(["ch-001", "ch-002"]);
+    expect(out.expected_payoff_chapter).toBe("ch-030");
+    expect(out.state).toBe("planted");
+  });
+
+  it("**回收追加**：没有 payoff_chapters 的条目也能标（建出这个可选键）", () => {
+    const out = annotateForeshadowEntry(base, "payoff", "ch-031");
+    expect(out.payoff_chapters).toEqual(["ch-031"]);
+    expect(out.plant_chapters).toEqual(["ch-001"]);
+  });
+
+  it("**撤销只删那一章**：清单里没有 ⇒ 原样返回（幂等，不误删别人的章）", () => {
+    expect(annotateForeshadowEntry(base, "plant", "ch-999", true)).toBe(base);
+    const out = annotateForeshadowEntry(base, "plant", "ch-001", true);
+    expect(out.plant_chapters).toEqual([]);
   });
 });

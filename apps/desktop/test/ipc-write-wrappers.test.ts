@@ -30,6 +30,7 @@ const WRITE_CHANNELS = [
   "outlineCreateChapter",
   "chapterWrite",
   "aiAdopt",
+  "foreshadowAnnotate",
   "aiSaveConfig",
   "aiSaveKey",
   "aiClearKey",

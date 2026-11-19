@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import {
+  annotateForeshadowEntry,
   buildForeshadowBoard,
   parseForeshadowLedger,
+  serializeForeshadowLedger,
   FORESHADOW_PATH,
   type ConsistencySpan,
 } from "@yushu/world-engine";
-import type { ForeshadowBoardPayload, SummaryRow } from "../shared/ipc.js";
+import type { ForeshadowAnnotatePayload, ForeshadowBoardPayload, SummaryRow } from "../shared/ipc.js";
 import { readOutlineSafe } from "./doc-readers.js";
+import { YushuError } from "@yushu/core";
 import type { ProjectGateway } from "./file-gateway.js";
 import { locateLedgerEntrySpan } from "./ledger-spans.js";
 
@@ -160,4 +163,64 @@ export async function foreshadowReportFindings(gateway: ProjectGateway): Promise
       ...(span ? { span } : {}),
     };
   });
+}
+
+/**
+ * **钩子标注的写入口**（R187）：把某章标进一条伏笔的 `plant_chapters`（埋设）或
+ * `payoff_chapters`（回收）——或撤销。这是 `world/foreshadow.yaml` 的**专用窄通道**
+ * （map-ops 家族先例：世界观的 YAML 结构化写走专用通道，不走通用 docWrite）。
+ *
+ * 三条红线：
+ * ① **同源不许两本账**：读与写都只走真源（gateway.readDoc / writeDoc），
+ *    判定永远由 `buildForeshadowBoard` 现算（R65 唯一出处）——面板与台账页
+ *    拿的是**同一个返回值** ⇒「标注后台账同步变」由数据流保证，不靠两边各刷一遍；
+ * ② **写歪当场拒**：找不到那条伏笔 ⇒ 点名拒绝（不静默吞掉）；
+ *    章号合法性不在这一步拦——写歪了下一次看板当场报 `fs-dangling-chapter`；
+ * ③ **CAS 拒覆盖**：baseHash 冲突 ⇒ writeDoc 拒（并发编辑不会被无声盖掉）。
+ *
+ * 返回**重算的看板**（调用方直接拿它刷新读数）。
+ */
+export async function annotateForeshadow(
+  gateway: ProjectGateway,
+  payload: ForeshadowAnnotatePayload,
+): Promise<ForeshadowBoardPayload> {
+  const chapters = await chapterOrder(gateway);
+  const snapshot = await gateway.readDoc(FORESHADOW_PATH).catch(() => null);
+  if (snapshot === null) {
+    throw new YushuError("E_NO_LEDGER", "项目还没有伏笔台账：先登记一条（world/foreshadow.yaml）");
+  }
+  const ledger = parseForeshadowLedger(snapshot.content);
+  const entry = ledger.entries.find((item) => item.id === payload.entryId);
+  if (entry === undefined) {
+    throw new YushuError("E_INVALID_INPUT", `找不到这条伏笔：${payload.entryId}`);
+  }
+  const next = annotateForeshadowEntry(entry, payload.kind, payload.chapterId, payload.remove === true);
+  const nextLedger = {
+    ...ledger,
+    entries: ledger.entries.map((item) => (item.id === entry.id ? next : item)),
+  };
+  await gateway.writeDoc(FORESHADOW_PATH, serializeForeshadowLedger(nextLedger), snapshot.hash);
+  const ledger2 = parseForeshadowLedger(serializeForeshadowLedger(nextLedger));
+  // 与既有 foreshadowBoard 同口径：summary/currentChapter 手工组装（引擎只给判定）；
+  // 不传 currentChapter ⇒ 引擎取章清单末章（R187 面板上明示这条口径）
+  const currentChapter: string | null = chapters.length > 0 ? (chapters[chapters.length - 1] ?? null) : null;
+  const board = buildForeshadowBoard(ledger2, { chapters });
+  return {
+    path: FORESHADOW_PATH,
+    exists: true,
+    note: "",
+    summary: [
+      { label: "未回收", value: `${String(board.stats.open ?? 0)} 条` },
+      { label: "已回收", value: `${String(board.stats.paid ?? 0)} 条` },
+      { label: "已放弃", value: `${String(board.stats.abandoned ?? 0)} 条` },
+      { label: "红鲱鱼", value: `${String(board.stats.redHerring ?? 0)} 条` },
+      { label: "逾期", value: `${String(board.stats.overdue ?? 0)} 条` },
+      { label: "当前章", value: currentChapter ?? "（无章）" },
+    ],
+    chapterTotal: chapters.length,
+    currentChapter,
+    rows: board.rows,
+    findings: board.findings,
+    stats: board.stats,
+  };
 }

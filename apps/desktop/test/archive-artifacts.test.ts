@@ -39,6 +39,8 @@ function makeForeshadow(overrides: Partial<ForeshadowBoardPayload> = {}): Foresh
         isRedHerring: false,
         overdueBy: 3,
         sinceAction: 2,
+        plantChapters: ["ch-001"],
+        payoffChapters: [],
       },
       {
         id: "fs-b",
@@ -48,6 +50,8 @@ function makeForeshadow(overrides: Partial<ForeshadowBoardPayload> = {}): Foresh
         isRedHerring: true,
         overdueBy: null,
         sinceAction: null,
+        plantChapters: [],
+        payoffChapters: [],
       },
     ],
     findings: [],
@@ -262,6 +266,8 @@ describe("世界观档案页右栏的产物摘要（R162）：与中栏那张表
       isRedHerring: false,
       overdueBy: null,
       sinceAction: null,
+      plantChapters: [],
+      payoffChapters: [],
     }));
     const block = blockOf({ foreshadow: makeForeshadow({ rows: many, stats: { total: many.length, open: many.length, closed: 0 } }), satisfaction: null, chronicle: null }, "foreshadow");
     expect(block?.counts.listed).toBe(ARCHIVE_ARTIFACT_MAX_ITEMS + 5);

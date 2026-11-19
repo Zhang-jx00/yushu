@@ -202,6 +202,10 @@ export interface ForeshadowRow {
   overdueBy: number | null;
   /** 距最近一次伏笔动作（埋设或回收）几章 */
   sinceAction: number | null;
+  /** R187：埋设章清单（钩子标注面板据此显示「已埋于本章」——与台账同一份现算） */
+  plantChapters: string[];
+  /** R187：回收章清单（可选键缺省 = 空清单） */
+  payoffChapters: string[];
 }
 
 export interface ForeshadowBoardOptions {
@@ -338,6 +342,10 @@ export function buildForeshadowBoard(
       isRedHerring: entry.is_red_herring,
       overdueBy: overdueBy !== null && overdueBy > 0 ? overdueBy : null,
       sinceAction,
+      // R187：章清单随行带走（钩子标注面板要知道「已埋/已回收于哪些章」——
+      // 与台账同一份现算结果 ⇒ 面板与台账页必然对得上）
+      plantChapters: entry.plant_chapters,
+      payoffChapters: entry.payoff_chapters ?? [],
     });
   }
 
@@ -378,4 +386,34 @@ export function buildForeshadowBoard(
     overdue: rows.filter((row) => row.overdueBy !== null && row.overdueBy > 0).length,
   };
   return { rows, findings, stats };
+}
+
+/**
+ * **钩子标注的一条纯判定**（R187）：给一条台账条目，把某章标进
+ * `plant_chapters`（埋设）或 `payoff_chapters`（回收）——或撤销（`remove`）。
+ *
+ * 三条口径：
+ * ① **去重**：章号已在清单里 ⇒ 原样返回同一份条目（重复点「埋设」不会写两遍）；
+ * ② **撤销只删那一章**：清单里没有 ⇒ 原样返回（幂等——重试不会把别人的章删掉）；
+ * ③ **不猜口径**：章 id 是不是合法清单成员由主进程在写盘前校验（`fs-dangling-chapter`
+ *    的章清单比对就在 `buildForeshadowBoard` 里，写歪了下一次看板当场点名）——
+ *    这里只做清单算术。
+ *
+ * 返回**新条目**（不可变；没变化返回**同一引用** ⇒ 调用方可据此跳过写盘）。
+ */
+export function annotateForeshadowEntry(
+  entry: Foreshadow,
+  kind: "plant" | "payoff",
+  chapterId: string,
+  remove = false,
+): Foreshadow {
+  const list = kind === "plant" ? entry.plant_chapters : (entry.payoff_chapters ?? []);
+  // 三种结局里**两种原样返回同一引用**：已标过（去重）与撤销时本来就没有（幂等）——
+  // filter 永远产生新数组 ⇒ 不先判 includes 就会破坏「没变化返回同一引用」的承诺。
+  const has = list.includes(chapterId);
+  const next = remove
+    ? (has ? list.filter((item) => item !== chapterId) : list)
+    : (has ? list : [...list, chapterId]);
+  if (next === list) return entry;
+  return { ...entry, ...(kind === "plant" ? { plant_chapters: next } : { payoff_chapters: next }) };
 }

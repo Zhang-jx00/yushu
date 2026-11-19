@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld("yushu", {
   },
   foreshadow: {
     board: () => invoke("foreshadow:board"),
+    annotate: (payload) => invoke("foreshadow:annotate", payload),
   },
   timeline: {
     view: (payload) => invoke("timeline:view", payload),

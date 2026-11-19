@@ -66,6 +66,8 @@ export const CHANNELS = {
   proposalApply: "proposal:apply",
   /** 伏笔台账看板（M4/T4-6，R66）：**只读**——判定层纯函数，桌面端只负责读真源并画表 */
   foreshadowBoard: "foreshadow:board",
+  /** R187：钩子标注（专用窄通道——map-ops 家族先例：世界观 YAML 结构化写不走通用 docWrite） */
+  foreshadowAnnotate: "foreshadow:annotate",
   /** 时间线视图与冲突（M4/T4-7，R68）：**只读**；历法切换只影响显示，不写任何文件 */
   timelineView: "timeline:view",
   /** 关系图谱（M4/T4-9，R69）：**只读真源**（entities/refs 直算，不碰 SQLite） */
@@ -2947,6 +2949,22 @@ export interface ForeshadowRowPayload {
   /** 距预期回收几章；无法定位是 null，不是 0 */
   overdueBy: number | null;
   sinceAction: number | null;
+  /** R187：埋设章清单（钩子标注面板据此显示「已埋于本章」） */
+  plantChapters: string[];
+  /** R187：回收章清单（可选键缺省 = 空） */
+  payoffChapters: string[];
+}
+
+/** 钩子标注（R187）：把某章标进一条伏笔的 plant_chapters / payoff_chapters（或撤销） */
+export interface ForeshadowAnnotatePayload {
+  /** 台账条目 id（fs-*） */
+  entryId: string;
+  /** 埋设 = plant_chapters；回收 = payoff_chapters */
+  kind: "plant" | "payoff";
+  /** 章号（与台账章清单同一口径：已建草稿用 chapter_id） */
+  chapterId: string;
+  /** true = 撤销（从清单里去掉那一章） */
+  remove?: boolean;
 }
 
 export interface ForeshadowFindingPayload {

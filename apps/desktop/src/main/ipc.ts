@@ -27,6 +27,7 @@ import {
   type ConsistencyCheckPayload,
   type PropagatePreviewPayload,
   type ProposalDecidePayload,
+  type ForeshadowAnnotatePayload,
   type ForeshadowBoardPayload,
   type TimelineViewPayload,
   type TimelineViewRequestPayload,
@@ -194,7 +195,7 @@ import { readCostPanel } from "./cost-ops.js";
 import { dryRunRule, readRuleCatalog } from "./rule-ops.js";
 import { markConsistencyStale, runConsistencyCheck } from "./consistency-ops.js";
 import { applyProposal, decideProposal, listProposals, previewPropagation, proposalPathOf } from "./propagation-ops.js";
-import { foreshadowBoard } from "./foreshadow-ops.js";
+import { annotateForeshadow, foreshadowBoard } from "./foreshadow-ops.js";
 import { timelineView } from "./timeline-ops.js";
 import { relationGraphView } from "./graph-ops.js";
 import { addMapHole, batchSetMarkerLayer, createMapAnchor, createMapMarker, createMapShape, mergeMapRegions, removeMapHole, setAnchorPosition, setMapBounds, setMarkerPosition, splitMapRegion, uploadMapBase, worldMapBase, worldMapView } from "./map-ops.js";
@@ -639,6 +640,10 @@ export function registerIpcHandlers(): void {
   // 伏笔台账看板（T4-6）：判定在引擎，这里只读真源算表 ⇒ 走 wrap（不改真源，不该刷索引、不该置脏结论）
   ipcMain.handle(CHANNELS.foreshadowBoard, () =>
     wrap<ForeshadowBoardPayload>(() => foreshadowBoard(requireGateway())),
+  );
+  ipcMain.handle(CHANNELS.foreshadowAnnotate, (_event, payload: ForeshadowAnnotatePayload) =>
+    // R187：写真源（world/foreshadow.yaml）⇒ 必须走 wrapWrite（写登记表对账）
+    wrapWrite<ForeshadowBoardPayload>(() => annotateForeshadow(requireGateway(), payload)),
   );
   // 时间线视图（T4-7）：历法切换只是显示参数，不产生任何写操作 ⇒ 同样走 wrap
   ipcMain.handle(CHANNELS.timelineView, (_event, payload: TimelineViewRequestPayload) =>

@@ -10188,6 +10188,80 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 160,
+    title: '钩子标注：编辑器里把本章标进伏笔的埋设章清单 ⇒ 盘上真源变了，台账同源（R187）',
+    file: 'step160-foreshadow-annotate.png',
+    body: String.raw`
+      // 这一步证 R187「钩子标注」的四件事：
+      // ① 编辑器右栏出现「钩子标注」面板（台账清单来自 board 载荷——与台账页同一份）；
+      // ② 点「埋设于本章」⇒ **盘上真源变了**（world/foreshadow.yaml 的 plant_chapters
+      //    含当前章 id——读盘核对，不信界面回执）；
+      // ③ 面板徽标「已埋于本章」出现（返回值就是重算的看板 ⇒ 同源由数据流保证）；
+      // ④ 点「撤销埋设标注」⇒ 盘上回原样（幂等可逆——写错了能改回去）。
+      const fixture = [
+        'apiVersion: yushu.foreshadow/v1',
+        'entries:',
+        '  - id: fs-r187',
+        '    name: "预演钩子"',
+        '    promise: "令牌合而为一"',
+        '    carrier: 道具',
+        '    visibility: 显写',
+        '    state: planted',
+        '    plant_chapters: ["ch-0001"]',
+        '    expected_payoff_chapter: ch-0009',
+        '    payoff_chapters: []',
+        '    payoff_type: "实证"',
+        '    is_red_herring: false',
+        '    recheck_after: 5',
+        '',
+      ].join('\n');
+      const current = await window.yushu.doc.read('world/foreshadow.yaml').catch(() => null);
+      if (current !== null && current.hash) {
+        await window.yushu.doc.write('world/foreshadow.yaml', fixture, current.hash);
+      } else {
+        await window.yushu.doc.write('world/foreshadow.yaml', fixture);
+      }
+      await tab('编辑器');
+      await sleep(800);
+      const panel = await waitFor(() => document.querySelector('[data-foreshadow-annotate]') || null, 12000);
+      if (!panel) return { ok: false, note: '编辑器右栏没有钩子标注面板：' + pageText().slice(0, 140) };
+      const chapterId = String(panel.getAttribute('data-annotate-chapter') || '');
+      if (chapterId === '') return { ok: false, note: '面板没摆当前章 id（对账锚点缺失）' };
+      const row = panel.querySelector('[data-annotate-row="fs-r187"]');
+      if (!row) return { ok: false, note: '面板里没有预演钩子那条：' + pageText().slice(0, 160) };
+      const plantBtn = [...row.querySelectorAll('button')].find((b) => String(b.textContent || '').indexOf('埋设于本章') >= 0);
+      if (!plantBtn) return { ok: false, note: '没有「埋设于本章」按钮（可能已标过）' };
+      // ② 埋设 ⇒ 盘上核对
+      plantBtn.click();
+      await sleep(900);
+      const disk1 = await window.yushu.doc.read('world/foreshadow.yaml');
+      // JSON.stringify 不带空格 ⇒ 断言串也别带（v470 首跑栽在这）
+      const planted = String(disk1.content).includes('plant_chapters: ["ch-0001","' + chapterId + '"]');
+      if (!planted) {
+        const errText = String(document.querySelector('.foreshadow-annotate .error-text')?.textContent || '');
+        return { ok: false, note: '盘上 plant_chapters 没含当前章 ' + chapterId + '（面板错误：' + errText.slice(0, 80) + '）：' + String(disk1.content).slice(0, 160) };
+      }
+      // ③ 徽标（返回值=重算看板 ⇒ 同源由数据流保证）
+      const badgeOk = await waitFor(() => {
+        const row2 = document.querySelector('[data-annotate-row="fs-r187"]');
+        return row2 && String(row2.textContent || '').includes('已埋于本章') ? true : null;
+      }, 6000);
+      // ④ 撤销 ⇒ 盘上回原样
+      const undoBtn = [...(document.querySelector('[data-annotate-row="fs-r187"]')?.querySelectorAll('button') ?? [])]
+        .find((b) => String(b.textContent || '').indexOf('撤销埋设标注') >= 0);
+      if (!undoBtn) return { ok: false, note: '没有「撤销埋设标注」按钮（徽标都没出？徽标=' + String(badgeOk !== null) + '）' };
+      undoBtn.click();
+      await sleep(900);
+      const disk2 = await window.yushu.doc.read('world/foreshadow.yaml');
+      const restored = String(disk2.content).includes('plant_chapters: ["ch-0001"]') && !String(disk2.content).includes(chapterId);
+      return {
+        ok: planted && badgeOk !== null && restored,
+        note: '面板在=true（当前章=' + chapterId + '）；盘上 plant_chapters 含本章=true；徽标「已埋于本章」=' +
+          String(badgeOk !== null) + '；撤销后盘上回原样=' + String(restored),
+      };
+    `,
+  },
 ];
 
 /**

@@ -9,6 +9,7 @@ import StarterKit from "@tiptap/starter-kit";
 import type { AiDraftTarget, ChapterWriteResult } from "../../../src/shared/ipc";
 import { api } from "../api";
 import { EditorAiRewrite } from "../components/EditorAiRewrite";
+import { ForeshadowAnnotate } from "../components/ForeshadowAnnotate";
 import { findUnsupportedSyntax, htmlToMd, mdToHtml } from "../markdown-bridge";
 import { merge3 } from "../chapter-merge";
 import { collectMentionedEntities, type EntityIndexEntry, LARGE_DOC_MENTION_CHARS } from "../entity-mentions";
@@ -1420,6 +1421,14 @@ export function ChapterEditorView({
           readSelection={readSelection}
           replaceSelection={replaceSelection}
           readBody={currentMarkdown}
+        />
+        {/* R187：钩子标注——把本章标进伏笔的埋设/回收章清单（真源同源；台账口径=章清单末章） */}
+        <ForeshadowAnnotate
+          currentChapterId={
+            selectedPath === null
+              ? null
+              : (selectedPath.split("/").pop()?.replace(/\.md$/, "") ?? null)
+          }
         />
       </aside>
       {focusMode && (
