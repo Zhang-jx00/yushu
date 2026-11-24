@@ -68,10 +68,10 @@ pnpm --filter @yushu/desktop dev      # Electron + Vite 热更新
 ## 怎么验（四连门禁，缺一项不算完成）
 
 ```bash
-pnpm test                # 单元/集成测试：2321 例 / 190 文件
+pnpm test                # 单元/集成测试：2334 例 / 191 文件
 pnpm typecheck           # 9 个包 + 2 个应用零错误（内含全量构建）
 pnpm --filter @yushu/desktop e2e     # 离线 mock LLM 的端到端全链路，逐条具名断言
-pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 140 步 UI 预演（最近一次 v476）+ 逐步截图取证
+pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 140 步 UI 预演（最近一次 v477）+ 逐步截图取证
 # 前端改动的判据：docs/10-前端设计契约.md（令牌 / 中文排版 / 动效 / 键盘可达），由 ui-contract.test.ts 钉住
 # UI 重构的调研与规范：docs/11-UI重构调研与设计规范.md（189 个来源 + 五批实施计划）
 ```
@@ -81,9 +81,10 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"   # 
 不翻退出码——同一份构建连跑两遍的实测差可达一倍（`cold_to_editable` 3160ms vs 1434ms），
 拿个位数毫秒的 ±20% 当结论只会造出一台假红机器。
 
-> **关于 CI**：本仓库**目前没有 CI 流水线**。上述四项每轮在本地实跑，数字与结论写进 `docs/06`。
-> M4 的退出条件里包含「规则回归集进 CI」，所以这条空缺是**已知未办**、不是被忽略——
-> 我们不用徽章冒充验证。
+> **关于 CI**：`.github/workflows/ci.yml` 已就位四岗——lint（`pnpm typecheck`）/ test（`pnpm test`）/
+> dco-check（限 PR，`scripts/check-dco.mjs`）/ changelog-check（`scripts/check-changelog.mjs`）。
+> e2e 与 UI 预演需要 Electron 图形环境，仍每轮在本地实跑，数字与结论写进 `docs/06`。
+> 本仓无 eslint，风格/结构规则以可红判据落在 test 岗。我们不用徽章冒充验证。
 
 ## 仓库结构
 

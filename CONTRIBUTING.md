@@ -35,6 +35,7 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"
 
 - 一轮改动按**层次切条**：引擎包 → 桌面端（主进程 / preload / 渲染层）→ 文档与证据。没有改动的层次就不产生空提交。
 - 每条提交只做一件事，信息里写清「为什么」而不只是「改了什么」。
+- **DCO 签署**：每条提交信息须含 `Signed-off-by: 姓名 <邮箱>`（用 `git commit -s` 自动追加），表示你有权提交该改动（Developer Certificate of Origin）。CI 的 dco-check 岗会在 PR 上逐条核对（历史提交早于本约定，不追溯）。
 - 不 `--no-verify`，不强推，不把 `.yushu/`、`exports/`、`dist/`、`node_modules/` 提交进版本库。
 - 预演截图落在 `docs/assets/m1-preview/`，随同轮文档一起提交；截图要**看内容**再提交，别只确认文件存在。
 
@@ -61,9 +62,11 @@ pnpm --filter @yushu/desktop exec electron . "--ui-walkthrough=<空目录>"
 
 ## 这个仓库目前没有的东西（别假装有的）
 
-没有 CI 流水线、没有 lint/format 配置（所以风格靠上面的约定与 code review）、没有打包配置与代码签名、
+没有 eslint/prettier 配置（风格靠上面的约定与 code review，以及单测里的可红判据）、没有打包配置与代码签名、
 包级 `test` 脚本（测试从根 `pnpm test` 跑，覆盖全部 9 包 + 2 应用）。
-这些是 `docs/04` 里登记的缺口，不是「已完成后没写文档」。
+CI 已就位（`.github/workflows/ci.yml`：lint=typecheck / test / dco-check / changelog-check），
+但 e2e 与 UI 预演仍需本地 Electron 图形环境，不在 CI 里跑。
+这些缺口登记在 `docs/04`，不是「已完成后没写文档」。
 
 ## 提问与讨论
 

@@ -11,6 +11,7 @@
 - **R180 性能预算**：**B1 账实不符修复**——R169 给 module_exec/fcp 设了预算却漏进 checks（只归档不翻退出码），本轮补齐（null 算未达标）；**B2 操作级画像**——opsScript 经渲染层 api() 掐表四操作（手动全书体检 / 稿件总览清单 / txt 导出 / 保存后轻校验）；consistency_manual≤1600 / library_list≤640 两轮观察后按 ×1.6/×2.0 进门禁，export/post-save 只归档；同步锁扩 2 例（checks 覆盖 + 归档回执）；**perf 门禁 pass_13_of_14**——hot_to_editable 897>800 系 R169 以来包体增长之既有回退（R180 未触及该路径），如实暴露另立专项，不改预算装绿；四门禁 2316/2316（189 文件）/ TC=0 / E2E=0 / v475 140/140
 
 ### 工程卫生线程（跨阶段，不属于 M3）：
+- **R192 开源合规收尾**：补齐 docs/04 §11.6「宣布开源门槛」剩余三条——**CI 四岗**（`.github/workflows/ci.yml`：lint=`pnpm typecheck` / test=`pnpm test` / dco-check 限 PR / changelog-check）+ 零依赖校验脚本 `scripts/check-dco.mjs` / `check-changelog.mjs`（锁 `oss-ci.test.ts` 13 例）；**M1 离线外部复现**（e2e + --ui-trial）；**数据主权删库重建演示** `scripts/rebuild-demo.mjs` ok=true（回执 docs/assets/oss/rebuild-demo-r192.json）；补 CONTRIBUTING DCO 约定、更正 README/SECURITY/docs/08「无 CI」过期声明；四门禁 2334/2334（191 文件）/ TC=0 / E2E=0 / v477 140/140
 - **R190 清洁与结构整理**：清空 `.tmp/` 草稿残留 **705 个文件（11.8MB）**（清单存档）+ `.mimosa/` 进 gitignore；死代码审计**零死代码**（零引用导出棘轮实数 10，旧注释 12 订正）；治理锁加**测试文件数实况锁**——台账「182 文件」与盘上实况 189 长期不符（R184 实跑已 184），一致锁只锁多处一致不锁实况 ⇒ 错了十几轮仍绿，如今自然红 + 双向变异红；六文件当前基线漂移修正（交接 §3 旧命令 / §4 键盘债 0 / 140 步 / 278 例 / §6 26 例 / §10 平台包 2 / §2.5-A 15 轮，docs/08 ok=140 / perf R169，docs/09 R104/R83 旧句，docs/14 R189 行），历史快照不动；四门禁 2314/2314（189 文件）/ TC=0 / E2E=0 / v474 140/140
 
 ### UI 重构线程（跨阶段，不属于 M3）：
