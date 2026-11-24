@@ -1,0 +1,24 @@
+{
+  "demo": "cli rebuild 删索引重建（数据主权零丢失）",
+  "project": "D:\\Github项目\\novel\\.tmp\\r192-rebuild-demo-project",
+  "cards": 3,
+  "chapters": 1,
+  "rebuild1": {
+    "files": 4,
+    "chunks": 4,
+    "entities": 3,
+    "skipped": 0
+  },
+  "indexDbDeleted": true,
+  "rebuild2": {
+    "files": 4,
+    "chunks": 4,
+    "entities": 3
+  },
+  "entitySearchIdentical": true,
+  "fullTextSearchIdentical": true,
+  "statsIdentical": true,
+  "entityHit": 1,
+  "fullTextHit": 1,
+  "ok": true
+}

@@ -1,0 +1,74 @@
+# 御书 CI（docs/04 §11.6 第三条门槛：lint / test / dco-check / changelog-check）。
+# 仓库维护配置，不进产品运行时。四道门禁里的 e2e 与 UI 预演需要 Electron 图形环境，
+# 仍在本地跑（见 README「测试」与 CONTRIBUTING「四连门禁」）；本流水线只跑可在无头环境复现的部分。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # lint 岗：严格类型检查（11 个包/应用，src 与 test 两面）。
+  # 本仓无 eslint——风格/结构/许可/行尾/排序等规则以「可红判据」形式实现在单测里（test 岗），
+  # 见 CONTRIBUTING「代码风格与架构约束」。lint 岗守的是类型这一层静态分析。
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  # test 岗：全部单元/集成测试（含各条源码扫描锁）。
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  # dco-check 岗：只在 PR 上跑——校验区间内每个提交都有 Signed-off-by。
+  # 历史提交早于 DCO 约定，不在 push(main) 上追溯拦截。
+  dco-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-dco.mjs --range "origin/${{ github.base_ref }}..HEAD"
+
+  # changelog-check 岗：CHANGELOG 版本结构（Unreleased 段 / semver 头 / ISO 日期 / 不重复）。
+  changelog-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-changelog.mjs CHANGELOG.md
