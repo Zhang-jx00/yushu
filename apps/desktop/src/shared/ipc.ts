@@ -480,6 +480,12 @@ export interface OutlineTemplateSummary {
   error?: string;
 }
 
+/** R191：outline:read 的读法参数（省略 = 既有的「状态 + 模板清单」全量读） */
+export interface OutlineReadPayload {
+  /** 只要大纲状态时置 false：跳过派系包模板扫描（首章预热只关心章纲，不等模板） */
+  includeTemplates?: boolean;
+}
+
 export interface OutlineState {
   path: string;
   exists: boolean;

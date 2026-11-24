@@ -214,6 +214,23 @@ describe("三级大纲（T1-10 / T1-11 / T1-12）", () => {
     expect(template?.defaultChaptersPerVolume).toBe(10);
   });
 
+  it("R191：includeTemplates=false ⇒ 不扫模板（模板清单为空），章纲照样可读", async () => {
+    const gateway = await newProjectGateway();
+    const fresh = await readOutlineState(gateway, { includeTemplates: false });
+    expect(fresh.templates).toEqual([]);
+    expect(fresh.exists).toBe(false);
+    await generateOutline(gateway, {
+      templateId: "xuanhuan-xitong/three-act-upgrade",
+      title: "天启界",
+      volumeCount: 2,
+      chaptersPerVolume: 1,
+    });
+    const state = await readOutlineState(gateway, { includeTemplates: false });
+    expect(state.templates).toEqual([]);
+    expect(state.exists).toBe(true);
+    expect(state.doc?.volumes).toHaveLength(2);
+  });
+
   it("一键生成骨架落盘 outline.yaml；覆盖生成必须携带 baseHash", async () => {
     const gateway = await newProjectGateway();
     const generated = await generateOutline(gateway, {

@@ -46,7 +46,7 @@ contextBridge.exposeInMainWorld("yushu", {
     rename: (from, to) => invoke("doc:rename", { from, to }),
   },
   outline: {
-    read: () => invoke("outline:read"),
+    read: (payload) => invoke("outline:read", payload),
     generate: (payload) => invoke("outline:generate", payload),
     write: (payload) => invoke("outline:write", payload),
     createChapter: (payload) => invoke("outline:createChapter", payload),

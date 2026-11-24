@@ -145,6 +145,7 @@ import type {
   OutlineCreateChapterPayload,
   OutlineGeneratePayload,
   OutlineMutateResult,
+  OutlineReadPayload,
   OutlineState,
   OutlineWritePayload,
   PackCatalog,
@@ -202,7 +203,7 @@ export interface YushuApi {
     rename: (from: string, to: string) => Promise<void>;
   };
   outline: {
-    read: () => Promise<OutlineState>;
+    read: (payload?: OutlineReadPayload) => Promise<OutlineState>;
     generate: (payload: OutlineGeneratePayload) => Promise<OutlineMutateResult>;
     write: (payload: OutlineWritePayload) => Promise<OutlineMutateResult>;
     createChapter: (payload: OutlineCreateChapterPayload) => Promise<OutlineChapterDraftResult>;

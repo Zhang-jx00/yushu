@@ -24,6 +24,7 @@ import { takePendingRecovery } from "../recovery-inbox";
 import { ProofreadPanel } from "./ProofreadPanel";
 import { cardTypeLabel, layerLabel } from "../card-labels";
 import { summarizeCardContext, type CardContextSummary } from "../components/card-context";
+import { firstDraftPath } from "../first-draft";
 
 /**
  * 浮层进场的**兜底延迟**（R116）：窗口被遮挡 / 最小化时浏览器会暂停 `requestAnimationFrame`，
@@ -463,6 +464,28 @@ export function ChapterEditorView({
     void refreshTargets();
     void refreshEntities();
   }, [refreshTargets, refreshEntities]);
+
+  /**
+   * R191：首章预热——章纲（1 个文件）里先定首章路径、立刻读，整本逐章清单（ai.drafts，335 章逐章读盘）并行加载；
+   * 清单到达后 refreshTargets 按既有规则校正（prev 在清单里就保留，不在才换 list[0]）。
+   * 首章口径 = 章纲里第一个已回填 chapter_id 的章（与 listDraftTargets 遍历同一份章纲的顺序一致）。
+   */
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const state = await api().outline.read({ includeTemplates: false });
+        if (!alive || !state.doc) return;
+        const path = firstDraftPath(state.doc);
+        if (path) setSelectedPath((prev) => prev ?? path);
+      } catch {
+        // 章纲读不到就等比清单兜底：这里不报错、也不改任何状态
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 源码形态：CodeMirror 实例（一次创建；实体提及装饰走 Compartment，便于实体列表变化后重配）
   useEffect(() => {

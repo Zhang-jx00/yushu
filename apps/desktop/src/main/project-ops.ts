@@ -57,6 +57,7 @@ import type {
   OutlineDocPayload,
   OutlineGeneratePayload,
   OutlineMutateResult,
+  OutlineReadPayload,
   OutlineState,
   OutlineTemplateSummary,
   OutlineWritePayload,
@@ -393,8 +394,11 @@ function toOutlinePayload(outline: Outline): OutlineDocPayload {
 }
 
 /** 读取大纲状态：outline.yaml（不存在时 exists=false）+ 可用模板清单 */
-export async function readOutlineState(gateway: ProjectGateway): Promise<OutlineState> {
-  const templates = await scanOutlineTemplates();
+export async function readOutlineState(
+  gateway: ProjectGateway,
+  payload?: OutlineReadPayload,
+): Promise<OutlineState> {
+  const templates = payload?.includeTemplates === false ? [] : await scanOutlineTemplates();
   const snap = await gateway.readDoc(OUTLINE_PATH).catch(() => null);
   if (!snap) return { path: OUTLINE_PATH, exists: false, templates };
   const outline = parseOutline(snap.content);

@@ -147,6 +147,7 @@ type ImportPlanResultPayload,
   type OutlineCreateChapterPayload,
   type OutlineGeneratePayload,
   type OutlineMutateResult,
+  type OutlineReadPayload,
   type OutlineState,
   type OutlineWritePayload,
   type PackCatalog,
@@ -483,8 +484,8 @@ export function registerIpcHandlers(): void {
     }),
   );
 
-  ipcMain.handle(CHANNELS.outlineRead, () =>
-    wrap<OutlineState>(() => readOutlineState(requireGateway())),
+  ipcMain.handle(CHANNELS.outlineRead, (_event, payload?: OutlineReadPayload) =>
+    wrap<OutlineState>(() => readOutlineState(requireGateway(), payload)),
   );
 
   ipcMain.handle(CHANNELS.outlineGenerate, (_event, payload: OutlineGeneratePayload) =>
