@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -233,6 +235,53 @@ describe("反漂移：账本里已动过的里程碑，对外文档不许写「�
     expect(a && b && c && e, "四处基线有一处解析不出来（漂移锁自己坏了？）").toBeTruthy();
     const seen = [`${a?.[1]}/${a?.[2]}`, `${b?.[1]}/${b?.[2]}`, `${c?.[1]}/${c?.[2]}`, `${e?.[1]}/${e?.[2]}`];
     expect(new Set(seen).size, `台账基线不一致：${seen.join(" vs ")}`).toBe(1);
+  });
+
+  it("台账写的测试文件数必须等于盘上实况（R190：一致之外再锁实况）", () => {
+    /**
+     * R119 那条漂移锁只查「四处逐字一致」——**四处一起写错照样绿**。
+     * 实撞（R190 清洁轮审计）：台账从 R184 起写「182 文件」，而盘上 R184 实跑已是 184 文件、
+     * R189 收口实跑是 189 文件（.tmp 旧日志与 vitest 实况为证）⇒ 一致锁全程绿，
+     * 读者拿到的文件数一直是假的。这条锁把「文档声称」钉到「盘上实况」：
+     * 数法与 vitest.config.ts 的 include 同口径（packages/ 与 apps/ 下 test/ 目录里的 *.test.ts，
+     * 跳过 node_modules/dist/out）。**新增测试文件而忘了改基线 ⇒ 当场红**——
+     * 这正是「182」能活十几轮的那个洞。
+     */
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      let entries: string[] = [];
+      try {
+        entries = readdirSync(dir);
+      } catch {
+        return;
+      }
+      for (const name of entries) {
+        if (name === "node_modules" || name === "dist" || name === "out") continue;
+        const abs = join(dir, name);
+        if (statSync(abs).isDirectory()) walk(abs);
+        else if (name.endsWith(".test.ts") && abs.split(/[\\/]/).includes("test")) files.push(abs);
+      }
+    };
+    for (const root of ["packages", "apps"]) walk(fileURLToPath(new URL(root, REPO)));
+    expect(files.length, "扫描器一个测试文件都没读到（扫描根错了？）").toBeGreaterThan(100);
+    const d08 = read("docs/08-交接文档-给QoderCN.md");
+    const readme = read("README.md");
+    const d09 = read("docs/09-进度与待做清单.md");
+    const handover = read("御书-交接文档.md");
+    const a = /\| 单测 \| \*\*(\d+)\/\d+ 全绿\*\*（(\d+) 个测试文件）/.exec(d08);
+    const b = /单元\/集成测试：(\d+) 例 \/ (\d+) 文件/.exec(readme);
+    const c = /当前验证基线[^`]*`pnpm test` \*\*(\d+)\/\d+（(\d+) 文件）\*\*/.exec(d09);
+    const e = /\| 单测 \| `pnpm test` \| \*\*(\d+)\/\d+（(\d+) 文件）\*\*/.exec(handover);
+    expect(a && b && c && e, "四处基线有一处解析不出来（漂移锁自己坏了？）").toBeTruthy();
+    const claims: Array<[string, string | undefined]> = [
+      ["docs/08 §1", a?.[2]],
+      ["README", b?.[2]],
+      ["docs/09 当前基线", c?.[2]],
+      ["御书 §2.2", e?.[2]],
+    ];
+    for (const [label, n] of claims) {
+      expect(Number(n), `${label} 写的测试文件数 ${n} ≠ 盘上实况 ${files.length}`).toBe(files.length);
+    }
   });
 
   it("台账基线（UI 预演步数 + 目录号）五处必须逐字一致", () => {

@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
  * 零引用导出的登记与棘轮（R99 死代码审计的产物）。
  *
  * 本轮把 `codePointCompareBy` 与 `isValidLocalId` 删了（确认全仓库零引用、且无文档价值），
- * 剩下的 12 个**有意留着**：它们是数据模型词表（`Relation` / `Storyline` / `MemoryLayer`）、
+ * 剩下的 10 个**有意留着**（R190 核：名单实数 10，旧注释写 12 是漂移）：它们是数据模型词表（`Relation` / `Storyline` / `MemoryLayer`）、
  * 布局常量（`ASSETS_DIR` 等，K03 布局的词汇表）。R108 起「未接线的取消口」也不在其中了：
  * `cancelImport` 接上了「取消导入」那条通道（`import:cancel`），T5-7 的"可中断续跑"用上了它。
  * 留着是判断，不是遗漏——所以把它变成机器判据：**新增零引用导出一律红**，删掉一个就把它从名单里划掉。
