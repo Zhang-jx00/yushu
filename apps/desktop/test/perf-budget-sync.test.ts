@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseFrontmatter } from "@yushu/core";
@@ -91,4 +91,61 @@ describe("性能预算两份定义一致（perf-budget.yaml ↔ BUDGETS）", () 
       .map(([key, yamlPath]) => `${key} → ${yamlPath}`);
     expect(dangling).toEqual([]);
   });
+
+  it("BUDGETS 每一项都必须真的进探针 checks（R180：登记了预算却不门禁 = 账实不符）", () => {
+    /**
+     * R169 实撞：yaml 与 BUDGETS 都登记了 module_exec_ms / fcp_ms，注释写「R169 起参与门禁」，
+     * 但 perf-runner 组 checks 时漏了这两键 ⇒ 只进报告、不翻退出码，门禁名存实亡。
+     * 上面四条锁只管「两份定义一致」，管不到「定义了却没用」——这条锁补上那个洞：
+     * 源码腿扫 checks 对象字面量，与 BUDGETS 键（去掉单位后缀）双向对账。
+     */
+    const src = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "perf-runner.ts"), "utf8");
+    const keys = extractChecksKeys(src);
+    expect(keys.length, "checks 块没解析出来（扫描器坏了？）").toBeGreaterThanOrEqual(10);
+    const expected = Object.keys(BUDGETS).map((k) => k.replace(/_(ms|mb|min)$/, ""));
+    const missing = expected.filter((k) => !keys.includes(k));
+    const extra = keys.filter((k) => !expected.includes(k));
+    expect(missing, `预算登记了却没进 checks：${missing.join(", ")}`).toEqual([]);
+    expect(extra, `checks 里有没登记预算的项（硬编门禁？）：${extra.join(", ")}`).toEqual([]);
+    // 自检：抽掉一项的样本必须被抓出来（防「解析出空数组 ⇒ 零命中全绿」）
+    const sample = src.replace(
+      "module_exec: boot.module_exec_ms !== null && boot.module_exec_ms <= BUDGETS.module_exec_ms,",
+      "",
+    );
+    const sampleKeys = extractChecksKeys(sample);
+    expect(expected.filter((k) => !sampleKeys.includes(k)), "自检样本应点名缺 module_exec").toContain("module_exec");
+  });
+
+  it("最新归档 perf 报告的 checks 必须覆盖探针当前全部检查项（R180：改了门禁就要重跑留证）", () => {
+    /**
+     * 归档回执腿：门禁项变了而最新归档报告还是旧的 ⇒ 「跑过 perf」这句话覆盖不了新门禁。
+     * 逼着改门禁的那一轮真的重跑探针并把报告归档（docs/assets/perf/），不许只改代码不留证。
+     */
+    const dir = join(ROOT, "docs", "assets", "perf");
+    const files = readdirSync(dir)
+      .filter((n) => /^perf-report-local-dev-\d{8}.*\.json$/.test(n))
+      .sort();
+    expect(files.length, "一份归档报告都没读到（目录错了？）").toBeGreaterThanOrEqual(1);
+    const latestName = files[files.length - 1] ?? "";
+    const latest = JSON.parse(readFileSync(join(dir, latestName), "utf8")) as {
+      checks?: Record<string, unknown>;
+    };
+    const archived = Object.keys(latest.checks ?? {});
+    const src = readFileSync(join(ROOT, "apps", "desktop", "src", "main", "perf-runner.ts"), "utf8");
+    const current = extractChecksKeys(src);
+    expect(current.length, "checks 块没解析出来（扫描器坏了？）").toBeGreaterThanOrEqual(10);
+    const missing = current.filter((k) => !archived.includes(k));
+    expect(
+      missing,
+      `最新归档报告（${latestName}）缺检查项：${missing.join(", ")}——改了门禁要重跑 perf 并归档`,
+    ).toEqual([]);
+  });
 });
+
+/** 从 perf-runner.ts 源码里提取 checks 对象字面量的键（4 空格缩进的 `key:` 行） */
+function extractChecksKeys(src: string): string[] {
+  const m = /const checks = \{([\s\S]*?)\n  \};/.exec(src);
+  if (!m) return [];
+  const body = m[1] ?? "";
+  return [...body.matchAll(/^\s{4}([a-z_0-9]+):/gm)].map((x) => x[1] ?? "");
+}

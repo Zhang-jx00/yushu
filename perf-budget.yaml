@@ -10,6 +10,8 @@
 #   - save_to_indexed_ms：单章变更后的增量重建耗时（不含自动刷新 2.5s 防抖排队）
 #   - query_p95_ms：不同关键词查询 50 次 p95；rebuild_cpm：全量重建吞吐（字/分钟，下限）
 #   - *_rss_mb：Electron 全部进程 working set 合计
+#   - consistency_manual_ms：手动全书体检（timing=manual 永远重算，随章数线性）；library_list_ms：稿件总览清单（O(章数) 磁盘读）
+#     export_txt_ms / consistency_postsave_ms：只归档不门禁（导出波动大；post-save 无脏标记走缓存复用）
 version: 1
 budgets:
   startup:      {cold_to_editable_ms: 2000, hot_to_editable_ms: 800, module_exec_ms: 200, fcp_ms: 400}
@@ -17,6 +19,7 @@ budgets:
   edit:         {keystroke_p95_ms: 16, keystroke_mega_p95_ms: 16, save_to_indexed_ms: 500}
   search:       {query_p95_ms: 80, rebuild_cpm: 20000}
   memory:       {idle_rss_mb: 600, million_chars_rss_mb: 1200}
+  ops:          {consistency_manual_ms: 1600, library_list_ms: 640}   # R180 B2：操作级画像（两轮观察 1007/1010、308/319 ⇒ ×1.6 / ×2.0）；export_txt / consistency_postsave 只归档不门禁
 fixtures:
   - synth-1m          # 合成百万字项目（17 卷 / 335 章 / ~1.1M 字 + 100k 大章靶子；确定性生成）
   - real-sample-300k  # 真实样本（待外部样本到位后补充）
@@ -218,3 +221,27 @@ measurements:
     report: docs/assets/perf/perf-report-local-dev-20261105-r169-perf-gate.json
     # 对照 R83 同夹具同机：cold 1268 vs 1445、module_exec 126 vs 136、fcp 196 vs 200 —— 无回退；
     # 首次对比基线（夹具目录里存的是 2026-10-25 的无主报告）⇒ 回归对比功能自本轮起也真的在工作。
+  - date: 2026-11-24
+    runner: local-dev          # 第 180 轮：B1 checks 补 module_exec/fcp（R169 设预算却漏门禁）+ B2 操作级画像四指标 + consistency_manual/library_list 设预算进门禁
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,108,349 字 + 100k 大章靶子（夹具已就位，reused=true）
+    result: pass_13_of_14      # 门禁 ok=false；唯一未达标 hot_to_editable（既有回退另立专项）；module_exec/fcp 自本轮起真的翻退出码
+    metrics:
+      cold_to_editable_ms: 1882 # ≤2000（热盘口径）
+      module_exec_ms: 156       # ≤200（R169 实测 126 ⇒ 包体增长；R180 起进 checks 真的翻退出码）
+      fcp_ms: 228               # ≤400（R169 实测 196）
+      hot_to_editable_ms: 897   # >800 ❌（R169 实测 681 ⇒ 既有回退，R180 未触及热重载路径，本轮如实暴露 ⇒ 另立性能回退专项）
+      project_open_ms: 265      # ≤3000
+      keystroke_p95_ms: 1.6     # ≤16
+      keystroke_mega_p95_ms: 4.5 # ≤16
+      save_to_indexed_ms: 436   # ≤500
+      query_p95_ms: 9.6         # ≤80
+      rebuild_cpm: 35651606     # ≥20000
+      idle_rss_mb: 540          # ≤600
+      million_chars_rss_mb: 1022 # ≤1200
+      consistency_manual_ms: 948 # ≤1600（R180 新增门禁；两轮观察 1007/1010 ⇒ ×1.6）
+      library_list_ms: 345      # ≤640（R180 新增门禁；两轮观察 308/319 ⇒ ×2.0）
+      export_txt_ms: 747        # 只归档不门禁（波动大）
+      consistency_postsave_ms: 0 # 只归档不门禁（无脏标记走缓存复用 ranAgain=false）
+    report: docs/assets/perf/perf-report-local-dev-20261124-r180-perf-ops-gate.json
+    # 变异证据：临时 module_exec_ms=1 / consistency_manual_ms=1 ⇒ 退出码 1 且 gate.failedBudgets 点名两项 ⇒ 还原（红→绿）。
+    # 对照 R169 同夹具同机：cold 1882 vs 1268、module_exec 156 vs 126、hot 897 vs 681 —— hot 回退另立专项；idle 540 达标（先前两轮 626/630 系机器负载）。

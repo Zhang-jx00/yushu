@@ -25,6 +25,10 @@ export const BUDGETS = {
   rebuild_cpm_min: 20000,
   idle_rss_mb: 600,
   million_chars_rss_mb: 1200,
+  // R180 B2：操作级画像两项随规模线性 ⇒ 两轮观察（1007/1010、308/319）后按 ×1.6 / ×2.0 设预算。
+  // export_txt_ms / consistency_postsave_ms 波动大或走缓存 ⇒ 只归档不门禁（同 chapter_write_ms）。
+  consistency_manual_ms: 1600,
+  library_list_ms: 640,
 } as const;
 
 /**
@@ -48,4 +52,6 @@ export const BUDGET_YAML_MAP: Record<keyof typeof BUDGETS, string> = {
   rebuild_cpm_min: "search.rebuild_cpm",
   idle_rss_mb: "memory.idle_rss_mb",
   million_chars_rss_mb: "memory.million_chars_rss_mb",
+  consistency_manual_ms: "ops.consistency_manual_ms",
+  library_list_ms: "ops.library_list_ms",
 };

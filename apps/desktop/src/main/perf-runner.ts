@@ -154,6 +154,35 @@ function indexScript(chapterPath: string): string {
   })()`;
 }
 
+/**
+ * R180 B2：操作级性能画像——经渲染层现成 api() 通道掐表四个真实操作
+ * （与 indexScript 同款 performance.now() 模式）。口径：
+ * - consistency_manual_ms：手动全书体检（timing=manual 永远重算，335 章夹具，随规模线性）；
+ * - library_list_ms：稿件总览清单（O(章数) 磁盘读，随规模线性）；
+ * - export_txt_ms：txt 导出落盘（写进夹具 exports/，量完即清；波动大 ⇒ 只归档不门禁）；
+ * - consistency_postsave_ms：保存后轻校验——无脏标记时走缓存复用路径（ranAgain=false），
+ *   这正是「保存后轻校验」的日常形态；有脏标记时重算。两种形态都如实记，不挑好看的。
+ */
+function opsScript(): string {
+  return `(async () => {
+    const api = window.yushu;
+    const now = () => performance.now();
+    const t0 = now();
+    await api.consistency.check({ timing: "manual" });
+    const consistencyManualMs = now() - t0;
+    const t1 = now();
+    await api.library.list();
+    const libraryListMs = now() - t1;
+    const t2 = now();
+    await api.export.run({ format: "txt", confirmed: true });
+    const exportTxtMs = now() - t2;
+    const t3 = now();
+    await api.consistency.check({ timing: "post-save" });
+    const consistencyPostsaveMs = now() - t3;
+    return { consistencyManualMs, libraryListMs, exportTxtMs, consistencyPostsaveMs };
+  })()`;
+}
+
 export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
   const dir = deps.dirArg.trim() || join(tmpdir(), "yushu-perf-synth1m");
   await fs.mkdir(dir, { recursive: true }).catch(() => undefined);
@@ -261,6 +290,16 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
   }
   const millionCharsRssMb = rssMb();
 
+  // ⑥.5 R180 B2：操作级画像（四个真实操作经渲染层 api 通道掐表）
+  const ops = (await win.webContents.executeJavaScript(opsScript())) as {
+    consistencyManualMs: number;
+    libraryListMs: number;
+    exportTxtMs: number;
+    consistencyPostsaveMs: number;
+  };
+  // 探针卫生：txt 导出写进夹具 exports/，量完即清——夹具要幂等复用，不留探针垃圾
+  await fs.rm(join(dir, "exports"), { recursive: true, force: true }).catch(() => undefined);
+
   // ⑦ 结果组装（对照预算）
   const metrics = {
     cold_to_editable_ms: coldToEditableMs,
@@ -282,10 +321,21 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
     rebuild_cpm: rebuildCpm,
     idle_rss_mb: idleRssMb,
     million_chars_rss_mb: millionCharsRssMb,
+    // R180 B2：操作级画像。前两项随规模线性 ⇒ 两轮观察后设预算进 checks；
+    // export 波动大 ⇒ 只归档不门禁（与 chapter_write_ms 同类）。
+    consistency_manual_ms: Math.round(ops.consistencyManualMs),
+    library_list_ms: Math.round(ops.libraryListMs),
+    export_txt_ms: Math.round(ops.exportTxtMs),
+    consistency_postsave_ms: Math.round(ops.consistencyPostsaveMs),
   };
   const checks = {
     cold_to_editable: coldToEditableMs <= BUDGETS.cold_to_editable_ms,
     hot_to_editable: hotToEditableMs <= BUDGETS.hot_to_editable_ms,
+    // R180 B1：R169 给这两项设了预算（yaml 注释「R169 起参与门禁」），但 checks 一直漏了它们
+    // ⇒ 只进报告与回归对比、不翻退出码——账实不符。本轮补齐。null（测不到）一律算未达标：
+    // 「没判的」不许看起来像「没问题」（与 summarizePerfGate 口径②同源）。
+    module_exec: boot.module_exec_ms !== null && boot.module_exec_ms <= BUDGETS.module_exec_ms,
+    fcp: boot.fcp_ms !== null && boot.fcp_ms <= BUDGETS.fcp_ms,
     project_open: projectOpenMs <= BUDGETS.project_open_ms,
     keystroke_p95: normal.syncP95 <= BUDGETS.keystroke_p95_ms,
     // 大章（~100k 字靶子）按键门禁（T2-4 切片 B 纳入）：超限视为大章性能回退
@@ -295,6 +345,9 @@ export async function runPerfProbe(deps: PerfProbeDeps): Promise<void> {
     rebuild_cpm: rebuildCpm >= BUDGETS.rebuild_cpm_min,
     idle_rss: idleRssMb <= BUDGETS.idle_rss_mb,
     million_chars_rss: millionCharsRssMb <= BUDGETS.million_chars_rss_mb,
+    // R180 B2：操作级门禁（两轮观察后设预算）。export / post-save 只进 metrics 不门禁。
+    consistency_manual: ops.consistencyManualMs <= BUDGETS.consistency_manual_ms,
+    library_list: ops.libraryListMs <= BUDGETS.library_list_ms,
   };
   // T2-10 遗留：回归对比基线 = 夹具目录中的上一次报告（同夹具同机同口径）；首次运行无基线则如实跳过
   const reportPath = join(dir, ".yushu", "perf-report.json");
