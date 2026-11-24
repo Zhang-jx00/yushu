@@ -245,3 +245,29 @@ measurements:
     report: docs/assets/perf/perf-report-local-dev-20261124-r180-perf-ops-gate.json
     # 变异证据：临时 module_exec_ms=1 / consistency_manual_ms=1 ⇒ 退出码 1 且 gate.failedBudgets 点名两项 ⇒ 还原（红→绿）。
     # 对照 R169 同夹具同机：cold 1882 vs 1268、module_exec 156 vs 126、hot 897 vs 681 —— hot 回退另立专项；idle 540 达标（先前两轮 626/630 系机器负载）。
+  - date: 2026-11-24
+    runner: local-dev          # 第 191 轮：hot_to_editable 回退专项——章纲（1 文件）先定首章立刻读，不再等整本 ai.drafts 清单
+    fixture: synth-1m          # 17 卷 / 335 章 / 1,111,605 字 + 100k 大章靶子（reused=true）
+    result: pass_14_of_14      # 14 项绝对预算全达标（hot 自 R180 的 897 回到 617）
+    metrics:
+      cold_to_editable_ms: 1239 # ≤2000
+      module_exec_ms: 161       # ≤200
+      fcp_ms: 236               # ≤400
+      hot_to_editable_ms: 617   # ≤800（R180 897 / R169 681；同口径第二轮 641）
+      project_open_ms: 385      # ≤3000
+      keystroke_p95_ms: 1.2     # ≤16
+      keystroke_mega_p95_ms: 4.4 # ≤16
+      save_to_indexed_ms: 406   # ≤500
+      query_p95_ms: 8.5         # ≤80
+      rebuild_cpm: 40955665     # ≥20000
+      idle_rss_mb: 498          # ≤600
+      million_chars_rss_mb: 936 # ≤1200
+      consistency_manual_ms: 873 # ≤1600
+      library_list_ms: 294      # ≤640
+      export_txt_ms: 711        # 只归档不门禁（波动大）
+      consistency_postsave_ms: 0 # 只归档不门禁（无脏标记走缓存复用）
+    report: docs/assets/perf/perf-report-local-dev-20261124-r191-hot-prime.json
+    # 证据链：探针分段（load/debug/tabs/click/editor）+ 渲染层 marks 实测——897 里 631ms 是「等 ai.drafts 整本章清单」
+    # （主进程 335 章逐章读盘 loop=565–625ms），CM 创建 6–7ms、chapter.read 1–2ms、dispatch 25–27ms。
+    # 修复后同口径两轮 617 / 641（均 ≤800）；剩余差异主要在项目启动段（project_open 229→385、module_exec 126→161、
+    # fcp 196→236，系 R183–R189 界面与包体增长）⇒ 另立观察项，不在本轮范围。

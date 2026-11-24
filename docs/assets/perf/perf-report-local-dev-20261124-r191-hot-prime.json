@@ -1,0 +1,226 @@
+{
+  "kind": "yushu-perf-probe/v1",
+  "date": "2026-11-24T12:18:54.705Z",
+  "fixture": {
+    "dir": "D:\\Temp\\yushu-perf-synth1m",
+    "reused": true,
+    "volumes": 17,
+    "chapters": 335,
+    "totalChars": 1111605,
+    "megaPath": "chapters/vol-d2d6605a/ch-15gg5bz.md"
+  },
+  "env": {
+    "electron": "44.4.5",
+    "node": "24.21.0",
+    "chrome": "152.0.7977.130",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7840HS with Radeon 780M Graphics",
+    "totalMemMb": 28484
+  },
+  "metrics": {
+    "cold_to_editable_ms": 1239,
+    "module_exec_ms": 161,
+    "fcp_ms": 236,
+    "hot_to_editable_ms": 617,
+    "project_open_ms": 385,
+    "keystroke_p95_ms": 1.2,
+    "keystroke_frame_p95_ms": 18.9,
+    "keystroke_mega_p95_ms": 4.4,
+    "keystroke_mega_frame_p95_ms": 19.2,
+    "save_to_indexed_ms": 406,
+    "chapter_write_ms": 14,
+    "query_p95_ms": 8.5,
+    "index_rebuild_ms": 1629,
+    "rebuild_cpm": 40955665,
+    "idle_rss_mb": 498,
+    "million_chars_rss_mb": 936,
+    "consistency_manual_ms": 873,
+    "library_list_ms": 294,
+    "export_txt_ms": 711,
+    "consistency_postsave_ms": 0
+  },
+  "budgets": {
+    "cold_to_editable_ms": 2000,
+    "hot_to_editable_ms": 800,
+    "module_exec_ms": 200,
+    "fcp_ms": 400,
+    "project_open_ms": 3000,
+    "keystroke_p95_ms": 16,
+    "keystroke_mega_p95_ms": 16,
+    "save_to_indexed_ms": 500,
+    "query_p95_ms": 80,
+    "rebuild_cpm_min": 20000,
+    "idle_rss_mb": 600,
+    "million_chars_rss_mb": 1200,
+    "consistency_manual_ms": 1600,
+    "library_list_ms": 640
+  },
+  "checks": {
+    "cold_to_editable": true,
+    "hot_to_editable": true,
+    "module_exec": true,
+    "fcp": true,
+    "project_open": true,
+    "keystroke_p95": true,
+    "keystroke_mega_p95": true,
+    "save_to_indexed": true,
+    "query_p95": true,
+    "rebuild_cpm": true,
+    "idle_rss": true,
+    "million_chars_rss": true,
+    "consistency_manual": true,
+    "library_list": true
+  },
+  "boot_notes": [],
+  "gate": {
+    "ok": true,
+    "failedBudgets": [],
+    "regressions": [],
+    "excluded": []
+  },
+  "comparison": {
+    "ok": true,
+    "thresholdRatio": 0.2,
+    "baselineDate": "2026-11-24T12:18:35.854Z",
+    "rows": [
+      {
+        "metric": "cold_to_editable_ms",
+        "previous": 1288,
+        "current": 1239,
+        "deltaPct": -3.8,
+        "status": "stable"
+      },
+      {
+        "metric": "module_exec_ms",
+        "previous": 160,
+        "current": 161,
+        "deltaPct": 0.6,
+        "status": "stable"
+      },
+      {
+        "metric": "fcp_ms",
+        "previous": 240,
+        "current": 236,
+        "deltaPct": -1.7,
+        "status": "stable"
+      },
+      {
+        "metric": "hot_to_editable_ms",
+        "previous": 641,
+        "current": 617,
+        "deltaPct": -3.7,
+        "status": "stable"
+      },
+      {
+        "metric": "project_open_ms",
+        "previous": 380,
+        "current": 385,
+        "deltaPct": 1.3,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_p95_ms",
+        "previous": 1.6,
+        "current": 1.2,
+        "deltaPct": -25,
+        "status": "improved"
+      },
+      {
+        "metric": "keystroke_frame_p95_ms",
+        "previous": 19.2,
+        "current": 18.9,
+        "deltaPct": -1.6,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_mega_p95_ms",
+        "previous": 4.5,
+        "current": 4.4,
+        "deltaPct": -2.2,
+        "status": "stable"
+      },
+      {
+        "metric": "keystroke_mega_frame_p95_ms",
+        "previous": 19.5,
+        "current": 19.2,
+        "deltaPct": -1.5,
+        "status": "stable"
+      },
+      {
+        "metric": "save_to_indexed_ms",
+        "previous": 408,
+        "current": 406,
+        "deltaPct": -0.5,
+        "status": "stable"
+      },
+      {
+        "metric": "chapter_write_ms",
+        "previous": 16,
+        "current": 14,
+        "deltaPct": -12.5,
+        "status": "stable"
+      },
+      {
+        "metric": "query_p95_ms",
+        "previous": 8.5,
+        "current": 8.5,
+        "deltaPct": 0,
+        "status": "stable"
+      },
+      {
+        "metric": "index_rebuild_ms",
+        "previous": 1674,
+        "current": 1629,
+        "deltaPct": -2.7,
+        "status": "stable"
+      },
+      {
+        "metric": "rebuild_cpm",
+        "previous": 39825506,
+        "current": 40955665,
+        "deltaPct": -2.8,
+        "status": "stable"
+      },
+      {
+        "metric": "idle_rss_mb",
+        "previous": 508,
+        "current": 498,
+        "deltaPct": -2,
+        "status": "stable"
+      },
+      {
+        "metric": "million_chars_rss_mb",
+        "previous": 1052,
+        "current": 936,
+        "deltaPct": -11,
+        "status": "stable"
+      },
+      {
+        "metric": "consistency_manual_ms",
+        "previous": 953,
+        "current": 873,
+        "deltaPct": -8.4,
+        "status": "stable"
+      },
+      {
+        "metric": "library_list_ms",
+        "previous": 318,
+        "current": 294,
+        "deltaPct": -7.5,
+        "status": "stable"
+      },
+      {
+        "metric": "export_txt_ms",
+        "previous": 768,
+        "current": 711,
+        "deltaPct": -7.4,
+        "status": "stable"
+      }
+    ],
+    "regressions": []
+  },
+  "indexFiles": 341,
+  "indexChunks": 3305,
+  "incrementalUpdatedFiles": 1
+}
