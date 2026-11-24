@@ -7,6 +7,7 @@
 目标版本：M3（AI Provider 与上下文记忆，见 `docs/04-开发计划.md` §6）——下一增量从此开始。
 
 ### 性能预算线程（跨阶段，不属于 M3）：
+- **R191 首章预热（hot_to_editable 回退专项）**：预算门禁暴露的 897ms 定量到根因——编辑器挂载后要等 `ai.drafts` 整本章清单才设首章（主进程 335 章逐章读盘 loop=565–625ms，只为 hasBody/wordCount），CM 创建仅 6–7ms、`chapter.read` 1–2ms、dispatch 25–27ms。修法（行为零变更）：新增纯函数 `firstDraftPath`（章纲里第一个已回填 chapter_id 的章 = 清单首项同一口径，路径走引擎 `chapterPath`）+ 编辑器挂载先 `outline:read({includeTemplates:false})` 定首章立刻读、整本清单并行加载（到达后按既有规则校正）+ `outline:read` 可跳模板扫描。同口径两轮 hot **617 / 641**（≤800；R169 681、R180 897），perf **14/14 全达标**；四门禁 2321/2321（190 文件）/ TC=0 / E2E=0 / v476 140/140
 - **R180 性能预算**：**B1 账实不符修复**——R169 给 module_exec/fcp 设了预算却漏进 checks（只归档不翻退出码），本轮补齐（null 算未达标）；**B2 操作级画像**——opsScript 经渲染层 api() 掐表四操作（手动全书体检 / 稿件总览清单 / txt 导出 / 保存后轻校验）；consistency_manual≤1600 / library_list≤640 两轮观察后按 ×1.6/×2.0 进门禁，export/post-save 只归档；同步锁扩 2 例（checks 覆盖 + 归档回执）；**perf 门禁 pass_13_of_14**——hot_to_editable 897>800 系 R169 以来包体增长之既有回退（R180 未触及该路径），如实暴露另立专项，不改预算装绿；四门禁 2316/2316（189 文件）/ TC=0 / E2E=0 / v475 140/140
 
 ### 工程卫生线程（跨阶段，不属于 M3）：
