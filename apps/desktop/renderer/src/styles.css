@@ -46,6 +46,19 @@
      压一层「地面色」把底图拉到与界面同一档，标注与网格才读得出来。
      放在 primitive 层 ⇒ 换主题时它跟着换（暗色下压的是暗的地面）。 */
   --c-map-scrim: rgba(247, 244, 238, 0.45);
+  /* R193 液态玻璃 primitive（三停 tint + 水珠 + 菲涅尔高光 + 边缘 + 桥）：
+     语义层 --glass-* 只引用这些 ⇒ 换主题时玻璃跟着换（两层令牌纪律） */
+  --c-glass-a: rgba(255, 255, 255, 0.14);
+  --c-glass-b: rgba(255, 255, 255, 0.05);
+  --c-glass-c: rgba(214, 226, 238, 0.10);
+  --c-glass-droplet-a: rgba(255, 255, 255, 0.55);
+  --c-glass-droplet-b: rgba(255, 255, 255, 0.14);
+  --c-glass-droplet-c: rgba(196, 216, 234, 0.16);
+  --c-glass-droplet-d: rgba(150, 178, 208, 0.26);
+  --c-glass-hi: rgba(255, 255, 255, 0.34);
+  --c-glass-edge: rgba(255, 255, 255, 0.30);
+  --c-glass-scatter: rgba(214, 226, 238, 0.10);
+  --c-glass-bridge: rgba(210, 224, 240, 0.30);
 
   /* 第二层 **semantic（用途）**：全部引用第一层，不写字面色值 */
   --bg: var(--c-paper);
@@ -154,6 +167,42 @@
   /* 浮层幕布（R173-UI 命令面板）：纸墨色的墨，半透明 —— 亮暗主题同源（墨在暗底上同样是压暗），
      走令牌不给浮层写裸色值。 */
   --scrim: rgba(43, 38, 32, 0.4);
+  /* R193 圆形粒子（水滴/源点按钮） */
+  --radius-round: 50%;
+  /* R193 液态玻璃族：blur/饱和语义令牌——色值全部来自 --c-glass-* primitive
+     （换主题跟着换；暗色覆盖只动 primitive，两层令牌纪律） */
+  --glass-blur: 16px;
+  --glass-blur-droplet: 7px;
+  --glass-saturate: 1.35;
+  --glass-tint: linear-gradient(
+    165deg,
+    var(--c-glass-a),
+    var(--c-glass-b) 42%,
+    var(--c-glass-c)
+  );
+  --glass-tint-droplet: radial-gradient(
+    circle at 32% 26%,
+    var(--c-glass-droplet-a),
+    var(--c-glass-droplet-b) 40%,
+    var(--c-glass-droplet-c) 68%,
+    var(--c-glass-droplet-d)
+  );
+  --glass-edge: var(--c-glass-edge);
+  --glass-fresnel: var(--c-glass-hi);
+  --glass-scatter: var(--c-glass-scatter);
+  --glass-bridge: var(--c-glass-bridge);
+  --glass-shadow-panel:
+    inset 0 1px 0 var(--glass-fresnel),
+    inset 0 -1px 0 var(--glass-scatter),
+    inset 1px 0 0 var(--c-glass-hi),
+    inset -1px 0 0 var(--c-glass-scatter),
+    0 18px 48px var(--c-glass-bridge);
+  --glass-highlight-arc: radial-gradient(120% 100% at 50% 0%, var(--c-glass-a), transparent 70%);
+  --glass-shadow-droplet:
+    inset 0 0 0 1px var(--glass-edge),
+    inset -4px -6px 14px var(--c-glass-scatter),
+    inset 2px 3px 8px var(--c-glass-droplet-a),
+    0 8px 22px var(--c-glass-bridge);
   /* 焦点环（契约 §5）：宽度与偏移只在这一处定义。用 outline 而不是 box-shadow ring——
      outline 在 Windows 高对比 / forced-colors 下会跟着系统色走，box-shadow 不会。 */
   --focus-width: 2px;
@@ -231,6 +280,18 @@ body {
   --c-paper: #1e1b18;
   /* 压暗层跟着换（暗色下压的是暗的地面，亮底图才拉得下来） */
   --c-map-scrim: rgba(30, 27, 24, 0.45);
+  /* R193 液态玻璃 primitive 暗色档：tint 更冷更透、菲涅尔提纯（暗底上高光要亮） */
+  --c-glass-a: rgba(120, 140, 165, 0.16);
+  --c-glass-b: rgba(90, 110, 135, 0.10);
+  --c-glass-c: rgba(70, 90, 115, 0.14);
+  --c-glass-droplet-a: rgba(190, 210, 235, 0.42);
+  --c-glass-droplet-b: rgba(120, 145, 175, 0.16);
+  --c-glass-droplet-c: rgba(80, 105, 135, 0.20);
+  --c-glass-droplet-d: rgba(60, 85, 115, 0.30);
+  --c-glass-hi: rgba(220, 235, 250, 0.30);
+  --c-glass-edge: rgba(200, 220, 240, 0.26);
+  --c-glass-scatter: rgba(120, 145, 175, 0.12);
+  --c-glass-bridge: rgba(120, 145, 175, 0.28);
   --c-paper-raised: #26221d;
   --c-paper-sunken: #16130f;
   --c-ink: #ece4d7;
@@ -3609,6 +3670,19 @@ select {
     transition-delay: 0s;
   }
 
+  /* R193：水滴层整层跳过（prefers-reduced-motion 下直接无动画显隐） */
+  .liquid-layer {
+    display: none;
+  }
+
+  .drawer-overlay .drawer-panel,
+  .drawer-panel.drawer-leaving,
+  .drawer-overlay.is-leaving .drawer-panel {
+    transition: none;
+    opacity: 1;
+    transform: none;
+  }
+
   /* 开屏入场（R109）：过渡也要被关掉——只关 animation 等于没关（R63 实测踩过）。
      用 `transition: none` 而不是 `0.01ms`：前者不引入新的字面量例外（棘轮只降不升），
      效果一样（状态变化即刻到位），而且不会在 R83 的例外清单里多一条。 */
@@ -5150,7 +5224,101 @@ table,
 
 /* R184 AI 抽屉：右侧滑入的候选处置面板（候选与副驾页同一份真源）。
    遮罩与 z-index 与命令面板 / 设置浮层同一档；无进出场动画（与命令面板同口径）。 */
+/* R193 液态玻璃族：玻璃面板皮肤（抽屉 / 设置浮层 / 命令面板共用同一材质）；
+   菲涅尔高光 = 顶部亮弧 + 四缘 inset 高光；毛玻璃散射 = backdrop blur+饱和。 */
+.glass-panel {
+  background: var(--glass-tint);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-shadow-panel);
+}
+
+.glass-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 34%;
+  border-radius: var(--radius-3) var(--radius-3) 0 0;
+  background: var(--glass-highlight-arc);
+  pointer-events: none;
+}
+
+.nav-tool.is-liquid-source {
+  border-radius: var(--radius-round);
+  aspect-ratio: 1;
+}
+
+/* 水滴过渡层：独立 fixed overlay，只动 transform 与 SVG d（合成层友好，60fps） */
+.liquid-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.liquid-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.liquid-bridge {
+  fill: var(--glass-bridge);
+  opacity: 0;
+  transition: opacity var(--motion-state) var(--ease-premium);
+}
+
+.liquid-droplet {
+  position: fixed;
+  top: 0;
+  left: 0;
+  border-radius: var(--radius-round);
+  background: var(--glass-tint-droplet);
+  backdrop-filter: blur(var(--glass-blur-droplet)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-shadow-droplet);
+  opacity: 0;
+  will-change: transform;
+}
+
+/* 抽屉进出场（R193：面板摊开 = 位移+透明度；退场走 --motion-exit，比进场快） */
+.drawer-overlay.is-leaving {
+  background: transparent;
+}
+
+.drawer-panel.drawer-entered {
+  opacity: 1;
+  transform: none;
+}
+
+.drawer-panel.drawer-leaving {
+  opacity: 0;
+  transform: translateX(14px) scale(0.97);
+}
+
+.drawer-overlay .drawer-panel {
+  opacity: 0;
+  transform: translateX(14px) scale(0.97);
+  transition:
+    opacity var(--motion-enter) var(--ease-enter),
+    transform var(--motion-enter) var(--ease-enter);
+}
+
+.drawer-overlay .drawer-panel.drawer-entered {
+  opacity: 1;
+  transform: none;
+}
+
+.drawer-overlay.is-leaving .drawer-panel {
+  opacity: 0;
+  transform: translateX(14px) scale(0.97);
+  transition:
+    opacity var(--motion-exit) var(--ease-premium),
+    transform var(--motion-exit) var(--ease-premium);
+}
+
 .drawer-overlay {
+
   position: fixed;
   inset: 0;
   background: var(--scrim);

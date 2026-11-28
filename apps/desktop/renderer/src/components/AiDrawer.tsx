@@ -6,6 +6,7 @@ import { api } from "../api.js";
 import { useAiSessionCandidates } from "./ai-session-bus.js";
 import { adoptAiCandidate, rejectAiCandidate } from "./ai-session-actions.js";
 import { summarizeAiSession } from "./ai-session.js";
+import { LiquidTransition } from "./LiquidTransition.js";
 
 /**
  * **AI 抽屉**（R184 · UI Phase 3 第一片）：任何页面都能唤起的右侧滑入面板——
@@ -38,10 +39,29 @@ export function AiDrawer({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const firstBtnRef = useRef<HTMLButtonElement | null>(null);
-
-  // 打开时取一次跨页可读的持久数据（使用记录 / 草稿章清单——都来自主进程，不依赖副驾页）
+  /**
+   * R193：**液态玻璃相位**——closed（不渲染）→ split（水滴从按钮拉丝断开飞来）
+   * → open（面板常驻）→ closing（面板收缩成水珠飞回融合）。时长从 :root 令牌读；
+   * reduced-motion 由 LiquidTransition 内部跳过（直接落到下一相位）。
+   */
+  const [phase, setPhase] = useState<"closed" | "split" | "open" | "closing">("closed");
   useEffect(() => {
-    if (!open) return;
+    if (open && phase === "closed") setPhase("split");
+    if (!open && (phase === "open" || phase === "split")) setPhase("closing");
+  }, [open, phase]);
+  // 面板锚点（水滴落点 = 抽屉所在右上区域）；源点按钮从 data-liquid-source 现场取
+  const panelAnchor = { x: window.innerWidth - 72, y: 96, r: 34 };
+  const sourceRect = ((): { x: number; y: number; r: number } => {
+    const el = document.querySelector('[data-liquid-source="ai-drawer"]');
+    if (el === null) return { x: 28, y: window.innerHeight - 96, r: 20 };
+    const rect = el.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: rect.width / 2 };
+  })();
+  const closingDoneRef = useRef(onClose);
+  closingDoneRef.current = onClose;
+  // 挂载期间数据随相位取（open 相位拉一次；closing 保持已有）
+  useEffect(() => {
+    if (phase !== "open") return;
     let alive = true;
     void api()
       .ai.usage()
@@ -59,9 +79,29 @@ export function AiDrawer({
     return () => {
       alive = false;
     };
-  }, [open]);
+  }, [phase]);
 
-  if (!open) return null;
+  // closing 完成 ⇒ 水珠飞回融合落地 ⇒ **归位 closed**（否则相位卡死、面板永不卸载）
+  useEffect(() => {
+    if (phase !== "closing") return;
+    const timer = window.setTimeout(() => {
+      setPhase("closed");
+      closingDoneRef.current();
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [phase]);
+
+  if (phase === "closed" || phase === "split") {
+    // split 相位：只有水滴层（面板还没摊开）
+    return phase === "split" ? (
+      <LiquidTransition
+        direction="split"
+        sourceRect={sourceRect}
+        targetRect={panelAnchor}
+        onDone={() => setPhase("open")}
+      />
+    ) : null;
+  }
 
   // 与副驾右栏同一个纯函数、同一份候选 ⇒ 两侧的数必然逐字一致
   const session = summarizeAiSession({
@@ -99,10 +139,24 @@ export function AiDrawer({
     }
   };
 
+  const leaving = phase === "closing";
   return (
-    <div className="drawer-overlay" onMouseDown={onClose} role="presentation">
+    <>
+      {leaving && (
+        <LiquidTransition
+          direction="merge"
+          sourceRect={sourceRect}
+          targetRect={panelAnchor}
+          onDone={() => undefined}
+        />
+      )}
       <div
-        className="drawer-panel"
+        className={"drawer-overlay" + (leaving ? " is-leaving" : "")}
+        onMouseDown={onClose}
+        role="presentation"
+      >
+      <div
+        className={"drawer-panel glass-panel" + (leaving ? " drawer-leaving" : " drawer-entered")}
         role="dialog"
         aria-modal="true"
         aria-label="AI 抽屉"
@@ -218,5 +272,6 @@ export function AiDrawer({
         </ul>
       </div>
     </div>
+      </>
   );
 }

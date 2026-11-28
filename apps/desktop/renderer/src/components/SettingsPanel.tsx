@@ -46,7 +46,7 @@ export function SettingsPanel({
   return (
     <div className="settings-overlay" onMouseDown={onClose} role="presentation">
       <div
-        className="settings-panel"
+        className="settings-panel glass-panel"
         role="dialog"
         aria-modal="true"
         aria-label="设置"

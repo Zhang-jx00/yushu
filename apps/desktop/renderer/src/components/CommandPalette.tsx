@@ -74,7 +74,7 @@ export function CommandPalette({
       role="presentation"
     >
       <div
-        className="command-panel"
+        className="command-panel glass-panel"
         role="dialog"
         aria-modal="true"
         aria-label="命令面板"

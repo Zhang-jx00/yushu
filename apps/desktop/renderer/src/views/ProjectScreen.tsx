@@ -275,7 +275,8 @@ export function ProjectScreen({
           </button>
           <button
             type="button"
-            className="nav-tool"
+            className="nav-tool is-liquid-source"
+            data-liquid-source="ai-drawer"
             aria-label="打开 AI 抽屉（Ctrl+J）"
             title="AI 抽屉（Ctrl+J）"
             onClick={() => setAiDrawerOpen(true)}

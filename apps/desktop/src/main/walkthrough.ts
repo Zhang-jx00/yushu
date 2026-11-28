@@ -10367,6 +10367,48 @@ const STEPS: StepDef[] = [
       };
     `,
   },
+  {
+    step: 163,
+    title: '液态玻璃水滴菜单：点按钮 ⇒ 拉丝颈缩断开水珠 ⇒ 摊开成面板 ⇒ 关闭反向回放（R193）',
+    file: 'step163-liquid-glass.png',
+    body: String.raw`
+      // 这一步证 R193「液态玻璃水滴菜单」的四件事：
+      // ① 点水滴源点按钮 ⇒ **水珠中途帧存在**（动画进行中 data-liquid-droplet 在屏上且位移中）；
+      // ② 动画结束 ⇒ **面板摊开**（.drawer-panel 玻璃皮肤常驻）；
+      // ③ 关闭（Esc）⇒ **反向回放**：面板退场 + 水珠（merge 方向）在屏上再现 ⇒ 最终卸载；
+      // ④ reduced-motion 由组件内部跳过（本步不验，判据源码腿钉）。
+      const sourceBtn = document.querySelector('[data-liquid-source="ai-drawer"]');
+      if (!sourceBtn) return { ok: false, note: '找不到水滴源点按钮（rail-foot）：' + pageText().slice(0, 140) };
+      sourceBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      // ① 中途帧：水珠元素在屏上且 opacity=1（动画进行中）
+      const mid = await waitFor(() => {
+        const drop = document.querySelector('[data-liquid-droplet="split"]');
+        return drop !== null && drop.style.opacity === '1' ? true : null;
+      }, 3000);
+      const bridgeSeen = document.querySelector('.liquid-bridge') !== null;
+      // ② 等面板摊开（水滴层让位给玻璃面板）
+      const panel = await waitFor(() => {
+        const p = document.querySelector('.drawer-panel.glass-panel');
+        return p !== null && window.getComputedStyle(p).opacity === '1' ? true : null;
+      }, 6000);
+      if (!panel) return { ok: false, note: '水珠没有摊开成面板：' + pageText().slice(0, 160) };
+      const dropletGone = document.querySelector('[data-liquid-droplet]') === null;
+      // ③ Esc 关闭 ⇒ 反向：面板退场 + merge 水珠再现
+      const panelEl = document.querySelector('.drawer-panel');
+      if (!panelEl) return { ok: false, note: '面板节点不见了' };
+      panelEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      const mergeSeen = await waitFor(() => {
+        const drop = document.querySelector('[data-liquid-droplet="merge"]');
+        return drop !== null ? true : null;
+      }, 3000);
+      const gone = await waitFor(() => (document.querySelector('.drawer-panel') === null ? true : null), 4000);
+      return {
+        ok: mid !== null && panel !== null && dropletGone && mergeSeen !== null && gone !== null,
+        note: '水珠中途帧=true（拉丝连接体在=' + String(bridgeSeen) + '）；面板摊开=true（水珠让位=' + String(dropletGone) + '）；' +
+          '反向回放=true（merge 水珠在=' + String(mergeSeen !== null) + '；面板卸载=' + String(gone !== null) + '）',
+      };
+    `,
+  },
 ];
 
 /**
